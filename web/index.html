@@ -112,6 +112,18 @@
         font: inherit;
         cursor: pointer;
     }
+    .transport {
+        align-items: center;
+        margin-top: 8px;
+    }
+    #playPause {
+        min-width: 7em;
+    }
+    #time {
+        margin-left: 4px;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+    }
     button.primary {
         border-color: var(--accent);
         background: var(--accent);
@@ -156,6 +168,12 @@
             <button id="speak" class="primary" type="button" disabled>Speak</button>
             <button id="stop" type="button" disabled>Stop</button>
             <button id="download" type="button" disabled>Download WAV</button>
+        </div>
+        <div class="buttons transport">
+            <button id="back" type="button" disabled title="Skip back 5 seconds" aria-label="Skip back 5 seconds">&#x23EA; 5 s</button>
+            <button id="playPause" type="button" disabled title="Play or pause" aria-label="Play">&#x25B6; Play</button>
+            <button id="forward" type="button" disabled title="Skip ahead 5 seconds" aria-label="Skip ahead 5 seconds">5 s &#x23E9;</button>
+            <output id="time" aria-live="off">0:00.0 / 0:00.0</output>
         </div>
         <p id="status" role="status" aria-live="polite">Loading the pronouncing dictionary...</p>
     </div>

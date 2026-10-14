@@ -1,6 +1,6 @@
 // The browser front end - text, voice, rate, room, and crowd controls; streaming synthesis in Web Workers (one per
-// crowd member, so the members synthesize in parallel); playback with Web Audio (each member panned, the room ambience
-// by a convolver); and WAV download
+// crowd member, so the members synthesize in parallel); a player (play/pause and skipping) over the streamed audio
+// with Web Audio (each member panned, the room ambience by a convolver); and WAV download
 
 import {encodeWav} from '../lib/wav.js';
 import {convolve, roomImpulse} from '../lib/room.js';
@@ -16,7 +16,15 @@ const crowdElement = document.getElementById('crowd');
 const speakButton = document.getElementById('speak');
 const stopButton = document.getElementById('stop');
 const downloadButton = document.getElementById('download');
+const backButton = document.getElementById('back');
+const playPauseButton = document.getElementById('playPause');
+const forwardButton = document.getElementById('forward');
+const timeElement = document.getElementById('time');
 const statusElement = document.getElementById('status');
+
+
+// The skip distance (s)
+const skipSeconds = 5;
 
 
 // The crowd - the lead (the chosen voice, centered) and five other speakers, each with its own voice, pitch, vocal
@@ -31,13 +39,17 @@ const crowdMembers = [
 ];
 
 
-// State - the workers ([{worker, ready}]), the current request, the playing sources, and the audio graph
+// State - the workers ([{worker, ready}]), the current request, and the audio graph
 let workers = [];
 let request = null;
 let nextRequestId = 1;
 let audioContext = null;
-let sources = [];
 let output = null;
+
+
+// The player - the streamed request's audio is kept as tracks of blocks on a timeline (s), so it can be played from any
+// position. While playing, the timeline position anchorPosition is at audio context time anchorTime.
+const player = {'request': null, 'playing': false, 'anchorPosition': 0, 'anchorTime': 0, 'sources': new Set(), 'startTimer': null};
 
 
 // Show a status message
@@ -66,14 +78,47 @@ function getMembers(settings) {
 
 
 // Is a request still synthesizing?
-function isBusy() {
-    return request !== null && request.done.some((done) => !done);
+function isBusy(target = request) {
+    return target !== null && target.done.some((done) => !done);
 }
 
 
-// Update the buttons for the current state
-function updateButtons() {
-    stopButton.disabled = !isBusy() && sources.length === 0;
+// The player's timeline duration so far (s)
+function duration() {
+    const target = player.request;
+    if (target === null) {
+        return 0;
+    }
+    return Math.max(0, ...target.tracks.map((track, ix) => (track.length === 0 ? 0 : target.members[ix].offset + track.length)));
+}
+
+
+// The player's current timeline position (s)
+function position() {
+    if (!player.playing) {
+        return player.anchorPosition;
+    }
+    return Math.max(0, player.anchorPosition + (audioContext.currentTime - player.anchorTime));
+}
+
+
+// Format seconds as m:ss.s
+function formatTime(seconds) {
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes}:${(seconds - minutes * 60).toFixed(1).padStart(4, '0')}`;
+}
+
+
+// Update the buttons and the time for the current state
+function updateControls() {
+    const hasAudio = duration() > 0;
+    stopButton.disabled = !isBusy() && !player.playing;
+    playPauseButton.disabled = !hasAudio && player.request === null;
+    backButton.disabled = !hasAudio;
+    forwardButton.disabled = !hasAudio;
+    playPauseButton.innerHTML = player.playing ? '&#x23F8; Pause' : '&#x25B6; Play';
+    playPauseButton.setAttribute('aria-label', player.playing ? 'Pause' : 'Play');
+    timeElement.textContent = `${formatTime(Math.min(position(), duration()))} / ${formatTime(duration())}`;
 }
 
 
@@ -86,7 +131,7 @@ function createWorker(index) {
         event.preventDefault();
         setStatus(`The synthesis worker failed: ${event.message || 'could not load (serve the page over HTTP)'}`, true);
         request = null;
-        updateButtons();
+        updateControls();
     };
     workers[index] = entry;
 }
@@ -100,7 +145,7 @@ function ensureWorkers(count) {
 }
 
 
-// Restart all workers - abandoning any synthesis in progress
+// Restart all workers - abandoning any synthesis in progress (the request keeps the audio it has, as if finished)
 function restartWorkers() {
     const count = workers.length;
     for (const entry of workers) {
@@ -108,6 +153,9 @@ function restartWorkers() {
     }
     workers = [];
     ensureWorkers(Math.max(1, count));
+    if (request !== null) {
+        request.done = request.done.map(() => true);
+    }
 }
 
 
@@ -115,7 +163,7 @@ function restartWorkers() {
 function onWorkerMessage(entry, message) {
     if (message.type === 'ready') {
         entry.ready = true;
-        if (!isBusy() && sources.length === 0) {
+        if (!isBusy() && !player.playing && player.request === null) {
             setStatus('Ready.');
         }
         return;
@@ -128,12 +176,9 @@ function onWorkerMessage(entry, message) {
         return;
     } else if (message.type === 'error') {
         setStatus(message.message, true);
-        request = null;
+        request.done = request.done.map(() => true);
     } else if (message.type === 'block') {
-        if (request.play) {
-            playBlock(message.member, message.samples, message.sampleRate);
-            setStatus(request.members.length > 1 ? 'The crowd is speaking...' : 'Speaking...');
-        }
+        addBlock(request, message.member, message.samples, message.sampleRate);
     } else if (message.type === 'chunk') {
         request.chunks[message.member].push(message.samples);
         request.sampleRate = message.sampleRate;
@@ -147,18 +192,15 @@ function onWorkerMessage(entry, message) {
                 saveWav(request);
                 request.download = false;
                 setStatus('Saved.');
-            } else if (request.play && sources.length === 0) {
-                setStatus('Done.');
             }
         }
     }
-    updateButtons();
+    updateControls();
 }
 
 
-// Send a synthesis request to the workers, one crowd member per worker - streaming requests post blocks to play as
-// they are synthesized
-function startRequest(play, download, stream) {
+// Send a synthesis request to the workers, one crowd member per worker - streaming requests post blocks for the player
+function startRequest(stream, download) {
     if (isBusy()) {
         restartWorkers();
     }
@@ -166,13 +208,10 @@ function startRequest(play, download, stream) {
     const members = getMembers(settings);
     ensureWorkers(members.length);
     request = {
-        'id': nextRequestId++, key, play, download, stream, members,
-        'chunks': members.map(() => []), 'done': members.map(() => false), 'next': members.map(() => null),
-        'nodes': [], 'startTime': null, 'sampleRate': 44100, 'count': 0
+        'id': nextRequestId++, key, stream, download, members, 'count': 0, 'sampleRate': 44100, 'autoplay': false,
+        'chunks': members.map(() => []), 'done': members.map(() => false), 'tracks': members.map(() => ({'blocks': [], 'length': 0})),
+        'nodes': []
     };
-    if (play) {
-        request.nodes = members.map((member) => memberNode(member));
-    }
     members.forEach((member, ix) => {
         workers[ix].worker.postMessage({
             'id': request.id, 'member': ix, 'text': settings.text, 'voice': member.voice, 'rate': settings.rate * member.rate,
@@ -181,7 +220,8 @@ function startRequest(play, download, stream) {
         });
     });
     setStatus(workers[0].ready ? 'Synthesizing...' : 'Loading the pronouncing dictionary...');
-    updateButtons();
+    updateControls();
+    return request;
 }
 
 
@@ -196,39 +236,130 @@ function memberNode(member) {
 }
 
 
-// Schedule a member's block to play after the member's last block - the members start together (after a short lead),
-// each at its offset
-function playBlock(member, samples, sampleRate) {
+// Add a streamed block to a member's track - and play it, if the player is playing. Playback starts once every member
+// has its first block (or shortly after the first block, if a member is slow), so no speaker is clipped.
+function addBlock(target, member, samples, sampleRate) {
     const buffer = audioContext.createBuffer(1, samples.length, sampleRate);
     buffer.copyToChannel(samples, 0);
-    const source = audioContext.createBufferSource();
-    source.buffer = buffer;
-    source.connect(request.nodes[member]);
-    if (request.startTime === null) {
-        request.startTime = audioContext.currentTime + (request.members.length > 1 ? 0.15 : 0.08);
+    const track = target.tracks[member];
+    const block = {buffer, 'start': track.length};
+    track.blocks.push(block);
+    track.length += buffer.duration;
+    if (player.request !== target) {
+        return;
     }
-    const scheduled = request.next[member] === null ? request.startTime + request.members[member].offset : request.next[member];
-    const startTime = Math.max(audioContext.currentTime + 0.02, scheduled);
-    source.start(startTime);
-    request.next[member] = startTime + buffer.duration;
-    source.onended = () => {
-        sources = sources.filter((other) => other !== source);
-        if (sources.length === 0 && request !== null && !isBusy() && request.play) {
-            setStatus('Done.');
+    if (player.playing) {
+        scheduleBlock(member, block);
+    } else if (target.autoplay) {
+        const allStarted = target.tracks.every((other) => other.blocks.length !== 0);
+        if (allStarted) {
+            target.autoplay = false;
+            clearTimeout(player.startTimer);
+            player.startTimer = null;
+            startPlayback(0);
+        } else if (player.startTimer === null) {
+            player.startTimer = setTimeout(() => {
+                player.startTimer = null;
+                if (target.autoplay && player.request === target) {
+                    target.autoplay = false;
+                    startPlayback(0);
+                }
+            }, 400);
         }
-        updateButtons();
-    };
-    sources.push(source);
+    }
 }
 
 
-// Stop playback
-function stopPlayback() {
-    for (const source of sources) {
+// Schedule a block for the current playback - skipping what is before the position
+function scheduleBlock(member, block) {
+    const target = player.request;
+    const blockStart = target.members[member].offset + block.start;
+    const blockEnd = blockStart + block.buffer.duration;
+    if (blockEnd <= player.anchorPosition) {
+        return;
+    }
+    let when = player.anchorTime + (blockStart - player.anchorPosition);
+    let offset = 0;
+    const earliest = audioContext.currentTime + 0.005;
+    if (when < earliest) {
+        offset = earliest - when;
+        when = earliest;
+    }
+    if (offset >= block.buffer.duration) {
+        return;
+    }
+    const source = audioContext.createBufferSource();
+    source.buffer = block.buffer;
+    source.connect(target.nodes[member]);
+    source.start(when, offset);
+    source.onended = () => player.sources.delete(source);
+    player.sources.add(source);
+}
+
+
+// Stop the scheduled sources
+function stopSources() {
+    for (const source of player.sources) {
         source.onended = null;
         source.stop();
     }
-    sources = [];
+    player.sources.clear();
+}
+
+
+// Play the player's request from a timeline position
+function startPlayback(at) {
+    stopSources();
+    audioContext.resume();
+    player.anchorPosition = at;
+    player.anchorTime = audioContext.currentTime + (player.request.members.length > 1 ? 0.1 : 0.05);
+    player.playing = true;
+    player.request.tracks.forEach((track, member) => {
+        for (const block of track.blocks) {
+            scheduleBlock(member, block);
+        }
+    });
+    setStatus(player.request.members.length > 1 ? 'The crowd is speaking...' : 'Speaking...');
+    updateControls();
+}
+
+
+// Pause the player, keeping its position
+function pausePlayback() {
+    if (player.playing) {
+        player.anchorPosition = Math.min(position(), duration());
+        player.playing = false;
+        stopSources();
+        setStatus('Paused.');
+    }
+    if (player.request !== null) {
+        player.request.autoplay = false;
+    }
+    updateControls();
+}
+
+
+// Move the player's position - continuing to play from there if playing
+function seek(to) {
+    const clamped = Math.max(0, Math.min(to, duration()));
+    if (player.playing) {
+        startPlayback(clamped);
+    } else {
+        player.anchorPosition = clamped;
+        updateControls();
+    }
+}
+
+
+// The player's clock - updates the time, and stops at the end of finished audio
+function tick() {
+    if (player.playing && !isBusy(player.request) && position() >= duration() + 0.05) {
+        player.playing = false;
+        player.anchorPosition = duration();
+        stopSources();
+        setStatus('Done.');
+    }
+    updateControls();
 }
 
 
@@ -306,27 +437,61 @@ function connectOutput(room, crowd) {
 }
 
 
-// Speak - stream the text, playing each block as soon as it is synthesized
+// Speak - stream the text into a new player request, playing as soon as the audio starts arriving
 function onSpeak() {
-    stopPlayback();
+    stopSources();
+    player.playing = false;
+    clearTimeout(player.startTimer);
+    player.startTimer = null;
     if (audioContext === null) {
         audioContext = new AudioContext();
     }
     audioContext.resume();
     connectOutput(roomElement.checked, crowdElement.checked);
-    startRequest(true, false, true);
+    const target = startRequest(true, false);
+    target.nodes = target.members.map((member) => memberNode(member));
+    target.autoplay = true;
+    player.request = target;
+    player.anchorPosition = 0;
+    updateControls();
 }
 
 
-// Stop - stop playback and abandon any synthesis in progress
+// Stop - stop playback (back to the start) and abandon any synthesis in progress
 function onStop() {
-    stopPlayback();
+    stopSources();
+    player.playing = false;
+    player.anchorPosition = 0;
+    if (player.request !== null) {
+        player.request.autoplay = false;
+    }
     if (isBusy()) {
         restartWorkers();
-        request = null;
     }
     setStatus('Stopped.');
-    updateButtons();
+    updateControls();
+}
+
+
+// Play/Pause - pause, or play from the position (from the start, if at the end); with nothing to play, Speak
+function onPlayPause() {
+    if (player.request === null || duration() === 0) {
+        onSpeak();
+    } else if (player.playing) {
+        pausePlayback();
+    } else {
+        const atEnd = player.anchorPosition >= duration() - 0.05 && !isBusy(player.request);
+        startPlayback(atEnd ? 0 : player.anchorPosition);
+    }
+}
+
+
+// Skip back or ahead
+function onSkip(seconds) {
+    if (player.request !== null) {
+        player.request.autoplay = false;
+        seek(position() + seconds);
+    }
 }
 
 
@@ -344,7 +509,7 @@ function onDownload() {
         }
         return;
     }
-    startRequest(false, true, false);
+    startRequest(false, true);
 }
 
 
@@ -395,6 +560,9 @@ onCrowd();
 speakButton.addEventListener('click', onSpeak);
 stopButton.addEventListener('click', onStop);
 downloadButton.addEventListener('click', onDownload);
+playPauseButton.addEventListener('click', onPlayPause);
+backButton.addEventListener('click', () => onSkip(-skipSeconds));
+forwardButton.addEventListener('click', () => onSkip(skipSeconds));
 rateElement.addEventListener('input', showRate);
 crowdElement.addEventListener('change', onCrowd);
 for (const element of [textElement, rateElement, roomElement, crowdElement, ...document.querySelectorAll('input[name="voice"]')]) {
@@ -408,4 +576,5 @@ textElement.addEventListener('keydown', (event) => {
 });
 speakButton.disabled = false;
 downloadButton.disabled = false;
-updateButtons();
+setInterval(tick, 100);
+updateControls();

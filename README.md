@@ -19,7 +19,8 @@ open http://localhost:8000/
 ```
 
 Type text, choose the voice, rate, room ambience, and crowd, and Speak, Stop, or Download WAV. Speak streams: each
-block of audio plays as soon as it is synthesized. Crowd has six different speakers (the chosen voice leads, centered)
+block of audio plays as soon as it is synthesized. The player keeps the streamed audio, so Play/Pause, skip back 5 s,
+and skip ahead 5 s work during and after synthesis, with the position and length shown. Crowd has six different speakers (the chosen voice leads, centered)
 say the text together, each with its own pitch, vocal tract length, rate, timing, and stereo position, synthesized in
 parallel by one worker each. The worker fetches
 `data/cmudict.dict` (3.6 MB) on startup. Text separated by blank lines is synthesized paragraph by paragraph, and each
