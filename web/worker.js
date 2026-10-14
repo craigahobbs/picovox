@@ -1,9 +1,11 @@
-// The synthesis Web Worker - loads the pronouncing dictionary, then synthesizes text paragraph by paragraph so playback
-// can start before a long text is finished. The synthesis functions are exported so they also run under Node.
+// The synthesis Web Worker - loads the pronouncing dictionary and warms up the voices, then synthesizes text. In
+// streaming mode, it posts small blocks of samples as they are synthesized so playback starts almost immediately (the
+// page applies the room ambience); otherwise it posts each finished paragraph. The synthesis functions are exported so
+// they also run under Node.
 //
-// Messages in: {'id', 'text', 'voice', 'rate', 'seed', 'room'}
-// Messages out: {'type': 'ready'}, {'type': 'chunk', 'id', 'index', 'samples', 'sampleRate'}, {'type': 'done', 'id', 'count'},
-// {'type': 'error', 'id', 'message'}
+// Messages in: {'id', 'text', 'voice', 'rate', 'seed', 'room', 'stream'}
+// Messages out: {'type': 'ready'}, {'type': 'chunk', 'id', 'index', 'samples', 'sampleRate'},
+// {'type': 'block', 'id', 'samples', 'sampleRate'}, {'type': 'done', 'id', 'count'}, {'type': 'error', 'id', 'message'}
 
 import {setDictionary, textToPhrases} from '../lib/lexicon.js';
 import {speak} from '../lib/speak.js';
@@ -36,6 +38,25 @@ export function synthesizeParagraphs(text, options, onChunk) {
 }
 
 
+// Stream text paragraph by paragraph, calling onBlock(samples, sampleRate) with each block as it is synthesized - returns
+// the paragraph count
+export function streamParagraphs(text, {voice = 'male', rate = 1, seed = 1} = {}, onBlock) {
+    const paragraphs = splitParagraphs(text);
+    for (const paragraph of paragraphs) {
+        speak(paragraph, voice, {seed, rate, 'onBlock': (samples) => onBlock(samples, 44100)});
+    }
+    return paragraphs.length;
+}
+
+
+// Warm up the voices - the first synthesis with each voice calibrates its levels
+export function warmUp() {
+    for (const voice of ['male', 'female']) {
+        speak('Hi.', voice);
+    }
+}
+
+
 // The worker message loop (only when running as a worker)
 if (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope) {
     // Fetch the dictionary on startup
@@ -46,6 +67,7 @@ if (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScop
         return response.text();
     }).then((text) => {
         setDictionary(text);
+        warmUp();
         self.postMessage({'type': 'ready'});
     });
     ready.catch((error) => {
@@ -54,12 +76,16 @@ if (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScop
 
     // Synthesize each request, posting each paragraph's samples as it is done
     self.onmessage = async (event) => {
-        const {id, text, voice, rate, seed, room} = event.data;
+        const {id, text, voice, rate, seed, room, stream} = event.data;
         try {
             await ready;
-            const count = synthesizeParagraphs(text, {voice, rate, seed, room}, (index, samples, sampleRate) => {
-                self.postMessage({'type': 'chunk', id, index, samples, sampleRate}, [samples.buffer]);
-            });
+            const count = stream ?
+                streamParagraphs(text, {voice, rate, seed}, (samples, sampleRate) => {
+                    self.postMessage({'type': 'block', id, samples, sampleRate}, [samples.buffer]);
+                }) :
+                synthesizeParagraphs(text, {voice, rate, seed, room}, (index, samples, sampleRate) => {
+                    self.postMessage({'type': 'chunk', id, index, samples, sampleRate}, [samples.buffer]);
+                });
             self.postMessage({'type': 'done', id, count});
         } catch (error) {
             self.postMessage({'type': 'error', id, 'message': error.message});

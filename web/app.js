@@ -1,7 +1,8 @@
-// The browser front end - text, voice, rate, and room controls; synthesis in a Web Worker; playback with Web Audio;
-// and WAV download
+// The browser front end - text, voice, rate, and room controls; streaming synthesis in a Web Worker; playback with Web
+// Audio (the room ambience by a convolver); and WAV download
 
 import {encodeWav} from '../lib/wav.js';
+import {roomImpulse} from '../lib/room.js';
 
 
 // Elements
@@ -15,7 +16,8 @@ const downloadButton = document.getElementById('download');
 const statusElement = document.getElementById('status');
 
 
-// State - the worker, the current request ({id, key, play, download, chunks, done}), and the playing sources
+// State - the worker, the current request ({id, key, play, download, stream, chunks, done}), the playing sources, and
+// the output (the destination, or the room convolver)
 let worker = null;
 let workerReady = false;
 let request = null;
@@ -23,6 +25,7 @@ let nextRequestId = 1;
 let audioContext = null;
 let sources = [];
 let nextStartTime = 0;
+let output = null;
 
 
 // Show a status message
@@ -80,6 +83,11 @@ function onWorkerMessage(message) {
     } else if (message.type === 'error') {
         setStatus(message.message, true);
         request = null;
+    } else if (message.type === 'block') {
+        if (request.play) {
+            playChunk(message.samples, message.sampleRate);
+            setStatus('Speaking...');
+        }
     } else if (message.type === 'chunk') {
         request.chunks.push(message);
         if (request.play) {
@@ -102,14 +110,14 @@ function onWorkerMessage(message) {
 }
 
 
-// Send a synthesis request to the worker
-function startRequest(play, download) {
+// Send a synthesis request to the worker - streaming requests post blocks to play as they are synthesized
+function startRequest(play, download, stream) {
     if (request !== null && !request.done) {
         startWorker();
     }
     const {settings, key} = getSettings();
-    request = {'id': nextRequestId++, key, play, download, 'chunks': [], 'done': false};
-    worker.postMessage({'id': request.id, ...settings});
+    request = {'id': nextRequestId++, key, play, download, stream, 'chunks': [], 'done': false};
+    worker.postMessage({'id': request.id, ...settings, stream});
     setStatus(workerReady ? 'Synthesizing...' : 'Loading the pronouncing dictionary...');
     updateButtons();
 }
@@ -121,8 +129,11 @@ function playChunk(samples, sampleRate) {
     buffer.copyToChannel(samples, 0);
     const source = audioContext.createBufferSource();
     source.buffer = buffer;
-    source.connect(audioContext.destination);
-    const startTime = Math.max(audioContext.currentTime + 0.05, nextStartTime);
+    source.connect(output);
+
+    // Start the first block after a short lead, then each block right after the last (restarting after an underrun)
+    const lead = sources.length === 0 ? 0.08 : 0.02;
+    const startTime = Math.max(audioContext.currentTime + lead, nextStartTime);
     source.start(startTime);
     nextStartTime = startTime + buffer.duration;
     source.onended = () => {
@@ -168,14 +179,40 @@ function saveWav(finished) {
 }
 
 
-// Speak - synthesize the text and play each paragraph as it is ready
+// Connect the output for the room setting - streamed audio is dry, so the room ambience is a convolver
+function connectOutput(room) {
+    if (output !== null) {
+        output.disconnect();
+    }
+    if (room) {
+        // The convolver's impulse response must be at the context's sample rate
+        const impulse = roomImpulse(audioContext.sampleRate);
+        const buffer = audioContext.createBuffer(1, impulse.length, audioContext.sampleRate);
+        buffer.copyToChannel(impulse, 0);
+        const convolver = audioContext.createConvolver();
+        convolver.normalize = false;
+        convolver.buffer = buffer;
+        const gain = audioContext.createGain();
+        gain.gain.value = 0.85;
+        convolver.connect(gain).connect(audioContext.destination);
+        output = convolver;
+    } else {
+        const gain = audioContext.createGain();
+        gain.connect(audioContext.destination);
+        output = gain;
+    }
+}
+
+
+// Speak - stream the text, playing each block as soon as it is synthesized
 function onSpeak() {
     stopPlayback();
     if (audioContext === null) {
         audioContext = new AudioContext();
     }
     audioContext.resume();
-    startRequest(true, false);
+    connectOutput(roomElement.checked);
+    startRequest(true, false, true);
 }
 
 
@@ -191,10 +228,10 @@ function onStop() {
 }
 
 
-// Download WAV - reuse the current audio if the settings are unchanged, else synthesize without playing
+// Download WAV - reuse the current (non-streamed) audio if the settings are unchanged, else synthesize without playing
 function onDownload() {
     const {key} = getSettings();
-    if (request !== null && request.key === key) {
+    if (request !== null && request.key === key && !request.stream) {
         if (request.done) {
             if (request.chunks.length !== 0) {
                 saveWav(request);
@@ -205,7 +242,7 @@ function onDownload() {
         }
         return;
     }
-    startRequest(false, true);
+    startRequest(false, true, false);
 }
 
 
