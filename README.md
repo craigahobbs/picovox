@@ -11,11 +11,11 @@ are no dependencies.
 
 ## The browser page
 
-Serve the repository root statically and open `web/`:
+Serve the repository root statically and open it - the root `index.html` redirects to `web/`:
 
 ```sh
-node tools/serve.js            # or: python3 -m http.server 8000
-open http://localhost:8000/web/
+python3 -m http.server 8000    # or: node tools/serve.js
+open http://localhost:8000/
 ```
 
 Type text, choose the voice, rate, and room ambience, and Speak, Stop, or Download WAV. The worker fetches
