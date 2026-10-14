@@ -122,10 +122,55 @@
     .transport button.skip {
         padding: 8px 12px;
     }
-    #time {
-        margin-left: 4px;
+    .position {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 10px;
+    }
+    .position input {
+        flex: 1;
+        min-width: 0;
+    }
+    #percent {
+        min-width: 3.5em;
+        text-align: right;
         color: var(--muted);
         font-variant-numeric: tabular-nums;
+    }
+    #now {
+        min-height: 1.5em;
+        margin: 8px 0 0;
+        font-style: italic;
+        overflow-wrap: anywhere;
+    }
+    #bookmarksSection h2 {
+        margin: 16px 0 6px;
+        font-size: 1rem;
+    }
+    #bookmarks {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 6px;
+    }
+    #bookmarks li {
+        display: flex;
+        gap: 6px;
+        align-items: stretch;
+    }
+    #bookmarks button.go {
+        flex: 1;
+        min-width: 0;
+        text-align: left;
+        padding: 6px 10px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    #bookmarks button.remove {
+        padding: 6px 12px;
     }
     button.primary {
         border-color: var(--accent);
@@ -173,16 +218,26 @@
             <button id="download" type="button" disabled>Download WAV</button>
         </div>
         <div class="buttons transport">
-            <button class="skip" type="button" data-skip="-300" disabled title="Skip back 5 minutes" aria-label="Skip back 5 minutes">&#x23EA; 5 m</button>
-            <button class="skip" type="button" data-skip="-60" disabled title="Skip back 1 minute" aria-label="Skip back 1 minute">&#x23EA; 1 m</button>
+            <button class="skip" type="button" data-skip="-5" disabled title="Back 5% of the text" aria-label="Back 5 percent">&#x23EA; 5%</button>
+            <button class="skip" type="button" data-skip="-1" disabled title="Back 1% of the text" aria-label="Back 1 percent">&#x23EA; 1%</button>
             <button id="playPause" type="button" disabled title="Play or pause" aria-label="Play">&#x25B6; Play</button>
-            <button class="skip" type="button" data-skip="60" disabled title="Skip ahead 1 minute" aria-label="Skip ahead 1 minute">1 m &#x23E9;</button>
-            <button class="skip" type="button" data-skip="300" disabled title="Skip ahead 5 minutes" aria-label="Skip ahead 5 minutes">5 m &#x23E9;</button>
-            <output id="time" aria-live="off">0:00.0 / 0:00.0</output>
+            <button class="skip" type="button" data-skip="1" disabled title="Ahead 1% of the text" aria-label="Ahead 1 percent">1% &#x23E9;</button>
+            <button class="skip" type="button" data-skip="5" disabled title="Ahead 5% of the text" aria-label="Ahead 5 percent">5% &#x23E9;</button>
+            <button id="bookmark" type="button" disabled title="Bookmark this position">&#x1F516; Bookmark</button>
         </div>
+        <div class="position">
+            <input id="seek" type="range" min="0" max="1000" step="1" value="0" disabled aria-label="Position in the text">
+            <output id="percent" aria-live="off">0%</output>
+        </div>
+        <p id="now" aria-live="off"></p>
         <p id="status" role="status" aria-live="polite">Loading the pronouncing dictionary...</p>
+        <section id="bookmarksSection" hidden>
+            <h2>Bookmarks</h2>
+            <ul id="bookmarks"></ul>
+        </section>
     </div>
-    <footer>Ctrl+Enter (or Cmd+Enter) speaks. Blank lines split long text into paragraphs, which play as they are synthesized.</footer>
+    <footer>Ctrl+Enter (or Cmd+Enter) speaks. Positions are in the text - skips and bookmarks land on sentence starts, and only
+        the sentences you play are synthesized. Bookmarks are kept in this browser, per text.</footer>
 </main>
 <script type="module" src="app.js"></script>
 </body>

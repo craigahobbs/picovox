@@ -3,8 +3,14 @@
 // page applies the room ambience); otherwise it posts each finished paragraph. The synthesis functions are exported so
 // they also run under Node.
 //
-// Messages in: {'id', 'member', 'text', 'voice', 'rate', 'seed', 'room', 'stream', 'overrides'} - the member (a crowd
-// member's index) is echoed back, and the overrides are voice parameters (e.g. pitchScale, tractScale)
+// Unit runs (the player): {'type': 'units', 'id', 'member', 'units': [{'index', 'text', 'trim'}], 'voice', 'rate', 'seed',
+// 'overrides'} synthesizes the text's units (sentences) in order, posting {'type': 'unitBlock', 'id', 'member', 'unit',
+// 'samples', 'sampleRate'} and {'type': 'unitDone', 'id', 'member', 'unit'}, then {'type': 'runDone', 'id', 'member'}.
+// Each unit starts trim seconds into its audio (dropping redundant leading silence). A newer run or {'type': 'cancel'}
+// supersedes a run between units.
+//
+// Whole-text requests (downloads): {'id', 'member', 'text', 'voice', 'rate', 'seed', 'room', 'stream', 'overrides'} - the
+// member (a crowd member's index) is echoed back, and the overrides are voice parameters (e.g. pitchScale, tractScale)
 // Messages out: {'type': 'ready'}, {'type': 'chunk', 'id', 'member', 'index', 'samples', 'sampleRate'},
 // {'type': 'block', 'id', 'member', 'samples', 'sampleRate'}, {'type': 'done', 'id', 'member', 'count'},
 // {'type': 'error', 'id', 'member', 'message'}
@@ -51,6 +57,21 @@ export function streamParagraphs(text, {voice = 'male', rate = 1, seed = 1, over
 }
 
 
+// Stream a unit (sentence) of text, dropping its first trim seconds - calls onBlock(samples, sampleRate)
+export function streamUnit(text, {voice = 'male', rate = 1, seed = 1, overrides = {}} = {}, trim, onBlock) {
+    let toTrim = Math.round(trim * 44100);
+    speak(text, voice, {seed, rate, overrides, 'onBlock': (samples) => {
+        if (toTrim >= samples.length) {
+            toTrim -= samples.length;
+            return;
+        }
+        const kept = toTrim > 0 ? samples.slice(toTrim) : samples;
+        toTrim = 0;
+        onBlock(kept, 44100);
+    }});
+}
+
+
 // Warm up the voices - the first synthesis with each voice calibrates its levels
 export function warmUp() {
     for (const voice of ['male', 'female']) {
@@ -76,8 +97,39 @@ if (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScop
         self.postMessage({'type': 'error', 'id': null, 'message': error.message});
     });
 
+    // Unit runs - the latest run supersedes earlier ones between units
+    let currentRun = 0;
+    const runUnits = async ({id, member, units, voice, rate, seed, overrides = {}}) => {
+        const run = ++currentRun;
+        await ready;
+        for (const unit of units) {
+            if (run !== currentRun) {
+                return;
+            }
+            streamUnit(unit.text, {voice, rate, 'seed': seed * 1000 + unit.index, overrides}, unit.trim, (samples, sampleRate) => {
+                self.postMessage({'type': 'unitBlock', id, member, 'unit': unit.index, samples, sampleRate}, [samples.buffer]);
+            });
+            self.postMessage({'type': 'unitDone', id, member, 'unit': unit.index});
+            // Yield, so a newer run or a cancel can arrive
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+        if (run === currentRun) {
+            self.postMessage({'type': 'runDone', id, member});
+        }
+    };
+
     // Synthesize each request, posting each paragraph's samples as it is done
     self.onmessage = async (event) => {
+        if (event.data.type === 'units') {
+            runUnits(event.data).catch((error) => {
+                self.postMessage({'type': 'error', 'id': event.data.id, 'member': event.data.member, 'message': error.message});
+            });
+            return;
+        }
+        if (event.data.type === 'cancel') {
+            currentRun++;
+            return;
+        }
         const {id, member = 0, text, voice, rate, seed, room, stream, overrides = {}} = event.data;
         try {
             await ready;

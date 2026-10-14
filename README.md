@@ -18,11 +18,14 @@ python3 -m http.server 8000    # or: node tools/serve.js
 open http://localhost:8000/
 ```
 
-Type text, choose the voice, rate, room ambience, and crowd, and Speak, Stop, or Download WAV. Speak streams: each
-block of audio plays as soon as it is synthesized. The player keeps the streamed audio, so Play/Pause and skipping back
-or ahead by 1 or 5 minutes work during and after synthesis, with the position and length shown. Crowd has six different speakers (the chosen voice leads, centered)
-say the text together, each with its own pitch, vocal tract length, rate, timing, and stereo position, synthesized in
-parallel by one worker each. The worker fetches
+Type or paste text - up to a whole book - choose the voice, rate, room ambience, and crowd, and Speak, Play/Pause, Stop,
+or Download WAV. The player's timeline is the text: it is split into sentences (long ones at semicolons and colons, and
+paragraphs at blank lines), which are synthesized on demand a few minutes ahead of the position and cached, so playback
+starts in about 0.1 s anywhere in the text and memory stays bounded (Moby Dick - 10,900 units - keeps about 40 in
+memory). Skip back or ahead by 1% or 5% of the text, or drag the position slider; skips land on sentence starts. Bookmark
+the current sentence, and go back to it later - bookmarks are kept in the browser, per text, as is the text. Crowd has
+six different speakers (the chosen voice leads, centered) say the text together, each with its own pitch, vocal tract
+length, rate, timing, and stereo position, synthesized in parallel by one worker each. The worker fetches
 `data/cmudict.dict` (3.6 MB) on startup. Text separated by blank lines is synthesized paragraph by paragraph, and each
 paragraph plays as soon as it is ready. The page needs HTTP - it does not work from a `file:` URL, since module
 workers and fetch require it.
