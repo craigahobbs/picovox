@@ -2,8 +2,9 @@
 //
 // node tools/pitchstats.js a.wav [b.wav ...]
 
-import {readWav} from '../lib/wav.js';
 import {pitchTrack} from '../lib/analysis.js';
+import process from 'node:process';
+import {readWav} from '../lib/wav.js';
 
 for (const path of process.argv.slice(2)) {
     const {samples, sampleRate} = readWav(path);
@@ -12,7 +13,7 @@ for (const path of process.argv.slice(2)) {
     const semitones = voiced.map((point) => 12 * Math.log2(point.f0));
     const mean = semitones.reduce((sum, value) => sum + value, 0) / semitones.length;
     const std = Math.sqrt(semitones.reduce((sum, value) => sum + (value - mean) * (value - mean), 0) / semitones.length);
-    const sorted = [...voiced.map((point) => point.f0)].sort((a, b) => a - b);
+    const sorted = [...voiced.map((point) => point.f0)].sort((left, right) => left - right);
     const percentile = (fraction) => sorted[Math.floor(fraction * (sorted.length - 1))];
     // Mean absolute pitch velocity (semitones per second) between consecutive voiced frames
     let velocity = 0;
@@ -23,6 +24,8 @@ for (const path of process.argv.slice(2)) {
             count++;
         }
     }
-    console.log(`${path.padEnd(30)} median ${percentile(0.5).toFixed(0)} Hz, 5-95% ${percentile(0.05).toFixed(0)}-${percentile(0.95).toFixed(0)} Hz, ` +
-        `std ${std.toFixed(2)} st, velocity ${(velocity / count).toFixed(1)} st/s, voiced ${(voiced.length / 100).toFixed(1)} s of ${(samples.length / sampleRate).toFixed(1)} s`);
+    const range = `${percentile(0.05).toFixed(0)}-${percentile(0.95).toFixed(0)}`;
+    const seconds = (samples.length / sampleRate).toFixed(1);
+    process.stdout.write(`${path.padEnd(30)} median ${percentile(0.5).toFixed(0)} Hz, 5-95% ${range} Hz, std ${std.toFixed(2)} st, ` +
+        `velocity ${(velocity / count).toFixed(1)} st/s, voiced ${(voiced.length / 100).toFixed(1)} s of ${seconds} s\n`);
 }

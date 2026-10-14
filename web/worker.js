@@ -15,10 +15,10 @@
 // {'type': 'block', 'id', 'member', 'samples', 'sampleRate'}, {'type': 'done', 'id', 'member', 'count'},
 // {'type': 'error', 'id', 'member', 'message'}
 
-import {setDictionary, textToPhrases} from '../lib/lexicon.js';
-import {speak} from '../lib/speak.js';
 import {convolve, roomImpulse} from '../lib/room.js';
+import {setDictionary, textToPhrases} from '../lib/lexicon.js';
 import {normalize} from '../lib/klatt.js';
+import {speak} from '../lib/speak.js';
 
 
 // Split text into paragraphs (separated by blank lines), dropping those with nothing to say
@@ -48,7 +48,8 @@ export function synthesizeParagraphs(text, options, onChunk) {
 
 // Stream text paragraph by paragraph, calling onBlock(samples, sampleRate) with each block as it is synthesized - returns
 // the paragraph count
-export function streamParagraphs(text, {voice = 'male', rate = 1, seed = 1, overrides = {}} = {}, onBlock) {
+export function streamParagraphs(text, options, onBlock) {
+    const {voice = 'male', rate = 1, seed = 1, overrides = {}} = options === undefined ? {} : options;
     const paragraphs = splitParagraphs(text);
     for (const paragraph of paragraphs) {
         speak(paragraph, voice, {seed, rate, overrides, 'onBlock': (samples) => onBlock(samples, 44100)});
@@ -58,7 +59,8 @@ export function streamParagraphs(text, {voice = 'male', rate = 1, seed = 1, over
 
 
 // Stream a unit (sentence) of text, dropping its first trim seconds - calls onBlock(samples, sampleRate)
-export function streamUnit(text, {voice = 'male', rate = 1, seed = 1, overrides = {}} = {}, trim, onBlock) {
+export function streamUnit(text, options, trim, onBlock) {
+    const {voice = 'male', rate = 1, seed = 1, overrides = {}} = options === undefined ? {} : options;
     let toTrim = Math.round(trim * 44100);
     speak(text, voice, {seed, rate, overrides, 'onBlock': (samples) => {
         if (toTrim >= samples.length) {
@@ -81,7 +83,7 @@ export function warmUp() {
 
 
 // The worker message loop (only when running as a worker)
-if (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope) {
+if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globalThis.WorkerGlobalScope) {
     // Fetch the dictionary on startup
     const ready = fetch(new URL('../data/cmudict.dict', import.meta.url)).then((response) => {
         if (!response.ok) {
@@ -111,7 +113,9 @@ if (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScop
             });
             self.postMessage({'type': 'unitDone', id, member, 'unit': unit.index});
             // Yield, so a newer run or a cancel can arrive
-            await new Promise((resolve) => setTimeout(resolve, 0));
+            await new Promise((resolve) => {
+                setTimeout(resolve, 0);
+            });
         }
         if (run === currentRun) {
             self.postMessage({'type': 'runDone', id, member});

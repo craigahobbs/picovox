@@ -1,9 +1,10 @@
 // Experiment 1 - sustained vowel glides for a male and a female voice, to check the source and the cascade
 
-import {synthesize, normalize} from '../lib/klatt.js';
+import {normalize, synthesize} from '../lib/klatt.js';
 import {decimate} from '../lib/analysis.js';
-import {writeWav} from '../lib/wav.js';
+import process from 'node:process';
 import {renderSpectrograms} from './spectrogram.js';
+import {writeWav} from '../lib/wav.js';
 
 
 // Hillenbrand et al. (1995) average vowel formants (F1, F2, F3) for men and women
@@ -57,4 +58,4 @@ for (const voice of voices) {
     paths.push(path);
 }
 renderSpectrograms('out/exp1-vowels.png', paths);
-console.log(paths.join('\n'));
+process.stdout.write(`${paths.join('\n')}\n`);

@@ -2,8 +2,9 @@
 //
 // node tools/ltas.js a.wav [b.wav ...]
 
+import {pitchTrack, spectrogram} from '../lib/analysis.js';
+import process from 'node:process';
 import {readWav} from '../lib/wav.js';
-import {spectrogram, pitchTrack} from '../lib/analysis.js';
 
 
 export function ltas(path, {voiced = true} = {}) {
@@ -19,7 +20,7 @@ export function ltas(path, {voiced = true} = {}) {
     frames.forEach((frame, ix) => {
         const point = pitch[Math.min(pitch.length - 1, ix)];
         const isVoiced = point && point.f0 > 0;
-        const frameEnergy = frame.db.reduce((sum, value) => sum + Math.pow(10, value / 10), 0);
+        const frameEnergy = frame.db.reduce((sum, value) => sum + 10 ** (value / 10), 0);
         if (isVoiced) {
             countVoiced++;
         }
@@ -28,7 +29,7 @@ export function ltas(path, {voiced = true} = {}) {
         }
         bands.forEach(([low, high], ixBand) => {
             for (let bin = Math.ceil(low / binHz); bin < Math.min(frame.db.length, high / binHz); bin++) {
-                const value = Math.pow(10, frame.db[bin] / 10);
+                const value = 10 ** (frame.db[bin] / 10);
                 if (isVoiced) {
                     powerVoiced[ixBand] += value;
                 }
@@ -48,6 +49,7 @@ if (process.argv[1] && process.argv[1].endsWith('ltas.js')) {
     const voiced = !process.argv.includes('--unvoiced');
     for (const path of process.argv.slice(2).filter((arg) => !arg.startsWith('--'))) {
         const {bands, db} = ltas(path, {voiced});
-        console.log(path.padEnd(28), bands.map(([low, high], ix) => `${low / 1000}-${high / 1000}k:${db[ix].toFixed(1).padStart(6)}`).join(' '));
+        const columns = bands.map(([low, high], ix) => `${low / 1000}-${high / 1000}k:${db[ix].toFixed(1).padStart(6)}`);
+        process.stdout.write(`${path.padEnd(28)} ${columns.join(' ')}\n`);
     }
 }

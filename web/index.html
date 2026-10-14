@@ -2,243 +2,719 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Voice Synth</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f7f3ec" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#16130f" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Audiobooks</title>
 <style>
     :root {
-        --bg: #f6f5f2;
-        --panel: #ffffff;
-        --text: #1d1d1f;
-        --muted: #6b6b70;
-        --border: #d8d6d0;
-        --accent: #2f5fd0;
+        --bg: #f7f3ec;
+        --surface: #fffdf9;
+        --surface-2: #efe9df;
+        --text: #221d16;
+        --muted: #6f665a;
+        --border: #e2d9cb;
+        --accent: #8a3b12;
         --accent-text: #ffffff;
+        --track: #e2d9cb;
         --error: #b3261e;
+        --shadow: 0 1px 2px rgba(60, 40, 20, 0.08), 0 4px 16px rgba(60, 40, 20, 0.08);
         color-scheme: light;
     }
     @media (prefers-color-scheme: dark) {
         :root {
-            --bg: #161618;
-            --panel: #202023;
-            --text: #ececee;
-            --muted: #9c9ca3;
-            --border: #3a3a3f;
-            --accent: #7b9cff;
-            --accent-text: #0d1430;
+            --bg: #16130f;
+            --surface: #211c17;
+            --surface-2: #2b251e;
+            --text: #f1ebe2;
+            --muted: #a99f92;
+            --border: #3a3229;
+            --accent: #e49a62;
+            --accent-text: #1c120a;
+            --track: #3a3229;
             --error: #ff8a80;
+            --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.3);
             color-scheme: dark;
         }
     }
     * {
         box-sizing: border-box;
     }
+    html {
+        -webkit-text-size-adjust: 100%;
+    }
     body {
         margin: 0;
         background: var(--bg);
         color: var(--text);
-        font: 16px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+        font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        -webkit-tap-highlight-color: transparent;
     }
-    main {
-        max-width: 720px;
-        margin: 0 auto;
-        padding: 32px 16px;
-    }
-    h1 {
-        margin: 0 0 4px;
-        font-size: 1.6rem;
-    }
-    .lede {
-        margin: 0 0 24px;
-        color: var(--muted);
-    }
-    .panel {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 16px;
-    }
-    textarea {
-        width: 100%;
-        min-height: 160px;
-        resize: vertical;
-        padding: 10px 12px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: var(--bg);
-        color: var(--text);
+    button, input {
         font: inherit;
-    }
-    .controls {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px 24px;
-        align-items: center;
-        margin: 16px 0;
-    }
-    fieldset {
-        display: flex;
-        gap: 16px;
-        margin: 0;
-        padding: 0;
-        border: 0;
-    }
-    legend {
-        float: left;
-        margin-right: 12px;
-        color: var(--muted);
-    }
-    label {
-        display: inline-flex;
-        gap: 6px;
-        align-items: center;
-        cursor: pointer;
-    }
-    .rate output {
-        min-width: 3.2em;
-        font-variant-numeric: tabular-nums;
-        color: var(--muted);
-    }
-    .buttons {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
+        color: inherit;
     }
     button {
-        padding: 8px 18px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: var(--panel);
-        color: var(--text);
-        font: inherit;
         cursor: pointer;
     }
-    .transport {
-        align-items: center;
-        margin-top: 8px;
+    [hidden] {
+        display: none !important;
     }
-    #playPause {
-        min-width: 7em;
+    .muted {
+        color: var(--muted);
     }
-    .transport button.skip {
-        padding: 8px 12px;
+    .icon {
+        width: 24px;
+        height: 24px;
+        fill: currentColor;
+        flex: none;
     }
-    .position {
+
+    /* Views */
+    .view {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: calc(env(safe-area-inset-top) + 16px) calc(env(safe-area-inset-right) + 16px) calc(env(safe-area-inset-bottom) + 96px) calc(env(safe-area-inset-left) + 16px);
+    }
+    h1, h2 {
+        margin: 0;
+        line-height: 1.2;
+    }
+    .masthead h1 {
+        font: 700 1.75rem/1.2 Georgia, "Iowan Old Style", "Times New Roman", serif;
+    }
+    .masthead p {
+        margin: 4px 0 0;
+    }
+    .library-section {
+        margin-top: 28px;
+    }
+    .library-section > h2 {
+        font-size: 1.05rem;
+        margin-bottom: 10px;
+    }
+
+    /* Book covers - an image, or a generated cover */
+    .cover {
+        position: relative;
+        flex: none;
+        width: 56px;
+        aspect-ratio: 2 / 3;
+        border-radius: 4px;
+        overflow: hidden;
+        background: var(--surface-2);
+        box-shadow: var(--shadow);
+    }
+    .cover img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+    }
+    .cover .generated {
+        position: absolute;
+        inset: 0;
         display: flex;
         align-items: center;
-        gap: 10px;
-        margin-top: 10px;
+        justify-content: center;
+        padding: 6%;
+        text-align: center;
+        font: 700 0.6rem/1.15 Georgia, serif;
+        color: #fff;
+        overflow: hidden;
     }
-    .position input {
-        flex: 1;
-        min-width: 0;
-    }
-    #percent {
-        min-width: 3.5em;
-        text-align: right;
-        color: var(--muted);
-        font-variant-numeric: tabular-nums;
-    }
-    #now {
-        min-height: 1.5em;
-        margin: 8px 0 0;
-        font-style: italic;
-        overflow-wrap: anywhere;
-    }
-    #bookmarksSection h2 {
-        margin: 16px 0 6px;
-        font-size: 1rem;
-    }
-    #bookmarks {
+
+    /* Book lists */
+    .book-list {
         list-style: none;
         margin: 0;
         padding: 0;
         display: grid;
-        gap: 6px;
+        gap: 2px;
     }
-    #bookmarks li {
+    .book-row {
         display: flex;
-        gap: 6px;
-        align-items: stretch;
+        align-items: center;
+        gap: 4px;
+        border-radius: 10px;
     }
-    #bookmarks button.go {
+    .book-open {
         flex: 1;
         min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 8px;
+        border: 0;
+        border-radius: 10px;
+        background: none;
         text-align: left;
-        padding: 6px 10px;
+    }
+    .book-open:hover, .book-open:focus-visible {
+        background: var(--surface-2);
+    }
+    .book-text {
+        min-width: 0;
+        display: grid;
+        gap: 2px;
+    }
+    .book-title {
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+    }
+    .book-meta {
+        font-size: 0.875rem;
+        color: var(--muted);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
     }
-    #bookmarks button.remove {
-        padding: 6px 12px;
+    .mini-progress {
+        height: 3px;
+        margin-top: 4px;
+        border-radius: 2px;
+        background: var(--track);
+        overflow: hidden;
+        width: 100%;
+        max-width: 220px;
     }
-    button.primary {
+    .mini-progress > div {
+        height: 100%;
+        background: var(--accent);
+    }
+    .icon-button {
+        flex: none;
+        width: 44px;
+        height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 0;
+        border-radius: 50%;
+        background: none;
+        color: var(--muted);
+    }
+    .icon-button:hover, .icon-button:focus-visible {
+        background: var(--surface-2);
+        color: var(--text);
+    }
+
+    /* The continue-listening card */
+    .continue {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 14px;
+        border-radius: 14px;
+        background: var(--surface);
+        box-shadow: var(--shadow);
+    }
+    .continue .cover {
+        width: 72px;
+    }
+    .continue .book-open {
+        padding: 0;
+    }
+    .continue .book-open:hover {
+        background: none;
+    }
+    .round-play {
+        flex: none;
+        width: 52px;
+        height: 52px;
+        border: 0;
+        border-radius: 50%;
+        background: var(--accent);
+        color: var(--accent-text);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* Discover - sources and search */
+    .tabs {
+        display: flex;
+        gap: 6px;
+        padding: 4px;
+        border-radius: 12px;
+        background: var(--surface-2);
+    }
+    .tabs button {
+        flex: 1;
+        min-height: 40px;
+        border: 0;
+        border-radius: 9px;
+        background: none;
+        font-weight: 600;
+        color: var(--muted);
+    }
+    .tabs button[aria-selected="true"] {
+        background: var(--surface);
+        color: var(--text);
+        box-shadow: var(--shadow);
+    }
+    .search {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+    }
+    .search input {
+        flex: 1;
+        min-width: 0;
+        min-height: 44px;
+        padding: 0 14px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--surface);
+    }
+    .button {
+        min-height: 44px;
+        padding: 0 16px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--surface);
+        font-weight: 600;
+    }
+    .button.primary {
         border-color: var(--accent);
         background: var(--accent);
         color: var(--accent-text);
     }
-    button:disabled {
-        opacity: 0.5;
-        cursor: default;
+    .source-note {
+        margin: 8px 2px 10px;
+        font-size: 0.875rem;
     }
-    #status {
-        min-height: 1.5em;
-        margin: 12px 0 0;
+    .list-status {
+        margin: 12px 2px;
         color: var(--muted);
     }
-    #status.error {
+    .list-status.error {
         color: var(--error);
     }
-    footer {
-        margin-top: 24px;
+    #more {
+        display: block;
+        width: 100%;
+        margin-top: 10px;
+    }
+
+    /* The mini player */
+    .mini-player {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 5;
+        padding: 8px calc(env(safe-area-inset-right) + 12px) calc(env(safe-area-inset-bottom) + 8px) calc(env(safe-area-inset-left) + 12px);
+        background: var(--surface);
+        border-top: 1px solid var(--border);
+        box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.08);
+    }
+    .mini-player-inner {
+        max-width: 760px;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .mini-player .cover {
+        width: 34px;
+    }
+    .mini-player .book-open {
+        padding: 4px;
+    }
+    .mini-player .round-play {
+        width: 44px;
+        height: 44px;
+    }
+
+    /* The player */
+    /* The player fills the viewport exactly and never scrolls - the cover shrinks (or hides) to make room */
+    .player {
+        max-width: 520px;
+        height: 100vh;
+        height: 100dvh;
+        padding-bottom: calc(env(safe-area-inset-bottom) + 16px);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    .player-bar {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        margin: -6px -8px 0;
+    }
+    .player-bar .spacer {
+        flex: 1;
+    }
+    .back {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        min-height: 44px;
+        padding: 0 10px 0 4px;
+        border: 0;
+        border-radius: 10px;
+        background: none;
+        font-weight: 600;
+    }
+    .back:hover, .back:focus-visible {
+        background: var(--surface-2);
+    }
+    .now-playing {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 6px;
+        padding-top: 8px;
+    }
+    .now-playing .cover {
+        flex: 1 1 0;
+        min-height: 0;
+        max-height: 330px;
+        width: auto;
+        max-width: 100%;
+        border-radius: 8px;
+        margin: 8px 0 14px;
+    }
+    @media (max-height: 560px) {
+        .now-playing .cover {
+            display: none;
+        }
+        .now-playing {
+            justify-content: center;
+        }
+    }
+    .now-playing .cover .generated {
+        font-size: 1.1rem;
+    }
+    #bookTitle {
+        font: 700 1.35rem/1.25 Georgia, "Iowan Old Style", serif;
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+    }
+    #bookAuthor, #chapterTitle {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    #bookAuthor {
+        margin: 0;
         color: var(--muted);
+    }
+    #chapterTitle {
+        margin: 10px 0 0;
         font-size: 0.875rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        color: var(--accent);
+        min-height: 1.3em;
+    }
+    #sentence {
+        flex: none;
+        margin: 6px 0 0;
+        height: 4.5em;
+        max-width: 34em;
+        font: 1.05rem/1.5 Georgia, "Iowan Old Style", serif;
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+    }
+    .progress {
+        flex: none;
+        width: 100%;
+        margin-top: 14px;
+    }
+    .track {
+        height: 6px;
+        border-radius: 3px;
+        background: var(--track);
+        overflow: hidden;
+    }
+    #progressFill {
+        height: 100%;
+        width: 0;
+        background: var(--accent);
+        transition: width 0.25s linear;
+    }
+    .progress-labels {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 6px;
+        font-size: 0.8125rem;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+    }
+    .transport {
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 28px;
+        margin-top: 18px;
+    }
+    .skip {
+        width: 64px;
+        height: 64px;
+        border: 0;
+        border-radius: 50%;
+        background: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .skip:hover, .skip:focus-visible {
+        background: var(--surface-2);
+    }
+    .skip .icon {
+        width: 40px;
+        height: 40px;
+    }
+    #playPause {
+        width: 80px;
+        height: 80px;
+    }
+    #playPause .icon {
+        width: 38px;
+        height: 38px;
+    }
+    #playerStatus {
+        flex: none;
+        margin: 10px 0 0;
+        min-height: 1.4em;
+        font-size: 0.875rem;
+        color: var(--muted);
+    }
+    #playerStatus.error {
+        color: var(--error);
+    }
+    .spinner {
+        animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    /* Sheets */
+    dialog.sheet {
+        width: 100%;
+        max-width: 560px;
+        max-height: 85dvh;
+        margin: auto auto 0;
+        padding: 0;
+        border: 0;
+        border-radius: 16px 16px 0 0;
+        background: var(--surface);
+        color: var(--text);
+        box-shadow: var(--shadow);
+    }
+    @media (min-width: 640px) {
+        dialog.sheet {
+            margin: auto;
+            border-radius: 16px;
+        }
+    }
+    dialog.sheet::backdrop {
+        background: rgba(0, 0, 0, 0.4);
+    }
+    .sheet-head {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 8px 10px 18px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+    }
+    .sheet-head h2 {
+        flex: 1;
+        font-size: 1.1rem;
+    }
+    .sheet-body {
+        padding: 12px 12px calc(env(safe-area-inset-bottom) + 20px);
+    }
+    .sheet-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 2px;
+    }
+    .sheet-item {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+    }
+    .sheet-go {
+        flex: 1;
+        min-width: 0;
+        display: grid;
+        gap: 2px;
+        min-height: 48px;
+        padding: 8px 10px;
+        border: 0;
+        border-radius: 10px;
+        background: none;
+        text-align: left;
+    }
+    .sheet-go:hover, .sheet-go:focus-visible {
+        background: var(--surface-2);
+    }
+    .sheet-go[aria-current="true"] {
+        color: var(--accent);
+        font-weight: 600;
+    }
+    .sheet-go .label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .sheet-go .detail {
+        font-size: 0.8125rem;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .sheet-item input {
+        flex: 1;
+        min-width: 0;
+        min-height: 44px;
+        padding: 0 10px;
+        border: 1px solid var(--accent);
+        border-radius: 10px;
+        background: var(--bg);
+    }
+    .sheet-empty {
+        padding: 16px 10px;
+        color: var(--muted);
+    }
+    .setting {
+        padding: 6px 6px 14px;
+    }
+    .setting h3 {
+        margin: 0 0 8px;
+        font-size: 0.9375rem;
+    }
+    .setting p {
+        margin: 10px 2px 0;
+        font-size: 0.875rem;
+    }
+    .confirm-message {
+        margin: 4px 6px 18px;
+    }
+    .confirm-buttons {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+    }
+    .add-bookmark {
+        width: 100%;
+        margin-bottom: 10px;
     }
 </style>
 </head>
 <body>
-<main>
-    <h1>Voice Synth</h1>
-    <p class="lede">A from-scratch formant speech synthesizer - LF glottal source, Klatt-style cascade, rule-based prosody - running in your browser.</p>
-    <div class="panel">
-        <textarea id="text" aria-label="Text to speak" spellcheck="true">The birch canoe slid on the smooth planks. Glue the sheet to the dark blue background.</textarea>
-        <div class="controls">
-            <fieldset>
-                <legend>Voice</legend>
-                <label><input type="radio" name="voice" value="male" checked> Male</label>
-                <label><input type="radio" name="voice" value="female"> Female</label>
-            </fieldset>
-            <label class="rate">Rate <input id="rate" type="range" min="0.6" max="1.6" step="0.05" value="1"> <output id="rateValue" for="rate">1.00x</output></label>
-            <label><input id="room" type="checkbox"> Room ambience</label>
-            <label title="Six different speakers say the text together"><input id="crowd" type="checkbox"> Crowd</label>
-        </div>
-        <div class="buttons">
-            <button id="speak" class="primary" type="button" disabled>Speak</button>
-            <button id="stop" type="button" disabled>Stop</button>
-            <button id="download" type="button" disabled>Download WAV</button>
-        </div>
-        <div class="buttons transport">
-            <button class="skip" type="button" data-skip="-5" disabled title="Back 5% of the text" aria-label="Back 5 percent">&#x23EA; 5%</button>
-            <button class="skip" type="button" data-skip="-1" disabled title="Back 1% of the text" aria-label="Back 1 percent">&#x23EA; 1%</button>
-            <button id="playPause" type="button" disabled title="Play or pause" aria-label="Play">&#x25B6; Play</button>
-            <button class="skip" type="button" data-skip="1" disabled title="Ahead 1% of the text" aria-label="Ahead 1 percent">1% &#x23E9;</button>
-            <button class="skip" type="button" data-skip="5" disabled title="Ahead 5% of the text" aria-label="Ahead 5 percent">5% &#x23E9;</button>
-            <button id="bookmark" type="button" disabled title="Bookmark this position">&#x1F516; Bookmark</button>
-        </div>
-        <div class="position">
-            <input id="seek" type="range" min="0" max="1000" step="1" value="0" disabled aria-label="Position in the text">
-            <output id="percent" aria-live="off">0%</output>
-        </div>
-        <p id="now" aria-live="off"></p>
-        <p id="status" role="status" aria-live="polite">Loading the pronouncing dictionary...</p>
-        <section id="bookmarksSection" hidden>
-            <h2>Bookmarks</h2>
-            <ul id="bookmarks"></ul>
-        </section>
-    </div>
-    <footer>Ctrl+Enter (or Cmd+Enter) speaks. Positions are in the text - skips and bookmarks land on sentence starts, and only
-        the sentences you play are synthesized. Bookmarks are kept in this browser, per text.</footer>
+<svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.14v13.72a1 1 0 0 0 1.52.85l10.9-6.86a1 1 0 0 0 0-1.7L9.52 4.29A1 1 0 0 0 8 5.14z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4.5" width="4" height="15" rx="1.2"/><rect x="14" y="4.5" width="4" height="15" rx="1.2"/></symbol>
+    <symbol id="i-busy" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9h-2.5A6.5 6.5 0 1 1 12 5.5z"/></symbol>
+    <symbol id="i-back30" viewBox="0 0 48 48"><path d="M24 8a16 16 0 1 1-15.7 19h3.1A13 13 0 1 0 24 11v5l-8-6.5L24 3z"/><text x="24" y="30.5" text-anchor="middle" font-size="12" font-weight="700" font-family="system-ui, sans-serif">30</text></symbol>
+    <symbol id="i-forward30" viewBox="0 0 48 48"><path d="M24 8a16 16 0 1 0 15.7 19h-3.1A13 13 0 1 1 24 11v5l8-6.5L24 3z"/><text x="24" y="30.5" text-anchor="middle" font-size="12" font-weight="700" font-family="system-ui, sans-serif">30</text></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M15.4 5.4 14 4l-8 8 8 8 1.4-1.4L8.8 12z"/></symbol>
+    <symbol id="i-contents" viewBox="0 0 24 24"><path d="M4 6h2v2H4zm4 0h12v2H8zM4 11h2v2H4zm4 0h12v2H8zm-4 5h2v2H4zm4 0h12v2H8z"/></symbol>
+    <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4.5L5 21V4a1 1 0 0 1 1-1zm1 2v12.3l5-3.2 5 3.2V5z"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M3 6h10.2a3 3 0 0 1 5.6 0H21v2h-2.2a3 3 0 0 1-5.6 0H3zm13 2a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM3 16h2.2a3 3 0 0 1 5.6 0H21v2H10.8a3 3 0 0 1-5.6 0H3zm5 2a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6.4 5 5 6.4l5.6 5.6L5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4-5.6-5.6L19 6.4 17.6 5 12 10.6z"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 17.2V20h2.8l9.4-9.4-2.8-2.8zm15.7-9.5a1 1 0 0 0 0-1.4l-2-2a1 1 0 0 0-1.4 0l-1.6 1.6 2.8 2.8z"/></symbol>
+    <symbol id="i-delete" viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4zm-3 6h12l-1 12H7zm4 2v8h1.5v-8zm3.5 0v8H15v-8z"/></symbol>
+</svg>
+
+<main id="libraryView" class="view" hidden>
+    <header class="masthead">
+        <h1>Audiobooks</h1>
+        <p class="muted">Public-domain books, read aloud by a voice synthesized in your browser.</p>
+    </header>
+
+    <section id="continueSection" class="library-section" hidden>
+        <h2>Continue listening</h2>
+        <div class="continue" id="continueCard"></div>
+    </section>
+
+    <section id="shelfSection" class="library-section" hidden>
+        <h2>Your books</h2>
+        <ul id="shelf" class="book-list"></ul>
+    </section>
+
+    <section class="library-section">
+        <h2>Find a book</h2>
+        <div id="sourceTabs" class="tabs" role="tablist" aria-label="Book source"></div>
+        <form id="searchForm" class="search" role="search">
+            <input id="search" type="search" placeholder="Search titles and authors" aria-label="Search titles and authors" enterkeyhint="search" autocomplete="off">
+            <button class="button" type="submit">Search</button>
+        </form>
+        <p id="sourceNote" class="source-note muted"></p>
+        <ul id="results" class="book-list"></ul>
+        <p id="resultsStatus" class="list-status" role="status"></p>
+        <button id="more" class="button" type="button" hidden>More</button>
+    </section>
 </main>
+
+<div id="miniPlayer" class="mini-player" hidden>
+    <div class="mini-player-inner" id="miniPlayerInner"></div>
+</div>
+
+<main id="playerView" class="view player" hidden>
+    <div class="player-bar">
+        <button id="toLibrary" class="back" type="button"><svg class="icon"><use href="#i-chevron"/></svg>Library</button>
+        <span class="spacer"></span>
+        <button id="contentsButton" class="icon-button" type="button" aria-label="Contents" title="Contents"><svg class="icon"><use href="#i-contents"/></svg></button>
+        <button id="bookmarksButton" class="icon-button" type="button" aria-label="Bookmarks" title="Bookmarks"><svg class="icon"><use href="#i-bookmark"/></svg></button>
+        <button id="settingsButton" class="icon-button" type="button" aria-label="Narrator and speed" title="Narrator and speed"><svg class="icon"><use href="#i-settings"/></svg></button>
+    </div>
+    <div class="now-playing">
+        <div id="playerCover" class="cover"></div>
+        <h1 id="bookTitle"></h1>
+        <p id="bookAuthor"></p>
+        <p id="chapterTitle"></p>
+        <p id="sentence" lang="en"></p>
+        <div class="progress">
+            <div class="track" role="progressbar" aria-label="Progress through the book" aria-valuemin="0" aria-valuemax="100" id="progressBar"><div id="progressFill"></div></div>
+            <div class="progress-labels"><span id="percent">0%</span><span id="remaining"></span></div>
+        </div>
+        <div class="transport">
+            <button id="skipBack" class="skip" type="button" aria-label="Back 30 seconds"><svg class="icon"><use href="#i-back30"/></svg></button>
+            <button id="playPause" class="round-play" type="button" aria-label="Play"><svg class="icon"><use href="#i-play"/></svg></button>
+            <button id="skipForward" class="skip" type="button" aria-label="Forward 30 seconds"><svg class="icon"><use href="#i-forward30"/></svg></button>
+        </div>
+        <p id="playerStatus" role="status"></p>
+    </div>
+</main>
+
+<dialog id="sheet" class="sheet" aria-labelledby="sheetTitle">
+    <div class="sheet-head">
+        <h2 id="sheetTitle"></h2>
+        <button id="sheetClose" class="icon-button" type="button" aria-label="Close"><svg class="icon"><use href="#i-close"/></svg></button>
+    </div>
+    <div id="sheetBody" class="sheet-body"></div>
+</dialog>
+
 <script type="module" src="app.js"></script>
 </body>
 </html>

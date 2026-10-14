@@ -3,8 +3,9 @@
 //
 // node tools/prosody.js [-t "text"] [-v] a.wav [b.wav ...]   (the text gives the syllable count for the speaking rate)
 
-import {readWav} from '../lib/wav.js';
 import {decimate, pitchTrack} from '../lib/analysis.js';
+import process from 'node:process';
+import {readWav} from '../lib/wav.js';
 import {textToPhrases} from '../lib/lexicon.js';
 
 
@@ -142,14 +143,14 @@ function analyze(path, syllables, verbose) {
         }
     });
     const voicedValues = pitch.filter((value) => value !== null);
-    const sorted = [...voicedValues].sort((a, b) => a - b);
+    const sorted = [...voicedValues].sort((left, right) => left - right);
     const median = sorted[Math.floor(sorted.length / 2)];
     for (let ix = 0; ix < pitch.length; ix++) {
         if (pitch[ix] !== null && Math.abs(pitch[ix] - median) > 9) {
             pitch[ix] = null;
         }
     }
-    const voiced = pitch.filter((value) => value !== null).sort((a, b) => a - b);
+    const voiced = pitch.filter((value) => value !== null).sort((left, right) => left - right);
     const percentile = (fraction) => voiced[Math.floor(fraction * (voiced.length - 1))];
     const [, pitchStd] = meanStd(voiced);
 
@@ -193,11 +194,11 @@ function analyze(path, syllables, verbose) {
             slopes.push(slope(xs, ys));
             const tail = ys.slice(-8);
             finals.push(tail[tail.length - 1] - Math.max(...ys.slice(-40)));
-            const head = meanStd(ys.slice(0, 15))[0];
+            const [head] = meanStd(ys.slice(0, 15));
             if (prevEnd !== null) {
                 resets.push(head - prevEnd);
             }
-            prevEnd = meanStd(ys.slice(-15))[0];
+            [prevEnd] = meanStd(ys.slice(-15));
         }
     }
 
@@ -225,8 +226,9 @@ function analyze(path, syllables, verbose) {
     }
 
     if (verbose) {
-        console.log(`${path}: pauses ${pauses.map(([start, end]) => (end - start) * hopMs).join(' ')} ms; finals ${finals.map((value) => value.toFixed(1)).join(' ')} st; ` +
-            `final intervals ${finalIntervals.map((value) => value.toFixed(0)).join(' ')} ms`);
+        const pauseList = pauses.map(([start, end]) => (end - start) * hopMs).join(' ');
+        process.stdout.write(`${path}: pauses ${pauseList} ms; finals ${finals.map((value) => value.toFixed(1)).join(' ')} st; ` +
+            `final intervals ${finalIntervals.map((value) => value.toFixed(0)).join(' ')} ms\n`);
     }
     return {
         'speech s': speechMs / 1000,
@@ -234,7 +236,7 @@ function analyze(path, syllables, verbose) {
         'pause ms': pauses.length === 0 ? 0 : pauseMs / pauses.length,
         'syl/s': syllables === null ? 0 : syllables / (speechMs / 1000),
         'artic syl/s': syllables === null ? 0 : syllables / (articulationMs / 1000),
-        'median Hz': 100 * Math.pow(2, median / 12),
+        'median Hz': 100 * 2 ** (median / 12),
         '5-95 st': percentile(0.95) - percentile(0.05),
         'std st': pitchStd,
         'peaks/s': pitchPeaks.length / (articulationMs / 1000),
@@ -267,8 +269,9 @@ let header = false;
 for (const path of paths) {
     const stats = analyze(path, syllables, verbose);
     if (!header) {
-        console.log(''.padEnd(26) + Object.keys(stats).map((key) => key.padStart(12)).join(''));
+        process.stdout.write(`${''.padEnd(26)}${Object.keys(stats).map((key) => key.padStart(12)).join('')}\n`);
         header = true;
     }
-    console.log(path.slice(-26).padEnd(26) + Object.values(stats).map((value) => value.toFixed(value >= 100 ? 0 : 2).padStart(12)).join(''));
+    const columns = Object.values(stats).map((value) => value.toFixed(value >= 100 ? 0 : 2).padStart(12));
+    process.stdout.write(`${path.slice(-26).padEnd(26)}${columns.join('')}\n`);
 }

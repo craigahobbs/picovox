@@ -9,30 +9,105 @@ It runs under Node (command-line tools and evaluation) and in the browser (Web A
 are no dependencies.
 
 
-## The browser page
+## The audiobook player
 
-Serve the repository root statically and open it - the root `index.html` redirects to `web/`:
+A public-domain audiobook player, read aloud by the synthesizer. Serve the repository root statically and open it - the
+root `index.html` redirects to `web/`:
 
 ```sh
-python3 -m http.server 8000    # or: node tools/serve.js
+python3 -m http.server 8000
 open http://localhost:8000/
 ```
 
-Type or paste text - up to a whole book - choose the voice, rate, room ambience, and crowd, and Speak, Play/Pause, Stop,
-or Download WAV. The player's timeline is the text: it is split into sentences (long ones at semicolons and colons, and
-paragraphs at blank lines), which are synthesized on demand a few minutes ahead of the position and cached, so playback
-starts in about 0.1 s anywhere in the text and memory stays bounded (Moby Dick - 10,900 units - keeps about 40 in
-memory). Skip back or ahead by 1% or 5% of the text, or drag the position slider; skips land on sentence starts. Bookmark
-the current sentence, and go back to it later - bookmarks are kept in the browser, per text, as is the text. Crowd has
-six different speakers (the chosen voice leads, centered) say the text together, each with its own pitch, vocal tract
-length, rate, timing, and stereo position, synthesized in parallel by one worker each. The worker fetches
-`data/cmudict.dict` (3.6 MB) on startup. Text separated by blank lines is synthesized paragraph by paragraph, and each
-paragraph plays as soon as it is ready. The page needs HTTP - it does not work from a `file:` URL, since module
-workers and fetch require it.
+To listen on a phone, open `http://<your computer's LAN address>:8000/` on it (same network).
+
+- **Books** come live from two sources, straight from the browser (both send CORS headers, so no server or proxy is
+  needed): [Standard Ebooks](https://standardebooks.org) - about 1,300 carefully produced classics, downloaded as EPUBs
+  and unzipped in the browser - and [Project Gutenberg](https://www.gutenberg.org) - its catalog through
+  [Gutendex](https://gutendex.com) and its texts through the [GITenberg](https://github.com/GITenberg) mirror on GitHub
+  (gutenberg.org's own text files don't send CORS headers; GITenberg is a 2016 snapshot, so newer books are missing).
+- **The player** has play/pause, back and forward 30 seconds, the book's contents, bookmarks (add, name, go to,
+  delete), and the narrator's voice and speed. It plays on from the library (with a mini player), and works with the
+  lock screen and media keys.
+- **Your place is kept** - every book's position, its bookmarks, and the open book are saved in browser storage as you
+  listen, so reloading, closing the tab, or coming back days later picks up at the same sentence. Downloaded books are
+  cached in IndexedDB, so reopening one is instant (and works offline).
+- **Long books are cheap**: the player's timeline is the book's text, split into sentences (long ones at semicolons and
+  colons) that are synthesized on demand a few minutes ahead of the position, and only the audio near the position is
+  kept - so playback starts in about 0.1 s anywhere in a book, and Moby Dick costs no more memory than a chapter.
+
+The page needs HTTP - it does not work from a `file:` URL, since module workers and fetch require it. The worker fetches
+`data/cmudict.dict` (3.6 MB) on startup.
+
+| Module | |
+| --- | --- |
+| `web/app.js` | The library and player interface |
+| `web/engine.js` | Playback - the text timeline, on-demand synthesis, scheduling, skipping, speech normalization |
+| `web/worker.js` | The synthesis Web Worker - unit (sentence) runs and whole-text synthesis |
+| `web/sources/standardebooks.js` | Standard Ebooks - browse, search, and EPUB loading |
+| `web/sources/gutenberg.js` | Project Gutenberg - Gutendex browse and search, GITenberg texts, boilerplate and chapters |
+| `web/store.js` | The listener's state in browser storage - places, bookmarks, settings |
+| `web/bookcache.js` | Downloaded books in IndexedDB |
 
 `node tools/browsercheck.js` checks the browser build under Node: it loads every `lib/` module and `web/worker.js` with
 `node:` imports forbidden, synthesizes with the worker's functions from a dictionary string, and checks the audio
 matches the Node path sample for sample.
+
+
+## The catalog and the published site
+
+The app is published as static files (GitHub Pages). The site holds only a catalog of books - their metadata, in
+`data/catalog.json` - and each book's full text is fetched from its source at play time, with CORS.
+
+```sh
+make catalog                          # rebuild data/catalog.json (GUTENBERG_COUNT=1000 by default)
+make catalog GUTENBERG_COUNT=2000     # consider more of Project Gutenberg's most-downloaded books
+make site                             # assemble the published site in build/site/
+make gh-pages                         # test, lint, and cover, then sync build/site/ to ../voice-synth.gh-pages
+```
+
+`make catalog` runs `node tools/catalog.js`, which reads every [Standard Ebooks](https://standardebooks.org) book (its
+popularity listing and each book's page) and the top Project Gutenberg books by downloads from
+[Gutendex](https://gutendex.com). Gutenberg books that duplicate a Standard Ebooks book are left out, and each
+remaining book's plain text is found in the [GITenberg](https://github.com/GITenberg) mirror on GitHub (whose
+`raw.githubusercontent.com` files send CORS headers) with the [gitberg](https://github.com/gitenberg-dev/gitberg)
+project's repository list and HEAD requests; books not in GITenberg are left out. Requests are throttled, and every
+fetched page is cached under `out/catalog/`, so a rerun takes seconds and an interrupted build resumes (`--max-age
+<days>`, 30 by default, refetches older pages). For books missing from the gitberg list, the GitHub search API is used -
+10 searches a minute, or many more with a `GITHUB_TOKEN` in the environment.
+
+A full build from an empty cache takes about 45 minutes: Standard Ebooks' ~1,500 book pages at 2 a second (about 12
+minutes), and Gutendex, which can take a minute per page of 32 books (about 30 minutes for 1,000). To finish a partial
+catalog, rerun `make catalog` (with `GITHUB_TOKEN=<token>` set to speed up any GitHub searches) - it picks up from the
+cache and resolves only the books it hasn't yet. `make catalog CATALOG_ARGS=--cache-only` rebuilds the catalog from the
+cache alone, without network requests (books not yet resolved are left out).
+
+The catalog format (`version` 1):
+
+```js
+{
+    'version': 1, 'generated': '<ISO time>',
+    'sources': {'standardebooks': {'name', 'url', 'description'}, 'gutenberg': {'name', 'url', 'description'}},
+    'books': [{
+        'source': 'standardebooks' | 'gutenberg',
+        'id': '/ebooks/herman-melville/moby-dick',  // Standard Ebooks: the book's path; Gutenberg: its number, as a string
+        'title': 'Moby Dick', 'subtitle': 'Or, The Whale',  // the subtitle is optional
+        'author': 'Herman Melville',                        // display names, several joined with ", "
+        'description': '<plain text, at most about 600 characters>',
+        'subjects': ['Fiction'],                            // at most 8
+        'language': 'en',
+        'cover': '<absolute image URL, or null>',
+        'rank': 1,                                          // 1-based popularity rank within its source
+        'words': 211202,                                    // approximate, or null
+        'text': {'url': '<absolute CORS URL of the full text>', 'format': 'epub' | 'gutenberg-text',
+                 'encoding': 'utf-8' | 'windows-1252'}      // the encoding is for gutenberg-text only
+    }]
+}
+```
+
+`lib/catalog.js` browses it in the app: `listBooks(catalog, source)` (by rank; `'all'` interleaves the sources),
+`searchBooks(catalog, query, source)` (every query word must start a title, subtitle, author, or subject word; title and
+author matches first), `findBook(catalog, source, id)`, `pageItems(items, page, pageSize)`, and `normalizeText(text)`.
 
 
 ## Command-line tools

@@ -2,10 +2,11 @@
 //
 // node tools/serve.js [-p port]
 
-import {createServer} from 'node:http';
-import {readFile} from 'node:fs/promises';
 import {extname, join, normalize, sep} from 'node:path';
+import {createServer} from 'node:http';
 import {fileURLToPath} from 'node:url';
+import process from 'node:process';
+import {readFile} from 'node:fs/promises';
 
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -35,5 +36,5 @@ createServer(async (request, response) => {
         response.writeHead(404).end('Not found');
     }
 }).listen(port, () => {
-    console.log(`http://localhost:${port}/web/`);
+    process.stdout.write(`http://localhost:${port}/web/\n`);
 });

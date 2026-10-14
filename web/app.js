@@ -1,959 +1,1011 @@
-// The browser front end - text, voice, rate, room, and crowd controls; a player whose timeline is the text (sentences
-// are synthesized on demand in Web Workers, one per crowd member, and cached); play/pause, skipping by 1% or 5% of the
-// text, a position slider, and bookmarks (per text, in browser storage); playback with Web Audio (each member panned,
-// the room ambience by a convolver); and WAV download
+// The audiobook player - a library (continue listening, your books, and finding books in the catalog of public-domain
+// books - data/catalog.json, built offline by tools/catalog.js; each book's text is fetched from its source) and a
+// player (play/pause, back and forward, with contents, bookmarks, and the narrator's voice and speed). The listener's
+// place in every book is kept in browser storage, so reloading or leaving and coming back resumes where they were.
 
-import {encodeWav} from '../lib/wav.js';
-import {convolve, roomImpulse} from '../lib/room.js';
-import {normalize} from '../lib/klatt.js';
+import {deleteCachedBook, getCachedBook, putCachedBook} from './bookcache.js';
+import {findBook, listBooks, pageItems, searchBooks} from '../lib/catalog.js';
+import {loadState, newId, saveState} from './store.js';
+import {Engine} from './engine.js';
+import {source as gutenberg} from './sources/gutenberg.js';
+import {source as standardEbooks} from './sources/standardebooks.js';
+
+
+// The book sources' loaders, and the catalog (loaded at startup)
+const loaders = Object.fromEntries([standardEbooks, gutenberg].map((source) => [source.id, source]));
+let catalog = null;
+const catalogPromise = fetch(new URL('../data/catalog.json', import.meta.url)).then((response) => {
+    if (!response.ok) {
+        throw new Error(`The book catalog couldn't be loaded (${response.status}).`);
+    }
+    return response.json();
+});
+
+
+// The skip distance (s) and the narrator speeds
+const skipSeconds = 30;
+const speeds = [0.8, 1, 1.2, 1.4, 1.6];
 
 
 // Elements
-const textElement = document.getElementById('text');
-const rateElement = document.getElementById('rate');
-const rateValueElement = document.getElementById('rateValue');
-const roomElement = document.getElementById('room');
-const crowdElement = document.getElementById('crowd');
-const speakButton = document.getElementById('speak');
-const stopButton = document.getElementById('stop');
-const downloadButton = document.getElementById('download');
-const skipButtons = [...document.querySelectorAll('button[data-skip]')];
-const playPauseButton = document.getElementById('playPause');
-const bookmarkButton = document.getElementById('bookmark');
-const seekElement = document.getElementById('seek');
-const percentElement = document.getElementById('percent');
-const nowElement = document.getElementById('now');
-const statusElement = document.getElementById('status');
-const bookmarksSection = document.getElementById('bookmarksSection');
-const bookmarksElement = document.getElementById('bookmarks');
+const element = (id) => document.getElementById(id);
+const libraryView = element('libraryView');
+const playerView = element('playerView');
+const miniPlayer = element('miniPlayer');
+const miniPlayerInner = element('miniPlayerInner');
+const continueSection = element('continueSection');
+const continueCard = element('continueCard');
+const shelfSection = element('shelfSection');
+const shelf = element('shelf');
+const sourceTabs = element('sourceTabs');
+const searchForm = element('searchForm');
+const searchInput = element('search');
+const sourceNote = element('sourceNote');
+const results = element('results');
+const resultsStatus = element('resultsStatus');
+const moreButton = element('more');
+const playerCover = element('playerCover');
+const bookTitle = element('bookTitle');
+const bookAuthor = element('bookAuthor');
+const chapterTitle = element('chapterTitle');
+const sentence = element('sentence');
+const progressBar = element('progressBar');
+const progressFill = element('progressFill');
+const percentLabel = element('percent');
+const remainingLabel = element('remaining');
+const playPauseButton = element('playPause');
+const playerStatus = element('playerStatus');
+const sheet = element('sheet');
+const sheetTitle = element('sheetTitle');
+const sheetBody = element('sheetBody');
 
 
-// The crowd - the lead (the chosen voice, centered) and five other speakers, each with its own voice, pitch, vocal
-// tract length, rate, seed, start offset (s), stereo position, and level
-const crowdMembers = [
-    {'voice': null, 'pitchScale': 1, 'tractScale': 1, 'rate': 1, 'seed': 1, 'offset': 0, 'pan': 0, 'gain': 1},
-    {'voice': 'male', 'pitchScale': 0.88, 'tractScale': 1.05, 'rate': 0.95, 'seed': 11, 'offset': 0.11, 'pan': -0.6, 'gain': 0.72},
-    {'voice': 'female', 'pitchScale': 1.08, 'tractScale': 0.97, 'rate': 1.04, 'seed': 12, 'offset': 0.05, 'pan': 0.5, 'gain': 0.72},
-    {'voice': 'male', 'pitchScale': 1.12, 'tractScale': 0.96, 'rate': 1.06, 'seed': 13, 'offset': 0.2, 'pan': 0.3, 'gain': 0.66},
-    {'voice': 'female', 'pitchScale': 0.9, 'tractScale': 1.03, 'rate': 0.97, 'seed': 14, 'offset': 0.16, 'pan': -0.35, 'gain': 0.66},
-    {'voice': 'male', 'pitchScale': 0.95, 'tractScale': 1, 'rate': 1.02, 'seed': 15, 'offset': 0.27, 'pan': 0.8, 'gain': 0.58}
-];
+// State - the persisted state, the open book ({key, chapters, loading, progress, error}), the browse results, and the
+// sheet being shown
+const state = loadState();
+state.sourceTab ||= 'all';
+let current = null;
+const browseState = {'query': '', 'page': 1, 'books': [], 'hasMore': false, 'total': 0, 'error': null};
+let openSheetName = null;
+let lastSave = 0;
+const engine = new Engine({'onChange': onEngineChange});
 
 
-// Timing (s) - the playback lead, how far ahead to schedule blocks, and the dropped silence at a mid-paragraph unit's start
-const leadSeconds = 0.06;
-const scheduleAheadSeconds = 4;
-const unitTrimSeconds = 0.12;
-
-
-// The synthesis window - synthesize at most this many units (and characters) ahead of the position, keep this many units
-// of audio behind it (so long texts, like books, need only a few minutes of audio in memory), and split sentences longer
-// than this many characters at semicolons and colons (phrase boundaries)
-const windowUnits = 40;
-const windowChars = 2500;
-const keepBehindUnits = 8;
-const longSentenceChars = 200;
-
-
-// State - the workers ([{worker, ready}]), the audio graph, the download request, and the session: the text's units
-// (sentences) and their synthesized audio - cache[unit][member] = {blocks: [{buffer, start}], length, done, run}
-let workers = [];
-let audioContext = null;
-let output = null;
-let nextRunId = 1;
-let download = null;
-let session = null;
-
-
-// The player - its position is a unit and a time within it. While playing, the chain is the units being played
-// ([{unit, from, startTime (audio context time of the unit's start, or null until it can start), cursors}]).
-const player = {'playing': false, 'unit': 0, 'time': 0, 'chain': [], 'sources': new Set(), 'dragging': false};
-
-
-// Show a status message
-function setStatus(message, isError = false) {
-    statusElement.textContent = message;
-    statusElement.classList.toggle('error', isError);
+// Create an element with a class and text
+function make(tag, className = '', text = '') {
+    const created = document.createElement(tag);
+    if (className !== '') {
+        created.className = className;
+    }
+    if (text !== '') {
+        created.textContent = text;
+    }
+    return created;
 }
 
 
-// The current settings, and keys identifying the synthesized audio (the room is applied at playback)
-function getSettings() {
-    const voice = document.querySelector('input[name="voice"]:checked').value;
-    const settings = {
-        'text': textElement.value, voice, 'rate': Number(rateElement.value), 'room': roomElement.checked, 'crowd': crowdElement.checked
+// An SVG icon (from the page's symbols)
+function icon(name, className = 'icon') {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', className);
+    svg.setAttribute('aria-hidden', 'true');
+    const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', `#i-${name}`);
+    svg.append(use);
+    return svg;
+}
+
+
+// A book's key - its source and id
+function bookKey(book) {
+    return `${book.source}:${book.id}`;
+}
+
+
+// A book's cover - its image, or a generated cover (a color from the title) if there is none or it fails to load
+function coverElement(book, className = '') {
+    const cover = make('div', `cover ${className}`.trim());
+    const generated = () => {
+        let hash = 0;
+        for (const char of book.title || '?') {
+            hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+        }
+        const label = make('div', 'generated', book.title || '');
+        label.style.background = `hsl(${hash % 360} 38% 34%)`;
+        cover.replaceChildren(label);
     };
-    const key = JSON.stringify({'text': settings.text, voice, 'rate': settings.rate, 'crowd': settings.crowd});
-    return {settings, key};
-}
-
-
-// The speakers for settings - the crowd, or just the chosen voice
-function getMembers(settings) {
-    const members = settings.crowd ? crowdMembers : crowdMembers.slice(0, 1);
-    return members.map((member) => ({...member, 'voice': member.voice === null ? settings.voice : member.voice}));
-}
-
-
-// A text's hash (FNV-1a) - bookmarks belong to a text
-function hashText(text) {
-    let hash = 0x811c9dc5;
-    for (let ix = 0; ix < text.length; ix++) {
-        hash = Math.imul(hash ^ text.charCodeAt(ix), 0x01000193) >>> 0;
+    if (book.cover) {
+        const image = make('img');
+        image.alt = '';
+        image.loading = 'lazy';
+        image.decoding = 'async';
+        image.referrerPolicy = 'no-referrer';
+        image.src = book.cover;
+        image.onerror = generated;
+        cover.append(image);
+    } else {
+        generated();
     }
-    return hash.toString(16);
+    return cover;
 }
 
 
-// Split text into units (sentences, long sentences at semicolons and colons, and paragraphs at blank lines) - [{index,
-// start, end, text, trim}]. A unit after another in the same paragraph drops its leading silence (trim), so sentences
-// flow at a natural pace.
-const abbreviations = new Set(['mr', 'mrs', 'ms', 'dr', 'st', 'vs', 'etc', 'jr', 'sr', 'prof', 'mt', 'no', 'vol', 'fig']);
-export function splitUnits(text) {
-    const units = [];
-    let start = 0;
-    let paragraphStart = true;
-    const addUnit = (end, endsParagraph) => {
-        const unitText = text.slice(start, end);
-        if (/[A-Za-z0-9]/.test(unitText)) {
-            const leading = unitText.length - unitText.trimStart().length;
-            units.push({
-                'index': units.length, 'start': start + leading, 'end': start + unitText.trimEnd().length, 'text': unitText.trim(),
-                'trim': paragraphStart ? 0 : unitTrimSeconds
-            });
-            paragraphStart = false;
-        }
-        if (endsParagraph) {
-            paragraphStart = true;
-        }
-        start = end;
-    };
-    for (let ix = 0; ix < text.length; ix++) {
-        const char = text[ix];
-        if (char === '\n' && /^\n[ \t\r]*\n/.test(text.slice(ix, ix + 40))) {
-            addUnit(ix, true);
-        } else if ((char === ';' || char === ':') && ix - start > longSentenceChars && /\s/.test(text[ix + 1] || ' ')) {
-            addUnit(ix + 1, false);
-        } else if ('.!?'.includes(char)) {
-            let end = ix + 1;
-            while (end < text.length && '.!?"\')]”’'.includes(text[end])) {
-                end++;
-            }
-            if (end < text.length && !/\s/.test(text[end])) {
-                continue;
-            }
-            const word = text.slice(start, ix).match(/([A-Za-z]+)$/);
-            if (char === '.' && word !== null && (abbreviations.has(word[1].toLowerCase()) || /^[A-Z]$/.test(word[1]))) {
-                continue;
-            }
-            addUnit(end, false);
-            ix = end - 1;
-        }
+// Format the time left
+function formatRemaining(seconds) {
+    if (!(seconds > 0)) {
+        return '';
     }
-    addUnit(text.length, true);
-    return units;
-}
-
-
-// Session audio queries - is a unit ready to start (every member has audio), complete (every member done), and its
-// length (s, when complete - the longest member, with its offset)
-function unitReady(unit) {
-    return session.cache[unit].every((cell) => cell.blocks.length !== 0 || cell.done);
-}
-
-function unitComplete(unit) {
-    return session.cache[unit].every((cell) => cell.done);
-}
-
-function unitLength(unit) {
-    return Math.max(...session.cache[unit].map((cell, member) => session.members[member].offset + cell.length));
-}
-
-
-// The player's position - {unit, time}
-function position() {
-    if (!player.playing) {
-        return {'unit': player.unit, 'time': player.time};
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 1) {
+        return 'Less than a minute left';
     }
-    const now = audioContext.currentTime;
-    for (let ix = player.chain.length - 1; ix >= 0; ix--) {
-        const entry = player.chain[ix];
-        if (entry.startTime !== null && entry.startTime <= now) {
-            let time = now - entry.startTime;
-            if (ix === 0) {
-                time = Math.max(time, entry.from);
-            }
-            if (unitComplete(entry.unit)) {
-                time = Math.min(time, unitLength(entry.unit));
-            }
-            return {'unit': entry.unit, time};
-        }
+    if (minutes < 60) {
+        return `${minutes} min left`;
     }
-    return {'unit': player.chain[0].unit, 'time': player.chain[0].from};
+    return `${Math.floor(minutes / 60)} h ${minutes % 60} min left`;
 }
 
 
-// A position's character offset in the text - interpolated through its unit by time
-function positionChar({unit, time}) {
-    const target = session.units[unit];
-    const length = unitComplete(unit) ? unitLength(unit) : Math.max(0.001, unitLength(unit));
-    let fraction = Math.max(0, Math.min(1, time / length));
-    if (!unitComplete(unit)) {
-        fraction = Math.min(fraction, 0.95);
-    }
-    return target.start + fraction * (target.end - target.start);
-}
-
-
-// The text's length for positions (to the end of its last unit)
-function textLength() {
-    return session.units[session.units.length - 1].end;
-}
-
-
-// The unit at a character offset - the first unit ending after it (a binary search)
-function unitAtChar(char) {
-    let low = 0;
-    let high = session.units.length - 1;
-    while (low < high) {
-        const middle = (low + high) >> 1;
-        if (session.units[middle].end > char) {
-            high = middle;
-        } else {
-            low = middle + 1;
-        }
-    }
-    return low;
-}
-
-
-// Is the session synthesizing?
-function isSynthesizing() {
-    return session !== null && session.run !== null && session.run.active;
-}
-
-
-// Update the controls for the current state
-function updateControls() {
-    const hasSession = session !== null && session.units.length !== 0;
-    stopButton.disabled = !player.playing && !isSynthesizing();
-    playPauseButton.disabled = false;
-    playPauseButton.innerHTML = player.playing ? '&#x23F8; Pause' : '&#x25B6; Play';
-    playPauseButton.setAttribute('aria-label', player.playing ? 'Pause' : 'Play');
-    for (const button of [...skipButtons, bookmarkButton]) {
-        button.disabled = !hasSession;
-    }
-    seekElement.disabled = !hasSession;
-    if (!hasSession) {
-        percentElement.textContent = '0%';
-        nowElement.textContent = '';
-        return;
-    }
-    const current = position();
-    const percent = 100 * positionChar(current) / textLength();
-    if (!player.dragging) {
-        seekElement.value = Math.round(percent * 10);
-        percentElement.textContent = `${Math.floor(percent)}%`;
-        nowElement.textContent = session.units[current.unit].text;
+// Save the persisted state - throttled unless forced
+function persist(force = true) {
+    const now = Date.now();
+    if (force || now - lastSave > 3000) {
+        lastSave = now;
+        saveState(state);
     }
 }
 
 
-// Create a synthesis worker at an index of the pool
-function createWorker(index) {
-    const worker = new Worker(new URL('worker.js', import.meta.url), {'type': 'module'});
-    const entry = {worker, 'ready': false};
-    worker.onmessage = (event) => onWorkerMessage(entry, event.data);
-    worker.onerror = (event) => {
-        event.preventDefault();
-        setStatus(`The synthesis worker failed: ${event.message || 'could not load (serve the page over HTTP)'}`, true);
-    };
-    workers[index] = entry;
-}
-
-
-// Make sure the pool has a count of workers
-function ensureWorkers(count) {
-    for (let ix = workers.length; ix < count; ix++) {
-        createWorker(ix);
-    }
-}
-
-
-// Cancel the workers' unit runs
-function cancelRuns() {
-    for (const entry of workers) {
-        entry.worker.postMessage({'type': 'cancel'});
-    }
-    if (session !== null && session.run !== null) {
-        session.run.active = false;
-    }
-}
-
-
-// Handle a worker message
-function onWorkerMessage(entry, message) {
-    if (message.type === 'ready') {
-        entry.ready = true;
-        if (session === null && download === null) {
-            setStatus('Ready.');
-        }
-    } else if (message.type === 'error' && message.id === null) {
-        // A worker could not start (the dictionary failed to load)
-        setStatus(message.message, true);
-    } else if (download !== null && message.id === download.id) {
-        onDownloadMessage(message);
-    } else if (session !== null && session.runIds.has(message.id)) {
-        onUnitMessage(message);
-    }
-    updateControls();
-}
-
-
-// Handle a unit-run message - add a block to its cell (the first run to reach a cell owns it), mark a cell done, or a
-// run done
-function onUnitMessage(message) {
-    if (message.type === 'error') {
-        setStatus(message.message, true);
-        return;
-    }
-    if (message.type === 'runDone') {
-        if (session.run !== null && session.run.id === message.id && ++session.run.membersDone === session.members.length) {
-            session.run.active = false;
-        }
-        return;
-    }
-    const cell = session.cache[message.unit][message.member];
-    if (cell.done || (cell.run !== null && cell.run !== message.id)) {
-        return;
-    }
-    cell.run = message.id;
-    if (message.type === 'unitBlock') {
-        const buffer = audioContext.createBuffer(1, message.samples.length, message.sampleRate);
-        buffer.copyToChannel(message.samples, 0);
-        cell.blocks.push({buffer, 'start': cell.length});
-        cell.length += buffer.duration;
-    } else if (message.type === 'unitDone') {
-        cell.done = true;
-    }
-    pump();
-}
-
-
-// Create the session for the current settings (keeping the current one if its settings are unchanged) - returns it, or
-// null if there is nothing to say
-function ensureSession() {
-    const {settings, key} = getSettings();
-    if (session !== null && session.key === key) {
-        return session;
-    }
-    cancelRuns();
-    const units = splitUnits(settings.text);
-    if (units.length === 0) {
-        session = null;
-        setStatus('Nothing to say - type some text.');
+// The chapter at a character offset - the last chapter starting at or before it
+function chapterAt(char) {
+    if (current === null) {
         return null;
     }
-    const members = getMembers(settings);
-    ensureWorkers(members.length);
-    session = {
-        key, settings, members, units, 'hash': hashText(settings.text), 'run': null, 'runIds': new Set(), 'nodes': [],
-        'cache': units.map(() => members.map(() => ({'blocks': [], 'length': 0, 'done': false, 'run': null})))
-    };
-    return session;
-}
-
-
-// Make sure the session's units in the window from a unit on are being synthesized - keeping the current run if it
-// reaches the first missing unit next
-function ensureSynthesis(from) {
-    const remaining = [];
-    const charLimit = session.units[from].start + windowChars;
-    for (let unit = from; unit < session.units.length && unit < from + windowUnits; unit++) {
-        if (unit > from + 1 && session.units[unit].start > charLimit) {
+    let found = null;
+    for (const chapter of current.chapters) {
+        if (chapter.char > char) {
             break;
         }
-        if (!unitComplete(unit)) {
-            remaining.push(unit);
-        }
+        found = chapter;
     }
-    if (remaining.length === 0) {
+    return found;
+}
+
+
+// Remember the place in the open book
+function savePosition(force = false) {
+    if (current === null || current.loading || current.error !== null || !engine.loaded) {
         return;
     }
-    const run = session.run;
-    if (run !== null && run.active) {
-        const index = run.order.indexOf(remaining[0]);
-        if (index !== -1 && run.order.slice(0, index).every((unit) => unitComplete(unit))) {
+    const engineState = engine.state();
+    const entry = state.books[current.key];
+    if (entry === undefined) {
+        return;
+    }
+    const chapter = chapterAt(engineState.char);
+    entry.char = engineState.sentenceChar;
+    entry.percent = engineState.status === 'ended' ? 100 : engineState.percent;
+    entry.remaining = engineState.status === 'ended' ? 0 : engineState.remainingSeconds;
+    entry.chapter = chapter === null ? '' : chapter.title;
+    entry.updated = Date.now();
+    persist(force);
+}
+
+
+// Engine changes - a new sentence, play, pause, buffering, or the end
+function onEngineChange(engineState) {
+    savePosition(engineState.status !== 'playing');
+    renderPlayer();
+    renderMiniPlayer();
+    updateMediaSession();
+}
+
+
+// Open a book - download it (or use the cached copy) and load it at the listener's place. To play, call from a user
+// gesture (it unlocks audio).
+async function openBook(book, {play = false, show = true} = {}) {
+    const key = bookKey(book);
+    const saved = state.books[key] || {};
+    state.books[key] = {
+        'char': 0, 'percent': 0, ...saved, 'source': book.source, 'id': book.id, 'title': book.title || saved.title || '',
+        'author': book.author || saved.author || '', 'cover': book.cover || saved.cover || null, 'updated': Date.now()
+    };
+    state.current = key;
+    persist();
+    if (show) {
+        showPlayer();
+    }
+    if (play) {
+        engine.ensureAudio();
+    }
+
+    // Already open?
+    if (current !== null && current.key === key && current.error === null) {
+        if (play && !current.loading) {
+            engine.play();
+        }
+        current.playWhenLoaded ||= play;
+        renderAll();
+        return;
+    }
+    engine.pause();
+    current = {key, 'chapters': [], 'loading': true, 'progress': null, 'error': null, 'playWhenLoaded': play};
+    renderAll();
+    const opening = current;
+    try {
+        let prepared = await getCachedBook(key);
+        if (prepared === null) {
+            const loader = loaders[book.source];
+            const entry = findBook(await catalogPromise, book.source, book.id);
+            if (loader === undefined || entry === null) {
+                throw new Error('This book is no longer in the catalog.');
+            }
+            prepared = await loader.load(entry, (loaded, total) => {
+                opening.progress = total ? loaded / total : null;
+                opening.loaded = loaded;
+                renderPlayer();
+            });
+            const {text, chapters, title, author} = prepared;
+            await putCachedBook({key, text, chapters, title, author});
+        }
+        if (current !== opening) {
             return;
         }
-    }
-    const id = nextRunId++;
-    session.run = {id, 'order': remaining, 'active': true, 'membersDone': 0};
-    session.runIds.add(id);
-    session.members.forEach((member, ix) => {
-        const units = remaining.filter((unit) => !session.cache[unit][ix].done).map((unit) => {
-            const {index, text, trim} = session.units[unit];
-            return {index, text, trim};
-        });
-        workers[ix].worker.postMessage({
-            'type': 'units', id, 'member': ix, units, 'voice': member.voice, 'rate': session.settings.rate * member.rate,
-            'seed': member.seed, 'overrides': {'pitchScale': member.pitchScale, 'tractScale': member.tractScale}
-        });
-    });
-}
-
-
-// Drop the cached audio of units outside the window around a unit (and not playing)
-function evictCache(center) {
-    const playing = new Set(player.playing ? player.chain.map((entry) => entry.unit) : []);
-    const charLimit = session.units[center].start + windowChars;
-    session.cache.forEach((cells, unit) => {
-        const inWindow = unit >= center - keepBehindUnits && (unit < center + windowUnits) &&
-            (unit <= center + 1 || session.units[unit].start <= charLimit);
-        if (!inWindow && !playing.has(unit) && cells.some((cell) => cell.blocks.length !== 0 || cell.done)) {
-            session.cache[unit] = cells.map(() => ({'blocks': [], 'length': 0, 'done': false, 'run': null}));
+        opening.chapters = prepared.chapters || [];
+        opening.loading = false;
+        const entry = state.books[key];
+        entry.title ||= prepared.title || '';
+        entry.author ||= prepared.author || '';
+        engine.load(prepared.text, state.settings, entry.char || 0);
+        persist();
+        renderAll();
+        if (opening.playWhenLoaded) {
+            engine.play();
         }
-    });
+    } catch (error) {
+        if (current === opening) {
+            opening.loading = false;
+            opening.error = error.message || String(error);
+            renderAll();
+        }
+    }
 }
 
 
-// Keep synthesis and the cache around the position - called by the clock
-let lastMaintenance = 0;
-function maintainWindow() {
-    if (session === null || session.units.length === 0) {
+// Play or pause the open book (from a user gesture)
+function togglePlay() {
+    if (current === null) {
         return;
     }
-    const {unit} = position();
-    if (player.playing) {
-        ensureSynthesis(unit);
-    }
-    const now = performance.now();
-    if (now - lastMaintenance > 2000) {
-        lastMaintenance = now;
-        evictCache(unit);
-    }
-}
-
-
-// Create the audio context (on a user gesture)
-function ensureAudio() {
-    if (audioContext === null) {
-        audioContext = new AudioContext();
-    }
-    audioContext.resume();
-}
-
-
-// Connect the output for the room setting - the room ambience is a convolver - and the session members' playback nodes
-// (each member's level and stereo position)
-function connectOutput() {
-    if (output !== null) {
-        output.disconnect();
-    }
-    const room = roomElement.checked;
-    // A crowd is louder - its members sum
-    const master = audioContext.createGain();
-    master.gain.value = session.members.length > 1 ? 0.42 : 1;
-    master.connect(audioContext.destination);
-    if (room) {
-        // The convolver's impulse response must be at the context's sample rate
-        const impulse = roomImpulse(audioContext.sampleRate);
-        const buffer = audioContext.createBuffer(1, impulse.length, audioContext.sampleRate);
-        buffer.copyToChannel(impulse, 0);
-        const convolver = audioContext.createConvolver();
-        convolver.normalize = false;
-        convolver.buffer = buffer;
-        const gain = audioContext.createGain();
-        gain.gain.value = 0.85;
-        convolver.connect(gain).connect(master);
-        output = convolver;
-    } else {
-        output = master;
-    }
-    session.nodes = session.members.map((member) => {
-        const gain = audioContext.createGain();
-        gain.gain.value = member.gain;
-        const panner = audioContext.createStereoPanner();
-        panner.pan.value = member.pan;
-        gain.connect(panner).connect(output);
-        return gain;
-    });
-}
-
-
-// Schedule a block of a chain entry's unit - skipping what has already passed
-function scheduleBlock(entry, member, block) {
-    let when = entry.startTime + session.members[member].offset + block.start;
-    let offset = 0;
-    const earliest = audioContext.currentTime + 0.005;
-    if (when + block.buffer.duration <= earliest) {
+    if (current.error !== null) {
+        // Retry a failed download
+        const book = state.books[current.key];
+        current = null;
+        openBook(book, {'play': true, 'show': !playerView.hidden});
         return;
     }
-    if (when < earliest) {
-        offset = earliest - when;
-        when = earliest;
-    }
-    const source = audioContext.createBufferSource();
-    source.buffer = block.buffer;
-    source.connect(session.nodes[member]);
-    source.start(when, offset);
-    source.onended = () => player.sources.delete(source);
-    player.sources.add(source);
-}
-
-
-// Stop the scheduled sources
-function stopSources() {
-    for (const source of player.sources) {
-        source.onended = null;
-        source.stop();
-    }
-    player.sources.clear();
-}
-
-
-// Advance playback - start chain units when they can start, schedule their blocks a few seconds ahead, extend the
-// chain with the next unit, and finish at the end of the text
-function pump() {
-    if (!player.playing) {
+    if (current.loading) {
+        current.playWhenLoaded = !current.playWhenLoaded;
+        engine.ensureAudio();
+        renderAll();
         return;
     }
-    const now = audioContext.currentTime;
-    for (let ix = 0; ix < player.chain.length; ix++) {
-        const entry = player.chain[ix];
-        if (entry.startTime === null) {
-            if (ix === 0 && unitReady(entry.unit)) {
-                entry.startTime = now + leadSeconds - entry.from;
-            } else if (ix !== 0 && player.chain[ix - 1].startTime !== null && unitComplete(player.chain[ix - 1].unit) && unitReady(entry.unit)) {
-                const previous = player.chain[ix - 1];
-                entry.startTime = Math.max(previous.startTime + unitLength(previous.unit), now + 0.03);
+    engine.toggle();
+}
+
+
+// Skip back or forward
+function skip(seconds) {
+    if (current !== null && !current.loading && engine.loaded) {
+        engine.skip(seconds);
+        savePosition(true);
+    }
+}
+
+
+// Show the library
+function showLibrary() {
+    closeSheet();
+    state.view = 'library';
+    persist();
+    playerView.hidden = true;
+    libraryView.hidden = false;
+    renderLibrary();
+    renderMiniPlayer();
+}
+
+
+// Show the player (with a history entry, so the back gesture returns to the library)
+function showPlayer() {
+    if (playerView.hidden && history.state?.view !== 'player') {
+        history.pushState({'view': 'player'}, '');
+    }
+    state.view = 'player';
+    persist();
+    libraryView.hidden = true;
+    miniPlayer.hidden = true;
+    playerView.hidden = false;
+    window.scrollTo(0, 0);
+    renderPlayer();
+}
+
+
+// Render everything
+function renderAll() {
+    renderPlayer();
+    renderMiniPlayer();
+    if (!libraryView.hidden) {
+        renderLibrary();
+    }
+}
+
+
+// Render the player
+function renderPlayer() {
+    if (current === null || playerView.hidden) {
+        return;
+    }
+    const book = state.books[current.key];
+    if (playerCover.dataset.key !== current.key) {
+        playerCover.dataset.key = current.key;
+        playerCover.replaceChildren(...coverElement(book).childNodes);
+        bookTitle.textContent = book.title;
+        bookAuthor.textContent = book.author;
+        document.title = `${book.title} - Audiobooks`;
+    }
+    const engineState = engine.state();
+    const ready = !current.loading && current.error === null && engine.loaded;
+    const percent = ready ? engineState.percent : (book.percent || 0);
+    const chapter = ready ? chapterAt(engineState.char) : null;
+    chapterTitle.textContent = chapter === null ? (book.chapter || '') : chapter.title;
+    sentence.textContent = ready ? engineState.sentence : '';
+    progressFill.style.width = `${Math.min(100, percent).toFixed(2)}%`;
+    progressBar.setAttribute('aria-valuenow', Math.floor(percent));
+    percentLabel.textContent = `${Math.floor(percent)}%`;
+    remainingLabel.textContent = ready ? formatRemaining(engineState.remainingSeconds) : formatRemaining(book.remaining);
+
+    // The play button and the status
+    let status = '';
+    let isError = false;
+    let buttonIcon = 'play';
+    let label = 'Play';
+    if (current.error !== null) {
+        status = `${current.error} Press play to try again.`;
+        isError = true;
+    } else if (current.loading) {
+        status = current.progress === null ? 'Downloading the book...' : `Downloading the book... ${Math.round(100 * current.progress)}%`;
+        if (current.playWhenLoaded) {
+            buttonIcon = 'busy';
+            label = 'Pause';
+        }
+    } else if (engine.error) {
+        status = engine.error;
+        isError = true;
+    } else if (engineState.status === 'buffering') {
+        buttonIcon = 'busy';
+        label = 'Pause';
+    } else if (engineState.status === 'playing') {
+        buttonIcon = 'pause';
+        label = 'Pause';
+    } else if (engineState.status === 'loading') {
+        status = 'Loading the voice...';
+    } else if (engineState.status === 'ended') {
+        status = 'The end. Press play to listen again.';
+    }
+    setPlayIcon(playPauseButton, buttonIcon, label);
+    playerStatus.textContent = status;
+    playerStatus.classList.toggle('error', isError);
+}
+
+
+// Set a play button's icon and label
+function setPlayIcon(button, name, label) {
+    if (button.dataset.icon !== name) {
+        button.dataset.icon = name;
+        button.replaceChildren(icon(name, name === 'busy' ? 'icon spinner' : 'icon'));
+    }
+    button.setAttribute('aria-label', label);
+}
+
+
+// The open book's play button state - 'pause' while playing (or about to), else 'play'
+function isPlayingOrStarting() {
+    if (current === null) {
+        return false;
+    }
+    if (current.loading) {
+        return current.playWhenLoaded;
+    }
+    const {status} = engine.state();
+    return status === 'playing' || status === 'buffering';
+}
+
+
+// Render the mini player (in the library, while a book is open)
+function renderMiniPlayer() {
+    const visible = current !== null && !libraryView.hidden;
+    miniPlayer.hidden = !visible;
+    if (!visible) {
+        return;
+    }
+    const book = state.books[current.key];
+    if (miniPlayerInner.dataset.key !== current.key) {
+        miniPlayerInner.dataset.key = current.key;
+        const open = make('button', 'book-open');
+        open.type = 'button';
+        open.setAttribute('aria-label', `Open the player for ${book.title}`);
+        const text = make('div', 'book-text');
+        text.append(make('div', 'book-title', book.title), make('div', 'book-meta'));
+        open.append(coverElement(book), text);
+        open.addEventListener('click', showPlayer);
+        const play = make('button', 'round-play');
+        play.type = 'button';
+        play.addEventListener('click', togglePlay);
+        miniPlayerInner.replaceChildren(open, play);
+    }
+    const playing = isPlayingOrStarting();
+    const busy = current.loading && current.playWhenLoaded || engine.state().status === 'buffering';
+    setPlayIcon(miniPlayerInner.querySelector('.round-play'), busy ? 'busy' : (playing ? 'pause' : 'play'), playing ? 'Pause' : 'Play');
+    const engineState = engine.loaded && !current.loading ? engine.state() : null;
+    const chapter = engineState === null ? book.chapter : (chapterAt(engineState.char) || {}).title;
+    const percent = engineState === null ? book.percent || 0 : engineState.percent;
+    miniPlayerInner.querySelector('.book-meta').textContent = [chapter, `${Math.floor(percent)}%`].filter(Boolean).join(' · ');
+}
+
+
+// A book list row - open the book on click; with an optional remove button and progress
+function bookRow(book, {progress = false, removable = false, showSource = false} = {}) {
+    const row = make('li', 'book-row');
+    const open = make('button', 'book-open');
+    open.type = 'button';
+    const text = make('div', 'book-text');
+    text.append(make('div', 'book-title', book.title));
+    const meta = [book.author];
+    if (showSource && catalog !== null && catalog.sources[book.source]) {
+        meta.push(catalog.sources[book.source].name);
+    }
+    if (progress) {
+        meta.push(book.percent >= 99.5 ? 'Finished' : `${Math.floor(book.percent || 0)}%`);
+    }
+    text.append(make('div', 'book-meta', meta.filter(Boolean).join(' · ')));
+    if (progress) {
+        const bar = make('div', 'mini-progress');
+        const fill = make('div');
+        fill.style.width = `${Math.min(100, book.percent || 0)}%`;
+        bar.append(fill);
+        text.append(bar);
+    }
+    open.append(coverElement(book), text);
+    open.addEventListener('click', () => openBook(book, {'play': false}));
+    row.append(open);
+    if (removable) {
+        const remove = make('button', 'icon-button');
+        remove.type = 'button';
+        remove.setAttribute('aria-label', `Remove ${book.title} from your books`);
+        remove.title = 'Remove';
+        remove.append(icon('delete'));
+        remove.addEventListener('click', () => removeBook(bookKey(book)));
+        row.append(remove);
+    }
+    return row;
+}
+
+
+// Remove a book from your books - its place, bookmarks, and downloaded copy
+function removeBook(key) {
+    const book = state.books[key];
+    if (book !== undefined) {
+        openSheetName = 'confirm';
+        confirmInSheet(`Remove "${book.title}" from your books? Your place and bookmarks in it are removed too.`, 'Remove',
+            () => removeBookNow(key), closeSheet, 'Remove book');
+        if (!sheet.open) {
+            sheet.showModal();
+        }
+    }
+}
+
+
+// Remove a book now
+function removeBookNow(key) {
+    closeSheet();
+    if (current !== null && current.key === key) {
+        engine.pause();
+        current = null;
+        state.current = null;
+    }
+    delete state.books[key];
+    delete state.bookmarks[key];
+    deleteCachedBook(key);
+    persist();
+    renderLibrary();
+    renderMiniPlayer();
+}
+
+
+// Render the library - continue listening, your books, and the source tabs
+function renderLibrary() {
+    const currentBook = state.current === null ? undefined : state.books[state.current];
+    continueSection.hidden = currentBook === undefined;
+    if (currentBook !== undefined) {
+        const open = make('button', 'book-open');
+        open.type = 'button';
+        const text = make('div', 'book-text');
+        const bar = make('div', 'mini-progress');
+        const fill = make('div');
+        fill.style.width = `${Math.min(100, currentBook.percent || 0)}%`;
+        bar.append(fill);
+        const where = [currentBook.chapter, `${Math.floor(currentBook.percent || 0)}%`, formatRemaining(currentBook.remaining)];
+        text.append(
+            make('div', 'book-title', currentBook.title),
+            make('div', 'book-meta', currentBook.author),
+            make('div', 'book-meta', where.filter(Boolean).join(' · ')),
+            bar
+        );
+        open.append(coverElement(currentBook), text);
+        open.addEventListener('click', showPlayer);
+        if (current === null || current.key !== state.current) {
+            open.addEventListener('click', () => openBook(currentBook, {'play': false}), {'once': true});
+        }
+        const play = make('button', 'round-play');
+        play.type = 'button';
+        play.id = 'continuePlay';
+        play.addEventListener('click', () => {
+            if (current !== null && current.key === state.current) {
+                togglePlay();
             } else {
-                break;
+                openBook(currentBook, {'play': true, 'show': false});
             }
-        }
-        const horizon = now + scheduleAheadSeconds;
-        session.cache[entry.unit].forEach((cell, member) => {
-            const offset = session.members[member].offset;
-            while (entry.cursors[member] < cell.blocks.length && entry.startTime + offset + cell.blocks[entry.cursors[member]].start < horizon) {
-                scheduleBlock(entry, member, cell.blocks[entry.cursors[member]]);
-                entry.cursors[member]++;
+            renderLibrary();
+        });
+        continueCard.replaceChildren(open, play);
+        renderContinuePlay();
+    }
+    const others = Object.entries(state.books).filter(([key]) => key !== state.current).
+        sort(([, first], [, second]) => (second.updated || 0) - (first.updated || 0));
+    shelfSection.hidden = others.length === 0;
+    shelf.replaceChildren(...others.map(([, book]) => bookRow(book, {'progress': true, 'removable': true})));
+}
+
+
+// Render the continue-listening card's play button for the open book's state
+function renderContinuePlay() {
+    const play = document.getElementById('continuePlay');
+    if (play !== null) {
+        const isOpen = current !== null && current.key === state.current;
+        const busy = isOpen && (current.loading && current.playWhenLoaded || engine.state().status === 'buffering');
+        const playing = isOpen && isPlayingOrStarting();
+        setPlayIcon(play, busy ? 'busy' : (playing ? 'pause' : 'play'), playing ? 'Pause' : 'Play');
+    }
+}
+
+
+// Render the source tabs - all books, or one source's
+function renderTabs() {
+    if (catalog === null) {
+        return;
+    }
+    // Short tab labels - they fit on a phone ('Project Gutenberg' -> 'Gutenberg')
+    const tabs = [['all', 'All'], ...Object.entries(catalog.sources).map(([id, source]) => [id, source.name.replace(/^Project /, '')])];
+    if (!tabs.some(([id]) => id === state.sourceTab)) {
+        state.sourceTab = 'all';
+    }
+    sourceTabs.replaceChildren(...tabs.map(([id, name]) => {
+        const tab = make('button', '', name);
+        tab.type = 'button';
+        tab.setAttribute('role', 'tab');
+        tab.setAttribute('aria-selected', String(id === state.sourceTab));
+        tab.addEventListener('click', () => {
+            if (state.sourceTab !== id) {
+                state.sourceTab = id;
+                persist();
+                renderTabs();
+                browse(searchInput.value.trim(), 1);
             }
         });
+        return tab;
+    }));
+    const source = catalog.sources[state.sourceTab];
+    const sourceNames = Object.values(catalog.sources).map((other) => other.name).join(' and ');
+    sourceNote.textContent = source === undefined ?
+        `${catalog.books.length.toLocaleString()} public-domain books from ${sourceNames}.` : source.description;
+}
 
-        // Extend the chain with the next unit
-        if (ix === player.chain.length - 1 && unitComplete(entry.unit) && entry.unit + 1 < session.units.length) {
-            player.chain.push({'unit': entry.unit + 1, 'from': 0, 'startTime': null, 'cursors': session.members.map(() => 0)});
+
+// Browse the catalog - the selected source's books by popularity, or search results; page 1 replaces, later pages
+// append
+function browse(query, page) {
+    browseState.query = query;
+    browseState.page = page;
+    if (catalog === null) {
+        renderResults();
+        return;
+    }
+    const books = query === '' ? listBooks(catalog, state.sourceTab) : searchBooks(catalog, query, state.sourceTab);
+    const paged = pageItems(books, page, 24);
+    browseState.books = page === 1 ? paged.items : [...browseState.books, ...paged.items];
+    browseState.hasMore = paged.hasMore;
+    browseState.total = paged.total;
+    renderResults();
+}
+
+
+// Render the browse results
+function renderResults() {
+    results.replaceChildren(...browseState.books.map((book) => bookRow(book, {'showSource': state.sourceTab === 'all'})));
+    let status = '';
+    if (browseState.error !== null) {
+        status = browseState.error;
+    } else if (catalog === null) {
+        status = 'Loading the catalog...';
+    } else if (browseState.books.length === 0) {
+        status = browseState.query === '' ? 'No books found.' : `No books match "${browseState.query}".`;
+    } else if (browseState.query !== '') {
+        const matches = browseState.total === 1 ? 'book matches' : 'books match';
+        status = `${browseState.total.toLocaleString()} ${matches} "${browseState.query}".`;
+    }
+    resultsStatus.textContent = status;
+    resultsStatus.classList.toggle('error', browseState.error !== null);
+    moreButton.hidden = !browseState.hasMore;
+}
+
+
+// Sheets - contents, bookmarks, and settings
+function openSheet(name) {
+    if (current === null || current.loading || current.error !== null) {
+        return;
+    }
+    openSheetName = name;
+    renderSheet();
+    if (!sheet.open) {
+        sheet.showModal();
+    }
+}
+
+function closeSheet() {
+    openSheetName = null;
+    if (sheet.open) {
+        sheet.close();
+    }
+}
+
+function renderSheet() {
+    if (openSheetName === 'contents') {
+        renderContents();
+    } else if (openSheetName === 'bookmarks') {
+        renderBookmarks();
+    } else if (openSheetName === 'settings') {
+        renderSettings();
+    }
+}
+
+
+// The contents sheet - the chapters, the current one marked
+function renderContents() {
+    sheetTitle.textContent = 'Contents';
+    if (current.chapters.length === 0) {
+        sheetBody.replaceChildren(make('p', 'sheet-empty', 'This book has no chapter headings.'));
+        return;
+    }
+    const currentChapter = chapterAt(engine.state().char);
+    const list = make('ul', 'sheet-list');
+    let currentButton = null;
+    for (const chapter of current.chapters) {
+        const item = make('li', 'sheet-item');
+        const go = make('button', 'sheet-go');
+        go.type = 'button';
+        go.style.paddingLeft = `${10 + 16 * Math.max(0, (chapter.level || 1) - 1)}px`;
+        go.append(make('span', 'label', chapter.title));
+        if (chapter === currentChapter) {
+            go.setAttribute('aria-current', 'true');
+            currentButton = go;
         }
+        go.addEventListener('click', () => {
+            engine.seekChar(chapter.char);
+            savePosition(true);
+            closeSheet();
+        });
+        item.append(go);
+        list.append(item);
     }
-
-    // Drop finished units from the front of the chain
-    while (player.chain.length > 1 && player.chain[1].startTime !== null && player.chain[1].startTime < now - 1) {
-        player.chain.shift();
-    }
-
-    // The end of the text
-    const last = player.chain[player.chain.length - 1];
-    if (last.unit === session.units.length - 1 && last.startTime !== null && unitComplete(last.unit) &&
-        now >= last.startTime + unitLength(last.unit) + 0.05) {
-        stopSources();
-        player.playing = false;
-        player.unit = last.unit;
-        player.time = unitLength(last.unit);
-        setStatus('Done.');
-    } else if (player.chain.every((entry) => entry.startTime === null || entry.startTime > now)) {
-        setStatus('Synthesizing...');
-    } else {
-        setStatus(session.members.length > 1 ? 'The crowd is speaking...' : 'Speaking...');
+    sheetBody.replaceChildren(list);
+    if (currentButton !== null) {
+        requestAnimationFrame(() => currentButton.scrollIntoView({'block': 'center'}));
     }
 }
 
 
-// Play from a position
-function startPlayback(unit, time) {
-    stopSources();
-    ensureAudio();
-    connectOutput();
-    player.playing = true;
-    player.chain = [{unit, 'from': time, 'startTime': null, 'cursors': session.members.map(() => 0)}];
-    ensureSynthesis(unit);
-    pump();
-    updateControls();
-}
-
-
-// Pause, keeping the position
-function pausePlayback() {
-    if (player.playing) {
-        const current = position();
-        stopSources();
-        player.playing = false;
-        player.unit = current.unit;
-        player.time = current.time;
-        setStatus('Paused.');
+// The bookmarks sheet - add one here, and go to, rename, or delete bookmarks
+function renderBookmarks(editingId = null) {
+    sheetTitle.textContent = 'Bookmarks';
+    const {key} = current;
+    const bookmarks = (state.bookmarks[key] || []).slice().sort((first, second) => first.char - second.char);
+    const add = make('button', 'button primary add-bookmark');
+    add.type = 'button';
+    add.append(icon('bookmark'), document.createTextNode(' Bookmark this spot'));
+    add.style.display = 'inline-flex';
+    add.style.alignItems = 'center';
+    add.style.justifyContent = 'center';
+    add.style.gap = '8px';
+    add.addEventListener('click', addBookmark);
+    const nodes = [add];
+    if (bookmarks.length === 0) {
+        nodes.push(make('p', 'sheet-empty', 'No bookmarks yet. Bookmarks keep a spot to come back to - name them to remember why.'));
     }
-    updateControls();
-}
-
-
-// Move to a unit's start - playing from there if playing, else just preparing its audio
-function moveTo(unit) {
-    if (player.playing) {
-        startPlayback(unit, 0);
-    } else {
-        player.unit = unit;
-        player.time = 0;
-        ensureSynthesis(unit);
-        updateControls();
-    }
-}
-
-
-// Speak - play the text from the start (reusing its audio if the settings are unchanged)
-function onSpeak() {
-    saveSettings();
-    ensureAudio();
-    if (ensureSession() !== null) {
-        startPlayback(0, 0);
-    }
-    updateControls();
-}
-
-
-// Stop - stop playback (back to the start) and stop synthesizing
-function onStop() {
-    stopSources();
-    player.playing = false;
-    player.unit = 0;
-    player.time = 0;
-    cancelRuns();
-    setStatus('Stopped.');
-    updateControls();
-}
-
-
-// Play/Pause - pause, or play from the position (from the start, at the end). If the settings changed, a new session
-// starts - at the same sentence, if the text is the same.
-function onPlayPause() {
-    if (player.playing) {
-        pausePlayback();
-        return;
-    }
-    saveSettings();
-    ensureAudio();
-    const {settings, key} = getSettings();
-    if (session === null || session.key !== key) {
-        const sameText = session !== null && session.hash === hashText(settings.text);
-        const unit = sameText ? player.unit : 0;
-        if (ensureSession() !== null) {
-            startPlayback(Math.min(unit, session.units.length - 1), 0);
+    const list = make('ul', 'sheet-list');
+    for (const bookmark of bookmarks) {
+        const item = make('li', 'sheet-item');
+        if (bookmark.id === editingId) {
+            const input = make('input');
+            input.type = 'text';
+            input.value = bookmark.label;
+            input.setAttribute('aria-label', 'Bookmark name');
+            input.maxLength = 120;
+            let done = false;
+            const finish = (save) => {
+                if (done) {
+                    return;
+                }
+                done = true;
+                if (save && input.value.trim() !== '') {
+                    bookmark.label = input.value.trim();
+                    persist();
+                }
+                renderBookmarks();
+            };
+            input.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    finish(true);
+                } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    finish(false);
+                }
+            });
+            input.addEventListener('blur', () => finish(true));
+            item.append(input);
+            requestAnimationFrame(() => {
+                input.focus();
+                input.select();
+            });
+        } else {
+            const go = make('button', 'sheet-go');
+            go.type = 'button';
+            const date = new Date(bookmark.created).toLocaleDateString(undefined, {'month': 'short', 'day': 'numeric'});
+            const detail = `${Math.floor(bookmark.percent)}% · ${date} · ${bookmark.snippet}`;
+            go.append(make('span', 'label', bookmark.label), make('span', 'detail', detail));
+            go.addEventListener('click', () => {
+                engine.seekChar(bookmark.char);
+                savePosition(true);
+                closeSheet();
+            });
+            const rename = make('button', 'icon-button');
+            rename.type = 'button';
+            rename.setAttribute('aria-label', `Rename the bookmark "${bookmark.label}"`);
+            rename.title = 'Rename';
+            rename.append(icon('edit'));
+            rename.addEventListener('click', () => renderBookmarks(bookmark.id));
+            const remove = make('button', 'icon-button');
+            remove.type = 'button';
+            remove.setAttribute('aria-label', `Delete the bookmark "${bookmark.label}"`);
+            remove.title = 'Delete';
+            remove.append(icon('delete'));
+            remove.addEventListener('click', () => {
+                confirmInSheet(`Delete the bookmark "${bookmark.label}"?`, 'Delete', () => {
+                    state.bookmarks[key] = state.bookmarks[key].filter((other) => other.id !== bookmark.id);
+                    persist();
+                }, renderBookmarks);
+            });
+            item.append(go, rename, remove);
         }
-        return;
+        list.append(item);
     }
-    const last = session.units.length - 1;
-    const atEnd = player.unit === last && unitComplete(last) && player.time >= unitLength(last) - 0.05;
-    startPlayback(atEnd ? 0 : player.unit, atEnd ? 0 : player.time);
+    nodes.push(list);
+    sheetBody.replaceChildren(...nodes);
 }
 
 
-// Skip by a percent of the text - to a sentence start: ahead at least to the next sentence; back to this sentence's start
-// if more than a second into it, else to an earlier one
-function onSkip(percent) {
-    if (session === null) {
-        return;
-    }
-    const current = position();
-    const target = positionChar(current) + percent / 100 * textLength();
-    let unit = unitAtChar(Math.max(0, Math.min(textLength() - 1, target)));
-    if (percent > 0 && unit <= current.unit) {
-        unit = current.unit + 1;
-    } else if (percent < 0 && unit >= current.unit) {
-        unit = current.time > 1 ? current.unit : current.unit - 1;
-    }
-    if (unit >= session.units.length) {
-        // Past the end - stop at the end
-        stopSources();
-        player.playing = false;
-        player.unit = session.units.length - 1;
-        player.time = unitComplete(player.unit) ? unitLength(player.unit) : 0;
-        setStatus('At the end.');
-        updateControls();
-        return;
-    }
-    moveTo(Math.max(0, unit));
-}
-
-
-// The position slider - show the target while dragging, and move there on release
-function onSeekInput() {
-    if (session === null) {
-        return;
-    }
-    player.dragging = true;
-    const char = Number(seekElement.value) / 1000 * textLength();
-    percentElement.textContent = `${Math.floor(Number(seekElement.value) / 10)}%`;
-    nowElement.textContent = session.units[unitAtChar(char)].text;
-}
-
-function onSeekChange() {
-    player.dragging = false;
-    if (session !== null) {
-        moveTo(unitAtChar(Number(seekElement.value) / 1000 * textLength()));
-    }
-}
-
-
-// Bookmarks - [{hash, char (the sentence start), percent, snippet, created}] in browser storage (may be unavailable)
-const bookmarksKey = 'voice-synth-bookmarks';
-function loadBookmarks() {
-    try {
-        const bookmarks = JSON.parse(localStorage.getItem(bookmarksKey));
-        return Array.isArray(bookmarks) ? bookmarks : [];
-    } catch {
-        return [];
-    }
-}
-
-function saveBookmarks(bookmarks) {
-    try {
-        localStorage.setItem(bookmarksKey, JSON.stringify(bookmarks));
-    } catch {
-        setStatus('Bookmarks can\'t be saved in this browser.', true);
-    }
+// Ask for confirmation in the sheet - onConfirm runs on the action button, then onDone (also on cancel)
+function confirmInSheet(message, actionLabel, onConfirm, onDone, title = sheetTitle.textContent) {
+    sheetTitle.textContent = title;
+    const cancel = make('button', 'button', 'Cancel');
+    cancel.type = 'button';
+    cancel.addEventListener('click', onDone);
+    const action = make('button', 'button primary', actionLabel);
+    action.type = 'button';
+    action.addEventListener('click', () => {
+        onConfirm();
+        onDone();
+    });
+    const buttons = make('div', 'confirm-buttons');
+    buttons.append(cancel, action);
+    sheetBody.replaceChildren(make('p', 'confirm-message', message), buttons);
+    action.focus();
 }
 
 
 // Bookmark the current sentence
-function onBookmark() {
-    if (session === null) {
+function addBookmark() {
+    const engineState = engine.state();
+    const chapter = chapterAt(engineState.char);
+    const snippet = engineState.sentence.length > 100 ? `${engineState.sentence.slice(0, 97)}...` : engineState.sentence;
+    const bookmarks = state.bookmarks[current.key] || [];
+    if (bookmarks.some((bookmark) => bookmark.char === engineState.sentenceChar)) {
         return;
     }
-    const current = position();
-    const unit = session.units[current.unit];
-    const bookmarks = loadBookmarks();
-    if (bookmarks.some((bookmark) => bookmark.hash === session.hash && bookmark.char === unit.start)) {
-        setStatus('That sentence is already bookmarked.');
-        return;
-    }
-    bookmarks.push({
-        'hash': session.hash, 'char': unit.start, 'percent': Math.floor(100 * unit.start / textLength()),
-        'snippet': unit.text.length > 90 ? `${unit.text.slice(0, 87)}...` : unit.text, 'created': new Date().toISOString()
-    });
-    saveBookmarks(bookmarks);
-    renderBookmarks();
-    setStatus(`Bookmarked at ${Math.floor(100 * unit.start / textLength())}%.`);
-}
-
-
-// Go to a bookmark - in the current text, at its sentence
-function goToBookmark(bookmark) {
-    ensureAudio();
-    if (ensureSession() === null) {
-        return;
-    }
-    const unit = unitAtChar(bookmark.char);
-    moveTo(unit);
-    if (!player.playing) {
-        setStatus(`At the bookmark (${bookmark.percent}%) - press Play.`);
-    }
-    updateControls();
-}
-
-
-// Show the current text's bookmarks
-function renderBookmarks() {
-    const hash = hashText(textElement.value);
-    const bookmarks = loadBookmarks().filter((bookmark) => bookmark.hash === hash).sort((first, second) => first.char - second.char);
-    bookmarksElement.replaceChildren(...bookmarks.map((bookmark) => {
-        const item = document.createElement('li');
-        const go = document.createElement('button');
-        go.type = 'button';
-        go.className = 'go';
-        go.textContent = `${bookmark.percent}% - ${bookmark.snippet}`;
-        go.title = `Go to: ${bookmark.snippet}`;
-        go.addEventListener('click', () => goToBookmark(bookmark));
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'remove';
-        remove.textContent = '×';
-        remove.setAttribute('aria-label', `Delete the bookmark at ${bookmark.percent}%`);
-        remove.addEventListener('click', () => {
-            saveBookmarks(loadBookmarks().filter((other) => !(other.hash === bookmark.hash && other.char === bookmark.char)));
-            renderBookmarks();
-        });
-        item.append(go, remove);
-        return item;
-    }));
-    bookmarksSection.hidden = bookmarks.length === 0;
-}
-
-
-// Download WAV - synthesize the whole text (each crowd member dry), then mix and save
-function onDownload() {
-    const {settings, key} = getSettings();
-    const members = getMembers(settings);
-    ensureWorkers(members.length);
-    download = {
-        'id': nextRunId++, key, settings, members, 'chunks': members.map(() => []), 'done': members.map(() => false),
-        'sampleRate': 44100, 'count': 0
+    const bookmark = {
+        'id': newId(), 'char': engineState.sentenceChar, 'percent': engineState.percent, snippet,
+        'label': chapter === null ? snippet : chapter.title, 'created': Date.now()
     };
-    members.forEach((member, ix) => {
-        workers[ix].worker.postMessage({
-            'id': download.id, 'member': ix, 'text': settings.text, 'voice': member.voice, 'rate': settings.rate * member.rate,
-            'seed': member.seed, 'room': settings.room && members.length === 1, 'stream': false,
-            'overrides': {'pitchScale': member.pitchScale, 'tractScale': member.tractScale}
-        });
-    });
-    setStatus('Synthesizing the download...');
+    state.bookmarks[current.key] = [...bookmarks, bookmark];
+    persist();
+    renderBookmarks(bookmark.id);
 }
 
 
-// Handle a download message
-function onDownloadMessage(message) {
-    if (message.type === 'error') {
-        setStatus(message.message, true);
-        download = null;
-    } else if (message.type === 'chunk') {
-        download.chunks[message.member].push(message.samples);
-        download.sampleRate = message.sampleRate;
-    } else if (message.type === 'done') {
-        download.done[message.member] = true;
-        download.count = message.count;
-        if (download.done.every((done) => done)) {
-            if (download.count === 0) {
-                setStatus('Nothing to say - type some text.');
-            } else {
-                saveWav(download);
-                setStatus('Saved.');
+// The settings sheet - the narrator's voice and speed
+function renderSettings() {
+    sheetTitle.textContent = 'Narrator';
+    const choice = (title, options, selected, onSelect) => {
+        const section = make('section', 'setting');
+        section.append(make('h3', '', title));
+        const tabs = make('div', 'tabs');
+        tabs.setAttribute('role', 'radiogroup');
+        tabs.setAttribute('aria-label', title);
+        for (const [value, label] of options) {
+            const button = make('button', '', label);
+            button.type = 'button';
+            button.setAttribute('role', 'radio');
+            button.setAttribute('aria-selected', String(value === selected));
+            button.setAttribute('aria-checked', String(value === selected));
+            button.addEventListener('click', () => onSelect(value));
+            tabs.append(button);
+        }
+        section.append(tabs);
+        return section;
+    };
+    const apply = (settings) => {
+        state.settings = {...state.settings, ...settings};
+        persist();
+        engine.setVoice(state.settings);
+        renderSettings();
+    };
+    const note = make('p', 'muted', 'The voices are synthesized in your browser from a model of the human voice - no recordings.');
+    sheetBody.replaceChildren(
+        choice('Voice', [['male', 'Male'], ['female', 'Female']], state.settings.voice, (voice) => apply({voice})),
+        choice('Speed', speeds.map((speed) => [speed, `${speed}×`]), state.settings.rate, (rate) => apply({rate})),
+        note
+    );
+}
+
+
+// The lock screen and media keys
+let mediaHandlersSet = false;
+let mediaKey = '';
+function updateMediaSession() {
+    if (!('mediaSession' in navigator) || current === null) {
+        return;
+    }
+    if (!mediaHandlersSet) {
+        mediaHandlersSet = true;
+        const handlers = {
+            'play': () => engine.play(), 'pause': () => engine.pause(), 'seekbackward': () => skip(-skipSeconds),
+            'seekforward': () => skip(skipSeconds), 'previoustrack': () => skip(-skipSeconds), 'nexttrack': () => skip(skipSeconds)
+        };
+        for (const [action, handler] of Object.entries(handlers)) {
+            try {
+                navigator.mediaSession.setActionHandler(action, handler);
+            } catch {
+                // An unsupported action
             }
-            download = null;
         }
     }
-}
-
-
-// Mix a finished download's members to mono - each at its offset and level, then the room ambience (a crowd's members
-// are synthesized dry), normalized
-function mixDownload(finished) {
-    const sampleRate = finished.sampleRate;
-    const tracks = finished.chunks.map((chunks) => {
-        const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
-        const track = new Float32Array(length);
-        let offset = 0;
-        for (const chunk of chunks) {
-            track.set(chunk, offset);
-            offset += chunk.length;
-        }
-        return track;
-    });
-    if (tracks.length === 1) {
-        return tracks[0];
+    const book = state.books[current.key];
+    const chapter = engine.loaded && !current.loading ? chapterAt(engine.state().char) : null;
+    const key = `${current.key}|${chapter === null ? '' : chapter.title}`;
+    if (key !== mediaKey && typeof MediaMetadata !== 'undefined') {
+        mediaKey = key;
+        navigator.mediaSession.metadata = new MediaMetadata({
+            'title': chapter === null ? book.title : chapter.title, 'artist': book.author,
+            'album': book.title, 'artwork': book.cover ? [{'src': book.cover, 'sizes': '512x768', 'type': 'image/jpeg'}] : []
+        });
     }
-    const starts = finished.members.map((member) => Math.round(member.offset * sampleRate));
-    const length = Math.max(...tracks.map((track, ix) => starts[ix] + track.length));
-    const mix = new Float32Array(length);
-    tracks.forEach((track, ix) => {
-        const gain = finished.members[ix].gain;
-        for (let jx = 0; jx < track.length; jx++) {
-            mix[starts[ix] + jx] += gain * track[jx];
-        }
-    });
-    return normalize(finished.settings.room ? convolve(mix, roomImpulse(sampleRate)) : mix, 0.89);
+    navigator.mediaSession.playbackState = isPlayingOrStarting() ? 'playing' : 'paused';
 }
 
 
-// Save a finished download as a WAV file
-function saveWav(finished) {
-    const samples = mixDownload(finished);
-    const blob = new Blob([encodeWav(samples, finished.sampleRate)], {'type': 'audio/wav'});
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `speech-${finished.settings.crowd ? 'crowd' : finished.settings.voice}.wav`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-}
-
-
-// Start the crowd's workers when the crowd is chosen, so they're ready (dictionary loaded) by the next Speak
-function onCrowd() {
-    if (crowdElement.checked) {
-        ensureWorkers(crowdMembers.length);
+// Wire up the controls
+element('toLibrary').addEventListener('click', () => {
+    if (history.state?.view === 'player') {
+        history.back();
+    } else {
+        showLibrary();
     }
-}
-
-
-// Remember the settings per viewer (browser storage may be unavailable)
-function saveSettings() {
-    try {
-        localStorage.setItem('voice-synth', JSON.stringify(getSettings().settings));
-    } catch {
-        // Settings are a convenience only
+});
+window.addEventListener('popstate', () => {
+    if (!playerView.hidden) {
+        showLibrary();
     }
-}
-
-function loadSettings() {
-    try {
-        const settings = JSON.parse(localStorage.getItem('voice-synth'));
-        if (settings !== null) {
-            textElement.value = settings.text;
-            document.querySelector(`input[name="voice"][value="${settings.voice === 'female' ? 'female' : 'male'}"]`).checked = true;
-            rateElement.value = settings.rate;
-            roomElement.checked = settings.room;
-            crowdElement.checked = settings.crowd === true;
-        }
-    } catch {
-        // Settings are a convenience only
+});
+playPauseButton.addEventListener('click', togglePlay);
+element('skipBack').addEventListener('click', () => skip(-skipSeconds));
+element('skipForward').addEventListener('click', () => skip(skipSeconds));
+element('contentsButton').addEventListener('click', () => openSheet('contents'));
+element('bookmarksButton').addEventListener('click', () => openSheet('bookmarks'));
+element('settingsButton').addEventListener('click', () => openSheet('settings'));
+element('sheetClose').addEventListener('click', closeSheet);
+sheet.addEventListener('close', () => {
+    openSheetName = null;
+});
+sheet.addEventListener('click', (event) => {
+    // A click on the backdrop closes the sheet
+    if (event.target === sheet) {
+        closeSheet();
     }
-}
-
-
-// Show the rate
-function showRate() {
-    rateValueElement.textContent = `${Number(rateElement.value).toFixed(2)}x`;
-}
-
-
-// Start up
-loadSettings();
-showRate();
-ensureWorkers(1);
-onCrowd();
-renderBookmarks();
-speakButton.addEventListener('click', onSpeak);
-stopButton.addEventListener('click', onStop);
-downloadButton.addEventListener('click', onDownload);
-playPauseButton.addEventListener('click', onPlayPause);
-bookmarkButton.addEventListener('click', onBookmark);
-for (const button of skipButtons) {
-    button.addEventListener('click', () => onSkip(Number(button.dataset.skip)));
-}
-seekElement.addEventListener('input', onSeekInput);
-seekElement.addEventListener('change', onSeekChange);
-rateElement.addEventListener('input', showRate);
-crowdElement.addEventListener('change', onCrowd);
-textElement.addEventListener('input', renderBookmarks);
-for (const element of [textElement, rateElement, roomElement, crowdElement, ...document.querySelectorAll('input[name="voice"]')]) {
-    element.addEventListener('change', saveSettings);
-}
-textElement.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+});
+searchForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    searchInput.blur();
+    browse(searchInput.value.trim(), 1);
+});
+let searchTimer = null;
+searchInput.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => browse(searchInput.value.trim(), 1), 150);
+});
+moreButton.addEventListener('click', () => browse(browseState.query, browseState.page + 1));
+document.addEventListener('keydown', (event) => {
+    if (sheet.open || event.target.closest('input, textarea, button[role="tab"]') || event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+    }
+    if (event.key === ' ' && current !== null && event.target === document.body) {
         event.preventDefault();
-        onSpeak();
+        togglePlay();
+    } else if (event.key === 'ArrowLeft' && !playerView.hidden) {
+        skip(-skipSeconds);
+    } else if (event.key === 'ArrowRight' && !playerView.hidden) {
+        skip(skipSeconds);
     }
 });
-// A debugging summary - the units, those with cached audio, and whether synthesis is running
-window.voiceSynthDebug = () => ({
-    'units': session === null ? 0 : session.units.length,
-    'cachedUnits': session === null ? 0 : session.cache.filter((cells) => cells.some((cell) => cell.blocks.length !== 0)).length,
-    'synthesizing': isSynthesizing(), 'position': session === null ? null : position()
+
+// Keep the place when the page is hidden or closed
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+        savePosition(true);
+    }
 });
-speakButton.disabled = false;
-downloadButton.disabled = false;
+window.addEventListener('pagehide', () => savePosition(true));
+
+// Refresh the player and mini player, and remember the place, as playback moves
 setInterval(() => {
-    pump();
-    maintainWindow();
-    updateControls();
-}, 100);
-updateControls();
+    renderPlayer();
+    if (!miniPlayer.hidden) {
+        renderMiniPlayer();
+        renderContinuePlay();
+    }
+    if (current !== null && isPlayingOrStarting()) {
+        savePosition(false);
+    }
+}, 250);
+
+
+// Start - the library, or the player where the listener left off (paused - audio needs a tap to start)
+browse('', 1);
+catalogPromise.then((loaded) => {
+    catalog = loaded;
+    renderTabs();
+    browse(searchInput.value.trim(), 1);
+}, (error) => {
+    browseState.error = error.message;
+    renderResults();
+});
+const resumeBook = state.current === null ? undefined : state.books[state.current];
+if (resumeBook !== undefined && state.view === 'player') {
+    history.replaceState({'view': 'library'}, '');
+    openBook(resumeBook, {'play': false, 'show': true});
+} else {
+    showLibrary();
+    if (resumeBook !== undefined) {
+        openBook(resumeBook, {'play': false, 'show': false});
+    }
+}

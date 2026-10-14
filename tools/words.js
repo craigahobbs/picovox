@@ -4,9 +4,10 @@
 
 import {execFileSync} from 'node:child_process';
 import {mkdirSync} from 'node:fs';
+import process from 'node:process';
 import {speak} from '../lib/speak.js';
-import {writeWav} from '../lib/wav.js';
 import {transcribe} from './eval.js';
+import {writeWav} from '../lib/wav.js';
 
 
 // Test words by the consonant they test
@@ -43,8 +44,9 @@ export function wordTest(voice, {overrides = {}} = {}) {
         const heard = transcribe(path, 'Now say the word again.').text.toLowerCase().replace(/[^a-z' ]+/g, ' ').trim().split(/\s+/);
         // The tested word is the one after "say" (or the second-to-last word, before "again")
         const sayIndex = heard.findIndex((other) => ['say', 'see', 'said', 'safe', 'sit'].includes(other));
-        const got = sayIndex >= 0 && sayIndex + 1 < heard.length ? heard[sayIndex + 1] : (heard.length >= 2 ? heard[heard.length - 2] : '?');
-        results[key] = results[key] || {'correct': 0, 'total': 0};
+        const fallback = heard.length >= 2 ? heard[heard.length - 2] : '?';
+        const got = sayIndex >= 0 && sayIndex + 1 < heard.length ? heard[sayIndex + 1] : fallback;
+        results[key] ||= {'correct': 0, 'total': 0};
         results[key].total++;
         if (got === word) {
             results[key].correct++;
@@ -75,9 +77,9 @@ if (process.argv[1] && process.argv[1].endsWith('words.js')) {
         total += value.total;
         return `${key}:${value.correct}/${value.total}`;
     }).join(' ');
-    console.log(`${voice} - ${(100 * correct / total).toFixed(0)}% words correct`);
-    console.log(line);
+    process.stdout.write(`${voice} - ${(100 * correct / total).toFixed(0)}% words correct\n`);
+    process.stdout.write(`${line}\n`);
     if (args.includes('--show')) {
-        console.log(misses.join('\n'));
+        process.stdout.write(`${misses.join('\n')}\n`);
     }
 }

@@ -2,10 +2,11 @@
 //
 // node tools/say.js [-v male|female] [-r rate] [-s seed] [--room] -o out.wav "text"
 
-import {speak} from '../lib/speak.js';
-import {writeWav} from '../lib/wav.js';
 import {convolve, roomImpulse} from '../lib/room.js';
 import {normalize} from '../lib/klatt.js';
+import process from 'node:process';
+import {speak} from '../lib/speak.js';
+import {writeWav} from '../lib/wav.js';
 
 
 const args = process.argv.slice(2);
@@ -33,4 +34,4 @@ for (let ix = 0; ix < args.length; ix++) {
 const {samples: dry, sampleRate} = speak(words.join(' '), voice, {seed, rate});
 const samples = room ? normalize(convolve(dry, roomImpulse(sampleRate)), 0.89) : dry;
 writeWav(output, samples, sampleRate);
-console.log(`${output} - ${(samples.length / sampleRate).toFixed(2)} s`);
+process.stdout.write(`${output} - ${(samples.length / sampleRate).toFixed(2)} s\n`);

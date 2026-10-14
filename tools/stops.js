@@ -5,9 +5,10 @@
 
 import {execFileSync} from 'node:child_process';
 import {mkdirSync} from 'node:fs';
+import process from 'node:process';
 import {speak} from '../lib/speak.js';
-import {writeWav} from '../lib/wav.js';
 import {transcribeAll} from './eval.js';
+import {writeWav} from '../lib/wav.js';
 
 
 // Minimal sets - word-initial stops, then word-final stops
@@ -39,7 +40,10 @@ export const finalSets = [
 function stopOf(word, final) {
     const spelled = word.toLowerCase();
     const letters = final ? spelled.replace(/e$/, '').slice(-2) : spelled.slice(0, 2);
-    const table = [['th', '?'], ['ph', '?'], ['ck', 'K'], ['gh', 'G'], ['p', 'P'], ['b', 'B'], ['t', 'T'], ['d', 'D'], ['c', 'K'], ['k', 'K'], ['q', 'K'], ['g', 'G']];
+    const table = [
+        ['th', '?'], ['ph', '?'], ['ck', 'K'], ['gh', 'G'], ['p', 'P'], ['b', 'B'], ['t', 'T'], ['d', 'D'], ['c', 'K'], ['k', 'K'],
+        ['q', 'K'], ['g', 'G']
+    ];
     if (final) {
         for (const [spelling, stop] of table) {
             if (letters.endsWith(spelling)) {
@@ -91,7 +95,8 @@ export async function stopTest(voice, {overrides = {}, seeds = 1, tag = 'stops'}
     return items.map((item, ix) => {
         const heard = transcripts[ix].text.toLowerCase().replace(/[^a-z' ]+/g, ' ').trim().split(/\s+/);
         const sayIndex = heard.findIndex((other) => ['say', 'see', 'said', 'safe', 'sit'].includes(other));
-        const got = sayIndex >= 0 && sayIndex + 1 < heard.length ? heard[sayIndex + 1] : (heard.length >= 2 ? heard[heard.length - 2] : '?');
+        const fallback = heard.length >= 2 ? heard[heard.length - 2] : '?';
+        const got = sayIndex >= 0 && sayIndex + 1 < heard.length ? heard[sayIndex + 1] : fallback;
         return {...item, got, 'heardStop': stopOf(got, item.final), 'heard': heard.join(' ')};
     });
 }
@@ -118,32 +123,35 @@ if (process.argv[1] && process.argv[1].endsWith('stops.js')) {
 
     // Score - word correct, stop correct, place correct, voicing correct - initial and final, and per stop
     const score = (list) => {
-        const n = list.length;
-        const pct = (count) => `${(100 * count / Math.max(1, n)).toFixed(0)}%`;
-        return `word ${pct(list.filter((r) => r.got === r.word).length)} stop ${pct(list.filter((r) => r.heardStop === r.stop).length)} ` +
-            `place ${pct(list.filter((r) => stopPlace[r.heardStop] === stopPlace[r.stop]).length)} ` +
-            `voicing ${pct(list.filter((r) => r.heardStop in stopVoiced && stopVoiced[r.heardStop] === stopVoiced[r.stop]).length)} (n=${n})`;
+        const total = list.length;
+        const pct = (count) => `${(100 * count / Math.max(1, total)).toFixed(0)}%`;
+        const voicingCorrect = (result) => result.heardStop in stopVoiced && stopVoiced[result.heardStop] === stopVoiced[result.stop];
+        return `word ${pct(list.filter((result) => result.got === result.word).length)} ` +
+            `stop ${pct(list.filter((result) => result.heardStop === result.stop).length)} ` +
+            `place ${pct(list.filter((result) => stopPlace[result.heardStop] === stopPlace[result.stop]).length)} ` +
+            `voicing ${pct(list.filter(voicingCorrect).length)} (n=${total})`;
     };
-    console.log(`${voice} ${JSON.stringify(overrides)}`);
-    console.log(`  all     ${score(results)}`);
-    console.log(`  initial ${score(results.filter((r) => !r.final))}`);
-    console.log(`  final   ${score(results.filter((r) => r.final))}`);
+    process.stdout.write(`${voice} ${JSON.stringify(overrides)}\n`);
+    process.stdout.write(`  all     ${score(results)}\n`);
+    process.stdout.write(`  initial ${score(results.filter((result) => !result.final))}\n`);
+    process.stdout.write(`  final   ${score(results.filter((result) => result.final))}\n`);
     for (const final of [false, true]) {
         const line = ['P', 'B', 'T', 'D', 'K', 'G'].map((stop) => {
-            const list = results.filter((r) => r.final === final && r.stop === stop);
-            return `${stop}:${list.filter((r) => r.heardStop === stop).length}/${list.length}`;
+            const list = results.filter((result) => result.final === final && result.stop === stop);
+            return `${stop}:${list.filter((result) => result.heardStop === stop).length}/${list.length}`;
         }).join(' ');
         // Confusion counts - target>heard
         const confusions = {};
-        for (const r of results.filter((other) => other.final === final && other.heardStop !== other.stop)) {
-            const key = `${r.stop}>${r.heardStop}`;
+        for (const result of results.filter((other) => other.final === final && other.heardStop !== other.stop)) {
+            const key = `${result.stop}>${result.heardStop}`;
             confusions[key] = (confusions[key] || 0) + 1;
         }
-        console.log(`  ${final ? 'final  ' : 'initial'} ${line}  ${Object.entries(confusions).map(([key, count]) => `${key}:${count}`).join(' ')}`);
+        const confusionList = Object.entries(confusions).map(([key, count]) => `${key}:${count}`).join(' ');
+        process.stdout.write(`  ${final ? 'final  ' : 'initial'} ${line}  ${confusionList}\n`);
     }
     if (args.includes('--show')) {
-        for (const r of results.filter((other) => other.got !== other.word)) {
-            console.log(`    ${r.word}->${r.got} [${r.heard}]`);
+        for (const result of results.filter((other) => other.got !== other.word)) {
+            process.stdout.write(`    ${result.word}->${result.got} [${result.heard}]\n`);
         }
     }
 }

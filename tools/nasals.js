@@ -5,9 +5,10 @@
 
 import {execFileSync} from 'node:child_process';
 import {mkdirSync} from 'node:fs';
+import process from 'node:process';
 import {speak} from '../lib/speak.js';
-import {writeWav} from '../lib/wav.js';
 import {transcribeAll} from './eval.js';
+import {writeWav} from '../lib/wav.js';
 
 
 // Test words in the "Now say X again." carrier, by group
@@ -68,12 +69,12 @@ export async function nasalTest(voice, {overrides = {}, tag = 'nasals'} = {}) {
         const heard = words(transcripts[ix].text);
         let got;
         if (item.group.startsWith('onset-')) {
-            got = heard[0];
+            [got] = heard;
         } else {
             const sayIndex = heard.findIndex((other) => ['say', 'see', 'said', 'safe', 'sit'].includes(other));
             got = sayIndex >= 0 && sayIndex + 1 < heard.length ? heard[sayIndex + 1] : (heard.length >= 2 ? heard[heard.length - 2] : '?');
         }
-        results[item.group] = results[item.group] || {'correct': 0, 'total': 0};
+        results[item.group] ||= {'correct': 0, 'total': 0};
         results[item.group].total++;
         if (got === item.word || (spellings[item.word] || []).includes(got)) {
             results[item.group].correct++;
@@ -107,9 +108,9 @@ if (process.argv[1] && process.argv[1].endsWith('nasals.js')) {
         total += value.total;
         return `${key}:${value.correct}/${value.total}`;
     }).join(' ');
-    console.log(`${voice} ${JSON.stringify(overrides)} - ${(100 * correct / total).toFixed(0)}% correct`);
-    console.log(line);
+    process.stdout.write(`${voice} ${JSON.stringify(overrides)} - ${(100 * correct / total).toFixed(0)}% correct\n`);
+    process.stdout.write(`${line}\n`);
     if (args.includes('--show')) {
-        console.log(misses.join('\n'));
+        process.stdout.write(`${misses.join('\n')}\n`);
     }
 }

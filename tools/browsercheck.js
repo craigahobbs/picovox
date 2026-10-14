@@ -3,9 +3,10 @@
 //
 // node tools/browsercheck.js
 
-import {registerHooks} from 'node:module';
-import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
+import process from 'node:process';
+import {readFileSync} from 'node:fs';
+import {registerHooks} from 'node:module';
 
 
 // Fail any node: import from lib/ or web/
@@ -23,7 +24,7 @@ registerHooks({
 
 // Load every lib and web module as a browser would - no process.getBuiltinModule
 const dictionaryText = readFileSync(new URL('../data/cmudict.dict', import.meta.url), 'utf8');
-const getBuiltinModule = process.getBuiltinModule;
+const {getBuiltinModule} = process;
 process.getBuiltinModule = undefined;
 const modules = ['analysis', 'glottal', 'klatt', 'lexicon', 'phonemes', 'room', 'speak', 'wav'];
 const lib = {};
@@ -31,7 +32,7 @@ for (const name of modules) {
     lib[name] = await import(`../lib/${name}.js`);
 }
 const worker = await import('../web/worker.js');
-console.log(`Loaded lib/{${modules.join(',')}}.js and web/worker.js with no node: imports`);
+process.stdout.write(`Loaded lib/{${modules.join(',')}}.js and web/worker.js with no node: imports\n`);
 
 // Without a dictionary, the text front end must ask for one
 let threw = false;
@@ -52,15 +53,15 @@ const options = {'voice': 'female', 'rate': 1.2, 'seed': 1, 'room': true};
 const count = worker.synthesizeParagraphs(text, options, (index, samples, sampleRate) => chunks.push({index, samples, sampleRate}));
 const wav = lib.wav.encodeWav(chunks[0].samples, chunks[0].sampleRate);
 process.getBuiltinModule = getBuiltinModule;
-console.log(`Worker synthesis: ${count} paragraphs, ${chunks.map((chunk) => (chunk.samples.length / chunk.sampleRate).toFixed(2)).join(' + ')} s, ` +
-    `WAV ${wav.length} bytes`);
+const chunkSeconds = chunks.map((chunk) => (chunk.samples.length / chunk.sampleRate).toFixed(2));
+process.stdout.write(`Worker synthesis: ${count} paragraphs, ${chunkSeconds.join(' + ')} s, WAV ${wav.length} bytes\n`);
 
 // The worker's audio must match the Node path (speak, room, normalize) sample for sample
 const {speak} = lib.speak;
 const sha = (samples) => createHash('sha256').update(new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength)).digest('hex');
-const expected = lib.klatt.normalize(lib.room.convolve(speak('The birch canoe slid on the smooth planks.', 'female', {'seed': 1, 'rate': 1.2}).samples,
-    lib.room.roomImpulse(44100)), 0.89);
+const dry = speak('The birch canoe slid on the smooth planks.', 'female', {'seed': 1, 'rate': 1.2}).samples;
+const expected = lib.klatt.normalize(lib.room.convolve(dry, lib.room.roomImpulse(44100)), 0.89);
 if (count !== 2 || sha(chunks[0].samples) !== sha(expected)) {
     throw new Error('The worker synthesis differs from the Node synthesis');
 }
-console.log('Worker synthesis matches the Node synthesis');
+process.stdout.write('Worker synthesis matches the Node synthesis\n');

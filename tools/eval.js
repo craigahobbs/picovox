@@ -4,8 +4,9 @@
 // node tools/eval.js [-v male|female|samantha|daniel] [-o overridesJson] [-n count] [--sus] [--show]
 
 import {execFile, execFileSync} from 'node:child_process';
-import {promisify} from 'node:util';
 import {mkdirSync, readFileSync} from 'node:fs';
+import process from 'node:process';
+import {promisify} from 'node:util';
 import {speak} from '../lib/speak.js';
 import {writeWav} from '../lib/wav.js';
 
@@ -90,7 +91,10 @@ function words(text) {
 function editDistance(reference, hypothesis) {
     const rows = reference.length + 1;
     const cols = hypothesis.length + 1;
-    const distance = Array.from({'length': rows}, (_, ix) => Array.from({'length': cols}, (__, jx) => (ix === 0 ? jx : (jx === 0 ? ix : 0))));
+    const distance = Array.from(
+        {'length': rows},
+        (_row, ix) => Array.from({'length': cols}, (_col, jx) => (ix === 0 ? jx : (jx === 0 ? ix : 0)))
+    );
     for (let ix = 1; ix < rows; ix++) {
         for (let jx = 1; jx < cols; jx++) {
             const cost = reference[ix - 1] === hypothesis[jx - 1] ? 0 : 1;
@@ -208,9 +212,11 @@ if (process.argv[1] && process.argv[1].endsWith('eval.js')) {
     if (show) {
         for (const result of results) {
             if (result.errors > 0) {
-                console.log(`  ${result.errors} | ${result.sentence} | ${result.text}`);
+                process.stdout.write(`  ${result.errors} | ${result.sentence} | ${result.text}\n`);
             }
         }
     }
-    console.log(`${voice} ${JSON.stringify(overrides)} - WER ${(100 * wer).toFixed(1)}%, mean token probability ${probability.toFixed(3)}`);
+    process.stdout.write(
+        `${voice} ${JSON.stringify(overrides)} - WER ${(100 * wer).toFixed(1)}%, mean token probability ${probability.toFixed(3)}\n`
+    );
 }
