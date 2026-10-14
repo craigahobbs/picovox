@@ -1,6 +1,6 @@
 // The browser front end - text, voice, rate, room, and crowd controls; streaming synthesis in Web Workers (one per
-// crowd member, so the members synthesize in parallel); a player (play/pause and skipping) over the streamed audio
-// with Web Audio (each member panned, the room ambience by a convolver); and WAV download
+// crowd member, so the members synthesize in parallel); a player (play/pause, and skipping by 1 or 5 minutes) over
+// the streamed audio with Web Audio (each member panned, the room ambience by a convolver); and WAV download
 
 import {encodeWav} from '../lib/wav.js';
 import {convolve, roomImpulse} from '../lib/room.js';
@@ -16,15 +16,10 @@ const crowdElement = document.getElementById('crowd');
 const speakButton = document.getElementById('speak');
 const stopButton = document.getElementById('stop');
 const downloadButton = document.getElementById('download');
-const backButton = document.getElementById('back');
+const skipButtons = [...document.querySelectorAll('button[data-skip]')];
 const playPauseButton = document.getElementById('playPause');
-const forwardButton = document.getElementById('forward');
 const timeElement = document.getElementById('time');
 const statusElement = document.getElementById('status');
-
-
-// The skip distance (s)
-const skipSeconds = 5;
 
 
 // The crowd - the lead (the chosen voice, centered) and five other speakers, each with its own voice, pitch, vocal
@@ -48,8 +43,15 @@ let output = null;
 
 
 // The player - the streamed request's audio is kept as tracks of blocks on a timeline (s), so it can be played from any
-// position. While playing, the timeline position anchorPosition is at audio context time anchorTime.
-const player = {'request': null, 'playing': false, 'anchorPosition': 0, 'anchorTime': 0, 'sources': new Set(), 'startTimer': null};
+// position. While playing, the timeline position anchorPosition is at audio context time anchorTime, and each member's
+// blocks are scheduled a few seconds ahead (cursors are each member's next block to schedule).
+const player = {
+    'request': null, 'playing': false, 'anchorPosition': 0, 'anchorTime': 0, 'sources': new Set(), 'startTimer': null, 'cursors': []
+};
+
+
+// How far ahead to schedule blocks (s)
+const scheduleAheadSeconds = 4;
 
 
 // Show a status message
@@ -114,8 +116,9 @@ function updateControls() {
     const hasAudio = duration() > 0;
     stopButton.disabled = !isBusy() && !player.playing;
     playPauseButton.disabled = !hasAudio && player.request === null;
-    backButton.disabled = !hasAudio;
-    forwardButton.disabled = !hasAudio;
+    for (const button of skipButtons) {
+        button.disabled = !hasAudio;
+    }
     playPauseButton.innerHTML = player.playing ? '&#x23F8; Pause' : '&#x25B6; Play';
     playPauseButton.setAttribute('aria-label', player.playing ? 'Pause' : 'Play');
     timeElement.textContent = `${formatTime(Math.min(position(), duration()))} / ${formatTime(duration())}`;
@@ -249,7 +252,7 @@ function addBlock(target, member, samples, sampleRate) {
         return;
     }
     if (player.playing) {
-        scheduleBlock(member, block);
+        scheduleAhead();
     } else if (target.autoplay) {
         const allStarted = target.tracks.every((other) => other.blocks.length !== 0);
         if (allStarted) {
@@ -297,6 +300,19 @@ function scheduleBlock(member, block) {
 }
 
 
+// Schedule each member's blocks that start within the schedule-ahead window
+function scheduleAhead() {
+    const horizon = position() + scheduleAheadSeconds;
+    player.request.tracks.forEach((track, member) => {
+        const offset = player.request.members[member].offset;
+        while (player.cursors[member] < track.blocks.length && offset + track.blocks[player.cursors[member]].start < horizon) {
+            scheduleBlock(member, track.blocks[player.cursors[member]]);
+            player.cursors[member]++;
+        }
+    });
+}
+
+
 // Stop the scheduled sources
 function stopSources() {
     for (const source of player.sources) {
@@ -314,11 +330,12 @@ function startPlayback(at) {
     player.anchorPosition = at;
     player.anchorTime = audioContext.currentTime + (player.request.members.length > 1 ? 0.1 : 0.05);
     player.playing = true;
-    player.request.tracks.forEach((track, member) => {
-        for (const block of track.blocks) {
-            scheduleBlock(member, block);
-        }
+    player.cursors = player.request.tracks.map((track, member) => {
+        const offset = player.request.members[member].offset;
+        const index = track.blocks.findIndex((block) => offset + block.start + block.buffer.duration > at);
+        return index === -1 ? track.blocks.length : index;
     });
+    scheduleAhead();
     setStatus(player.request.members.length > 1 ? 'The crowd is speaking...' : 'Speaking...');
     updateControls();
 }
@@ -351,8 +368,11 @@ function seek(to) {
 }
 
 
-// The player's clock - updates the time, and stops at the end of finished audio
+// The player's clock - schedules ahead, updates the time, and stops at the end of finished audio
 function tick() {
+    if (player.playing) {
+        scheduleAhead();
+    }
     if (player.playing && !isBusy(player.request) && position() >= duration() + 0.05) {
         player.playing = false;
         player.anchorPosition = duration();
@@ -486,7 +506,7 @@ function onPlayPause() {
 }
 
 
-// Skip back or ahead
+// Skip back or ahead by seconds (each skip button's data-skip)
 function onSkip(seconds) {
     if (player.request !== null) {
         player.request.autoplay = false;
@@ -561,8 +581,9 @@ speakButton.addEventListener('click', onSpeak);
 stopButton.addEventListener('click', onStop);
 downloadButton.addEventListener('click', onDownload);
 playPauseButton.addEventListener('click', onPlayPause);
-backButton.addEventListener('click', () => onSkip(-skipSeconds));
-forwardButton.addEventListener('click', () => onSkip(skipSeconds));
+for (const button of skipButtons) {
+    button.addEventListener('click', () => onSkip(Number(button.dataset.skip)));
+}
 rateElement.addEventListener('input', showRate);
 crowdElement.addEventListener('change', onCrowd);
 for (const element of [textElement, rateElement, roomElement, crowdElement, ...document.querySelectorAll('input[name="voice"]')]) {
