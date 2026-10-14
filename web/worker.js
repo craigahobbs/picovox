@@ -3,9 +3,11 @@
 // page applies the room ambience); otherwise it posts each finished paragraph. The synthesis functions are exported so
 // they also run under Node.
 //
-// Messages in: {'id', 'text', 'voice', 'rate', 'seed', 'room', 'stream'}
-// Messages out: {'type': 'ready'}, {'type': 'chunk', 'id', 'index', 'samples', 'sampleRate'},
-// {'type': 'block', 'id', 'samples', 'sampleRate'}, {'type': 'done', 'id', 'count'}, {'type': 'error', 'id', 'message'}
+// Messages in: {'id', 'member', 'text', 'voice', 'rate', 'seed', 'room', 'stream', 'overrides'} - the member (a crowd
+// member's index) is echoed back, and the overrides are voice parameters (e.g. pitchScale, tractScale)
+// Messages out: {'type': 'ready'}, {'type': 'chunk', 'id', 'member', 'index', 'samples', 'sampleRate'},
+// {'type': 'block', 'id', 'member', 'samples', 'sampleRate'}, {'type': 'done', 'id', 'member', 'count'},
+// {'type': 'error', 'id', 'member', 'message'}
 
 import {setDictionary, textToPhrases} from '../lib/lexicon.js';
 import {speak} from '../lib/speak.js';
@@ -20,8 +22,8 @@ export function splitParagraphs(text) {
 
 
 // Synthesize a passage - the same chain as tools/say.js: speak, then the optional room ambience
-export function synthesizeText(text, {voice = 'male', rate = 1, seed = 1, room = false} = {}) {
-    const {samples: dry, sampleRate} = speak(text, voice, {seed, rate});
+export function synthesizeText(text, {voice = 'male', rate = 1, seed = 1, room = false, overrides = {}} = {}) {
+    const {samples: dry, sampleRate} = speak(text, voice, {seed, rate, overrides});
     const samples = room ? normalize(convolve(dry, roomImpulse(sampleRate)), 0.89) : dry;
     return {samples, sampleRate};
 }
@@ -40,10 +42,10 @@ export function synthesizeParagraphs(text, options, onChunk) {
 
 // Stream text paragraph by paragraph, calling onBlock(samples, sampleRate) with each block as it is synthesized - returns
 // the paragraph count
-export function streamParagraphs(text, {voice = 'male', rate = 1, seed = 1} = {}, onBlock) {
+export function streamParagraphs(text, {voice = 'male', rate = 1, seed = 1, overrides = {}} = {}, onBlock) {
     const paragraphs = splitParagraphs(text);
     for (const paragraph of paragraphs) {
-        speak(paragraph, voice, {seed, rate, 'onBlock': (samples) => onBlock(samples, 44100)});
+        speak(paragraph, voice, {seed, rate, overrides, 'onBlock': (samples) => onBlock(samples, 44100)});
     }
     return paragraphs.length;
 }
@@ -76,19 +78,19 @@ if (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScop
 
     // Synthesize each request, posting each paragraph's samples as it is done
     self.onmessage = async (event) => {
-        const {id, text, voice, rate, seed, room, stream} = event.data;
+        const {id, member = 0, text, voice, rate, seed, room, stream, overrides = {}} = event.data;
         try {
             await ready;
             const count = stream ?
-                streamParagraphs(text, {voice, rate, seed}, (samples, sampleRate) => {
-                    self.postMessage({'type': 'block', id, samples, sampleRate}, [samples.buffer]);
+                streamParagraphs(text, {voice, rate, seed, overrides}, (samples, sampleRate) => {
+                    self.postMessage({'type': 'block', id, member, samples, sampleRate}, [samples.buffer]);
                 }) :
-                synthesizeParagraphs(text, {voice, rate, seed, room}, (index, samples, sampleRate) => {
-                    self.postMessage({'type': 'chunk', id, index, samples, sampleRate}, [samples.buffer]);
+                synthesizeParagraphs(text, {voice, rate, seed, room, overrides}, (index, samples, sampleRate) => {
+                    self.postMessage({'type': 'chunk', id, member, index, samples, sampleRate}, [samples.buffer]);
                 });
-            self.postMessage({'type': 'done', id, count});
+            self.postMessage({'type': 'done', id, member, count});
         } catch (error) {
-            self.postMessage({'type': 'error', id, 'message': error.message});
+            self.postMessage({'type': 'error', id, member, 'message': error.message});
         }
     };
 }
