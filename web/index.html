@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice Synth</title>
+<style>
+    :root {
+        --bg: #f6f5f2;
+        --panel: #ffffff;
+        --text: #1d1d1f;
+        --muted: #6b6b70;
+        --border: #d8d6d0;
+        --accent: #2f5fd0;
+        --accent-text: #ffffff;
+        --error: #b3261e;
+        color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --bg: #161618;
+            --panel: #202023;
+            --text: #ececee;
+            --muted: #9c9ca3;
+            --border: #3a3a3f;
+            --accent: #7b9cff;
+            --accent-text: #0d1430;
+            --error: #ff8a80;
+            color-scheme: dark;
+        }
+    }
+    * {
+        box-sizing: border-box;
+    }
+    body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 16px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+    }
+    main {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 32px 16px;
+    }
+    h1 {
+        margin: 0 0 4px;
+        font-size: 1.6rem;
+    }
+    .lede {
+        margin: 0 0 24px;
+        color: var(--muted);
+    }
+    .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px;
+    }
+    textarea {
+        width: 100%;
+        min-height: 160px;
+        resize: vertical;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg);
+        color: var(--text);
+        font: inherit;
+    }
+    .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px 24px;
+        align-items: center;
+        margin: 16px 0;
+    }
+    fieldset {
+        display: flex;
+        gap: 16px;
+        margin: 0;
+        padding: 0;
+        border: 0;
+    }
+    legend {
+        float: left;
+        margin-right: 12px;
+        color: var(--muted);
+    }
+    label {
+        display: inline-flex;
+        gap: 6px;
+        align-items: center;
+        cursor: pointer;
+    }
+    .rate output {
+        min-width: 3.2em;
+        font-variant-numeric: tabular-nums;
+        color: var(--muted);
+    }
+    .buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    button {
+        padding: 8px 18px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+    }
+    button.primary {
+        border-color: var(--accent);
+        background: var(--accent);
+        color: var(--accent-text);
+    }
+    button:disabled {
+        opacity: 0.5;
+        cursor: default;
+    }
+    #status {
+        min-height: 1.5em;
+        margin: 12px 0 0;
+        color: var(--muted);
+    }
+    #status.error {
+        color: var(--error);
+    }
+    footer {
+        margin-top: 24px;
+        color: var(--muted);
+        font-size: 0.875rem;
+    }
+</style>
+</head>
+<body>
+<main>
+    <h1>Voice Synth</h1>
+    <p class="lede">A from-scratch formant speech synthesizer - LF glottal source, Klatt-style cascade, rule-based prosody - running in your browser.</p>
+    <div class="panel">
+        <textarea id="text" aria-label="Text to speak" spellcheck="true">The birch canoe slid on the smooth planks. Glue the sheet to the dark blue background.</textarea>
+        <div class="controls">
+            <fieldset>
+                <legend>Voice</legend>
+                <label><input type="radio" name="voice" value="male" checked> Male</label>
+                <label><input type="radio" name="voice" value="female"> Female</label>
+            </fieldset>
+            <label class="rate">Rate <input id="rate" type="range" min="0.6" max="1.6" step="0.05" value="1"> <output id="rateValue" for="rate">1.00x</output></label>
+            <label><input id="room" type="checkbox"> Room ambience</label>
+        </div>
+        <div class="buttons">
+            <button id="speak" class="primary" type="button" disabled>Speak</button>
+            <button id="stop" type="button" disabled>Stop</button>
+            <button id="download" type="button" disabled>Download WAV</button>
+        </div>
+        <p id="status" role="status" aria-live="polite">Loading the pronouncing dictionary...</p>
+    </div>
+    <footer>Ctrl+Enter (or Cmd+Enter) speaks. Blank lines split long text into paragraphs, which play as they are synthesized.</footer>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
