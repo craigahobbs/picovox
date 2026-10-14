@@ -209,9 +209,10 @@ function readJSONCache(cacheName) {
 }
 
 
-// Parse HTML into a document
+// Parse HTML into a document - with one window's DOMParser (a JSDOM window per page holds gigabytes over a crawl)
+const domParser = new (new JSDOM('').window.DOMParser)();
 function parseHTML(html) {
-    return new JSDOM(html).window.document;
+    return domParser.parseFromString(html, 'text/html');
 }
 
 
@@ -257,9 +258,10 @@ function uniqueSubjects(subjects) {
 }
 
 
-// A key for matching the same work across sources - the normalized title without a leading article
+// A key for matching the same work across sources - the normalized title without a leading article or word breaks
+// ("The Case-Book of Sherlock Holmes" matches "The Casebook of Sherlock Holmes")
 function titleKey(title) {
-    return normalizeText(title).replace(/^(?:the|a|an) /, '');
+    return normalizeText(title).replace(/^(?:the|a|an) /, '').replace(/ /g, '');
 }
 
 
@@ -325,9 +327,7 @@ async function standardEbooks(options) {
     for (const [index, item] of listed.entries()) {
         const cacheName = `standardebooks/book${item.id.slice('/ebooks'.length).replace(/\//g, '_')}.html`;
         const html = await fetchCached(`${seURL}${item.id}`, cacheName, options.maxAge);
-        const doc = html === null ? null : parseHTML(html);
-        const book = doc === null ? null : standardEbook(item, doc);
-        doc?.defaultView.close();
+        const book = html === null ? null : standardEbook(item, parseHTML(html));
         if (book === null) {
             log(`  Standard Ebooks: ${item.id} - no book page or EPUB download`);
             missing++;
@@ -424,7 +424,7 @@ function gutenbergTitle(rawTitle) {
         return match.index >= 3 && prefix.split('(').length === prefix.split(')').length;
     });
     if (!separator) {
-        return {'title': oneLine, 'subtitle': ''};
+        return {'title': titleCase(oneLine), 'subtitle': ''};
     }
     const title = oneLine.slice(0, separator.index).replace(/[,.]$/, '');
     let subtitle = oneLine.slice(separator.index + separator[0].length).trim();
@@ -433,20 +433,26 @@ function gutenbergTitle(rawTitle) {
     } else if (subtitle.length > subtitleLength) {
         subtitle = `${subtitle.slice(0, subtitle.lastIndexOf(' ', subtitleLength)).replace(/[\s,;:—–-]+$/, '')}…`;
     }
-    return {title, 'subtitle': titleCase(subtitle)};
+    return {'title': titleCase(title), 'subtitle': titleCase(subtitle)};
 }
 
 
-// Title-case a lowercase subtitle ("or, the modern prometheus" is "Or, the Modern Prometheus")
+// Title-case a title in sentence case or lowercase ("The three musketeers" is "The Three Musketeers", "or, the modern
+// prometheus" is "Or, the Modern Prometheus") - a title with mostly capitalized words is left as it is
 const smallWords = new Set([
-    'a', 'an', 'and', 'as', 'at', 'but', 'by', 'for', 'from', 'in', 'into', 'nor', 'of', 'on', 'or', 'the', 'to', 'with'
+    'a', 'an', 'and', 'as', 'at', 'but', 'by', 'de', 'du', 'for', 'from', 'in', 'into', 'la', 'le', 'nor', 'of', 'on', 'or',
+    'the', 'to', 'van', 'von', 'with'
 ]);
 function titleCase(text) {
     const capitalize = (word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`;
-    if (text !== text.toLowerCase()) {
+    const words = text.split(' ');
+    const isSmall = (word) => smallWords.has(word.replace(/\W/g, '')) || /^d['’]/.test(word);
+    const majorWords = words.slice(1).filter((word) => /^[a-zA-Z]/.test(word) && !isSmall(word));
+    const lowerCount = majorWords.filter((word) => /^[a-z]/.test(word)).length;
+    if (lowerCount === 0 || lowerCount < majorWords.length - lowerCount) {
         return capitalize(text);
     }
-    return text.split(' ').map((word, index) => (index > 0 && smallWords.has(word.replace(/\W/g, '')) ? word : capitalize(word))).join(' ');
+    return words.map((word, index) => (index > 0 && isSmall(word) ? word : capitalize(word))).join(' ');
 }
 
 
@@ -460,6 +466,10 @@ function gutenbergAuthor(name) {
     // An epithet ('Marcus Aurelius, Emperor of Rome') isn't a first name
     if (epithetRegex.test(parts[1])) {
         return parts[0];
+    }
+    // A lowercase particle ('Augustine, of Hippo, Saint') follows the name
+    if (/^[a-z]/.test(parts[1])) {
+        return `${parts[0]} ${parts[1]}`;
     }
     const suffix = parts.slice(2).find((part) => /^(?:Jr\.?|Sr\.?|[IVX]+)$/.test(part));
     return `${parts[1]} ${parts[0]}${suffix ? ` ${suffix}` : ''}`;
@@ -486,11 +496,12 @@ function gutenbergSubjects(result) {
         .map((shelf) => shelf.replace(/^[^:]+:\s*/, ''));
     const topics = result.subjects.map((subject) => {
         const [topic] = subject.split(' -- ');
-        const person = topic.match(/^([^,(]+),\s*([^,(]+?)\s*(?:\(Fictitious character\)|,\s*(?:[a-z.]+\s*)?\d.*)$/);
-        if (person) {
-            return epithetRegex.test(person[2]) ? person[1] : `${person[2]} ${person[1]}`;
+        const plain = topic.replace(/\s*\([^)]*\)/g, '');
+        const name = plain.replace(/,\s*(?:[a-z.]+\s*)?\d[^,]*$/, '');
+        if ((name !== plain || topic !== plain) && name.includes(',')) {
+            return gutenbergAuthor(name);
         }
-        return topic.replace(/\s*\([^)]*\)/g, '');
+        return plain;
     });
     const fiction = result.subjects.some((subject) => /\bfiction\b/i.test(subject)) ? ['Fiction'] : [];
     return uniqueSubjects([...fiction, ...shelves, ...topics]);
@@ -587,7 +598,22 @@ async function resolveText(id, repository) {
 }
 
 
-// The top Gutenberg books, without Standard Ebooks duplicates, with texts in GITenberg
+// Is a Gutendex result a reference work (a dictionary, encyclopedia, index, or the like) - not for reading aloud?
+const referenceTitleWords = [
+    'dictionary', 'dictionaries', 'encyclop(?:a)?edia', 'cyclop(?:a)?edia', 'thesaurus', 'glossary', 'concordance', 'gazetteer', 'index of'
+];
+const referenceSubjects = [
+    'dictionaries', 'encyclopedias and dictionaries', 'indexes', 'catalogs', 'glossaries, vocabularies', 'concordances', 'gazetteers'
+];
+const referenceTitleRegex = new RegExp(`\\b(?:${referenceTitleWords.join('|')})\\b`, 'i');
+const referenceSubjectRegex = new RegExp(`^(?:${referenceSubjects.join('|')})\\b`, 'i');
+function isReferenceWork(result) {
+    return referenceTitleRegex.test(result.title) ||
+        result.subjects.some((subject) => subject.split(' -- ').some((part) => referenceSubjectRegex.test(part.trim())));
+}
+
+
+// The top Gutenberg books, without Standard Ebooks duplicates or reference works, with texts in GITenberg
 async function gutenbergBooks(options, seBooks) {
     const results = await gutendexBooks(options);
 
@@ -599,7 +625,12 @@ async function gutenbergBooks(options, seBooks) {
     const fullTitles = new Set();
     let seDuplicates = 0;
     let gutenbergDuplicates = 0;
+    let referenceWorks = 0;
     for (const result of results) {
+        if (isReferenceWork(result)) {
+            referenceWorks++;
+            continue;
+        }
         const {title, subtitle} = gutenbergTitle(result.title);
         const author = result.authors.map((person) => gutenbergAuthor(person.name)).filter((name) => name !== '').join(', ');
         const surnames = surnameKeys(author);
@@ -616,7 +647,7 @@ async function gutenbergBooks(options, seBooks) {
         candidates.push({result, title, subtitle, author});
     }
     log(`Gutenberg: ${candidates.length} candidates (${seDuplicates} Standard Ebooks duplicates, ` +
-        `${gutenbergDuplicates} duplicate editions)`);
+        `${gutenbergDuplicates} duplicate editions, ${referenceWorks} reference works)`);
 
     // Resolve the texts - results are cached (GITenberg is a static mirror; unresolved books are retried after maxAge)
     const repositories = await gitenbergRepositories(options.maxAge);
