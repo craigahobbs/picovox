@@ -1,0 +1,7 @@
+{
+  "name": "voice-synth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Experiments in realistic formant speech synthesis, in JavaScript"
+}
