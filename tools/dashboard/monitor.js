@@ -349,10 +349,11 @@ async function renderSamples(config, checkpoint, prefix) {
 }
 
 
-// The checkpoints waiting for samples - [{run, step, path}], oldest first, of the runs since the pipeline started and
-// saved at least 30 seconds ago (so they're completely written)
+// The checkpoints waiting for samples - [{run, step, path}], oldest first, of the runs since the pipeline started (whose
+// names start with samples.runs) and saved at least 30 seconds ago (so they're completely written)
 function pendingCheckpoints(pipeline, index, now) {
     const since = Date.parse(pipeline.since);
+    const prefix = pipeline.samples.runs || '';
     const done = new Set(index.checkpoints.map((checkpoint) => `${checkpoint.run} ${checkpoint.step}`));
     const pending = [];
     let runs;
@@ -361,7 +362,7 @@ function pendingCheckpoints(pipeline, index, now) {
     } catch {
         return [];
     }
-    for (const run of runs) {
+    for (const run of runs.filter((name) => name.startsWith(prefix))) {
         let files;
         try {
             files = readdirSync(join(runsPath, run));

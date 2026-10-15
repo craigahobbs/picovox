@@ -4,6 +4,7 @@
     "workflow": "wf_71f8b2f9-e0f",
     "samples": {
         "checkpointEvery": 5000,
+        "runs": "multi-",
         "text": "Call me Ishmael. Some years ago, never mind how long precisely, having little or no money in my purse, and nothing particular to interest me on shore, I thought I would sail about a little and see the watery part of the world.",
         "speakers": [
             {"key": "arctic-slt", "label": "ARCTIC slt", "sex": "female"},
@@ -45,10 +46,26 @@
             "detail": "one multi-speaker, multi-style model",
             "weight": 70,
             "processes": ["nn.train", "nn.model", "nn.discriminator", "nn.evaluate", "nn.export", "nn.parity", "nn.fit", "nn/js/"],
+            "runs": ["multi-", "test-"],
             "steps": [
-                {"title": "Training", "run": true, "process": "nn.train", "weight": 9},
+                {"title": "Training", "run": "multi-", "process": "nn.train", "weight": 9},
                 {"title": "Profile and optimize training", "log": "build/nn/profile/profile.log", "weight": 0},
                 {"title": "Export for the browser", "file": "data/nn/multi.json", "process": "nn.export", "weight": 1}
+            ]
+        },
+        {
+            "title": "G2P",
+            "detail": "a minimal neural letters-to-phonemes model for words the dictionary lacks, packaged as generated JavaScript",
+            "weight": 5,
+            "processes": ["nn.g2p", "tools/g2p"],
+            "runs": ["g2p-"],
+            "steps": [
+                {"title": "Data and spelling rules", "log": "build/nn/g2p/data.log", "weight": 1},
+                {"title": "Size sweep", "log": "build/nn/g2p/sweep.log", "weight": 4},
+                {"title": "Distillation, quantization, pruning", "log": "build/nn/g2p/compress.log", "weight": 3},
+                {"title": "Package as generated JavaScript", "log": "build/nn/g2p/package.log", "weight": 1},
+                {"title": "Integration and parity", "log": "build/nn/g2p/integrate.log", "weight": 1},
+                {"title": "Evaluation and listening samples", "log": "build/nn/g2p/eval.log", "weight": 1}
             ]
         },
         {

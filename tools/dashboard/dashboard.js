@@ -621,10 +621,13 @@ function agentState(agent) {
 // runs, and processes since the pipeline started), each with its state. Rows are never removed.
 async function pipelineRows(logs, activity) {
     const since = Date.parse(pipeline.since);
+    const plannedSteps = pipeline.phases.flatMap((phase) => phase.steps);
     const logsByPath = new Map(logs.map((log) => [`build/nn/${log.file.path}`, log]));
     const newRuns = [...runs.values()].filter((run) => run.modified >= since).sort((first, second) => first.modified - second.modified);
-    const newestRun = newRuns[newRuns.length - 1];
-    const plannedSteps = pipeline.phases.flatMap((phase) => phase.steps);
+    // The run step tracks the newest run whose name starts with its prefix (true = any run)
+    const runStep = plannedSteps.find((step) => step.run);
+    const runPrefix = typeof runStep?.run === 'string' ? runStep.run : '';
+    const newestRun = newRuns.filter((run) => run.name.startsWith(runPrefix)).pop();
     const planned = new Set(plannedSteps.filter((step) => step.log).map((step) => step.log));
     const processes = (activity?.steps || []).filter((entry) => entry.started >= since);
     const latestProcess = (prefix) => processes.filter((entry) => entry.label.startsWith(prefix)).pop();
@@ -696,10 +699,12 @@ async function pipelineRows(logs, activity) {
         addRow(assign(id, phaseOfFolder(`build/nn/${log.file.path}`)), row);
     }
 
-    // Earlier runs join the training phase
+    // Other runs join the phase whose run prefixes match (else the training phase)
     const trainPhase = pipeline.phases.findIndex((phase) => phase.steps.some((step) => step.run));
     for (const run of newRuns.filter((item) => item !== newestRun)) {
-        addRow(trainPhase, {'id': `run:${run.name}`, 'title': `run ${run.name}`, 'kind': 'run', 'state': runState(run)});
+        const phaseIndex = pipeline.phases.findIndex((phase) => (phase.runs || []).some((prefix) => run.name.startsWith(prefix)));
+        const row = {'id': `run:${run.name}`, 'title': `run ${run.name}`, 'kind': 'run', 'state': runState(run)};
+        addRow(phaseIndex === -1 ? trainPhase : phaseIndex, row);
     }
 
     // Unplanned processes join the phase whose process prefixes match
