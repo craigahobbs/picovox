@@ -139,7 +139,10 @@ refreshes every second, read-only, re-fetching only what changed.
 The monitor writes `build/nn/activity.json` every second: the Python and Node processes working in the repository for
 10 seconds or more (with their multiprocessing workers folded in), running now or before, and the workflow's agents
 (`pipeline.json`'s workflow, else the newest workflow in `~/.claude/projects/`) - so the dashboard shows the steps that
-write no log.
+write no log. It also renders each new checkpoint of the pipeline's runs (`build/nn/runs/<run>/step-*.pt`) with
+`pipeline.json`'s sample speakers and text, scores the samples with UTMOS on the CPU (leaving the GPU to training), and
+lists them in `build/nn/samples-progress/index.json` with today's app voices as a reference; the dashboard's Checkpoint
+samples section plays them, newest first.
 
 
 ## The listener panel

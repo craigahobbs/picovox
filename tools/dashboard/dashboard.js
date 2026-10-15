@@ -23,6 +23,8 @@ const pipelineFacts = document.getElementById('pipelineFacts');
 const pipelineBar = document.getElementById('pipelineBar');
 const phasesElement = document.getElementById('phases');
 const updatedElement = document.getElementById('updated');
+const checkpointSection = document.getElementById('checkpointSection');
+const checkpointsElement = document.getElementById('checkpoints');
 
 
 // State - runs by name ({name, entries, info, modified}), the selected run, and fetched files by URL
@@ -899,9 +901,76 @@ function renderLogs(allLogs) {
 }
 
 
-// Render the samples - WAV files under build/nn/
+// The mean of the scores of a sex's samples, formatted
+function meanScore(samples, sex) {
+    const scores = samples.filter((sample) => sample.sex === sex && Number.isFinite(sample.mos)).map((sample) => sample.mos);
+    return scores.length === 0 ? '-' : (scores.reduce((sum, score) => sum + score, 0) / scores.length).toFixed(2);
+}
+
+
+// Render the checkpoint samples (build/nn/samples-progress/index.json, written by the monitor) - each checkpoint's
+// voices, newest first, then the reference app voices - rebuilt when the index changes, reusing each sample's player so
+// playback continues
+let checkpointsKey = null;
+const voiceTiles = new Map();
+async function renderCheckpointSamples() {
+    const result = await fetchText(new URL('samples-progress/index.json', buildUrl));
+    if (result === null || result.text === checkpointsKey) {
+        checkpointSection.hidden = result === null && checkpointsKey === null;
+        return;
+    }
+    checkpointsKey = result.text;
+    let index;
+    try {
+        index = JSON.parse(result.text);
+    } catch {
+        return;
+    }
+    const tile = (sample) => {
+        if (!voiceTiles.has(sample.file)) {
+            const element = make('div', 'voice');
+            const head = make('div', 'voice-head');
+            head.append(make('span', '', sample.label), make('span', 'mos', Number.isFinite(sample.mos) ? sample.mos.toFixed(2) : '-'));
+            const audio = make('audio');
+            audio.controls = true;
+            audio.preload = 'none';
+            audio.src = new URL(`samples-progress/${encodeURIComponent(sample.file)}`, buildUrl);
+            element.append(head, audio);
+            voiceTiles.set(sample.file, element);
+        }
+        return voiceTiles.get(sample.file);
+    };
+    const block = (title, facts, samples) => {
+        const element = make('div', 'checkpoint');
+        const head = make('div', 'checkpoint-head');
+        head.append(make('h3', '', title), make('span', 'facts', facts));
+        const voices = make('div', 'voices');
+        voices.append(...samples.map(tile));
+        element.append(head, voices);
+        return element;
+    };
+    const checkpoints = [...index.checkpoints].sort((first, second) => second.rendered - first.rendered);
+    const blocks = checkpoints.map((checkpoint) => block(
+        `${checkpoint.run} · step ${checkpoint.step.toLocaleString()}`,
+        `female ${meanScore(checkpoint.samples, 'female')} · male ${meanScore(checkpoint.samples, 'male')} · ` +
+            `rendered ${new Date(checkpoint.rendered).toLocaleTimeString()}`,
+        checkpoint.samples
+    ));
+    if (index.reference.length !== 0) {
+        const facts = `female ${meanScore(index.reference, 'female')} · male ${meanScore(index.reference, 'male')}`;
+        blocks.push(block('Today\'s app voices (reference)', facts, index.reference));
+    }
+    if (checkpoints.length === 0) {
+        blocks.unshift(make('p', 'empty', 'No checkpoints yet - samples appear as each one is saved.'));
+    }
+    checkpointsElement.replaceChildren(...blocks);
+    checkpointSection.hidden = false;
+}
+
+
+// Render the samples - WAV files under build/nn/ (but the checkpoint samples, shown above)
 function renderSamples(allFiles) {
-    const files = allFiles.filter((file) => file.path.endsWith('.wav'));
+    const files = allFiles.filter((file) => file.path.endsWith('.wav') && !file.path.startsWith('samples-progress/'));
     if (files.length === 0) {
         samplesElement.replaceChildren(make('p', 'empty', 'No samples yet.'));
         return;
@@ -934,6 +1003,7 @@ async function refresh() {
         await renderPipeline(logs);
         renderLogs(logs);
         renderSamples(files);
+        await renderCheckpointSamples();
         updatedElement.textContent = `Updated ${new Date().toLocaleTimeString()} · every second`;
     } finally {
         setTimeout(refresh, refreshMs);

@@ -4,17 +4,22 @@
 // - agents: the workflow's agents (pipeline.json's workflow, else the newest workflow under ~/.claude/projects) - each
 //   one's phase, whether it finished, and its latest action
 //
+// It also renders samples of each new checkpoint (build/nn/runs/<run>/step-*.pt, of the runs since the pipeline started)
+// with pipeline.json's sample speakers and text, scores them with UTMOS (on the CPU, leaving the GPU to training), and
+// lists them in build/nn/samples-progress/index.json, with today's app voices as a reference.
+//
 // node tools/dashboard/monitor.js
 
 import {
-    closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, writeFileSync
+    closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statSync, writeFileSync
 } from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
+import {execFile, execFileSync} from 'node:child_process';
 import {Buffer} from 'node:buffer';
-import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {homedir} from 'node:os';
 import process from 'node:process';
+import {promisify} from 'node:util';
 
 
 // The repository, the files, the refresh period (ms), and how long an ended process stays in the history (ms)
@@ -25,6 +30,9 @@ const projectsPath = join(homedir(), '.claude/projects');
 const periodMs = 1000;
 const keepMs = 24 * 60 * 60 * 1000;
 const minimumMs = 10000;
+const samplesPath = join(repository, 'build/nn/samples-progress');
+const runsPath = join(repository, 'build/nn/runs');
+const execFileAsync = promisify(execFile);
 
 
 // Interpreters whose processes may be pipeline steps, and commands that never are
@@ -158,12 +166,7 @@ function findWorkflowDir(now) {
         return workflowDir;
     }
     workflowFound = now;
-    let wanted = null;
-    try {
-        wanted = JSON.parse(readFileSync(pipelinePath, 'utf8')).workflow || null;
-    } catch {
-        // No pipeline - the newest workflow
-    }
+    const wanted = readPipeline()?.workflow || null;
     let newest = null;
     const list = (path) => {
         try {
@@ -276,6 +279,151 @@ function workflowAgents(now) {
 }
 
 
+// Read the pipeline (pipeline.json) - null if missing or invalid
+function readPipeline() {
+    try {
+        return JSON.parse(readFileSync(pipelinePath, 'utf8'));
+    } catch {
+        return null;
+    }
+}
+
+
+// Read the checkpoint samples' index
+function readSamplesIndex() {
+    try {
+        return JSON.parse(readFileSync(join(samplesPath, 'index.json'), 'utf8'));
+    } catch {
+        return {'reference': [], 'checkpoints': []};
+    }
+}
+
+
+// Write the checkpoint samples' index
+function writeSamplesIndex(index) {
+    const temporary = join(samplesPath, 'index.json.tmp');
+    writeFileSync(temporary, `${JSON.stringify(index, null, 1)}\n`);
+    renameSync(temporary, join(samplesPath, 'index.json'));
+}
+
+
+// Score WAV files with UTMOS on the CPU - {file name: mos}
+async function scoreSamples(files) {
+    const python = join(repository, 'build/venv-listeners/bin/python');
+    const args = ['-I', 'tools/listeners.py', '--device', 'cpu', '--no-embedding', '--no-emotion', ...files];
+    const env = {...process.env, 'OMP_NUM_THREADS': '4'};
+    const {stdout} = await execFileAsync(python, args, {'cwd': repository, env, 'maxBuffer': 16 * 1024 * 1024});
+    const scores = {};
+    for (const line of stdout.split('\n')) {
+        try {
+            const record = JSON.parse(line);
+            scores[record.file.slice(record.file.lastIndexOf('/') + 1)] = record.mos;
+        } catch {
+            // Not a result line
+        }
+    }
+    return scores;
+}
+
+
+// Render a checkpoint's samples (or, with checkpoint null, the reference app voices) - the index entry's samples
+async function renderSamples(config, checkpoint, prefix) {
+    const env = {...process.env, 'OMP_NUM_THREADS': '2'};
+    const voices = checkpoint === null ? config.reference : config.speakers;
+    const files = await Promise.all(voices.map(async (voice) => {
+        const name = `${prefix}-${(voice.key || voice.model.slice(voice.model.lastIndexOf('/') + 1))}.wav`;
+        const output = join(samplesPath, name);
+        if (checkpoint === null) {
+            await execFileAsync('node', ['nn/js/speak.js', '-m', voice.model, config.text, '-o', output], {'cwd': repository, env});
+        } else {
+            const python = join(repository, 'build/venv-nn/bin/python');
+            const args = ['-B', '-m', 'nn.synthesize', checkpoint, config.text, '-o', output, '--speaker', voice.key];
+            await execFileAsync(python, args, {'cwd': repository, env});
+        }
+        return name;
+    }));
+    const scores = await scoreSamples(files.map((name) => join(samplesPath, name)));
+    return voices.map((voice, index) => (
+        {'label': voice.label, 'sex': voice.sex, 'file': files[index], 'mos': scores[files[index]] ?? null}
+    ));
+}
+
+
+// The checkpoints waiting for samples - [{run, step, path}], oldest first, of the runs since the pipeline started and
+// saved at least 30 seconds ago (so they're completely written)
+function pendingCheckpoints(pipeline, index, now) {
+    const since = Date.parse(pipeline.since);
+    const done = new Set(index.checkpoints.map((checkpoint) => `${checkpoint.run} ${checkpoint.step}`));
+    const pending = [];
+    let runs;
+    try {
+        runs = readdirSync(runsPath);
+    } catch {
+        return [];
+    }
+    for (const run of runs) {
+        let files;
+        try {
+            files = readdirSync(join(runsPath, run));
+        } catch {
+            continue;
+        }
+        for (const file of files) {
+            const match = file.match(/^step-(\d+)\.pt$/);
+            const path = join(runsPath, run, file);
+            if (match && !done.has(`${run} ${Number(match[1])}`)) {
+                const {mtimeMs} = statSync(path);
+                if (mtimeMs >= since && now - mtimeMs > 30000) {
+                    pending.push({run, 'step': Number(match[1]), path, 'modified': mtimeMs});
+                }
+            }
+        }
+    }
+    return pending.sort((first, second) => first.modified - second.modified);
+}
+
+
+// Render the next checkpoint's samples (one job at a time, checked every 30 seconds)
+let sampleJob = null;
+let samplesChecked = 0;
+function checkSamples(now) {
+    if (sampleJob !== null || now - samplesChecked < 30000) {
+        return;
+    }
+    samplesChecked = now;
+    const pipeline = readPipeline();
+    if (pipeline === null || !pipeline.samples) {
+        return;
+    }
+    mkdirSync(samplesPath, {'recursive': true});
+    const index = readSamplesIndex();
+    const [next] = pendingCheckpoints(pipeline, index, now);
+    if (index.reference.length === 0 && pipeline.samples.reference) {
+        sampleJob = renderSamples(pipeline.samples, null, 'reference').then((samples) => {
+            writeSamplesIndex({...readSamplesIndex(), 'reference': samples});
+        });
+    } else if (next) {
+        // Render from a copy, so the trainer can replace the file meanwhile
+        const copy = join(samplesPath, `${next.run}-step-${next.step}.pt`);
+        writeFileSync(copy, readFileSync(next.path));
+        sampleJob = renderSamples(pipeline.samples, copy, `${next.run}-step-${next.step}`).then((samples) => {
+            const latest = readSamplesIndex();
+            latest.checkpoints.push({'run': next.run, 'step': next.step, 'rendered': Date.now(), samples});
+            writeSamplesIndex(latest);
+        }).finally(() => {
+            rmSync(copy, {'force': true});
+        });
+    } else {
+        return;
+    }
+    sampleJob = sampleJob.catch((error) => {
+        process.stderr.write(`monitor: samples: ${error.message}\n`);
+    }).finally(() => {
+        sampleJob = null;
+    });
+}
+
+
 // Monitor - write the activity file every second
 function main() {
     mkdirSync(dirname(activityPath), {'recursive': true});
@@ -290,6 +438,7 @@ function main() {
         try {
             history = updateHistory(history, runningSteps(now), now);
             const activity = {'updated': now, 'steps': history, 'agents': workflowAgents(now)};
+            checkSamples(now);
             const temporary = `${activityPath}.tmp`;
             writeFileSync(temporary, `${JSON.stringify(activity, null, 1)}\n`);
             renameSync(temporary, activityPath);
