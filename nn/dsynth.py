@@ -117,6 +117,12 @@ def _biquad(frequency, b0, b1, b2, a1, a2, trig=None):
 
 # The voicing's high shelf (lib/klatt.js HighShelf at SHELF_HZ) - log magnitude and phase
 def shelf_log(frequency, gain_db, trig=None):
+    real, imag = _biquad(frequency, *_shelf_coefficients(gain_db), trig)
+    return 0.5 * torch.log(real * real + imag * imag + 1e-30), torch.atan2(imag, real)
+
+
+# The high shelf's biquad coefficients (b0, b1, b2, a1, a2)
+def _shelf_coefficients(gain_db):
     amp = 10 ** (gain_db / 40)
     w0 = 2 * math.pi * params.SHELF_HZ / params.REF_RATE
     alpha = math.sin(w0) / 2 * math.sqrt(2)
@@ -128,8 +134,7 @@ def shelf_log(frequency, gain_db, trig=None):
     b2 = amp * ((amp + 1) + (amp - 1) * cos - sqrt_a) / a0
     a1 = 2 * ((amp - 1) - (amp + 1) * cos) / a0
     a2 = ((amp + 1) - (amp - 1) * cos - sqrt_a) / a0
-    real, imag = _biquad(frequency, b0, b1, b2, a1, a2, trig)
-    return 0.5 * torch.log(real * real + imag * imag + 1e-30), torch.atan2(imag, real)
+    return b0, b1, b2, a1, a2
 
 
 # The frication bandpass's (lib/klatt.js Bandpass, 0 dB peak) biquad coefficients (b0, b1, b2, a1, a2)
@@ -784,6 +789,247 @@ def _frication_kernel(trig, values):
     return _FricationResponse.apply(*(value.contiguous() for value in trig), coef)
 
 
+#
+# The harmonic amplitudes on Apple GPUs (MPS, float32, a constant F0) - a Metal kernel for harmonic_amplitudes after the
+# tract: the high shelf, the channel equalizer, the harmonic taper, the magnitude and phase, the LF source's
+# interpolation in Rd, and the complex product (the forward per harmonic; the backward per frame, over the harmonics),
+# so their [B, T, K] intermediates are never stored. The shelf's per-frame biquad coefficients are made by PyTorch as
+# shelf_log makes them, and the tract's response by its kernel.
+#
+
+_AMPLITUDES_SOURCE = '''
+#include <metal_stdlib>
+using namespace metal;
+
+struct Biquad {
+    float re, im, nr, ni, dr, di, q;
+};
+
+static Biquad biquad(device const float* coef, const float c1, const float s1, const float c2, const float s2) {
+    Biquad out;
+    const float b0 = coef[0], b1 = coef[1], b2 = coef[2], a1 = coef[3], a2 = coef[4];
+    out.nr = b0 + b1 * c1 + b2 * c2;
+    out.ni = -(b1 * s1 + b2 * s2);
+    out.dr = 1.0f + a1 * c1 + a2 * c2;
+    out.di = -(a1 * s1 + a2 * s2);
+    out.q = out.dr * out.dr + out.di * out.di;
+    out.re = (out.nr * out.dr + out.ni * out.di) / out.q;
+    out.im = (out.ni * out.dr - out.nr * out.di) / out.q;
+    return out;
+}
+
+// One harmonic's quantities - its frequency's trigonometry, the shelf, the equalizer's interpolation, the taper, the
+// magnitude and phase, the filter (fr, fi), and the source (sr, si) and its Rd slope (dsr, dsi)
+struct Harmonic {
+    float c1, s1, c2, s2, eq_weight, taper, exp_l, magnitude, phase, cos_phase, sin_phase, fr, fi, sr, si, dsr, dsi;
+    long eq_low;
+    Biquad shelf;
+};
+
+// consts: taper start, taper end, the equalizer's log-frequency step; dims: frames (B x T), K, T, the LF table's
+// harmonics (its row length), whether there is an equalizer
+static Harmonic harmonic(const long frame, const long k, device const float* f0, device const float* av,
+                         device const int* low, device const float* weight, device const float* shelf,
+                         device const float* tract_magnitude, device const float* tract_phase, device const float* eq,
+                         device const float* lf_re, device const float* lf_im, constant float4& consts,
+                         constant long4& dims, constant long& has_eq) {
+    Harmonic h;
+    const long harmonics = dims.y, frames_per_item = dims.z, table = dims.w;
+    const long element = frame * harmonics + k;
+    const float frequency = f0[frame] * float(k + 1);
+    const float omega = 6.2831855f * frequency / 44100.0f;
+    const float omega2 = 2.0f * omega;
+    h.c1 = precise::cos(omega);
+    h.s1 = precise::sin(omega);
+    h.c2 = precise::cos(omega2);
+    h.s2 = precise::sin(omega2);
+    h.shelf = biquad(shelf + frame * 5, h.c1, h.s1, h.c2, h.s2);
+    const float shelf_magnitude = 0.5f * precise::log(h.shelf.re * h.shelf.re + h.shelf.im * h.shelf.im + 1e-30f);
+    const float shelf_phase = precise::atan2(h.shelf.im, h.shelf.re);
+    float log_magnitude = tract_magnitude[element];
+    h.eq_low = 0;
+    h.eq_weight = 0.0f;
+    if (has_eq) {
+        const float position = clamp(precise::log(max(frequency, 1.0f) / 60.0f) / consts.z, 0.0f, 23.0f);
+        h.eq_low = min((long)floor(position), 22L);
+        h.eq_weight = position - float(h.eq_low);
+        device const float* gains = eq + (frame / frames_per_item) * 24;
+        const float db = gains[h.eq_low] * (1.0f - h.eq_weight) + gains[h.eq_low + 1] * h.eq_weight;
+        log_magnitude = log_magnitude + db * 0.11512925f;
+    }
+    const float taper_position = clamp((frequency - consts.x) / (consts.y - consts.x), 0.0f, 1.0f);
+    h.taper = 0.5f + 0.5f * precise::cos(3.1415927f * taper_position);
+    h.exp_l = precise::exp(log_magnitude + shelf_magnitude);
+    h.magnitude = 2.0f * av[frame] * h.exp_l * h.taper;
+    h.phase = tract_phase[element] + shelf_phase;
+    h.cos_phase = precise::cos(h.phase);
+    h.sin_phase = precise::sin(h.phase);
+    h.fr = h.magnitude * h.cos_phase;
+    h.fi = h.magnitude * h.sin_phase;
+    const float w = weight[frame];
+    device const float* row0 = lf_re + (long)low[frame] * table + k + 1;
+    device const float* row0i = lf_im + (long)low[frame] * table + k + 1;
+    h.sr = row0[0] * (1.0f - w) + row0[table] * w;
+    h.si = row0i[0] * (1.0f - w) + row0i[table] * w;
+    h.dsr = row0[table] - row0[0];
+    h.dsi = row0i[table] - row0i[0];
+    return h;
+}
+
+kernel void amplitudes(device float* amp_re [[buffer(0)]], device float* amp_im [[buffer(1)]],
+                       device const float* f0 [[buffer(2)]], device const float* av [[buffer(3)]],
+                       device const int* low [[buffer(4)]], device const float* weight [[buffer(5)]],
+                       device const float* shelf [[buffer(6)]], device const float* tract_magnitude [[buffer(7)]],
+                       device const float* tract_phase [[buffer(8)]], device const float* eq [[buffer(9)]],
+                       device const float* lf_re [[buffer(10)]], device const float* lf_im [[buffer(11)]],
+                       constant float4& consts [[buffer(12)]], constant long4& dims [[buffer(13)]],
+                       constant long& has_eq [[buffer(14)]], uint index [[thread_position_in_grid]]) {
+    const long frames = dims.x, harmonics = dims.y;
+    if ((long)index >= frames * harmonics) {
+        return;
+    }
+    const Harmonic h = harmonic(index / harmonics, index % harmonics, f0, av, low, weight, shelf, tract_magnitude,
+                                tract_phase, eq, lf_re, lf_im, consts, dims, has_eq);
+    amp_re[index] = h.sr * h.fr - h.si * h.fi;
+    amp_im[index] = h.sr * h.fi + h.si * h.fr;
+}
+
+// Per frame: the voicing's, the Rd weight's, and the shelf coefficients' gradients, the equalizer gains' per-frame
+// gradients [B, T, 24], and per harmonic the tract's log magnitude and phase gradients
+kernel void amplitudes_backward(device float* grad_av [[buffer(0)]], device float* grad_weight [[buffer(1)]],
+                                device float* grad_shelf [[buffer(2)]], device float* grad_eq [[buffer(3)]],
+                                device float* grad_tract_magnitude [[buffer(4)]], device float* grad_tract_phase [[buffer(5)]],
+                                device const float* grad_re [[buffer(6)]], device const float* grad_im [[buffer(7)]],
+                                device const float* f0 [[buffer(8)]], device const float* av [[buffer(9)]],
+                                device const int* low [[buffer(10)]], device const float* weight [[buffer(11)]],
+                                device const float* shelf [[buffer(12)]], device const float* tract_magnitude [[buffer(13)]],
+                                device const float* tract_phase [[buffer(14)]], device const float* eq [[buffer(15)]],
+                                device const float* lf_re [[buffer(16)]], device const float* lf_im [[buffer(17)]],
+                                constant float4& consts [[buffer(18)]], constant long4& dims [[buffer(19)]],
+                                constant long& has_eq [[buffer(20)]], uint index [[thread_position_in_grid]]) {
+    const long frames = dims.x, harmonics = dims.y;
+    if ((long)index >= frames) {
+        return;
+    }
+    const long frame = index;
+    float g_av = 0.0f, g_weight = 0.0f;
+    float g_shelf[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    float g_eq[24];
+    for (int i = 0; i < 24; i++) {
+        g_eq[i] = 0.0f;
+    }
+    for (long k = 0; k < harmonics; k++) {
+        const long element = frame * harmonics + k;
+        const float gre = grad_re[element], gim = grad_im[element];
+        if (gre == 0.0f && gim == 0.0f) {
+            grad_tract_magnitude[element] = 0.0f;
+            grad_tract_phase[element] = 0.0f;
+            continue;
+        }
+        const Harmonic h = harmonic(frame, k, f0, av, low, weight, shelf, tract_magnitude, tract_phase, eq, lf_re, lf_im,
+                                    consts, dims, has_eq);
+        // amp = source x filter (complex)
+        const float g_sr = gre * h.fr + gim * h.fi;
+        const float g_si = gim * h.fr - gre * h.fi;
+        const float g_fr = gre * h.sr + gim * h.si;
+        const float g_fi = gim * h.sr - gre * h.si;
+        g_weight += g_sr * h.dsr + g_si * h.dsi;
+        // filter = magnitude (cos, sin)(phase)
+        const float g_magnitude = g_fr * h.cos_phase + g_fi * h.sin_phase;
+        const float g_phase = g_fi * h.fr - g_fr * h.fi;
+        // magnitude = 2 av exp(L) taper, L = tract + eq + shelf
+        g_av += g_magnitude * 2.0f * h.exp_l * h.taper;
+        const float g_l = g_magnitude * h.magnitude;
+        grad_tract_magnitude[element] = g_l;
+        grad_tract_phase[element] = g_phase;
+        if (has_eq) {
+            const float g_db = g_l * 0.11512925f;
+            g_eq[h.eq_low] += g_db * (1.0f - h.eq_weight);
+            g_eq[h.eq_low + 1] += g_db * h.eq_weight;
+        }
+        // the shelf's log magnitude and phase
+        const float p = h.shelf.re * h.shelf.re + h.shelf.im * h.shelf.im;
+        const float g_shelf_re = g_l * h.shelf.re / (p + 1e-30f) - g_phase * h.shelf.im / p;
+        const float g_shelf_im = g_l * h.shelf.im / (p + 1e-30f) + g_phase * h.shelf.re / p;
+        const Biquad f = h.shelf;
+        const float g_nr = (g_shelf_re * f.dr - g_shelf_im * f.di) / f.q;
+        const float g_ni = (g_shelf_re * f.di + g_shelf_im * f.dr) / f.q;
+        const float g_dr = (g_shelf_re * (f.nr - 2.0f * f.re * f.dr) + g_shelf_im * (f.ni - 2.0f * f.im * f.dr)) / f.q;
+        const float g_di = (g_shelf_re * (f.ni - 2.0f * f.re * f.di) - g_shelf_im * (f.nr + 2.0f * f.im * f.di)) / f.q;
+        g_shelf[0] += g_nr;
+        g_shelf[1] += g_nr * h.c1 - g_ni * h.s1;
+        g_shelf[2] += g_nr * h.c2 - g_ni * h.s2;
+        g_shelf[3] += g_dr * h.c1 - g_di * h.s1;
+        g_shelf[4] += g_dr * h.c2 - g_di * h.s2;
+    }
+    grad_av[frame] = g_av;
+    grad_weight[frame] = g_weight;
+    for (int i = 0; i < 5; i++) {
+        grad_shelf[frame * 5 + i] = g_shelf[i];
+    }
+    for (int i = 0; i < 24; i++) {
+        grad_eq[frame * 24 + i] = g_eq[i];
+    }
+}
+'''
+_AMPLITUDES_LIBRARY = {}
+
+
+# The harmonic amplitudes' Metal library for values (None where there is none, or the values aren't MPS float32)
+def _amplitudes_library_for(values):
+    if values.device.type != 'mps' or values.dtype != torch.float32:
+        return None
+    if 'library' not in _AMPLITUDES_LIBRARY:
+        try:
+            _AMPLITUDES_LIBRARY['library'] = torch.mps.compile_shader(_AMPLITUDES_SOURCE)
+        except Exception:  # pylint: disable=broad-except
+            _AMPLITUDES_LIBRARY['library'] = None
+    return _AMPLITUDES_LIBRARY['library']
+
+
+class _HarmonicAmplitudes(torch.autograd.Function):
+    """The complex harmonic amplitudes [B, T, K] (real, imaginary) from the frames' F0 [B, T] (constant), voicing
+    (linear) [B, T], LF table row (int32) and Rd weight [B, T], shelf coefficients [B, T, 5], the tract's log magnitude
+    and phase [B, T, K], and the channel equalizer's gains (dB) [B, 24] or None - differentiable in all but the F0 and
+    the row"""
+
+    @staticmethod
+    def forward(ctx, f0, av, low, weight, shelf, tract_magnitude, tract_phase, eq, lf_re, lf_im, sample_rate):  # pylint: disable=arguments-differ
+        batch, frames, harmonics = tract_magnitude.shape
+        dims = [batch * frames, harmonics, frames, lf_re.shape[1]]
+        consts = [params.HARMONIC_TAPER_START * sample_rate, params.HARMONIC_TAPER_END * sample_rate,
+                  math.log(params.EQ_HIGH_HZ / params.EQ_LOW_HZ) / (params.EQ_BAND_COUNT - 1), 0.0]
+        has_eq = int(eq is not None)
+        eq_buffer = eq if eq is not None else av
+        amp_re = torch.empty_like(tract_magnitude)
+        amp_im = torch.empty_like(tract_magnitude)
+        _amplitudes_library_for(av).amplitudes(amp_re, amp_im, f0, av, low, weight, shelf, tract_magnitude, tract_phase,
+                                               eq_buffer, lf_re, lf_im, consts, dims, has_eq, threads=amp_re.numel())
+        ctx.save_for_backward(f0, av, low, weight, shelf, tract_magnitude, tract_phase, eq_buffer, lf_re, lf_im)
+        ctx.dims, ctx.consts, ctx.has_eq = dims, consts, has_eq
+        return amp_re, amp_im
+
+    @staticmethod
+    def backward(ctx, grad_re, grad_im):  # pylint: disable=arguments-differ
+        f0, av, low, weight, shelf, tract_magnitude, tract_phase, eq_buffer, lf_re, lf_im = ctx.saved_tensors
+        batch, frames, harmonics = tract_magnitude.shape
+        grad_re = torch.zeros_like(tract_magnitude) if grad_re is None else grad_re.contiguous()
+        grad_im = torch.zeros_like(tract_magnitude) if grad_im is None else grad_im.contiguous()
+        grad_av = torch.empty_like(av)
+        grad_weight = torch.empty_like(weight)
+        grad_shelf = torch.empty_like(shelf)
+        grad_eq = torch.empty(batch, frames, params.EQ_BAND_COUNT, dtype=av.dtype, device=av.device)
+        grad_tract_magnitude = torch.empty_like(tract_magnitude)
+        grad_tract_phase = torch.empty_like(tract_magnitude)
+        _amplitudes_library_for(av).amplitudes_backward(
+            grad_av, grad_weight, grad_shelf, grad_eq, grad_tract_magnitude, grad_tract_phase, grad_re, grad_im, f0, av, low,
+            weight, shelf, tract_magnitude, tract_phase, eq_buffer, lf_re, lf_im, ctx.consts, ctx.dims, ctx.has_eq,
+            threads=ctx.dims[0])
+        grad_eq = grad_eq.sum(dim=1) if ctx.has_eq else None
+        return (None, grad_av, None, grad_weight, grad_shelf, grad_tract_magnitude, grad_tract_phase, grad_eq, None, None,
+                None)
+
+
 # Gaussian draws [B, max count] of a stream for each seed (rows zero-padded past their counts)
 def _row_draws(seeds, stream, counts):
     draws = numpy.zeros((len(seeds), int(max(counts))))
@@ -999,8 +1245,15 @@ class DSynth(torch.nn.Module):
         source_re = table_re[low] * (1 - weight) + table_re[low + 1] * weight
         source_im = table_im[low] * (1 - weight) + table_im[low + 1] * weight
 
-        # The source shelf and the tract, as log magnitude and phase
+        # The source shelf and the tract, as log magnitude and phase (on Apple GPUs with a constant F0, everything but
+        # the tract in a Metal kernel)
         tract_magnitude, tract_phase = tract_log(frequency, split, trig)
+        if constant_f0 and correction is None and _amplitudes_library_for(values) is not None:
+            shelf = torch.cat([torch.broadcast_to(coefficient, split['shelf'].shape) for coefficient in _shelf_coefficients(split['shelf'])], dim=-1)
+            return _HarmonicAmplitudes.apply(f0[..., 0].contiguous(), split['av'][..., 0].contiguous(), low.int().contiguous(),
+                                             weight[..., 0].contiguous(), shelf.contiguous(), tract_magnitude.contiguous(),
+                                             tract_phase.contiguous(), None if eq is None else eq.contiguous(), self.lf_re, self.lf_im,
+                                             self.sample_rate)
         shelf_magnitude, shelf_phase = shelf_log(frequency, split['shelf'], trig)
         if eq is not None:
             tract_magnitude = tract_magnitude + eq_log(frequency, eq)
