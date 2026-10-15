@@ -225,10 +225,17 @@ async function refreshRuns() {
         if (jsonLog === null && textLog === null) {
             continue;
         }
+        // A run stopped early by plan (pipeline.json stopAt - for example, a stage launched with a longer schedule, for its
+        // learning rate, and stopped part way) counts its progress to the planned stop
+        const info = textLog === null ? {} : parseTextLog(textLog.text);
+        const stopAt = pipeline?.stopAt?.[entry.name];
+        if (stopAt) {
+            info.targetSteps = stopAt;
+        }
         runs.set(entry.name, {
             'name': entry.name,
             'entries': jsonLog === null ? {'train': [], 'val': []} : parseJsonLog(jsonLog.text),
-            'info': textLog === null ? {} : parseTextLog(textLog.text),
+            info,
             'modified': Math.max(jsonLog?.modified || 0, textLog?.modified || 0)
         });
     }
