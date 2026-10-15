@@ -64,6 +64,15 @@ function otherLayout(model, bytes) {
 }
 
 
+// Assert two arrays are equal, element by element - without assert.deepEqual's diff, which for large arrays that
+// differ takes enormous memory
+function assertArraysEqual(actual, expected, message) {
+    assert.equal(actual.length, expected.length, message);
+    const index = actual.findIndex((value, ix) => !Object.is(value, expected[ix]));
+    assert.equal(index, -1, `${message} differ at ${index}`);
+}
+
+
 // Words to compare models on
 const words = ['queequeg', 'longbourn', 'netherfield', 'clerval', 'raskolnikov', 'pumblechook', 'harpooneer', 'a', 'x', 'o\'clock'];
 
@@ -122,11 +131,11 @@ test('g2p.loadG2p', async () => {
 });
 
 
-// The shipped model's format - per-row scales, values bit-packed, deflated
+// The shipped model's format - per-row scales, a byte per value (6-bit values deflate smaller than bit-packed), deflated
 test('g2p.g2pModel format', () => {
     assert.equal(g2pModel.design, 'ar');
     assert.equal(g2pModel.groupSize, 0);
-    assert.equal(g2pModel.layout, 'packed');
+    assert.equal(g2pModel.layout, 'bytes');
     assert.equal(g2pModel.deflate, true);
 });
 
@@ -148,17 +157,17 @@ test('g2p.loadG2p, both layouts', async () => {
     const raw = await streamBytes(base64Bytes(g2pModel.weights), new DecompressionStream('deflate-raw'));
     const other = {
         ...g2pModel,
-        'layout': 'bytes',
+        'layout': {'bytes': 'packed', 'packed': 'bytes'}[g2pModel.layout],
         'deflate': false,
         'weights': bytesBase64(otherLayout(g2pModel, raw))
     };
     // Converting back gives the same bytes
     const otherRaw = base64Bytes(other.weights);
-    assert.deepEqual(otherLayout(other, otherRaw), raw);
+    assertArraysEqual(otherLayout(other, otherRaw), raw, 'weight bytes');
     const tensors = unpackTensors(g2pModel, raw);
     const otherTensors = unpackTensors(other, otherRaw);
     for (const [name, values] of tensors) {
-        assert.deepEqual(otherTensors.get(name), values, name);
+        assertArraysEqual(otherTensors.get(name), values, name);
     }
     const [pronounce, pronounceOther] = await Promise.all([loadG2p(g2pModel), loadG2p(other)]);
     assert.deepEqual(words.map(pronounceOther), words.map(pronounce));
