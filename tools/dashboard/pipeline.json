@@ -27,6 +27,7 @@
             "steps": [
                 {"title": "NN-only G2P runs", "log": "build/nn/g2p-nnonly/nnonly.log", "weight": 3},
                 {"title": "Small ladder (the challenger's recipe on every dictionary word)", "file": "build/nn/pipeline/g2p-ladder.json", "weight": 3},
+                {"title": "Heteronyms and variants: train on what readers actually say (lead, read, live...)", "log": "build/nn/heteronyms/heteronyms.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 3},
                 {"title": "The chosen G2P in the app", "file": "build/nn/pipeline/g2p-chosen.json", "weight": 1}
             ]
         },
