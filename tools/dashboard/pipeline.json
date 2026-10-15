@@ -64,6 +64,7 @@
             "runs": [],
             "steps": [
                 {"title": "Heteronym review: inventory, training-data readings from the audio, context model design, regression gate", "file": "build/nn/heteronyms/review.md", "weight": 2},
+                {"title": "Heteronyms built: readings from the audio in the training data, the context model, the gates", "log": "build/nn/hetimpl/hetimpl.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 4},
                 {"title": "Training data pronounced by the G2P network (not the dictionary)", "log": "build/nn/frontend/frontend.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 2},
                 {"title": "One config, pinned inputs (packages, data checksums), provenance in every model", "file": "build/nn/pipeline/train-reproducible.json", "weight": 2},
                 {"title": "Stages as resumable Make targets with a GPU lock and loud failures", "file": "build/nn/pipeline/train-targets.json", "weight": 2},
