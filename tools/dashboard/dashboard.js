@@ -1,11 +1,12 @@
 // The training dashboard - reads the neural training runs' logs (build/nn/runs/<run>/log.jsonl and train.log), the
 // data pipelines' logs (build/nn/**/*.log), and samples (build/nn/**/*.wav) through python3 -m http.server's directory
-// listings, and refreshes every 10 seconds. Read-only: it never touches the training.
+// listings, and refreshes every second. Read-only: it never touches the training.
 
 
-// Where the build lives relative to this page, and timing (ms)
-const buildUrl = new URL('../../build/nn/', import.meta.url);
-const refreshMs = 10000;
+// Where the repository and the build live relative to this page, and timing (ms)
+const rootUrl = new URL('../../', import.meta.url);
+const buildUrl = new URL('build/nn/', rootUrl);
+const refreshMs = 1000;
 const stalledMs = 3 * 60 * 1000;
 const stoppedMs = 30 * 60 * 1000;
 
@@ -17,6 +18,11 @@ const chartsTitle = document.getElementById('chartsTitle');
 const logsElement = document.getElementById('logs');
 const samplesElement = document.getElementById('samples');
 const progressSection = document.getElementById('progressSection');
+const pipelineSection = document.getElementById('pipelineSection');
+const pipelineTitle = document.getElementById('pipelineTitle');
+const pipelineFacts = document.getElementById('pipelineFacts');
+const pipelineBar = document.getElementById('pipelineBar');
+const phasesElement = document.getElementById('phases');
 const progressElement = document.getElementById('progress');
 const updatedElement = document.getElementById('updated');
 
@@ -63,24 +69,36 @@ async function listDirectory(url) {
 }
 
 
-// Fetch a text file, reusing the cached text when its Last-Modified is unchanged - {text, modified} or null
+// Fetch a text file, reusing the cached text when its Last-Modified is unchanged - {text, modified} or null. Last-Modified
+// has one-second resolution, so a file fetched within two seconds of its last change is fetched in full next time (a
+// conditional request could miss a write in the same second). Files quiet for 5 minutes are checked every 10 seconds.
 async function fetchText(url) {
     try {
-        const cached = fileCache.get(url);
-        const headers = cached ? {'If-Modified-Since': cached.lastModified} : {};
+        const cached = fileCache.get(String(url));
+        if (cached && cached.settled && Date.now() - cached.modified > 5 * 60 * 1000 && Date.now() - cached.checked < 10000) {
+            return cached;
+        }
+        const headers = cached && cached.settled ? {'If-Modified-Since': cached.lastModified} : {};
         const response = await fetch(url, {'cache': 'no-store', headers});
         if (response.status === 304 && cached) {
+            cached.checked = Date.now();
             return cached;
         }
         if (!response.ok) {
+            // Not there (yet)
+            fileCache.delete(String(url));
             return null;
         }
         const lastModified = response.headers.get('Last-Modified') || '';
-        const result = {'text': await response.text(), lastModified, 'modified': lastModified ? Date.parse(lastModified) : Date.now()};
-        fileCache.set(url, result);
+        const modified = lastModified ? Date.parse(lastModified) : Date.now();
+        const served = Date.parse(response.headers.get('Date') || '') || Date.now();
+        const settled = lastModified !== '' && served - modified >= 2000;
+        const result = {'text': await response.text(), lastModified, modified, settled, 'checked': Date.now()};
+        fileCache.set(String(url), result);
         return result;
     } catch {
-        return null;
+        // A failed request - the last known text, if any
+        return fileCache.get(String(url)) ?? null;
     }
 }
 
@@ -239,7 +257,8 @@ function renderRuns() {
         card.append(head, bar, factsElement);
         card.addEventListener('click', () => {
             selectedRun = run.name;
-            render();
+            renderRuns();
+            renderCharts(true);
         });
         return card;
     }));
@@ -332,9 +351,15 @@ function drawChart(canvas, series, {logScale = false} = {}) {
 }
 
 
-// Render the selected run's charts
-function renderCharts() {
+// Render the selected run's charts - only when its data changed, unless forced
+let chartsKey = null;
+function renderCharts(force = false) {
     const run = runs.get(selectedRun);
+    const dataKey = run ? `${run.name} ${run.modified} ${(run.entries.train || []).length} ${(run.entries.val || []).length}` : '';
+    if (!force && dataKey === chartsKey) {
+        return;
+    }
+    chartsKey = dataKey;
     if (!run) {
         chartsTitle.textContent = 'Curves';
         chartsElement.replaceChildren(make('p', 'empty', 'Select a run.'));
@@ -392,18 +417,25 @@ function renderCharts() {
 }
 
 
-// Find files under build/nn/ (not in runs/) by extension, two levels deep - [{path, url}]
-async function findFiles(extension) {
+// Find the files under build/nn/ (not in runs/), two levels deep - [{path, url}]. The subdirectories are listed every
+// 10 seconds (their files are fetched every second).
+const listingCache = new Map();
+async function findFiles() {
     const found = [];
     const top = await listDirectory(buildUrl);
     for (const entry of top) {
         if (entry.isDirectory && entry.name !== 'runs') {
-            const nested = await listDirectory(new URL(`${encodeURIComponent(entry.name)}/`, buildUrl));
-            for (const item of nested.filter((other) => !other.isDirectory && other.name.endsWith(extension))) {
+            let listing = listingCache.get(entry.name);
+            if (!listing || Date.now() - listing.time > 10000) {
+                listing = {'time': Date.now(), 'entries': await listDirectory(new URL(`${encodeURIComponent(entry.name)}/`, buildUrl))};
+                listingCache.set(entry.name, listing);
+            }
+            const nested = listing.entries;
+            for (const item of nested.filter((other) => !other.isDirectory)) {
                 const url = new URL(`${encodeURIComponent(entry.name)}/${encodeURIComponent(item.name)}`, buildUrl);
                 found.push({'path': `${entry.name}/${item.name}`, url});
             }
-        } else if (!entry.isDirectory && entry.name.endsWith(extension)) {
+        } else if (!entry.isDirectory) {
             found.push({'path': entry.name, 'url': new URL(encodeURIComponent(entry.name), buildUrl)});
         }
     }
@@ -443,9 +475,11 @@ function progressTimeLeft(path, fraction) {
 }
 
 
-// Render the progress of the active logs (updated in the last few minutes, not yet complete)
+// Render the progress of the active logs outside the pipeline (updated in the last few minutes, not yet complete)
 function renderProgress(logs) {
-    const active = logs.filter(({result}) => Date.now() - result.modified < stalledMs).map(({file, result, lines}) => {
+    const inPipeline = pipelineLogs();
+    const recent = logs.filter(({file, result}) => Date.now() - result.modified < stalledMs && !inPipeline.has(file.path));
+    const active = recent.map(({file, result, lines}) => {
         const progress = parseProgress(lines);
         return progress === null || progress.fraction >= 1 ? null : {file, result, progress};
     }).filter((item) => item !== null);
@@ -466,9 +500,156 @@ function renderProgress(logs) {
 }
 
 
-// Render the activity logs - the most recently updated first, each one's tail
-async function renderLogs() {
-    const files = await findFiles('.log');
+// The pipeline (pipeline.json) - its phases' steps, each tracked by a log, the newest training run, or an output file
+let pipeline = null;
+let pipelineLoaded = 0;
+async function loadPipeline() {
+    if (Date.now() - pipelineLoaded < 30000) {
+        return;
+    }
+    pipelineLoaded = Date.now();
+    const result = await fetchText(new URL('pipeline.json', import.meta.url));
+    try {
+        pipeline = result === null ? null : JSON.parse(result.text);
+    } catch {
+        pipeline = null;
+    }
+}
+
+
+// Whether a file exists - checked every 10 seconds
+const existsCache = new Map();
+async function fileExists(path) {
+    const cached = existsCache.get(path);
+    if (cached && Date.now() - cached.time < 10000) {
+        return cached.exists;
+    }
+    let exists = false;
+    try {
+        exists = (await fetch(new URL(path, rootUrl), {'method': 'HEAD', 'cache': 'no-store'})).ok;
+    } catch {
+        // Unreachable - not there
+    }
+    existsCache.set(path, {'time': Date.now(), exists});
+    return exists;
+}
+
+
+// A pipeline step's state - {status: waiting|running|done|failed, fraction, line}
+async function stepState(step) {
+    if (step.log) {
+        const result = await fetchText(new URL(step.log, rootUrl));
+        if (result === null) {
+            return {'status': 'waiting', 'fraction': 0};
+        }
+        const lines = result.text.replace(/\r/g, '\n').split('\n').filter((line) => line.trim() !== '');
+        const lastLine = (lines[lines.length - 1] || '').trim();
+        if (lines.some((line) => line.startsWith('Traceback'))) {
+            return {'status': 'failed', 'fraction': 0, 'line': lastLine};
+        }
+        if (Date.now() - result.modified < stalledMs) {
+            const progress = parseProgress(lines);
+            const fraction = progress === null ? null : Math.min(progress.fraction, 0.99);
+            return {'status': 'running', fraction, 'line': progress?.line ?? lastLine};
+        }
+        return {'status': 'done', 'fraction': 1, 'line': lastLine};
+    }
+    if (step.run) {
+        const since = Date.parse(pipeline.since);
+        const [run] = [...runs.values()].filter((item) => item.modified >= since).sort((first, second) => second.modified - first.modified);
+        if (!run) {
+            return {'status': 'waiting', 'fraction': 0};
+        }
+        const train = run.entries.train || [];
+        const last = train[train.length - 1];
+        const fraction = last && run.info.targetSteps ? Math.min(1, last.step / run.info.targetSteps) : 0;
+        const status = runStatus(run);
+        const line = `${run.name} - step ${last ? last.step.toLocaleString() : 0} of ${(run.info.targetSteps || 0).toLocaleString()}`;
+        if (status === 'failed') {
+            return {status, fraction, line};
+        }
+        const ended = status === 'finished' || status === 'stopped';
+        return ended ? {'status': 'done', 'fraction': 1, line} : {'status': 'running', fraction, line};
+    }
+    return await fileExists(step.file) ? {'status': 'done', 'fraction': 1} : {'status': 'waiting', 'fraction': 0};
+}
+
+
+// Render the pipeline - the overall progress (by the phases' and steps' weights, roughly their expected time) and each
+// phase's steps
+const stepIcons = {'waiting': '○', 'running': '●', 'done': '✓', 'failed': '✕'};
+async function renderPipeline() {
+    await loadPipeline();
+    pipelineSection.hidden = pipeline === null;
+    if (pipeline === null) {
+        return;
+    }
+    const phases = await Promise.all(pipeline.phases.map(async (phase) => ({
+        phase, 'steps': await Promise.all(phase.steps.map(async (step) => ({step, 'state': await stepState(step)})))
+    })));
+    let overall = 0;
+    const totalWeight = phases.reduce((sum, {phase}) => sum + phase.weight, 0);
+    phasesElement.replaceChildren(...phases.map(({phase, steps}) => {
+        const stepWeight = steps.reduce((sum, {step}) => sum + step.weight, 0);
+        const done = steps.reduce((sum, {step, state}) => sum + step.weight * (state.fraction ?? 0.5), 0) / stepWeight;
+        overall += phase.weight * done / totalWeight;
+        const statuses = steps.map(({state}) => state.status);
+        let status = 'waiting';
+        if (statuses.every((item) => item === 'done')) {
+            status = 'done';
+        } else if (statuses.some((item) => item !== 'waiting')) {
+            status = 'running';
+        }
+        const element = make('div', `phase ${status}`);
+        const head = make('div', 'pipeline-head');
+        head.append(make('h3', '', phase.title), make('span', 'facts', status === 'waiting' ? 'waiting' : `${Math.round(100 * done)}%`));
+        const list = make('ul', 'steps');
+        for (const {step, state} of steps) {
+            const item = make('li', `step ${state.status}`);
+            const percent = state.status === 'running' && state.fraction !== null ? `${Math.round(100 * state.fraction)}%` : '';
+            item.append(make('span', 'icon', stepIcons[state.status]), make('span', '', step.title), make('span', 'facts', percent));
+            if (state.status === 'running' || state.status === 'failed') {
+                if (state.fraction !== null) {
+                    const bar = make('div', 'bar');
+                    const fill = make('div');
+                    fill.style.width = `${(100 * state.fraction).toFixed(1)}%`;
+                    bar.append(fill);
+                    item.append(bar);
+                }
+                if (state.line) {
+                    item.append(make('div', 'progress-line', state.line));
+                }
+            }
+            list.append(item);
+        }
+        element.append(head, make('div', 'phase-detail', phase.detail), list);
+        return element;
+    }));
+    pipelineTitle.textContent = pipeline.title;
+    pipelineBar.style.width = `${(100 * overall).toFixed(1)}%`;
+    const elapsed = formatDuration((Date.now() - Date.parse(pipeline.since)) / 1000);
+    pipelineFacts.textContent = `about ${Math.round(100 * overall)}% (weighted by expected time) · started ${elapsed} ago`;
+}
+
+
+// The pipeline's logs (paths under build/nn/), shown in its steps rather than under Other activity
+function pipelineLogs() {
+    return new Set((pipeline?.phases || []).flatMap((phase) => phase.steps).filter((step) => step.log).
+        map((step) => step.log.replace(/^build\/nn\//, '')));
+}
+
+
+// A log's heading - its path and age
+function logHeading(file, result) {
+    return `${file.path} · updated ${formatDuration((Date.now() - result.modified) / 1000)} ago`;
+}
+
+
+// Render the activity logs - the most recently updated first, each one's tail - rebuilt only when they change
+let logsKey = null;
+let logHeads = [];
+async function renderLogs(allFiles) {
+    const files = allFiles.filter((file) => file.path.endsWith('.log'));
     const allLogs = (await Promise.all(files.map(async (file) => ({file, 'result': await fetchText(file.url)})))).
         filter((item) => item.result !== null).sort((first, second) => second.result.modified - first.result.modified);
     for (const log of allLogs) {
@@ -476,14 +657,24 @@ async function renderLogs() {
     }
     renderProgress(allLogs);
     const logs = allLogs.slice(0, 8);
+    const key = logs.map(({file, result}) => `${file.path} ${result.modified} ${result.text.length}`).join('\n');
+    if (key === logsKey && logs.length !== 0) {
+        logs.forEach(({file, result}, index) => {
+            logHeads[index].textContent = logHeading(file, result);
+        });
+        return;
+    }
+    logsKey = key;
+    logHeads = [];
     if (logs.length === 0) {
         logsElement.replaceChildren(make('p', 'empty', 'No logs yet.'));
         return;
     }
     logsElement.replaceChildren(...logs.map(({file, result, lines}) => {
         const wrap = make('div', 'log');
-        const age = formatDuration((Date.now() - result.modified) / 1000);
-        wrap.append(make('h3', '', `${file.path} · updated ${age} ago`));
+        const head = make('h3', '', logHeading(file, result));
+        logHeads.push(head);
+        wrap.append(head);
         const pre = make('pre', '', lines.slice(-14).join('\n'));
         wrap.append(pre);
         requestAnimationFrame(() => {
@@ -495,8 +686,8 @@ async function renderLogs() {
 
 
 // Render the samples - WAV files under build/nn/
-async function renderSamples() {
-    const files = await findFiles('.wav');
+function renderSamples(allFiles) {
+    const files = allFiles.filter((file) => file.path.endsWith('.wav'));
     if (files.length === 0) {
         samplesElement.replaceChildren(make('p', 'empty', 'No samples yet.'));
         return;
@@ -518,20 +709,20 @@ async function renderSamples() {
 }
 
 
-// Render everything
-function render() {
-    renderRuns();
-    renderCharts();
-}
-
-
-// Refresh periodically
+// Refresh - then again a second later, so refreshes never overlap
 async function refresh() {
-    await refreshRuns();
-    render();
-    await Promise.all([renderLogs(), renderSamples()]);
-    updatedElement.textContent = `Updated ${new Date().toLocaleTimeString()} · every ${refreshMs / 1000} s`;
+    try {
+        await refreshRuns();
+        renderRuns();
+        renderCharts();
+        await renderPipeline();
+        const files = await findFiles();
+        renderSamples(files);
+        await renderLogs(files);
+        updatedElement.textContent = `Updated ${new Date().toLocaleTimeString()} · every second`;
+    } finally {
+        setTimeout(refresh, refreshMs);
+    }
 }
 refresh();
-setInterval(refresh, refreshMs);
-window.addEventListener('resize', () => renderCharts());
+window.addEventListener('resize', () => renderCharts(true));
