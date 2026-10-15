@@ -50,6 +50,7 @@
             "steps": [
                 {"title": "Training", "run": "multi-", "process": "nn.train", "weight": 9},
                 {"title": "Profile and optimize training", "log": "build/nn/profile/profile.log", "weight": 0},
+                {"title": "Profile 2: the critic path and fixed-shape batches (after multi-b)", "log": "build/nn/profile2/profile.log", "weight": 0},
                 {"title": "Export for the browser", "file": "data/nn/multi.json", "process": "nn.export", "weight": 1}
             ]
         },
