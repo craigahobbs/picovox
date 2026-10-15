@@ -126,12 +126,13 @@ node tools/words.js -v male --show                              # per-consonant 
 average spectrum), `tools/slices.js` (band spectra of time ranges), `tools/pitchstats.js`, and `tools/envelope.js`.
 
 The training dashboard, `tools/dashboard/`, follows the neural voices' training as it runs: serve the repository
-(`python3 -m http.server`) and open http://localhost:8000/tools/dashboard/. At the top is the pipeline from
-`tools/dashboard/pipeline.json` - its phases and steps, each tracked by a log, the newest training run, or an output file,
-with an overall progress weighted by each step's expected time. Below are the runs in `build/nn/runs/` (their `log.jsonl`
-and `train.log`) with charts of their losses, validation, pitch error, and step times; progress bars for other active
-logs (any line with a percentage or an n/m count); the tails of the logs in `build/nn/`; and players for the samples
-there. It refreshes every second, read-only, re-fetching only what changed.
+(`python3 -m http.server`) and open http://localhost:8000/tools/dashboard/. At the top is a checklist of the pipeline in
+`tools/dashboard/pipeline.json` - every phase's steps, each tracked by a log, the newest training run, or an output file,
+always listed with its progress bar and latest line, and an overall progress weighted by each step's expected time.
+Unplanned work (other logs and runs since the pipeline started) joins the phase running when it appeared, and stays.
+Below are the runs in `build/nn/runs/` (their `log.jsonl` and `train.log`) with charts of their losses, validation, pitch
+error, and step times; the tails of the logs in `build/nn/`; and players for the samples there. It refreshes every
+second, read-only, re-fetching only what changed.
 
 
 ## The listener panel

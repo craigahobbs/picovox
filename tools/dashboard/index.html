@@ -214,6 +214,9 @@
     .step.waiting {
         color: var(--muted);
     }
+    .step {
+        min-height: 3.1rem;
+    }
     .step .facts {
         white-space: nowrap;
     }
@@ -223,6 +226,39 @@
     }
     .step .progress-line {
         grid-column: 2 / 4;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .step .unplanned {
+        font-family: var(--mono);
+        font-size: 0.8rem;
+    }
+    .step.done .bar > div {
+        background: var(--good);
+    }
+    .step.failed .bar > div {
+        background: var(--bad);
+        width: 100% !important;
+    }
+    .bar > div.indeterminate {
+        width: 30% !important;
+        animation: sweep 1.6s ease-in-out infinite alternate;
+    }
+    @keyframes sweep {
+        from {
+            margin-left: 0;
+        }
+        to {
+            margin-left: 70%;
+        }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .bar > div.indeterminate {
+            animation: none;
+            width: 100% !important;
+            opacity: 0.35;
+        }
     }
     .progress-list {
         display: grid;
@@ -342,10 +378,6 @@
         </div>
         <div class="bar overall"><div id="pipelineBar"></div></div>
         <div id="phases" class="phases"></div>
-    </section>
-    <section id="progressSection" hidden>
-        <h2>Other activity</h2>
-        <div id="progress" class="progress-list"></div>
     </section>
     <section>
         <h2>Runs</h2>

@@ -17,13 +17,11 @@ const chartsElement = document.getElementById('charts');
 const chartsTitle = document.getElementById('chartsTitle');
 const logsElement = document.getElementById('logs');
 const samplesElement = document.getElementById('samples');
-const progressSection = document.getElementById('progressSection');
 const pipelineSection = document.getElementById('pipelineSection');
 const pipelineTitle = document.getElementById('pipelineTitle');
 const pipelineFacts = document.getElementById('pipelineFacts');
 const pipelineBar = document.getElementById('pipelineBar');
 const phasesElement = document.getElementById('phases');
-const progressElement = document.getElementById('progress');
 const updatedElement = document.getElementById('updated');
 
 
@@ -475,31 +473,6 @@ function progressTimeLeft(path, fraction) {
 }
 
 
-// Render the progress of the active logs outside the pipeline (updated in the last few minutes, not yet complete)
-function renderProgress(logs) {
-    const inPipeline = pipelineLogs();
-    const recent = logs.filter(({file, result}) => Date.now() - result.modified < stalledMs && !inPipeline.has(file.path));
-    const active = recent.map(({file, result, lines}) => {
-        const progress = parseProgress(lines);
-        return progress === null || progress.fraction >= 1 ? null : {file, result, progress};
-    }).filter((item) => item !== null);
-    progressSection.hidden = active.length === 0;
-    progressElement.replaceChildren(...active.map(({file, progress}) => {
-        const item = make('div', 'progress-item');
-        const head = make('div', 'progress-head');
-        const timeLeft = progressTimeLeft(file.path, progress.fraction);
-        const estimate = Number.isFinite(timeLeft) ? ` · about ${formatDuration(timeLeft)} left` : '';
-        head.append(make('h3', '', file.path), make('span', 'facts', `${(100 * progress.fraction).toFixed(0)}%${estimate}`));
-        const bar = make('div', 'bar');
-        const fill = make('div');
-        fill.style.width = `${(100 * progress.fraction).toFixed(1)}%`;
-        bar.append(fill);
-        item.append(head, bar, make('div', 'progress-line', progress.line));
-        return item;
-    }));
-}
-
-
 // The pipeline (pipeline.json) - its phases' steps, each tracked by a log, the newest training run, or an output file
 let pipeline = null;
 let pipelineLoaded = 0;
@@ -535,107 +508,199 @@ async function fileExists(path) {
 }
 
 
-// A pipeline step's state - {status: waiting|running|done|failed, fraction, line}
-async function stepState(step) {
-    if (step.log) {
-        const result = await fetchText(new URL(step.log, rootUrl));
-        if (result === null) {
-            return {'status': 'waiting', 'fraction': 0};
-        }
-        const lines = result.text.replace(/\r/g, '\n').split('\n').filter((line) => line.trim() !== '');
-        const lastLine = (lines[lines.length - 1] || '').trim();
-        if (lines.some((line) => line.startsWith('Traceback'))) {
-            return {'status': 'failed', 'fraction': 0, 'line': lastLine};
-        }
-        if (Date.now() - result.modified < stalledMs) {
-            const progress = parseProgress(lines);
-            const fraction = progress === null ? null : Math.min(progress.fraction, 0.99);
-            return {'status': 'running', fraction, 'line': progress?.line ?? lastLine};
-        }
-        return {'status': 'done', 'fraction': 1, 'line': lastLine};
+// The phase each unplanned log was assigned to - the phase running when it first appeared, remembered per browser
+const assignedKey = 'training-dashboard-assigned-v1';
+let assigned = {};
+try {
+    assigned = JSON.parse(localStorage.getItem(assignedKey)) || {};
+} catch {
+    assigned = {};
+}
+function saveAssigned() {
+    try {
+        localStorage.setItem(assignedKey, JSON.stringify(assigned));
+    } catch {
+        // Unavailable storage - assignments last this page load
     }
-    if (step.run) {
-        const since = Date.parse(pipeline.since);
-        const [run] = [...runs.values()].filter((item) => item.modified >= since).sort((first, second) => second.modified - first.modified);
-        if (!run) {
-            return {'status': 'waiting', 'fraction': 0};
-        }
-        const train = run.entries.train || [];
-        const last = train[train.length - 1];
-        const fraction = last && run.info.targetSteps ? Math.min(1, last.step / run.info.targetSteps) : 0;
-        const status = runStatus(run);
-        const line = `${run.name} - step ${last ? last.step.toLocaleString() : 0} of ${(run.info.targetSteps || 0).toLocaleString()}`;
-        if (status === 'failed') {
-            return {status, fraction, line};
-        }
-        const ended = status === 'finished' || status === 'stopped';
-        return ended ? {'status': 'done', 'fraction': 1, line} : {'status': 'running', fraction, line};
-    }
-    return await fileExists(step.file) ? {'status': 'done', 'fraction': 1} : {'status': 'waiting', 'fraction': 0};
 }
 
 
-// Render the pipeline - the overall progress (by the phases' and steps' weights, roughly their expected time) and each
-// phase's steps
+// A log step's state from its fetched log - {status: waiting|running|done|failed, fraction, line, timeLeft}
+function logState(path, log) {
+    if (!log) {
+        return {'status': 'waiting', 'fraction': 0, 'line': 'not started'};
+    }
+    const {result, lines} = log;
+    const lastLine = (lines[lines.length - 1] || '').trim();
+    if (lines.some((line) => line.startsWith('Traceback'))) {
+        return {'status': 'failed', 'fraction': 0, 'line': lastLine};
+    }
+    if (Date.now() - result.modified < stalledMs) {
+        const progress = parseProgress(lines);
+        if (progress === null) {
+            return {'status': 'running', 'fraction': null, 'line': lastLine};
+        }
+        const fraction = Math.min(progress.fraction, 0.99);
+        return {'status': 'running', fraction, 'line': progress.line, 'timeLeft': progressTimeLeft(path, progress.fraction)};
+    }
+    return {'status': 'done', 'fraction': 1, 'line': lastLine};
+}
+
+
+// A training run's state
+function runState(run) {
+    const train = run.entries.train || [];
+    const last = train[train.length - 1];
+    const fraction = last && run.info.targetSteps ? Math.min(1, last.step / run.info.targetSteps) : 0;
+    const status = runStatus(run);
+    const line = `step ${last ? last.step.toLocaleString() : 0} of ${(run.info.targetSteps || 0).toLocaleString()}`;
+    if (status === 'failed') {
+        return {status, fraction, line};
+    }
+    if (status === 'finished' || status === 'stopped') {
+        return {'status': 'done', 'fraction': 1, line};
+    }
+    const recent = train.slice(-20).map((entry) => entry.secondsPerStep).filter(Number.isFinite);
+    const timeLeft = last && run.info.targetSteps ? (run.info.targetSteps - last.step) * median(recent) : NaN;
+    return {'status': 'running', fraction, 'line': status === 'stalled' ? `${line} - no update for a few minutes` : line, timeLeft};
+}
+
+
+// The pipeline's rows - the planned steps of each phase, then the unplanned work that appeared during it (logs and runs
+// since the pipeline started), each with its state. Rows are never removed.
+async function pipelineRows(logs) {
+    const since = Date.parse(pipeline.since);
+    const logsByPath = new Map(logs.map((log) => [`build/nn/${log.file.path}`, log]));
+    const newRuns = [...runs.values()].filter((run) => run.modified >= since).sort((first, second) => first.modified - second.modified);
+    const newestRun = newRuns[newRuns.length - 1];
+    const planned = new Set(pipeline.phases.flatMap((phase) => phase.steps).filter((step) => step.log).map((step) => step.log));
+    const phases = await Promise.all(pipeline.phases.map(async (phase) => ({
+        phase, 'rows': await Promise.all(phase.steps.map(async (step) => {
+            let state;
+            if (step.log) {
+                state = logState(step.log, logsByPath.get(step.log));
+            } else if (step.run) {
+                state = newestRun ? runState(newestRun) : {'status': 'waiting', 'fraction': 0, 'line': 'not started'};
+                if (newestRun) {
+                    state.line = `${newestRun.name} - ${state.line}`;
+                }
+            } else {
+                state = await fileExists(step.file) ? {'status': 'done', 'fraction': 1, 'line': step.file} :
+                    {'status': 'waiting', 'fraction': 0, 'line': 'not started'};
+            }
+            return {'id': step.title, 'title': step.title, 'weight': step.weight, state};
+        }))
+    })));
+
+    // The phase running now - the first not done (for assigning unplanned work)
+    const phaseDone = (rows) => rows.every((row) => row.state.status === 'done');
+    const currentPhase = Math.max(0, phases.findIndex(({rows}) => !phaseDone(rows)));
+    const unplanned = [
+        ...logs.filter((log) => log.result.modified >= since && !planned.has(`build/nn/${log.file.path}`)).
+            sort((first, second) => first.result.modified - second.result.modified).
+            map((log) => ({'id': `log:${log.file.path}`, 'title': log.file.path, 'state': logState(log.file.path, log)})),
+        ...newRuns.filter((run) => run !== newestRun).
+            map((run) => ({'id': `run:${run.name}`, 'title': `run ${run.name}`, 'state': runState(run)}))
+    ];
+    let changed = false;
+    for (const row of unplanned) {
+        if (!(row.id in assigned)) {
+            const trainPhase = pipeline.phases.findIndex((phase) => phase.steps.some((step) => step.run));
+            assigned[row.id] = row.id.startsWith('run:') ? trainPhase : currentPhase;
+            changed = true;
+        }
+        phases[Math.min(assigned[row.id], phases.length - 1)].rows.push({...row, 'weight': 0, 'unplanned': true});
+    }
+    if (changed) {
+        saveAssigned();
+    }
+    return phases;
+}
+
+
+// Render the pipeline - a checklist of every phase's steps, stable rows updated in place, and the overall progress (by
+// the phases' and steps' weights, roughly their expected time)
 const stepIcons = {'waiting': '○', 'running': '●', 'done': '✓', 'failed': '✕'};
-async function renderPipeline() {
+let pipelineKey = null;
+let rowElements = new Map();
+let phaseElements = [];
+async function renderPipeline(logs) {
     await loadPipeline();
     pipelineSection.hidden = pipeline === null;
     if (pipeline === null) {
         return;
     }
-    const phases = await Promise.all(pipeline.phases.map(async (phase) => ({
-        phase, 'steps': await Promise.all(phase.steps.map(async (step) => ({step, 'state': await stepState(step)})))
-    })));
+    const phases = await pipelineRows(logs);
+
+    // Build the rows when the set of rows changes (a step appeared), otherwise update them in place
+    const key = phases.map(({rows}) => rows.map((row) => row.id).join('|')).join('||');
+    if (key !== pipelineKey) {
+        pipelineKey = key;
+        rowElements = new Map();
+        phaseElements = phases.map(({phase, rows}) => {
+            const element = make('div', 'phase');
+            const head = make('div', 'pipeline-head');
+            const facts = make('span', 'facts');
+            head.append(make('h3', '', phase.title), facts);
+            const list = make('ul', 'steps');
+            for (const row of rows) {
+                const item = make('li', 'step');
+                const icon = make('span', 'icon');
+                const percent = make('span', 'facts');
+                const bar = make('div', 'bar');
+                const fill = make('div');
+                bar.append(fill);
+                const line = make('div', 'progress-line');
+                item.append(icon, make('span', row.unplanned ? 'unplanned' : '', row.title), percent, bar, line);
+                list.append(item);
+                rowElements.set(row.id, {item, icon, percent, fill, line});
+            }
+            element.append(head, make('div', 'phase-detail', phase.detail), list);
+            phasesElement.append(element);
+            return {element, facts};
+        });
+        phasesElement.replaceChildren(...phaseElements.map(({element}) => element));
+    }
+
+    // Update the rows and the phases
     let overall = 0;
     const totalWeight = phases.reduce((sum, {phase}) => sum + phase.weight, 0);
-    phasesElement.replaceChildren(...phases.map(({phase, steps}) => {
-        const stepWeight = steps.reduce((sum, {step}) => sum + step.weight, 0);
-        const done = steps.reduce((sum, {step, state}) => sum + step.weight * (state.fraction ?? 0.5), 0) / stepWeight;
-        overall += phase.weight * done / totalWeight;
-        const statuses = steps.map(({state}) => state.status);
-        let status = 'waiting';
-        if (statuses.every((item) => item === 'done')) {
-            status = 'done';
-        } else if (statuses.some((item) => item !== 'waiting')) {
-            status = 'running';
-        }
-        const element = make('div', `phase ${status}`);
-        const head = make('div', 'pipeline-head');
-        head.append(make('h3', '', phase.title), make('span', 'facts', status === 'waiting' ? 'waiting' : `${Math.round(100 * done)}%`));
-        const list = make('ul', 'steps');
-        for (const {step, state} of steps) {
-            const item = make('li', `step ${state.status}`);
-            const percent = state.status === 'running' && state.fraction !== null ? `${Math.round(100 * state.fraction)}%` : '';
-            item.append(make('span', 'icon', stepIcons[state.status]), make('span', '', step.title), make('span', 'facts', percent));
-            if (state.status === 'running' || state.status === 'failed') {
-                if (state.fraction !== null) {
-                    const bar = make('div', 'bar');
-                    const fill = make('div');
-                    fill.style.width = `${(100 * state.fraction).toFixed(1)}%`;
-                    bar.append(fill);
-                    item.append(bar);
-                }
-                if (state.line) {
-                    item.append(make('div', 'progress-line', state.line));
+    phases.forEach(({phase, rows}, index) => {
+        for (const row of rows) {
+            const {item, icon, percent, fill, line} = rowElements.get(row.id);
+            const {status, fraction, timeLeft} = row.state;
+            item.className = `step ${status}`;
+            icon.textContent = stepIcons[status];
+            let label = status;
+            if (status === 'running') {
+                label = fraction === null ? 'running' : `${Math.round(100 * fraction)}%`;
+                if (Number.isFinite(timeLeft)) {
+                    label += ` · ${formatDuration(timeLeft)} left`;
                 }
             }
-            list.append(item);
+            percent.textContent = label;
+            fill.style.width = `${(100 * (fraction ?? 0)).toFixed(1)}%`;
+            fill.classList.toggle('indeterminate', status === 'running' && fraction === null);
+            line.textContent = row.state.line || '';
+            line.title = row.state.line || '';
         }
-        element.append(head, make('div', 'phase-detail', phase.detail), list);
-        return element;
-    }));
+        const plannedRows = rows.filter((row) => !row.unplanned);
+        const stepWeight = plannedRows.reduce((sum, row) => sum + row.weight, 0);
+        const done = plannedRows.reduce((sum, row) => sum + row.weight * (row.state.fraction ?? 0.5), 0) / stepWeight;
+        overall += phase.weight * done / totalWeight;
+        let status = 'waiting';
+        if (rows.every((row) => row.state.status === 'done')) {
+            status = 'done';
+        } else if (rows.some((row) => row.state.status !== 'waiting')) {
+            status = 'running';
+        }
+        phaseElements[index].element.className = `phase ${status}`;
+        phaseElements[index].facts.textContent = status === 'waiting' ? 'waiting' : `${Math.round(100 * done)}%`;
+    });
     pipelineTitle.textContent = pipeline.title;
     pipelineBar.style.width = `${(100 * overall).toFixed(1)}%`;
     const elapsed = formatDuration((Date.now() - Date.parse(pipeline.since)) / 1000);
     pipelineFacts.textContent = `about ${Math.round(100 * overall)}% (weighted by expected time) · started ${elapsed} ago`;
-}
-
-
-// The pipeline's logs (paths under build/nn/), shown in its steps rather than under Other activity
-function pipelineLogs() {
-    return new Set((pipeline?.phases || []).flatMap((phase) => phase.steps).filter((step) => step.log).
-        map((step) => step.log.replace(/^build\/nn\//, '')));
 }
 
 
@@ -645,17 +710,22 @@ function logHeading(file, result) {
 }
 
 
+// Fetch the logs under build/nn/ - [{file, result, lines}], the most recently updated first
+async function loadLogs(allFiles) {
+    const files = allFiles.filter((file) => file.path.endsWith('.log'));
+    const logs = (await Promise.all(files.map(async (file) => ({file, 'result': await fetchText(file.url)})))).
+        filter((item) => item.result !== null).sort((first, second) => second.result.modified - first.result.modified);
+    for (const log of logs) {
+        log.lines = log.result.text.replace(/\r/g, '\n').split('\n').filter((line) => line.trim() !== '');
+    }
+    return logs;
+}
+
+
 // Render the activity logs - the most recently updated first, each one's tail - rebuilt only when they change
 let logsKey = null;
 let logHeads = [];
-async function renderLogs(allFiles) {
-    const files = allFiles.filter((file) => file.path.endsWith('.log'));
-    const allLogs = (await Promise.all(files.map(async (file) => ({file, 'result': await fetchText(file.url)})))).
-        filter((item) => item.result !== null).sort((first, second) => second.result.modified - first.result.modified);
-    for (const log of allLogs) {
-        log.lines = log.result.text.replace(/\r/g, '\n').split('\n').filter((line) => line.trim() !== '');
-    }
-    renderProgress(allLogs);
+function renderLogs(allLogs) {
     const logs = allLogs.slice(0, 8);
     const key = logs.map(({file, result}) => `${file.path} ${result.modified} ${result.text.length}`).join('\n');
     if (key === logsKey && logs.length !== 0) {
@@ -715,10 +785,11 @@ async function refresh() {
         await refreshRuns();
         renderRuns();
         renderCharts();
-        await renderPipeline();
         const files = await findFiles();
+        const logs = await loadLogs(files);
+        await renderPipeline(logs);
+        renderLogs(logs);
         renderSamples(files);
-        await renderLogs(files);
         updatedElement.textContent = `Updated ${new Date().toLocaleTimeString()} · every second`;
     } finally {
         setTimeout(refresh, refreshMs);
