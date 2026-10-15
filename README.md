@@ -237,6 +237,48 @@ Fred 0.57 (a shared formant-synthesis signature), every human pair 0.0-0.48, and
 (F0 alone does not change the perceived speaker).
 
 
+## Distilling the voice model
+
+Each retrain of the multi-speaker acoustic model ends the same way: train a big teacher, then distill small students
+from it and ship the smallest one that keeps the teacher's quality. `nn/distill.py` runs that pipeline, with its
+settings in `data/nn/distill.json` (the teacher, the distillation set, the training settings, the student ladder, the
+polish, the evaluation speakers, and the tolerance):
+
+```sh
+build/venv-nn/bin/python -B -m nn.distill ladder                  # everything below, in order
+build/venv-nn/bin/python -B -m nn.distill targets                 # 1. the teacher's targets (about 10 minutes on the GPU)
+build/venv-nn/bin/python -B -m nn.distill train --student s64     # 2. each student of the ladder
+build/venv-nn/bin/python -B -m nn.distill polish --student s64    # 3. optional: a short fine-tune on the recordings
+build/venv-nn/bin/python -B -m nn.distill eval teacher s96 s64 s48 s32   # 4. each model through the browser path
+build/venv-nn/bin/python -B -m nn.distill pick                    # 5. speed, samples, and the smallest within tolerance
+```
+
+1. **Targets** - sequence-level distillation in parameter space. The teacher speaks (tokens, speaker, style) to its
+   durations (pauses included) and its 32 synthesizer parameters every 5 ms, as inference does, with no audio
+   rendered. The inputs are the training utterances with their own speakers and styles, and every sentence of the
+   Project Gutenberg books in `build/nn/g2p/books/` (tokenized by `nn/frontend.py`, split into sentences as inference
+   splits text) spoken twice, each time by a random reader (8% an emotional-corpus actor, 10% a blend of two readers)
+   in a neutral or, 30% of the time, an emotional style at a random intensity. The set goes to
+   `build/nn/distill/targets/` (frames as float16).
+2. **Students** - the same `MultiModel` with smaller widths and depths. They share the teacher's conditioning: its
+   speaker, style, and channel-equalizer tables are copied and frozen, so a voice designed as a blend of the teacher's
+   speakers is the same voice in a student. A student runs with the teacher's durations (teacher forcing on its length
+   regulator) and learns L1 on the normalized parameter frames plus the duration losses against the teacher's
+   duration outputs. `--init-teacher` copies every teacher tensor of the same shape; `--feature-weight` adds
+   intermediate-feature matching. Runs go to `build/nn/runs/distill-<student>/`.
+3. **Polish** - `nn/trainmulti.py`'s real-audio losses (the spectral loss through the differentiable synthesizer on
+   the recordings, the adversarial critic - started from the teacher's - and feature matching) for a short fine-tune.
+4. **Evaluation** - each model is exported (`nn/export.py`), packaged (`nn/package.py`, the generated module's bytes
+   and gzip bytes), and spoken by `nn/js/speak.js` on `tools/panel-texts.json` for six speakers; the renderings are
+   scored with UTMOS, Whisper's WER, and the ECAPA speaker similarity to the teacher's rendering of the same speaker.
+   `pick` measures `nn/js/speak.js`'s real-time factor, renders listening samples to `build/nn/distill-samples/`, and
+   chooses the smallest student within the tolerance - mean UTMOS within 0.05 of the teacher's, WER at most 1 point
+   worse, and speaker similarity at least 0.85 - writing `build/nn/distill/summary.json`.
+
+Progress lines go to `build/nn/distill/` (`targets.log`, `students.log`, `eval.log`), which the training dashboard
+follows.
+
+
 ## The library
 
 | Module | |
