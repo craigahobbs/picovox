@@ -20,7 +20,7 @@ import {setPronouncer, textToPhrases} from '../lib/lexicon.js';
 import {createRenderer} from '../nn/js/render.js';
 import {loadG2p} from '../lib/g2p.js';
 import {loadPackagedModel} from '../nn/js/package.js';
-import {speakFrames} from '../nn/js/model.js';
+import {streamFrames} from '../nn/js/model.js';
 
 
 // The neural voices - each a speaker (by key) of the multi-speaker model's speaker table
@@ -84,9 +84,10 @@ export function streamNeuralUnit(model, text, options, onBlock) {
     const sampleRate = 24000;
     const pause = paragraphStart ? neuralParagraphPause : neuralSentencePause;
     onBlock(new Float32Array(Math.round(sampleRate * pause / rate)), sampleRate);
-    const networkStart = performance.now();
-    const {frames, eq} = speakFrames(model, text, {'rate': 1 / rate, speaker});
-    options.onNetwork?.(performance.now() - networkStart);
+    // The network streams its frames a fraction of a second at a time, each chunk rendered as it comes
+    let networkMs = 0;
+    let networkStart = performance.now();
+    const {chunks, eq} = streamFrames(model, text, {'rate': 1 / rate, speaker});
     const renderer = createRenderer({sampleRate, seed, eq, 'blockSize': 2048, 'onBlock': (block) => {
         const samples = new Float32Array(block.length);
         for (let ix = 0; ix < block.length; ix++) {
@@ -94,9 +95,15 @@ export function streamNeuralUnit(model, text, options, onBlock) {
         }
         onBlock(samples, sampleRate);
     }});
-    for (const frame of frames) {
-        renderer.push([frame]);
+    for (const chunk of chunks) {
+        networkMs += performance.now() - networkStart;
+        for (const frame of chunk) {
+            renderer.push([frame]);
+        }
+        networkStart = performance.now();
     }
+    networkMs += performance.now() - networkStart;
+    options.onNetwork?.(networkMs);
     renderer.end();
 }
 
@@ -160,6 +167,8 @@ if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globa
             const post = (samples, sampleRate) => {
                 if (blocks === 0) {
                     trace(`unit ${unit.index} first block after ${Math.round(performance.now() - unitStart)} ms`);
+                } else if (blocks === 1) {
+                    trace(`unit ${unit.index} first speech after ${Math.round(performance.now() - unitStart)} ms`);
                 }
                 blocks += 1;
                 self.postMessage({'type': 'unitBlock', id, 'unit': unit.index, samples, sampleRate}, [samples.buffer]);

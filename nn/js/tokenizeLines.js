@@ -10,7 +10,8 @@ import {readFileSync, writeSync} from 'node:fs';
 import {tokenize} from './tokens.js';
 
 
-// Tokenize each line of standard input
+// Tokenize each line of standard input with the training vocabulary (nn/vocab.json)
+const vocabulary = JSON.parse(readFileSync(new URL('../vocab.json', import.meta.url), 'utf8')).tokens;
 const lines = readFileSync(0, 'utf8').split('\n').filter((line) => line.trim() !== '');
-const output = lines.map((line) => JSON.stringify(tokenize(JSON.parse(line))));
+const output = lines.map((line) => JSON.stringify(tokenize(JSON.parse(line), vocabulary)));
 writeSync(1, output.join('\n') + (output.length ? '\n' : ''));
