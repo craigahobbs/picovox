@@ -878,7 +878,7 @@ function renderSettings() {
         renderSettings();
     };
     const note = make('p', 'muted', 'The voices are synthesized in your browser - no recordings. A small neural network, ' +
-        'trained on about an hour of a real speaker, drives a model of the human voice.');
+        'trained on 53 hours of 237 American audiobook readers, drives a model of the human voice.');
     sheetBody.replaceChildren(
         choice('Voice', voiceChoices, state.settings.voice, (voice) => apply({voice})),
         choice('Speed', speeds.map((speed) => [speed, `${speed}×`]), state.settings.rate, (rate) => apply({rate})),

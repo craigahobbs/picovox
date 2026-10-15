@@ -8,7 +8,8 @@
 // 'samples', 'sampleRate'} and {'type': 'unitDone', 'id', 'member', 'unit'}, then {'type': 'runDone', 'id', 'member'}.
 // Each unit starts trim seconds into its audio (dropping redundant leading silence). A newer run or {'type': 'cancel'}
 // supersedes a run between units. {'type': 'prepare', 'voice'} loads a voice ahead of playback. A voice named in
-// neuralVoices is synthesized by its neural model (nn/js), loaded on first use from data/nn/.
+// neuralVoices is a speaker of the multi-speaker neural model (nn/js), a generated module (data/nn/multi.js) imported on
+// first use.
 //
 // Whole-text requests (downloads): {'id', 'member', 'text', 'voice', 'rate', 'seed', 'room', 'stream', 'overrides'} - the
 // member (a crowd member's index) is echoed back, and the overrides are voice parameters (e.g. pitchScale, tractScale)
@@ -17,20 +18,22 @@
 // {'type': 'error', 'id', 'member', 'message'}
 
 import {convolve, roomImpulse} from '../lib/room.js';
-import {loadModel, speakFrames} from '../nn/js/model.js';
 import {setDictionary, textToPhrases} from '../lib/lexicon.js';
 import {createRenderer} from '../nn/js/render.js';
+import {loadPackagedModel} from '../nn/js/package.js';
 import {normalize} from '../lib/klatt.js';
 import {speak} from '../lib/speak.js';
+import {speakFrames} from '../nn/js/model.js';
 
 
-// The neural voices - each one's model (data/nn/<model>.json and .bin), trained on a CMU ARCTIC speaker
-export const neuralVoices = {'neural-male': 'bdl', 'neural-female': 'slt'};
+// The neural voices - each a speaker (by key) of the multi-speaker model's speaker table
+export const neuralVoices = {'neural-male': {'speaker': 'arctic-bdl'}, 'neural-female': {'speaker': 'arctic-slt'}};
 
 
-// Neural playback - the output gain (the renderer's peaks run near full scale), and the pauses before a sentence and a
-// paragraph (s, at normal speed - the model's own edge silences are short)
-const neuralGain = 1.05;
+// Neural playback - the output gain (the multi-speaker model's speech runs about 2 dB below the earlier single-speaker
+// voices', whose gain was 1.05), and the pauses before a sentence and a paragraph (s, at normal speed - the model's own
+// edge silences are short)
+const neuralGain = 1.3;
 const neuralSentencePause = 0.24;
 const neuralParagraphPause = 0.4;
 
@@ -45,36 +48,39 @@ function softLimit(value) {
 }
 
 
-// Load a neural voice's model - cached, so each voice loads once
-const neuralModels = new Map();
-export function loadNeuralVoice(voice, fetchFn = fetch) {
-    if (!neuralModels.has(voice)) {
-        const base = new URL(`../data/nn/${neuralVoices[voice]}`, import.meta.url);
-        const fetchOk = (url) => fetchFn(url).then((response) => {
-            if (!response.ok) {
-                throw new Error(`The ${voice} voice couldn't be loaded (${response.status}).`);
-            }
-            return response;
+// Load the multi-speaker neural model - imported and unpacked once, shared by every neural voice. importModule is the
+// generated module's import (replaceable for tests).
+let neuralModel = null;
+export function loadNeuralModel(importModule = () => import('../data/nn/multi.js')) {
+    if (neuralModel === null) {
+        neuralModel = importModule().then((module) => loadPackagedModel(module));
+        neuralModel.catch(() => {
+            neuralModel = null;
         });
-        const loading = Promise.all([
-            fetchOk(`${base}.json`).then((response) => response.json()),
-            fetchOk(`${base}.bin`).then((response) => response.arrayBuffer())
-        ]).then(([manifest, buffer]) => loadModel(manifest, buffer));
-        loading.catch(() => neuralModels.delete(voice));
-        neuralModels.set(voice, loading);
     }
-    return neuralModels.get(voice);
+    return neuralModel;
+}
+
+
+// A neural voice's speaker id in the model's speaker table
+export function neuralSpeaker(model, voice) {
+    const {speaker} = neuralVoices[voice];
+    const entry = model.manifest.speakers.find((item) => item.key === speaker);
+    if (!entry) {
+        throw new Error(`The ${voice} voice's speaker (${speaker}) isn't in the model.`);
+    }
+    return entry.id;
 }
 
 
 // Stream a unit (sentence) with a neural model - a pause, then the unit's audio - calling onBlock(samples, sampleRate).
 // rate is the speaking speed (1 is normal); paragraphStart lengthens the pause.
 export function streamNeuralUnit(model, text, options, onBlock) {
-    const {rate = 1, seed = 1, paragraphStart = false} = options;
+    const {rate = 1, seed = 1, paragraphStart = false, speaker} = options;
     const sampleRate = 44100;
     const pause = paragraphStart ? neuralParagraphPause : neuralSentencePause;
     onBlock(new Float32Array(Math.round(sampleRate * pause / rate)), sampleRate);
-    const {frames, eq} = speakFrames(model, text, {'rate': 1 / rate});
+    const {frames, eq} = speakFrames(model, text, {'rate': 1 / rate, speaker});
     const renderer = createRenderer({sampleRate, seed, eq, 'blockSize': 2048, 'onBlock': (block) => {
         const samples = new Float32Array(block.length);
         for (let ix = 0; ix < block.length; ix++) {
@@ -172,8 +178,9 @@ if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globa
             };
             const unitSeed = seed * 1000 + unit.index;
             if (voice in neuralVoices) {
-                const model = await loadNeuralVoice(voice);
-                streamNeuralUnit(model, unit.text, {rate, 'seed': unitSeed, 'paragraphStart': unit.trim === 0}, post);
+                const model = await loadNeuralModel();
+                const speaker = neuralSpeaker(model, voice);
+                streamNeuralUnit(model, unit.text, {rate, 'seed': unitSeed, 'paragraphStart': unit.trim === 0, speaker}, post);
             } else {
                 streamUnit(unit.text, {voice, rate, 'seed': unitSeed, overrides}, unit.trim, post);
             }
@@ -199,7 +206,7 @@ if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globa
         if (event.data.type === 'prepare') {
             // Load a neural voice ahead of playback
             if (event.data.voice in neuralVoices) {
-                loadNeuralVoice(event.data.voice).catch((error) => {
+                loadNeuralModel().catch((error) => {
                     self.postMessage({'type': 'error', 'id': null, 'member': 0, 'message': error.message});
                 });
             }

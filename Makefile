@@ -68,7 +68,7 @@ site: data/catalog.json
 	cp data/cmudict.dict data/LICENSE.cmudict data/catalog.json build/site/data/
 	mkdir -p build/site/nn build/site/data/nn
 	rsync -a --exclude .DS_Store nn/js nn/vocab.json build/site/nn/
-	cp data/nn/*.bin data/nn/slt.json data/nn/bdl.json build/site/data/nn/
+	cp data/nn/multi.js build/site/data/nn/
 
 _gh-pages: site
 

@@ -7,6 +7,13 @@
 //         [--transform '[{"pitchScale": 1.2}]'] [--pause 0.5] [--rate 1] [--bandwidth-scale 1 (the network's own)]
 //     node nn/js/speak.js -m data/nn/slt --batch list.json    # [{text, wav, params, seed, transform}, ...]
 //
+// The multi-speaker, multi-style model (data/nn/multi) takes a voice and a style (batch items may set speaker,
+// embedding, and style too):
+//
+//     node nn/js/speak.js -m data/nn/multi "Hello." -o hello.wav --speaker 5        # a speaker id (data/nn/speakers.json)
+//         [--blend '{"5": 0.6, "12": 0.4}'] [--embedding '[...]']                  # a blend, or a raw embedding
+//         [--style happy --intensity 0.7] [--style '{"happy": 0.5, "sad": 0.2}']   # an emotion, or a blend
+//
 // It prints one JSON line: the audio seconds, and the seconds spent loading, in the network, and rendering.
 // --frames-only skips the rendering (the params file only).
 
@@ -24,7 +31,8 @@ import {render} from './render.js';
 // Parse the command line
 function parseArgs(argv) {
     const args = {'model': 'data/nn/slt', 'text': null, 'wav': null, 'params': null, 'sampleRate': 44100, 'seed': 1, 'batch': null,
-        'transform': null, 'pauseThreshold': 0.5, 'rate': 1, 'framesOnly': false, 'peak': 0.89, 'bandwidthScale': null};
+        'transform': null, 'pauseThreshold': 0.5, 'rate': 1, 'framesOnly': false, 'peak': 0.89, 'bandwidthScale': null,
+        'speaker': undefined, 'embedding': undefined, 'style': undefined, 'intensity': 1};
     for (let ix = 0; ix < argv.length; ix++) {
         const arg = argv[ix];
         const take = () => argv[++ix];
@@ -50,6 +58,17 @@ function parseArgs(argv) {
             args.bandwidthScale = Number(take());
         } else if (arg === '--peak') {
             args.peak = Number(take());
+        } else if (arg === '--speaker') {
+            args.speaker = Number(take());
+        } else if (arg === '--blend') {
+            args.speaker = JSON.parse(take());
+        } else if (arg === '--embedding') {
+            args.embedding = JSON.parse(take());
+        } else if (arg === '--style') {
+            const style = take();
+            args.style = style.startsWith('{') ? JSON.parse(style) : style;
+        } else if (arg === '--intensity') {
+            args.intensity = Number(take());
         } else if (arg === '--frames-only') {
             args.framesOnly = true;
         } else {
@@ -82,6 +101,7 @@ function normalize(samples, peak) {
 
 function main() {
     const args = parseArgs(process.argv.slice(2));
+    const defaultStyle = typeof args.style === 'string' ? {'emotion': args.style, 'intensity': args.intensity} : args.style;
     const startLoad = performance.now();
     const model = loadModel(JSON.parse(readFileSync(`${args.model}.json`, 'utf8')), toArrayBuffer(readFileSync(`${args.model}.bin`)));
     const loadSeconds = (performance.now() - startLoad) / 1000;
@@ -93,7 +113,8 @@ function main() {
     for (const item of items) {
         const startNetwork = performance.now();
         const spoken = speakFrames(model, item.text, {'pauseThreshold': item.pauseThreshold ?? args.pauseThreshold,
-            'rate': item.rate ?? args.rate, 'bandwidthScale': item.bandwidthScale ?? args.bandwidthScale ?? undefined});
+            'rate': item.rate ?? args.rate, 'bandwidthScale': item.bandwidthScale ?? args.bandwidthScale ?? undefined,
+            'speaker': item.speaker ?? args.speaker, 'embedding': item.embedding ?? args.embedding, 'style': item.style ?? defaultStyle});
         networkSeconds += (performance.now() - startNetwork) / 1000;
         const frames = applyTransforms(spoken.frames, item.transform ?? args.transform ?? []);
         if (item.params) {

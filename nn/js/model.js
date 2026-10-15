@@ -11,6 +11,17 @@
 //
 // The weights are 8-bit (per-row scales, nn/export.py), dequantized on load; the arithmetic is float64.
 // Long texts are spoken a sentence at a time (as the training data is - one or two sentences), each with its own <bos>.
+//
+// The multi-speaker, multi-style model (data/nn/multi - manifest kind 'multi', nn/model.py's MultiModel) takes a voice
+// and a style:
+//
+//     const {frames, eq} = speakFrames(model, 'Hello, world.', {
+//         'speaker': 5,                                   // a speaker id (manifest.speakers), or a blend
+//         // 'speaker': {'5': 0.6, '12': 0.4},            //   {id: weight} (normalized to sum to 1)
+//         // 'embedding': [...],                          // or a raw speaker embedding (manifest.config.speakerDim)
+//         'style': {'emotion': 'happy', 'intensity': 0.7} // an emotion (manifest.styles, or 'neutral') at 0-1
+//         // 'style': {'happy': 0.5, 'sad': 0.2}          //   or a blend {emotion: weight}
+//     });
 
 import {NAMES, PARAMETERS} from './params.js';
 import {tokenize, vocab} from './tokens.js';
@@ -181,9 +192,10 @@ function addRows(inputA, inputB) {
 }
 
 
-// A conv-FFN block - x + W2 SiLU(DW(SiLU(W1 LN(x))))
-function convFFN(model, prefix, input) {
-    const hidden = silu(linear(model, `${prefix}.inner`, layerNorm(model, `${prefix}.norm`, input)));
+// A conv-FFN block - x + W2 SiLU(DW(SiLU(W1 LN(x)))), with FiLM ([gamma, beta]) after the norm when given
+function convFFN(model, prefix, input, filmVectors = null) {
+    const normed = layerNorm(model, `${prefix}.norm`, input);
+    const hidden = silu(linear(model, `${prefix}.inner`, filmVectors ? film(normed, filmVectors) : normed));
     const convolved = silu(depthwiseConv(model, `${prefix}.conv`, hidden));
     return addRows(input, linear(model, `${prefix}.outer`, convolved));
 }
@@ -243,9 +255,147 @@ function roundHalfEven(value) {
 // The model
 //
 
+//
+// The multi-speaker model's conditioning
+//
+
+// A matrix of one row
+function rowMatrix(values) {
+    return {'rows': 1, 'cols': values.length, 'data': Float64Array.from(values)};
+}
+
+
+// A speaker blend's normalized weights - [[id, weight], ...] - from an id or an {id: weight} object
+function speakerWeights(model, speaker) {
+    const {speakers} = model.config;
+    const isBlend = typeof speaker === 'object' && speaker !== null;
+    const entries = isBlend ? Object.entries(speaker).map(([id, share]) => [Number(id), Number(share)]) :
+        [[Number(speaker ?? model.manifest.defaultSpeaker ?? 0), 1]];
+    const total = entries.reduce((sum, [, share]) => sum + share, 0);
+    if (!(total > 0) || entries.some(([id, share]) => !Number.isInteger(id) || id < 0 || id >= speakers || share < 0)) {
+        throw new Error(`invalid speaker ${JSON.stringify(speaker)}`);
+    }
+    return entries.map(([id, share]) => [id, share / total]);
+}
+
+
+// A style's weights over the style table's rows - from {emotion, intensity} or an {emotion: weight} blend (neutral has
+// no row - it is the zero style)
+function styleWeights(model, style) {
+    const names = model.manifest.styles;
+    const weights = new Float64Array(names.length);
+    if (style === undefined || style === null) {
+        return weights;
+    }
+    const entries = 'emotion' in style ? [[style.emotion, style.intensity ?? 1]] : Object.entries(style);
+    for (const [emotion, share] of entries) {
+        if (emotion !== 'neutral') {
+            const index = names.indexOf(emotion);
+            if (index < 0) {
+                throw new Error(`unknown style ${emotion}`);
+            }
+            weights[index] += Number(share);
+        }
+    }
+    return weights;
+}
+
+
+// The multi-speaker model's voice - {condition (the condition vector [speaker embedding, style embedding]), eq (the
+// channel equalizer, dB)} - see speakFrames for the options
+export function voiceCondition(model, {speaker, embedding, style, eq} = {}) {
+    const {speakerDim, styleDim} = model.config;
+    const speakerTable = weight(model, 'speaker.weight').data;
+    const eqTable = weight(model, 'eq_table').data;
+    const [, bands] = weight(model, 'eq_table').shape;
+    const condition = new Float64Array(speakerDim + styleDim);
+    const voiceEq = new Array(bands).fill(0);
+    for (const [id, share] of speakerWeights(model, speaker)) {
+        for (let ix = 0; ix < speakerDim; ix++) {
+            condition[ix] += share * speakerTable[id * speakerDim + ix];
+        }
+        for (let ix = 0; ix < bands; ix++) {
+            voiceEq[ix] += share * eqTable[id * bands + ix];
+        }
+    }
+    if (embedding !== undefined && embedding !== null) {
+        if (embedding.length !== speakerDim) {
+            throw new Error(`the speaker embedding must have ${speakerDim} values`);
+        }
+        condition.set(embedding);
+    }
+    const styleTable = weight(model, 'style').data;
+    const weights = styleWeights(model, style);
+    for (const [row, share] of weights.entries()) {
+        for (let ix = 0; ix < styleDim; ix++) {
+            condition[speakerDim + ix] += share * styleTable[row * styleDim + ix];
+        }
+    }
+    return {condition, 'eq': eq ?? voiceEq};
+}
+
+
+// The condition's projections - {encoder, duration, decoder (added vectors), films: {prefix: [gamma, beta]}}
+function conditionProjections(model, condition) {
+    const input = rowMatrix(condition);
+    const projections = {
+        'encoder': linear(model, 'condition_encoder', input).data,
+        'duration': linear(model, 'condition_duration', input).data,
+        'decoder': linear(model, 'condition_decoder', input).data,
+        'films': {}
+    };
+    const prefixes = [];
+    for (let layer = 0; layer < 2 * model.config.encoderLayers; layer += 2) {
+        prefixes.push(`encoder.${layer}`);
+    }
+    for (let layer = 0; layer < model.config.decoderLayers; layer++) {
+        prefixes.push(`decoder.${layer}`);
+    }
+    for (const prefix of prefixes) {
+        const filmVector = linear(model, `${prefix}.film`, input).data;
+        const half = filmVector.length / 2;
+        projections.films[prefix] = [filmVector.subarray(0, half), filmVector.subarray(half)];
+    }
+    return projections;
+}
+
+
+// Add a vector to every row of a matrix, in place
+function addVector(input, vector) {
+    for (let ix = 0; ix < input.data.length; ix++) {
+        input.data[ix] += vector[ix % input.cols];
+    }
+    return input;
+}
+
+
+// FiLM - each row times (1 + gamma) plus beta, in place
+function film(input, [gamma, beta]) {
+    for (let ix = 0; ix < input.data.length; ix++) {
+        const channel = ix % input.cols;
+        input.data[ix] = input.data[ix] * (1 + gamma[channel]) + beta[channel];
+    }
+    return input;
+}
+
+
 // Token ids to token features (rows [N][D])
-function encode(model, ids) {
+function encode(model, ids, projections) {
     const embedding = weight(model, 'embedding.weight');
+    if (projections) {
+        const [, width] = embedding.shape;
+        let rows = zeros(ids.length, width);
+        for (const [index, id] of ids.entries()) {
+            for (let ix = 0; ix < width; ix++) {
+                rows.data[index * width + ix] = embedding.data[id * width + ix] + projections.encoder[ix];
+            }
+        }
+        for (let layer = 0; layer < 2 * model.config.encoderLayers; layer++) {
+            const prefix = `encoder.${layer}`;
+            rows = layer % 2 === 0 ? convFFN(model, prefix, rows, projections.films[prefix]) : selfAttention(model, prefix, rows);
+        }
+        return layerNorm(model, 'encoder_norm', rows);
+    }
     const speaker = weight(model, 'speaker.weight').data;
     const [, dim] = embedding.shape;
     let rows = zeros(ids.length, dim);
@@ -262,8 +412,9 @@ function encode(model, ids) {
 
 
 // Predicted durations (10 ms frames) of token features
-function predictDurations(model, ids, features, {pauseThreshold = 0.5, rate = 1} = {}) {
-    let rows = features;
+function predictDurations(model, ids, features, {pauseThreshold = 0.5, rate = 1} = {}, projections = null) {
+    let rows = projections ? addVector({'rows': features.rows, 'cols': features.cols, 'data': Float64Array.from(features.data)},
+        projections.duration) : features;
     for (let layer = 0; layer < 2; layer++) {
         const prefix = `duration_layers.${layer}`;
         rows = layerNorm(model, `${prefix}.norm`, silu(linear(model, `${prefix}.linear`, depthwiseConv(model, `${prefix}.conv`, rows))));
@@ -290,7 +441,7 @@ function predictDurations(model, ids, features, {pauseThreshold = 0.5, rate = 1}
 
 
 // Decode token features and durations to parameter frames (Float64Array rows of nn/params.py's parameters, 5 ms)
-function decode(model, features, durations) {
+function decode(model, features, durations, projections = null) {
     const {config} = model;
     const frameCount = durations.reduce((sum, duration) => sum + duration, 0);
     if (frameCount === 0) {
@@ -311,12 +462,10 @@ function decode(model, features, durations) {
         }
     }
     let rows = addRows(linear(model, 'decoder_in', regulated), linear(model, 'position_in', positions));
-    const speaker = weight(model, 'decoder_speaker.weight').data;
-    for (let ix = 0; ix < rows.data.length; ix++) {
-        rows.data[ix] += speaker[ix % rows.cols];
-    }
+    addVector(rows, projections ? projections.decoder : weight(model, 'decoder_speaker.weight').data);
     for (let layer = 0; layer < config.decoderLayers; layer++) {
-        rows = convFFN(model, `decoder.${layer}`, rows);
+        const prefix = `decoder.${layer}`;
+        rows = convFFN(model, prefix, rows, projections ? projections.films[prefix] : null);
     }
     const logits = linear(model, 'head', layerNorm(model, 'decoder_norm', rows));
     const count = NAMES.length;
@@ -341,13 +490,24 @@ function decode(model, features, durations) {
 }
 
 
+// Whether a model is the multi-speaker model
+export function isMulti(model) {
+    return model.config.kind === 'multi';
+}
+
+
 // Infer one token sequence (ids, starting with <bos>) - {durations (10 ms frames per token), frames (5 ms; 2F of them -
-// the caller appends the end frame)}
+// the caller appends the end frame)}. A multi-speaker model's voice is options.projections (from options.condition, or
+// the speakFrames voice options).
 export function infer(model, ids, options = {}) {
+    let projections = null;
+    if (isMulti(model)) {
+        projections = options.projections ?? conditionProjections(model, options.condition ?? voiceCondition(model, options).condition);
+    }
     const mapped = ids.map((id) => model.remap.get(id) ?? id);
-    const features = encode(model, mapped);
-    const durations = predictDurations(model, mapped, features, options);
-    return {durations, 'frames': decode(model, features, durations)};
+    const features = encode(model, mapped, projections);
+    const durations = predictDurations(model, mapped, features, options, projections);
+    return {durations, 'frames': decode(model, features, durations, projections)};
 }
 
 
@@ -372,13 +532,22 @@ export function sentences(ids) {
 // Speak text - {frames (5 ms parameter frames, Float64Array rows, the end frame included), eq (the voice's channel
 // equalizer, dB), sentences: [{ids, durations, frameStart}]}. options: pauseThreshold, rate (a duration multiplier),
 // bandwidthScale (default: the voice's - the manifest's inference.bandwidthScale, which sharpens the network's
-// over-smoothed formant bandwidths; 1 for the network's own).
+// over-smoothed formant bandwidths; 1 for the network's own). The multi-speaker model's voice options: speaker (an id
+// of manifest.speakers, or a blend {id: weight}; default manifest.defaultSpeaker), embedding (a raw speaker embedding,
+// in place of the speaker's), style ({emotion, intensity} - an emotion of manifest.styles or 'neutral', intensity 0-1 -
+// or a blend {emotion: weight}), and eq (a channel equalizer in place of the speakers' blend).
 export function speakFrames(model, text, options = {}) {
     const {ids} = tokenize(text);
     const frames = [];
     const parts = [];
+    let voice = null;
+    let sentenceOptions = options;
+    if (isMulti(model)) {
+        voice = voiceCondition(model, options);
+        sentenceOptions = {...options, 'projections': conditionProjections(model, voice.condition)};
+    }
     for (const sentenceIds of sentences(ids)) {
-        const result = infer(model, sentenceIds, options);
+        const result = infer(model, sentenceIds, sentenceOptions);
         parts.push({'ids': sentenceIds, 'durations': result.durations, 'frameStart': frames.length});
         frames.push(...result.frames);
     }
@@ -386,5 +555,5 @@ export function speakFrames(model, text, options = {}) {
         frames.push(Float64Array.from(frames[frames.length - 1]));
     }
     const scale = options.bandwidthScale ?? model.manifest.inference?.bandwidthScale ?? 1;
-    return {'frames': scale === 1 ? frames : bandwidthScale(frames, scale), 'eq': model.manifest.eq, 'sentences': parts};
+    return {'frames': scale === 1 ? frames : bandwidthScale(frames, scale), 'eq': voice ? voice.eq : model.manifest.eq, 'sentences': parts};
 }
