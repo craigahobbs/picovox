@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Training Dashboard</title>
+<style>
+    :root {
+        --bg: #f4f6f8;
+        --panel: #ffffff;
+        --text: #1b232c;
+        --muted: #607080;
+        --rule: #dbe1e7;
+        --accent: #2563a8;
+        --series-2: #c2410c;
+        --series-3: #15803d;
+        --series-4: #7c3aed;
+        --good: #15803d;
+        --warn: #b45309;
+        --bad: #b91c1c;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --bg: #0f1419;
+            --panel: #171e26;
+            --text: #e3e9ef;
+            --muted: #8d9cab;
+            --rule: #2a3440;
+            --accent: #6aa8ec;
+            --series-2: #f0955c;
+            --series-3: #5bc589;
+            --series-4: #b49af5;
+            --good: #5bc589;
+            --warn: #e8b04c;
+            --bad: #f2837b;
+            color-scheme: dark;
+        }
+    }
+    * {
+        box-sizing: border-box;
+    }
+    body {
+        margin: 0;
+        padding: 20px max(16px, env(safe-area-inset-left)) 40px max(16px, env(safe-area-inset-right));
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    main {
+        max-width: 1200px;
+        margin: 0 auto;
+        display: grid;
+        gap: 18px;
+    }
+    header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 6px 16px;
+    }
+    h1 {
+        margin: 0;
+        font-size: 1.5rem;
+    }
+    h2 {
+        margin: 0 0 10px;
+        font-size: 1.05rem;
+    }
+    h3 {
+        margin: 0;
+        font-size: 0.95rem;
+    }
+    .muted {
+        color: var(--muted);
+    }
+    .updated {
+        font-family: var(--mono);
+        font-size: 0.8rem;
+        color: var(--muted);
+    }
+    section {
+        background: var(--panel);
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        padding: 16px;
+        min-width: 0;
+    }
+    .runs {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+        gap: 10px;
+    }
+    .run {
+        display: grid;
+        gap: 6px;
+        padding: 12px;
+        border: 1px solid var(--rule);
+        border-radius: 8px;
+        background: var(--bg);
+        text-align: left;
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+    }
+    .run[aria-pressed="true"] {
+        border-color: var(--accent);
+        box-shadow: inset 0 0 0 1px var(--accent);
+    }
+    .run-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        align-items: baseline;
+    }
+    .run-name {
+        font-weight: 600;
+        overflow-wrap: anywhere;
+    }
+    .pill {
+        flex: none;
+        font: 600 0.7rem/1 var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 4px 6px;
+        border-radius: 4px;
+        color: var(--panel);
+        background: var(--muted);
+    }
+    .pill.live {
+        background: var(--good);
+    }
+    .pill.stalled {
+        background: var(--warn);
+    }
+    .pill.failed {
+        background: var(--bad);
+    }
+    .bar {
+        height: 6px;
+        border-radius: 3px;
+        background: var(--rule);
+        overflow: hidden;
+    }
+    .bar > div {
+        height: 100%;
+        background: var(--accent);
+    }
+    .facts {
+        font: 0.78rem/1.5 var(--mono);
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+    }
+    .charts {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+        gap: 14px;
+    }
+    .chart {
+        display: grid;
+        gap: 6px;
+        min-width: 0;
+    }
+    .chart canvas {
+        width: 100%;
+        height: 190px;
+        display: block;
+    }
+    .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 12px;
+        font-size: 0.78rem;
+        color: var(--muted);
+    }
+    .legend span::before {
+        content: "";
+        display: inline-block;
+        width: 10px;
+        height: 3px;
+        margin-right: 5px;
+        vertical-align: middle;
+        background: var(--swatch);
+    }
+    .logs {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+        gap: 12px;
+    }
+    .log {
+        display: grid;
+        gap: 6px;
+        min-width: 0;
+    }
+    pre {
+        margin: 0;
+        padding: 10px;
+        max-height: 240px;
+        overflow: auto;
+        border-radius: 6px;
+        background: var(--bg);
+        font: 0.75rem/1.45 var(--mono);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+    }
+    .samples {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        gap: 8px;
+    }
+    .sample {
+        display: grid;
+        gap: 4px;
+        font-size: 0.8rem;
+        min-width: 0;
+    }
+    .sample span {
+        overflow-wrap: anywhere;
+    }
+    audio {
+        width: 100%;
+        height: 32px;
+    }
+    .empty {
+        color: var(--muted);
+        margin: 0;
+    }
+</style>
+</head>
+<body>
+<main>
+    <header>
+        <h1>Training Dashboard</h1>
+        <span class="muted">voice-synth neural voices - build/nn/</span>
+        <span id="updated" class="updated"></span>
+    </header>
+    <section>
+        <h2>Runs</h2>
+        <div id="runs" class="runs"><p class="empty">Looking for runs in build/nn/runs/...</p></div>
+    </section>
+    <section>
+        <h2 id="chartsTitle">Curves</h2>
+        <div id="charts" class="charts"></div>
+    </section>
+    <section>
+        <h2>Activity logs</h2>
+        <div id="logs" class="logs"><p class="empty">Looking for logs in build/nn/...</p></div>
+    </section>
+    <section>
+        <h2>Samples</h2>
+        <div id="samples" class="samples"><p class="empty">No samples yet.</p></div>
+    </section>
+</main>
+<script type="module" src="dashboard.js"></script>
+</body>
+</html>
