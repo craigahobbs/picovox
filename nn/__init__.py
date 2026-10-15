@@ -8,6 +8,9 @@ interpretable source-filter parameters, trained end to end through a differentia
 - nn/frontend.py - the token vocabulary (nn/vocab.json) and a Python port of lib/lexicon.js textToPhrases
 - nn/data.py - the training data (CMU ARCTIC slt and bdl) under build/nn/data/, its loader, and its statistics
 - nn/js/tokens.js - the same tokens in JavaScript, from lib/lexicon.js, for browser-side inference
+- nn/cremad.py - emotional speech for the style modifiers: CREMA-D fetched, force-aligned (a wav2vec2 phoneme CTC
+  recognizer), and built under build/nn/data/cremad/ in nn/data.py's format with emotion and intensity labels; the
+  listener panel's emotion recognition of it (data/nn/cremad.json)
 
 The synthesizer:
 
@@ -30,6 +33,11 @@ The network:
 
 - nn/model.py - the model: tokens to durations to parameter frames (non-autoregressive, ~0.75M parameters)
 - nn/train.py - training end to end through nn/dsynth.py (checkpoints under build/nn/runs/)
+- nn/model.py's MultiModel and nn/trainmulti.py - the multi-speaker, multi-style model (~0.95M parameters): a speaker
+  table (blendable voices) and a style table (emotions scaled by intensity) conditioning the network (FiLM), trained
+  on the American reader pool and CREMA-D with an adversarial spectrogram critic against the over-smoothing;
+  nn/export.py writes data/nn/multi.*, which nn/js/model.js speaks with a speaker blend and a style
+- nn/evalmulti.py - the multi-speaker model's evaluation and samples (build/nn/samples-multi/)
 - nn/export.py - 8-bit export to data/nn/<voice>.bin and .json; nn/js/model.js - the forward pass in JavaScript;
   nn/js/transforms.js - the voice and style transforms; nn/js/speak.js - text to WAV with a neural voice (Node)
 - nn/synthesize.py - inference in PyTorch; nn/parity.py - nn/js/model.js against PyTorch, the quantization, and speed

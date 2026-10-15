@@ -112,12 +112,23 @@ def read_xwaves(path):
     return labels
 
 
+# An utterance's phone labels - [(label, start, end)] in seconds, from its xwaves (ARCTIC) or MFA (LibriTTSLabel,
+# utterance['labelFormat'] == 'mfa') label file
+def read_labels(utterance):
+    if utterance.get('labelFormat') == 'mfa':
+        return read_mfa(utterance['lab'])
+    return read_xwaves(utterance['lab'])
+
+
 # The ARCTIC utterances of a speaker - [{speaker, sentence, wav, lab, text}]
 def arctic_utterances(speaker):
     directory = os.path.join(ARCTIC_DIR, f'cmu_us_{speaker}_arctic')
     prompts = read_prompts(os.path.join(directory, 'etc', 'txt.done.data'))
     utterances = []
     for name in sorted(os.listdir(os.path.join(directory, 'wav'))):
+        # Only the recordings (nn/evaluate.py caches whisper.cpp transcripts beside them)
+        if not name.endswith('.wav'):
+            continue
         sentence = os.path.splitext(name)[0]
         utterances.append({'speaker': speaker, 'sentence': sentence, 'wav': os.path.join(directory, 'wav', name),
                            'lab': os.path.join(directory, 'lab', sentence + '.lab'), 'text': prompts.get(sentence)})
@@ -142,7 +153,7 @@ def mean_label_seconds(utterances):
     totals = collections.defaultdict(lambda: [0.0, 0])
     for utterance in utterances:
         if os.path.exists(utterance['lab']):
-            for label, start, end in read_xwaves(utterance['lab']):
+            for label, start, end in read_labels(utterance):
                 key = align.label_key(label)
                 totals[key][0] += end - start
                 totals[key][1] += 1
@@ -185,7 +196,7 @@ def silent_runs(samples, rate):
 def align_utterance(utterance, mean_seconds, samples, rate):
     tokenized = tokenize(utterance['text'])
     tokens = tokenized['tokens']
-    labels = read_xwaves(utterance['lab'])
+    labels = read_labels(utterance)
     wav_seconds = len(samples) / rate
 
     # Clip the labels to the audio (the last label extends to its end)
@@ -284,7 +295,7 @@ def process_utterance(task):
     frame_count = sum(frames)
 
     # Resample to 24 kHz, then cut to the frames
-    resampled = soxr.resample(samples, rate, SAMPLE_RATE, quality='VHQ')
+    resampled = samples if rate == SAMPLE_RATE else soxr.resample(samples, rate, SAMPLE_RATE, quality='VHQ')
     start = int(round(cut_start * SAMPLE_RATE))
     audio = resampled[start:start + frame_count * HOP]
     audio = np.pad(audio, (0, frame_count * HOP - len(audio)))

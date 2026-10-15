@@ -22,9 +22,10 @@ from . import spectral
 class SpectrogramDiscriminator(torch.nn.Module):
     """A log-mel spectrogram discriminator at one resolution"""
 
-    def __init__(self, sample_rate, fft_size, mels, max_hz, channels=32):
+    def __init__(self, sample_rate, fft_size, mels, max_hz, channels=32, eps=0.0):
         super().__init__()
         self.fft_size = fft_size
+        self.eps = eps
         bank = spectral.mel_filterbank(sample_rate, fft_size, mels, high=max_hz)
         self.register_buffer('bank', torch.tensor(bank, dtype=torch.float32), persistent=False)
         leaky = torch.nn.LeakyReLU(0.2)
@@ -39,7 +40,7 @@ class SpectrogramDiscriminator(torch.nn.Module):
 
     def forward(self, audio):
         """Audio [B, N] to (scores [B, 1, T, M'], intermediate features)"""
-        magnitude = spectral.stft_magnitude(audio, self.fft_size, self.fft_size // 4, eps=0)
+        magnitude = spectral.stft_magnitude(audio, self.fft_size, self.fft_size // 4, eps=self.eps)
         x = torch.log(magnitude ** 2 @ self.bank.T + 1e-5)[:, None]
         features = []
         for layer in self.layers:
@@ -51,12 +52,12 @@ class SpectrogramDiscriminator(torch.nn.Module):
 class Critic(torch.nn.Module):
     """Spectrogram discriminators at several resolutions"""
 
-    def __init__(self, sample_rate, max_hz):
+    def __init__(self, sample_rate, max_hz, eps=0.0):
         super().__init__()
         self.discriminators = torch.nn.ModuleList([
-            SpectrogramDiscriminator(sample_rate, 1024, 80, max_hz),
-            SpectrogramDiscriminator(sample_rate, 512, 64, max_hz),
-            SpectrogramDiscriminator(sample_rate, 256, 32, max_hz)
+            SpectrogramDiscriminator(sample_rate, 1024, 80, max_hz, eps=eps),
+            SpectrogramDiscriminator(sample_rate, 512, 64, max_hz, eps=eps),
+            SpectrogramDiscriminator(sample_rate, 256, 32, max_hz, eps=eps)
         ])
 
     def forward(self, audio):

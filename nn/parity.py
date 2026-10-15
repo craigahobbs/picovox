@@ -14,6 +14,7 @@ quantized against the float model):
 - speed - nn/js/speak.js's real-time factors (network, rendering at 44.1 kHz)
 
     build/venv-nn/bin/python -B -m nn.parity build/nn/runs/slt/best.pt data/nn/slt
+    build/venv-nn/bin/python -B -m nn.parity build/nn/runs/multi-b/best.pt data/nn/multi --speaker libritts-6454 [--style happy]
 """
 
 import argparse
@@ -51,7 +52,7 @@ def forced_values(voice, parts):
     for part in parts:
         tokens = torch.tensor([[voice.remap.get(token, token) for token in part['ids']]])
         with torch.no_grad():
-            outputs = voice.model(tokens, torch.tensor([part['durations']]), torch.tensor([voice.speaker]))
+            outputs = voice.model(tokens, torch.tensor([part['durations']]), **voice.condition())
             chunks.append(voice.model.parameters_from_unit(outputs['unit'])[0].numpy())
     values = numpy.concatenate(chunks)
     return params.bandwidth_scale(numpy.concatenate([values, values[-1:]]), voice.bandwidth_scale)
@@ -63,20 +64,30 @@ def main(argv=None):
     parser.add_argument('model', help='the exported voice (data/nn/<voice>, without extension)')
     parser.add_argument('--count', type=int, default=40)
     parser.add_argument('--audio-count', type=int, default=8)
-    parser.add_argument('--speaker', default=None, help='the speaker of a multi-speaker model')
+    parser.add_argument('--speaker', default=None, help='the speaker of a multi-speaker model (a key or an id)')
+    parser.add_argument('--blend', default=None, help='a multi-speaker model\'s speaker blend (JSON {id: weight})')
+    parser.add_argument('--style', default=None, help='a multi-speaker model\'s style (an emotion)')
+    parser.add_argument('--intensity', type=float, default=1.0)
     args = parser.parse_args(argv)
+    blend = json.loads(args.blend) if args.blend else None
     items = texts(args.count)
     with open(f'{args.model}.json', encoding='utf-8') as file:
         scale = json.load(file)['inference'].get('bandwidthScale', 1.0)
-    quantized = Voice(args.checkpoint, quantized=True, speaker=args.speaker, bandwidth_scale=scale)
-    floating = Voice(args.checkpoint, quantized=False, speaker=args.speaker, bandwidth_scale=scale)
+    voice = {'speaker': args.speaker, 'blend': blend, 'emotion': args.style, 'intensity': args.intensity}
+    quantized = Voice(args.checkpoint, quantized=True, bandwidth_scale=scale, **voice)
+    floating = Voice(args.checkpoint, quantized=False, bandwidth_scale=scale, **voice)
+    js_voice = []
+    if quantized.multi:
+        js_voice = ['--blend', json.dumps(blend)] if blend else ['--speaker', str(quantized.speaker)]
+        if args.style:
+            js_voice += ['--style', args.style, '--intensity', str(args.intensity)]
 
     with tempfile.TemporaryDirectory() as directory:
         batch = [{'text': text, 'params': os.path.join(directory, f'{ix}.json')} for ix, text in enumerate(items)]
         with open(os.path.join(directory, 'batch.json'), 'w', encoding='utf-8') as file:
             json.dump(batch, file)
         subprocess.run(['node', os.path.join(ROOT, 'nn', 'js', 'speak.js'), '-m', args.model, '--batch',
-                        os.path.join(directory, 'batch.json'), '--frames-only'], check=True, capture_output=True, cwd=ROOT)
+                        os.path.join(directory, 'batch.json'), '--frames-only', *js_voice], check=True, capture_output=True, cwd=ROOT)
         js_frames = []
         js_durations = []
         for item in batch:
@@ -90,7 +101,7 @@ def main(argv=None):
         with open(os.path.join(directory, 'speed.json'), 'w', encoding='utf-8') as file:
             json.dump(speed_batch, file)
         process = subprocess.run(['node', os.path.join(ROOT, 'nn', 'js', 'speak.js'), '-m', args.model, '--batch',
-                                  os.path.join(directory, 'speed.json')], check=True, capture_output=True, text=True, cwd=ROOT)
+                                  os.path.join(directory, 'speed.json'), *js_voice], check=True, capture_output=True, text=True, cwd=ROOT)
         speed = json.loads(process.stdout.strip().splitlines()[-1])
 
     same_tokens = 0

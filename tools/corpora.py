@@ -7,7 +7,8 @@ Download and unpack the human speech corpora used as calibration targets, idempo
     build/venv-analysis/bin/python -I tools/corpora.py [--list] [--keep-archives] [name ...]
 
 The corpora (names): the CMU ARCTIC US English speakers (arctic-<speaker>), the LibriTTS-R dev-clean audiobook
-subset (libritts-r-dev-clean), and the LibriTTSLabel forced alignments of LibriTTS (libritts-label-dev-clean).
+and train-clean-100 subsets (libritts-r-dev-clean, libritts-r-train-clean-100), and the LibriTTSLabel forced alignments
+of LibriTTS (libritts-label-dev-clean, libritts-label-train-clean-100).
 With no names, all of them are fetched. A corpus already unpacked is skipped; an interrupted download resumes.
 Downloads are sequential (one connection at a time) with a descriptive User-Agent.
 """
@@ -66,7 +67,19 @@ CORPORA['libritts-r-dev-clean'] = {
     'urls': ['https://www.openslr.org/resources/141/dev_clean.tar.gz'],
     'dest': os.path.join(CORPORA_DIR, 'libritts_r'),
     'check': os.path.join(CORPORA_DIR, 'libritts_r', 'LibriTTS_R', 'dev-clean'),
+    'sizePaths': [os.path.join(CORPORA_DIR, 'libritts_r', 'LibriTTS_R', 'dev-clean')],
     'description': 'LibriTTS-R dev-clean (OpenSLR 141) - 40 LibriVox audiobook readers (20 female, 20 male), 24 kHz, '
+                   'sentence-segmented, with original and normalized text; speech-restored LibriTTS',
+    'license': 'CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/) - Koizumi et al., "LibriTTS-R", 2023; '
+               'derived from LibriTTS (Zen et al., 2019, CC BY 4.0) and LibriSpeech/LibriVox (public domain recordings)'
+}
+CORPORA['libritts-r-train-clean-100'] = {
+    'urls': ['https://openslr.elda.org/resources/141/train_clean_100.tar.gz'],    # the OpenSLR EU mirror (faster)
+    'dest': os.path.join(CORPORA_DIR, 'libritts_r'),
+    'check': os.path.join(CORPORA_DIR, 'libritts_r', 'LibriTTS_R', 'train-clean-100'),
+    'sizePaths': [os.path.join(CORPORA_DIR, 'libritts_r', 'LibriTTS_R', 'train-clean-100')],
+    'description': 'LibriTTS-R train-clean-100 (OpenSLR 141) - 247 LibriVox audiobook readers (123 female, 124 male; 33,232 '
+                   'utterances, about 54 hours - the "100" is LibriSpeech\'s hours, before LibriTTS\'s filtering), 24 kHz, '
                    'sentence-segmented, with original and normalized text; speech-restored LibriTTS',
     'license': 'CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/) - Koizumi et al., "LibriTTS-R", 2023; '
                'derived from LibriTTS (Zen et al., 2019, CC BY 4.0) and LibriSpeech/LibriVox (public domain recordings)'
@@ -84,11 +97,21 @@ CORPORA['libritts-label-dev-clean'] = {
     'dest': os.path.join(CORPORA_DIR, 'libritts_label'),
     'check': os.path.join(CORPORA_DIR, 'libritts_label', 'lab', 'phone', 'dev-clean'),
     'members': ('lab/phone/dev-clean/', 'lab/word/dev-clean/'),
+    'sizePaths': [os.path.join(CORPORA_DIR, 'libritts_label', 'lab', kind, 'dev-clean') for kind in ('phone', 'word')],
     'description': 'LibriTTSLabel (github.com/kan-bayashi/LibriTTSLabel) - Montreal Forced Aligner phone and word '
-                   'alignments of LibriTTS (the same utterances as LibriTTS-R); only dev-clean is unpacked',
+                   'alignments of LibriTTS dev-clean (the same utterances as LibriTTS-R)',
     'license': 'No license stated by the repository - used here only locally, for measurement, and not redistributed'
 }
-
+CORPORA['libritts-label-train-clean-100'] = {
+    'urls': CORPORA['libritts-label-dev-clean']['urls'],
+    'dest': os.path.join(CORPORA_DIR, 'libritts_label'),
+    'check': os.path.join(CORPORA_DIR, 'libritts_label', 'lab', 'phone', 'train-clean-100'),
+    'members': ('lab/phone/train-clean-100/', 'lab/word/train-clean-100/'),
+    'sizePaths': [os.path.join(CORPORA_DIR, 'libritts_label', 'lab', kind, 'train-clean-100') for kind in ('phone', 'word')],
+    'description': 'LibriTTSLabel (github.com/kan-bayashi/LibriTTSLabel) - Montreal Forced Aligner phone and word '
+                   'alignments of LibriTTS train-clean-100 (the same utterances as LibriTTS-R)',
+    'license': 'No license stated by the repository - used here only locally, for measurement, and not redistributed'
+}
 
 # Print a progress line to stderr
 def log(message):
@@ -212,7 +235,8 @@ def write_readme():
         if not present:
             size = 'not downloaded'
         elif os.path.isdir(corpus['check']):
-            size = f'{directory_size(os.path.dirname(corpus["check"])) / 1e6:.0f} MB unpacked'
+            paths = corpus.get('sizePaths', [os.path.dirname(corpus['check'])])
+            size = f'{sum(directory_size(path) for path in paths) / 1e6:.0f} MB unpacked'
         else:
             size = 'small (documentation files)'
         lines.extend([
@@ -224,7 +248,15 @@ def write_readme():
             f'- Size: {size}',
             ''
         ])
-    with open(os.path.join(CORPORA_DIR, 'README.md'), 'w', encoding='utf-8') as file:
+    # Keep the sections other tools append (each between <!-- ... --> markers - nn/cremad.py's, for example)
+    readme_path = os.path.join(CORPORA_DIR, 'README.md')
+    if os.path.exists(readme_path):
+        with open(readme_path, encoding='utf-8') as file:
+            existing = file.read()
+        marker = existing.find('\n<!-- ')
+        if marker >= 0:
+            lines.append(existing[marker + 1:].rstrip('\n') + '\n')
+    with open(readme_path, 'w', encoding='utf-8') as file:
         file.write('\n'.join(lines))
 
 
