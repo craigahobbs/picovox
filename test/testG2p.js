@@ -131,6 +131,29 @@ test('g2p.loadG2p', async () => {
 });
 
 
+// The shipped model reads heteronyms as readers do - its targets for these are the LibriTTS-R readers' majority
+// pronunciation, not the CMU dictionary's first (lead "leed", not the metal "led")
+test('g2p.loadG2p, readers\' pronunciations', async () => {
+    const pronounce = await loadG2p(g2pModel);
+    const expected = {
+        'lead': 'L IY1 D',
+        'live': 'L IH1 V',
+        'lives': 'L AY1 V Z',
+        'wind': 'W IH1 N D',
+        'wound': 'W UW1 N D',
+        'tears': 'T IH1 R Z',
+        'content': 'K AH0 N T EH1 N T',
+        'record': 'R EH1 K ER0 D',
+        // Function words keep the dictionary's full form - their reduction is contextual
+        'can': 'K AE1 N',
+        'and': 'AH0 N D'
+    };
+    for (const [word, phones] of Object.entries(expected)) {
+        assert.equal(pronounce(word).join(' '), phones, word);
+    }
+});
+
+
 // The shipped model's format - per-row scales, a byte per value (6-bit values deflate smaller than bit-packed), deflated
 test('g2p.g2pModel format', () => {
     assert.equal(g2pModel.design, 'ar');
