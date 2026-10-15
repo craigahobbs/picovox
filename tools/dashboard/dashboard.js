@@ -242,7 +242,7 @@ async function refreshRuns() {
 const runGroupSpecs = [
     {'title': 'Multi-speaker voice', 'prefixes': ['multi-'], 'open': true},
     {'title': 'G2P', 'prefixes': ['g2p-'], 'open': false},
-    {'title': 'Voice students (distilled and from scratch)', 'prefixes': ['distill-', 'scratch-'], 'open': false},
+    {'title': 'Voice students (distilled and from scratch)', 'prefixes': ['distill-', 'scratch-'], 'open': true},
     {'title': 'Earlier single-speaker voices', 'prefixes': ['slt-', 'bdl-', 'joint-'], 'open': false},
     {'title': 'Other', 'prefixes': [''], 'open': false}
 ];
