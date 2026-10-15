@@ -58,20 +58,17 @@ class SpectrogramDiscriminator(torch.nn.Module):
         return self.score(self.spectrogram(audio))
 
 
-# The critic's resolutions - FFT size: mel bands
-SCALES = {1024: 80, 512: 64, 256: 32}
-
-
 class Critic(torch.nn.Module):
-    """Spectrogram discriminators at several resolutions (FFT sizes of SCALES); dtype (torch.bfloat16 or torch.float16)
-    runs their convolutions in that precision (autocast - the spectrograms, the weights, and the outputs stay float32)"""
+    """Spectrogram discriminators at several resolutions; dtype (torch.bfloat16 or torch.float16) runs their
+    convolutions in that precision (autocast - the spectrograms, the weights, and the outputs stay float32)"""
 
-    def __init__(self, sample_rate, max_hz, eps=0.0, channels=32, scales=(1024, 512, 256), dtype=None):
+    def __init__(self, sample_rate, max_hz, eps=0.0, dtype=None):
         super().__init__()
         self.dtype = dtype
         self.discriminators = torch.nn.ModuleList([
-            SpectrogramDiscriminator(sample_rate, fft_size, SCALES[fft_size], max_hz, channels=channels, eps=eps)
-            for fft_size in scales
+            SpectrogramDiscriminator(sample_rate, 1024, 80, max_hz, eps=eps),
+            SpectrogramDiscriminator(sample_rate, 512, 64, max_hz, eps=eps),
+            SpectrogramDiscriminator(sample_rate, 256, 32, max_hz, eps=eps)
         ])
 
     def spectrograms(self, audio):
