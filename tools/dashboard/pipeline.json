@@ -49,6 +49,8 @@
             "processes": [],
             "runs": [],
             "steps": [
+                {"title": "Integration branch: distillation, G2P-network data, G2P training tooling", "log": "build/nn/loop/merge.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 2},
+                {"title": "Alternating loop on the training code: optimize, simplify, repeat", "log": "build/nn/loop/loop.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 6},
                 {"title": "Merged into main", "file": "build/nn/pipeline/merged.json", "weight": 1}
             ]
         },
