@@ -24,6 +24,10 @@ over-smoothed bandwidths, chosen on the validation sentences).
 
 The quantization is the only lossy step - quantized_model() gives the PyTorch model with the exported weights
 (dequantized), which nn/js/model.js must match.
+
+Lower precision (--bits 6, 5, 4, and --group for per-group scales) uses nn/quant.py's 'packed' encoding: the values
+packed at the bit width, float16 scales per row or per group (the manifest entry's bits and group). The default (8 bits
+per row) is the 'int8' format above, unchanged.
 """
 
 import argparse
@@ -36,7 +40,7 @@ import sys
 import numpy
 import torch
 
-from . import params
+from . import params, quant
 from .data import DATA_DIR, ArcticData
 from .model import STYLE_NAMES, build_model, parameter_count
 
@@ -101,14 +105,19 @@ def is_quantized(tensor, name=None):
     return tensor.dim() >= 2 and tensor.numel() >= MIN_QUANTIZED and name not in FLOAT_TENSORS
 
 
-# A copy of a model with its weights quantized and dequantized - the exported model, in PyTorch
-def quantized_model(model):
+# A copy of a model with its weights quantized and dequantized - the exported model, in PyTorch (bits and group - the
+# export's precision, nn/quant.py)
+def quantized_model(model, bits=8, group=0):
     model = copy.deepcopy(model)
     state = model.state_dict()
     for name, tensor in exported_tensors(model).items():
         if is_quantized(tensor, name):
-            values, scales = quantize(tensor)
-            state[name] = torch.tensor(values.astype(numpy.float32) * scales[:, None]).reshape(tensor.shape)
+            if quant.is_int8(bits, group):
+                values, scales = quantize(tensor)
+                state[name] = torch.tensor(values.astype(numpy.float32) * scales[:, None]).reshape(tensor.shape)
+            else:
+                values, scales = quant.quantize_array(tensor.numpy(), bits, group)
+                state[name] = torch.tensor(quant.dequantize_array(values, scales, tuple(tensor.shape), group))
     model.load_state_dict(state)
     return model
 
@@ -169,15 +178,27 @@ def speaker_list(state):
     return out
 
 
-# Export a model - writes <out>/<voice>.bin and <voice>.json, returns the manifest
-def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0, bandwidth_scale=1.0):
+# Export a model - writes <out>/<voice>.bin and <voice>.json, returns the manifest (bits and group - the weights'
+# precision, nn/quant.py; the default is the 8-bit per-row 'int8' format)
+def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0, bandwidth_scale=1.0, bits=8, group=0):
     os.makedirs(out_dir, exist_ok=True)
+    if not quant.is_int8(bits, group):
+        extra = {**(extra or {}), 'quantization': {'bits': bits, 'group': group}}
     chunks = []
     offset = 0
     tensors = []
     for name, tensor in exported_tensors(model, speaker).items():
         entry = {'name': name, 'shape': list(tensor.shape)}
-        if is_quantized(tensor, name):
+        if is_quantized(tensor, name) and not quant.is_int8(bits, group):
+            values, scales = quant.quantize_array(tensor.numpy(), bits, group)
+            data = quant.pack(values, bits)
+            scale_data = scales.astype('<f2').tobytes()
+            entry.update({'encoding': 'packed', 'bits': bits, 'group': quant.group_size(values.shape[1], group),
+                          'offset': offset, 'scaleOffset': offset + _aligned(len(data))})
+            chunks.append(data + b'\0' * (_aligned(len(data)) - len(data)))
+            chunks.append(scale_data + b'\0' * (_aligned(len(scale_data)) - len(scale_data)))
+            offset += _aligned(len(data)) + _aligned(len(scale_data))
+        elif is_quantized(tensor, name):
             values, scales = quantize(tensor)
             data = values.tobytes()
             entry.update({'encoding': 'int8', 'offset': offset, 'scaleOffset': offset + _aligned(len(data))})
@@ -252,15 +273,18 @@ def main(argv=None):
     parser.add_argument('--speaker', default=None, help='the speaker of a multi-speaker model (default: the first)')
     parser.add_argument('--bandwidth-scale', type=float, default=1.0,
                         help='the default formant bandwidth scale at inference (nn/js/model.js speakFrames)')
+    parser.add_argument('--bits', type=int, default=8, help='the weights\' bit width (nn/quant.py; default 8)')
+    parser.add_argument('--group', type=int, default=0, help='per-group scales of this many weights (default 0: per row)')
     args = parser.parse_args(argv)
     model, state = load_model(args.checkpoint)
     speaker = state['speakers'].index(args.speaker) if args.speaker else 0
     if is_multi(model) and not args.speaker:
         speaker = state['speakers'].index('arctic-bdl')
-    manifest = export(model, state, args.voice, args.out, speaker=speaker, bandwidth_scale=args.bandwidth_scale)
+    manifest = export(model, state, args.voice, args.out, speaker=speaker, bandwidth_scale=args.bandwidth_scale, bits=args.bits,
+                      group=args.group)
     sizes = {suffix: os.path.getsize(os.path.join(args.out, f'{args.voice}.{suffix}')) for suffix in ('bin', 'json')}
     print(json.dumps({'voice': args.voice, 'parameters': manifest['parameterCount'], 'bytes': sizes,
-                      'quantized': sum(1 for tensor in manifest['tensors'] if tensor['encoding'] == 'int8'),
+                      'quantized': sum(1 for tensor in manifest['tensors'] if tensor['encoding'] in ('int8', 'packed')),
                       'float32': sum(1 for tensor in manifest['tensors'] if tensor['encoding'] == 'float32'),
                       'remap': manifest['remap']}))
     return 0

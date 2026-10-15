@@ -50,11 +50,11 @@ class Voice:
     """A model ready for inference - the model, its remap, and its channel equalizer"""
 
     def __init__(self, checkpoint, quantized=True, device='cpu', speaker=None, bandwidth_scale=1.0, blend=None, emotion=None,
-                 intensity=1.0):
+                 intensity=1.0, bits=8, group=0):
         model, state = load_model(checkpoint, device)
         self.bandwidth_scale = bandwidth_scale
         self.speaker = speaker_id(state, speaker) if speaker is not None else 0
-        self.model = quantized_model(model) if quantized else model
+        self.model = quantized_model(model, bits, group) if quantized else model
         self.model.eval()
         self.state = state
         self.multi = is_multi(model)
@@ -88,7 +88,7 @@ class Voice:
 
     def frames(self, text, pause_threshold=0.5, rate=1.0):
         """Text to parameter frames [T, COUNT] (numpy, the end frame included) and the sentences' token ids and
-        durations"""
+        durations - with the spectral correction head, [T, COUNT + K], its band gains (dB) after the parameters"""
         ids = tokenize(text)['ids']
         chunks = []
         parts = []
@@ -98,6 +98,8 @@ class Voice:
             with torch.no_grad():
                 result = self.model.infer(tokens, **self.condition(), pause_threshold=pause_threshold, rate=rate)
             values = result['values'][0, :-1].cpu().numpy()
+            if 'correction' in result:
+                values = numpy.concatenate([values, result['correction'][0, :-1].cpu().numpy()], axis=-1)
             parts.append({'ids': sentence, 'durations': result['durations'][0].cpu().numpy().tolist()})
             chunks.append(values)
         if not chunks:
@@ -116,12 +118,15 @@ def speaker_id(state, speaker):
     return state['speakers'].index(speaker)
 
 
-# Render parameter frames with nn/dsynth.py (counter noise, as nn/js/render.js), peak-normalized
+# Render parameter frames with nn/dsynth.py (counter noise, as nn/js/render.js), peak-normalized - frames [T, COUNT], or
+# [T, COUNT + K] with the spectral correction's band gains (dB) after the parameters
 def render(values, eq, sample_rate=44100, seed=1, peak=0.89):
     synth = dsynth.DSynth(sample_rate, noise='counter')
+    values = numpy.asarray(values)
+    correction = torch.tensor(values[:, params.COUNT:], dtype=torch.float64) if values.shape[-1] > params.COUNT else None
     with torch.no_grad():
-        audio = synth(torch.tensor(values, dtype=torch.float64), seed=seed,
-                      eq=torch.tensor(eq, dtype=torch.float64)).numpy()
+        audio = synth(torch.tensor(values[:, :params.COUNT], dtype=torch.float64), seed=seed,
+                      eq=torch.tensor(eq, dtype=torch.float64), correction=correction).numpy()
     return audio * peak / max(1e-9, numpy.abs(audio).max())
 
 

@@ -100,6 +100,21 @@ RESIDUAL_LOW_HZ = 100.0
 RESIDUAL_HIGH_HZ = 16000.0
 
 
+# The spectral correction (optional - a model option, nn/model.py correctionBands) - a learned per-frame envelope that
+# multiplies the voicing's harmonic amplitudes and the noise (aspiration and frication) spectra: K band gains (dB, the
+# network's tanh output bounded by its correctionRangeDb) at log-spaced frequencies from CORRECTION_LOW_HZ to
+# CORRECTION_HIGH_HZ, interpolated linearly in dB over log frequency (held beyond the ends) and, for the noise, linearly
+# in dB between frames. It models what the formants and the static channel equalizer don't - a frame's spectral
+# envelope beyond the source-filter model - while the parameters stay interpretable. Off (K = 0), nothing changes.
+CORRECTION_LOW_HZ = 100.0
+CORRECTION_HIGH_HZ = 12000.0
+
+
+# The spectral correction's band frequencies (Hz) for K bands
+def correction_frequencies(bands):
+    return [CORRECTION_LOW_HZ * (CORRECTION_HIGH_HZ / CORRECTION_LOW_HZ) ** (ix / (bands - 1)) for ix in range(bands)]
+
+
 # The channel equalizer's band frequencies (Hz)
 def eq_frequencies():
     return [EQ_LOW_HZ * (EQ_HIGH_HZ / EQ_LOW_HZ) ** (ix / (EQ_BAND_COUNT - 1)) for ix in range(EQ_BAND_COUNT)]
@@ -285,16 +300,19 @@ def effort(values, db, shelf_per_db=0.5, rd_per_db=-0.02):
 
 
 #
-# Parameter files - JSON {"frameRate": 200, "names": [...], "frames": [[value, ...], ...], "eq": [dB, ...] (optional)},
-# shared with nn/js
+# Parameter files - JSON {"frameRate": 200, "names": [...], "frames": [[value, ...], ...], "eq": [dB, ...] (optional),
+# "correction": [[dB, ...], ...] (optional - the spectral correction's band gains per frame)}, shared with nn/js
 #
 
-# Write parameter frames (a [T, COUNT] array-like) to a JSON parameter file, with an optional channel equalizer (dB)
+# Write parameter frames (a [T, COUNT] array-like, or [T, COUNT + K] with the spectral correction's K band gains after
+# the parameters) to a JSON parameter file, with an optional channel equalizer (dB)
 def write_params(path, frames, eq=None):
-    rows = [[round(float(value), 4) for value in row] for row in frames]
+    rows = [[round(float(value), 4) for value in row[:COUNT]] for row in frames]
     data = {'frameRate': FRAME_RATE, 'names': NAMES, 'frames': rows}
     if eq is not None:
         data['eq'] = [round(float(value), 3) for value in eq]
+    if len(frames) and len(frames[0]) > COUNT:
+        data['correction'] = [[round(float(value), 4) for value in row[COUNT:]] for row in frames]
     with open(path, 'w', encoding='utf-8') as file:
         json.dump(data, file, separators=(',', ':'))
 
@@ -303,6 +321,14 @@ def write_params(path, frames, eq=None):
 def read_eq(path):
     with open(path, encoding='utf-8') as file:
         return json.load(file).get('eq')
+
+
+# Read a JSON parameter file's spectral correction (dB) [T, K] (numpy), or None
+def read_correction(path):
+    import numpy  # pylint: disable=import-outside-toplevel
+    with open(path, encoding='utf-8') as file:
+        correction = json.load(file).get('correction')
+    return None if correction is None else numpy.array(correction, dtype=numpy.float64)
 
 
 # Read a JSON parameter file to a numpy array [T, COUNT] (parameters missing from the file take their defaults)
@@ -344,7 +370,7 @@ def javascript():
         'HARMONIC_TAPER_START': HARMONIC_TAPER_START, 'HARMONIC_TAPER_END': HARMONIC_TAPER_END, 'F0_MIN': F0_MIN,
         'LF_RD_MIN': LF_RD_MIN, 'LF_RD_MAX': LF_RD_MAX, 'LF_RD_STEP': LF_RD_STEP, 'LF_HARMONICS': LF_HARMONICS,
         'LF_POINTS': LF_POINTS, 'EQ_BAND_COUNT': EQ_BAND_COUNT, 'EQ_LOW_HZ': EQ_LOW_HZ, 'EQ_HIGH_HZ': EQ_HIGH_HZ,
-        'EQ_RANGE_DB': EQ_RANGE_DB
+        'EQ_RANGE_DB': EQ_RANGE_DB, 'CORRECTION_LOW_HZ': CORRECTION_LOW_HZ, 'CORRECTION_HIGH_HZ': CORRECTION_HIGH_HZ
     }
     lines = [
         '// The synthesizer parameter set - GENERATED from nn/params.py (python -m nn.params --write-js); do not edit.',

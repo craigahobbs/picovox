@@ -43,4 +43,15 @@ The network:
 - nn/synthesize.py - inference in PyTorch; nn/parity.py - nn/js/model.js against PyTorch, the quantization, and speed
 - nn/evaluate.py - the neural voices against the rule voices, the recordings, and the analysis-by-synthesis ceiling;
   nn/samples.py - listening samples and the transforms demonstration (build/nn/samples/)
+
+Architecture options and model size (each off by default):
+
+- nn/model.py's options - the spectral correction head (correctionBands; nn/dsynth.py and nn/js/render.js apply it)
+  and the all-convolution encoder (encoder 'conv'); nn/trainmulti.py --correction-bands, --encoder
+- nn/quant.py - weight quantization at 8-4 bits, per row or per group, shared by nn/export.py (--bits, --group),
+  quantization-aware training (nn/trainmulti.py --qat-bits), and nn/js/model.js
+- nn/package.py - an export as a generated JavaScript module, loaded by nn/js/package.js (nn/js/packagecheck.js checks it)
+- nn/archeval.py - a checkpoint at an export precision: validation, the panel (UTMOS, WER, speaker similarity), size;
+  nn/sizesearch.py - the minimal-size search over widths, depths, encoders, and bit widths (Pareto front)
+- nn/stepcheck.py - the trainer's step-0 losses on fixed batches, exactly, to check a change leaves training unchanged
 """

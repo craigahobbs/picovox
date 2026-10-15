@@ -41,7 +41,14 @@ function parseArgs(argv) {
 function main() {
     const args = parseArgs(process.argv.slice(2));
     const data = JSON.parse(readFileSync(args.input, 'utf-8'));
-    const frames = data.frames.map((row) => Object.fromEntries(data.names.map((name, ix) => [name, row[ix]])));
+    const frames = data.frames.map((row, frameIx) => {
+        const frame = Object.fromEntries(data.names.map((name, ix) => [name, row[ix]]));
+        // (the optional spectral correction's band gains, dB)
+        if (data.correction) {
+            frame.correction = data.correction[frameIx];
+        }
+        return frame;
+    });
     const start = performance.now();
     let samples;
     if (args.push > 0) {

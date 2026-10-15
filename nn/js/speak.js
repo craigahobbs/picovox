@@ -118,9 +118,14 @@ function main() {
         networkSeconds += (performance.now() - startNetwork) / 1000;
         const frames = applyTransforms(spoken.frames, item.transform ?? args.transform ?? []);
         if (item.params) {
-            const rows = frames.map((frame) => Array.from(frame, (value) => Math.round(value * 10000) / 10000));
-            writeFileSync(item.params, JSON.stringify({'frameRate': 200, 'names': NAMES, 'frames': rows, 'eq': spoken.eq,
-                'sentences': spoken.sentences}));
+            const round = (value) => Math.round(value * 10000) / 10000;
+            const rows = frames.map((frame) => Array.from(frame.subarray(0, NAMES.length), round));
+            const data = {'frameRate': 200, 'names': NAMES, 'frames': rows, 'eq': spoken.eq, 'sentences': spoken.sentences};
+            // (a model with the spectral correction head - its band gains, dB, after each frame's parameters)
+            if (frames.length > 0 && frames[0].length > NAMES.length) {
+                data.correction = frames.map((frame) => Array.from(frame.subarray(NAMES.length), round));
+            }
+            writeFileSync(item.params, JSON.stringify(data));
         }
         audioSeconds += Math.max(0, frames.length - 1) / 200;
         if (!args.framesOnly && item.wav) {

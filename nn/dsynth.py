@@ -204,6 +204,18 @@ def band_log_grid(frequency, gains, low_hz, high_hz):
     return db * (math.log(10) / 20)
 
 
+# The spectral correction's natural-log gain (nn/params.py CORRECTION_*) at per-frame frequencies [B, T, H] for per-frame
+# band gains [B, T, K] (dB) - interpolated linearly in dB over log frequency, held beyond the ends
+def correction_log(frequency, gains):
+    bands = gains.shape[-1]
+    step = math.log(params.CORRECTION_HIGH_HZ / params.CORRECTION_LOW_HZ) / (bands - 1)
+    position = torch.clamp(torch.log(torch.clamp(frequency, min=1.0) / params.CORRECTION_LOW_HZ) / step, 0, bands - 1)
+    low = torch.clamp(torch.floor(position).long(), max=bands - 2)
+    weight = position - low
+    db = torch.gather(gains, -1, low) * (1 - weight) + torch.gather(gains, -1, low + 1) * weight
+    return db * (math.log(10) / 20)
+
+
 # Small caches of constant tensors (index grids, windows, frequency grids) by key - host-to-device copies on MPS wait
 # for the whole GPU queue, so the synthesizer makes each constant once
 _CACHE = {}
@@ -727,8 +739,8 @@ class DSynth(torch.nn.Module):
         return int(min(params.LF_HARMONICS - 1, math.ceil(params.HARMONIC_TAPER_END * self.sample_rate / lowest)))
 
     # The frames' complex harmonic amplitudes [B, T, K] (real, imaginary) and the harmonic numbers; linear is the
-    # values' linear_values, if already computed
-    def harmonic_amplitudes(self, values, harmonics, eq=None, linear=None):
+    # values' linear_values, if already computed; correction the optional spectral correction's gains (dB) [B, T, bands]
+    def harmonic_amplitudes(self, values, harmonics, eq=None, linear=None, correction=None):
         split = split_values(values, linear)
         k = torch.arange(1, harmonics + 1, device=values.device, dtype=values.dtype)
         f0 = torch.clamp(split['f0'], min=params.F0_MIN)
@@ -749,6 +761,8 @@ class DSynth(torch.nn.Module):
         shelf_magnitude, shelf_phase = shelf_log(frequency, split['shelf'], trig)
         if eq is not None:
             tract_magnitude = tract_magnitude + eq_log(frequency, eq)
+        if correction is not None:
+            tract_magnitude = tract_magnitude + correction_log(frequency, correction)
         magnitude = 2 * split['av'] * torch.exp(tract_magnitude + shelf_magnitude) * harmonic_taper(frequency, self.sample_rate)
         phase = tract_phase + shelf_phase
         filter_re = magnitude * torch.cos(phase)
@@ -756,9 +770,9 @@ class DSynth(torch.nn.Module):
         return source_re * filter_re - source_im * filter_im, source_re * filter_im + source_im * filter_re
 
     # The harmonic (voicing) signal [B, N]
-    def _voicing(self, values, linear, tensors, grid, harmonics, count, eq=None):
+    def _voicing(self, values, linear, tensors, grid, harmonics, count, eq=None, correction=None):
         batch = values.shape[0]
-        amp_re, amp_im = self.harmonic_amplitudes(values, harmonics, eq, linear)
+        amp_re, amp_im = self.harmonic_amplitudes(values, harmonics, eq, linear, correction)
 
         # Sum the harmonics over the samples grouped by frame interval: Re(sum_k A_k exp(2 pi i k phase)), the
         # amplitudes interpolated between frames - on Apple GPUs in the Metal kernels, else the interval's two frames'
@@ -779,7 +793,7 @@ class DSynth(torch.nn.Module):
         return signal.reshape(batch, -1).index_select(1, grid['cells'])
 
     # The noise (aspiration and frication) signal [B, N]
-    def _noise_signal(self, values, linear, tensors, grid, seeds, count, eq=None, residual=None):
+    def _noise_signal(self, values, linear, tensors, grid, seeds, count, eq=None, residual=None, correction=None):
         device = values.device
         batch = values.shape[0]
         fft_size, hop = self.noise_fft, self.noise_hop
@@ -816,6 +830,12 @@ class DSynth(torch.nn.Module):
             channel = torch.exp(eq_log(frequency.expand(batch, -1), eq))[:, None, :]
             filter_aspiration = filter_aspiration * channel
             filter_frication = filter_frication * channel
+        if correction is not None:
+            # The spectral correction - its band gains (dB) interpolated to the noise frames
+            correction_db = interpolate_frames(correction, positions, key=('noise', self.sample_rate, frames_count, hop))
+            filter_correction = torch.exp(band_log_grid(frequency, correction_db, params.CORRECTION_LOW_HZ, params.CORRECTION_HIGH_HZ))
+            filter_aspiration = filter_aspiration * filter_correction
+            filter_frication = filter_frication * filter_correction
         filtered = spectrum_aspiration * filter_aspiration + spectrum_frication * filter_frication
         if residual is not None:
             # The residual noise - its band levels (dB) interpolated to the noise frames
@@ -851,12 +871,13 @@ class DSynth(torch.nn.Module):
             window_sum[quarter:quarter + frames_count] += window_squared[quarter]
         return window_sum
 
-    def forward(self, values, seed=1, return_parts=False, eq=None, residual=None, plan=None):
+    def forward(self, values, seed=1, return_parts=False, eq=None, residual=None, plan=None, correction=None):
         """Render parameter values [B, T, COUNT] (or [T, COUNT]) to audio [B, N] (or [N]); seed is an int or a list; eq is
         the optional channel equalizer's gains (dB) [B, EQ_BAND_COUNT] (or [EQ_BAND_COUNT]); residual is the optional
         (experimental, PyTorch only) residual noise's band levels (dB) [B, T, RESIDUAL_BAND_COUNT]; plan is the
         optional cycle plan made ahead (plan_cycles, of these values' F0 and jitter and these seeds, optionally with its
-        plan_host_tensors as 'host') - it leaves only a few columns to read from the device here"""
+        plan_host_tensors as 'host') - it leaves only a few columns to read from the device here; correction is the
+        optional spectral correction's band gains (dB) [B, T, K] (or [T, K]) - nn/params.py CORRECTION_*"""
         squeeze = values.dim() == 2
         if squeeze:
             values = values[None]
@@ -864,6 +885,8 @@ class DSynth(torch.nn.Module):
                 eq = eq[None]
             if residual is not None and residual.dim() == 2:
                 residual = residual[None]
+            if correction is not None and correction.dim() == 2:
+                correction = correction[None]
         batch, frame_count, _ = values.shape
         seeds = list(seed) if isinstance(seed, (list, tuple)) else [int(seed) + ix for ix in range(batch)]
         count = sample_count(frame_count, self.sample_rate)
@@ -893,11 +916,11 @@ class DSynth(torch.nn.Module):
         linear = linear_values(values)
 
         # The voicing, with shimmer, and the noise
-        voicing = self._voicing(values, linear, tensors, grid, harmonics, count, eq)
+        voicing = self._voicing(values, linear, tensors, grid, harmonics, count, eq, correction)
         index, weight = grid['index'], grid['weight']
         shimmer_amount = linear[:, index, params.INDEX['shimmer']] * (1 - weight) + linear[:, index + 1, params.INDEX['shimmer']] * weight
         voicing = voicing * torch.relu(1 + shimmer_amount * tensors['shimmer'])
-        noise = self._noise_signal(values, linear, tensors, grid, seeds, count, eq, residual)
+        noise = self._noise_signal(values, linear, tensors, grid, seeds, count, eq, residual, correction)
         audio = voicing + noise
         if return_parts:
             parts = {'audio': audio, 'voicing': voicing, 'noise': noise}
