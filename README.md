@@ -301,6 +301,38 @@ The polish adds 0.025-0.034 UTMOS, most of it to the two ARCTIC voices the app u
 distillation loses most; intermediate-feature matching (weight 0.05) adds about 0.02, and the two barely stack.
 
 
+## Training the G2P model
+
+The app pronounces every word with one small network, `lib/models/g2pModel.js` (`lib/g2p.js` runs it;
+`nn/g2pmodel.py` is its bit-exact Python port, which pronounces the voice model's training data). `nn/g2p.py` trains
+and exports it, with the recipe in `data/nn/train.json`'s `g2p` settings:
+
+```sh
+build/venv-nn/bin/python -B -m nn.heteronyms --out build/nn/heteronyms  # data/nn/g2p-relabel.json's words (optional)
+build/venv-nn/bin/python -B -m nn.g2p train --out build/nn/g2p-train      # four stages, about 30 minutes on one CPU core
+build/venv-nn/bin/python -B -m nn.g2p export build/nn/g2p-train --out lib/models/g2pModel.js
+build/venv-nn/bin/python -B -m nn.g2p evaluate                            # the book-token error of lib/models/g2pModel.js
+```
+
+The network is an autoregressive encoder-decoder (embedding 32, a bidirectional GRU of 96 over the letters, a GRU
+decoder of 192 with attention; 369,767 parameters). It trains on every word of the CMU Pronouncing Dictionary (its
+first pronunciation) but a 2,000-word monitoring set, sampled half uniformly and half by the square root of the word's
+count in 128 Project Gutenberg books, plus - 30% of the samples - 100,812 words the dictionary lacks, labeled by a
+large teacher ensemble or by the spelling and `-s` rules where they apply (`data/nn/g2p-words.json`). A base stage
+(20,000 steps of 512 at learning rate 3e-3) is polished twice with more of the samples on the most frequent words
+(5,000 steps at 1e-3 over the top 20,000 words, then 5,000 at 5e-4 over the top 12,000). The last stage (focus, 3,000
+steps) teaches the readers' pronunciations of 56 words whose dictionary-first pronunciation isn't the usual reading
+(lead L IY1 D, live L IH1 V, wind W IH1 N D, ... - `data/nn/g2p-relabel.json`; a stage's `relabel` replaces those
+words' targets, the rule-labeled words derived from them follow, and `focusBoost` gives them 2% of the samples). The
+export quantizes to 6 bits per weight. Training on the CPU with one thread is deterministic: the recipe reproduces the
+shipped model's weights bit for bit.
+
+`nn/heteronyms.py` chooses the relabeled words from the LibriTTS-R readers' usage: for each word with several
+dictionary pronunciations, the variant the readers used by the forced alignments; a word is relabeled when the
+readers' majority isn't the first (significant, 3+ speakers), the difference is lexical (not vowel reduction or stress
+alone, not a function word), and the vowel's formants (or the fricative's voicing) agree where measured.
+
+
 ## The library
 
 | Module | |

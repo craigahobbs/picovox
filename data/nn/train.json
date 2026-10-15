@@ -1,0 +1,20 @@
+{
+    "description": "The shipped recipe of make train - every stage's settings and seeds",
+    "g2p": {
+        "description": "The G2P network (nn/g2p.py): the AR encoder-decoder trained on every dictionary word, frequency-weighted, with teacher-labeled unknown words, in four stages (base, two polishes over the most frequent words, then the readers' pronunciations of the relabeled words - focus), exported at 6 bits",
+        "model": {"embed": 32, "hidden": 96},
+        "batch": 512,
+        "alpha": 0.5,
+        "uniform": 0.5,
+        "unknown": 0.3,
+        "threads": 1,
+        "stages": [
+            {"name": "base", "steps": 20000, "lr": 0.003, "warmup": 500, "seed": 1},
+            {"name": "polish", "steps": 5000, "lr": 0.001, "warmup": 100, "seed": 3, "topBoost": {"share": 0.3, "count": 20000}},
+            {"name": "polish2", "steps": 5000, "lr": 0.0005, "warmup": 100, "seed": 4, "topBoost": {"share": 0.4, "count": 12000}},
+            {"name": "focus", "steps": 3000, "lr": 0.0005, "warmup": 100, "seed": 6, "topBoost": {"share": 0.4, "count": 12000},
+             "relabel": "data/nn/g2p-relabel.json", "focusBoost": {"share": 0.02}}
+        ],
+        "export": {"bits": 6, "groupSize": 0, "biasBits": 8}
+    }
+}

@@ -77,7 +77,7 @@ from . import params
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(ROOT, 'data', 'nn', 'distill.json')
 DISTILL_DIR = os.environ.get('NN_DISTILL_DIR', os.path.join(ROOT, 'build', 'nn', 'distill'))
-RUNS_DIR = os.path.join(ROOT, 'build', 'nn', 'runs')
+RUNS_DIR = os.environ.get('NN_RUNS_DIR', os.path.join(ROOT, 'build', 'nn', 'runs'))
 SAMPLES_DIR = os.environ.get('NN_DISTILL_SAMPLES', os.path.join(ROOT, 'build', 'nn', 'distill-samples'))
 LISTENERS_PYTHON = os.path.join(ROOT, 'build', 'venv-listeners', 'bin', 'python')
 WHISPER_MODEL = os.path.join(ROOT, 'data', 'whisper', 'ggml-base.en.bin')
@@ -267,7 +267,10 @@ def make_targets(args):
     remap = {vocab.index(source): vocab.index(target) for source, target in remap_names.items()}
     token_lists, records, book_report = target_inputs(state, settings, remap, log)
     if args.limit:
-        keep = numpy.random.default_rng(0).permutation(len(records))[:args.limit]
+        # (a quarter of the items validation)
+        order = numpy.random.default_rng(0).permutation(len(records))
+        keep = [index for index in order if records[index][10] == 1][:args.limit // 4]
+        keep += [index for index in order if records[index][10] == 0][:args.limit - len(keep)]
         keep = sorted(keep, key=lambda index: (records[index][10] == 0, index))
         token_lists = [token_lists[index] for index in keep]
         records = [records[index] for index in keep]
@@ -1082,7 +1085,7 @@ def main(argv=None):
     sub.add_argument('--book-copies', type=int, default=None, help='each book sentence this many times (different speakers)')
     sub.add_argument('--batch', type=int, default=64)
     sub.add_argument('--batch-tokens', type=int, default=8192)
-    sub.add_argument('--limit', type=int, default=None, help='only this many items (a smoke test)')
+    sub.add_argument('--limit', type=int, default=None, help='only this many items, a quarter validation (a smoke test)')
     sub.set_defaults(func=make_targets)
 
     sub = subparsers.add_parser('train', help='a student')
