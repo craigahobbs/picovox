@@ -608,6 +608,13 @@
     .setting {
         padding: 6px 6px 14px;
     }
+    /* The voice choices wrap two by two on a phone */
+    .setting:first-of-type .tabs {
+        flex-wrap: wrap;
+    }
+    .setting:first-of-type .tabs button {
+        flex: 1 1 40%;
+    }
     .setting h3 {
         margin: 0 0 8px;
         font-size: 0.9375rem;

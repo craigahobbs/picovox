@@ -59,13 +59,16 @@ build/venv-%.build: requirements/%.txt
 listeners: build/venv-listeners.build
 
 
-# The published site - the app, its library, the data, and the catalog
+# The published site - the app, its library, the neural voices, the data, and the catalog
 .PHONY: site
 site: data/catalog.json
 	rm -rf build/site
 	mkdir -p build/site/data
 	rsync -a --exclude .DS_Store index.html README.md web lib build/site/
 	cp data/cmudict.dict data/LICENSE.cmudict data/catalog.json build/site/data/
+	mkdir -p build/site/nn build/site/data/nn
+	rsync -a --exclude .DS_Store nn/js nn/vocab.json build/site/nn/
+	cp data/nn/*.bin data/nn/slt.json data/nn/bdl.json build/site/data/nn/
 
 _gh-pages: site
 

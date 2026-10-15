@@ -6,7 +6,7 @@
 // The storage key and the default state
 const storageKey = 'gutenberg-audiobooks-v1';
 const defaultState = {
-    'current': null, 'view': 'library', 'settings': {'voice': 'male', 'rate': 1}, 'books': {}, 'bookmarks': {}
+    'current': null, 'view': 'library', 'settings': {'voice': 'neural-male', 'rate': 1}, 'books': {}, 'bookmarks': {}
 };
 
 

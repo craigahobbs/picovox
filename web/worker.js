@@ -7,7 +7,8 @@
 // 'overrides'} synthesizes the text's units (sentences) in order, posting {'type': 'unitBlock', 'id', 'member', 'unit',
 // 'samples', 'sampleRate'} and {'type': 'unitDone', 'id', 'member', 'unit'}, then {'type': 'runDone', 'id', 'member'}.
 // Each unit starts trim seconds into its audio (dropping redundant leading silence). A newer run or {'type': 'cancel'}
-// supersedes a run between units.
+// supersedes a run between units. {'type': 'prepare', 'voice'} loads a voice ahead of playback. A voice named in
+// neuralVoices is synthesized by its neural model (nn/js), loaded on first use from data/nn/.
 //
 // Whole-text requests (downloads): {'id', 'member', 'text', 'voice', 'rate', 'seed', 'room', 'stream', 'overrides'} - the
 // member (a crowd member's index) is echoed back, and the overrides are voice parameters (e.g. pitchScale, tractScale)
@@ -16,9 +17,76 @@
 // {'type': 'error', 'id', 'member', 'message'}
 
 import {convolve, roomImpulse} from '../lib/room.js';
+import {loadModel, speakFrames} from '../nn/js/model.js';
 import {setDictionary, textToPhrases} from '../lib/lexicon.js';
+import {createRenderer} from '../nn/js/render.js';
 import {normalize} from '../lib/klatt.js';
 import {speak} from '../lib/speak.js';
+
+
+// The neural voices - each one's model (data/nn/<model>.json and .bin), trained on a CMU ARCTIC speaker
+export const neuralVoices = {'neural-male': 'bdl', 'neural-female': 'slt'};
+
+
+// Neural playback - the output gain (the renderer's peaks run near full scale), and the pauses before a sentence and a
+// paragraph (s, at normal speed - the model's own edge silences are short)
+const neuralGain = 1.05;
+const neuralSentencePause = 0.24;
+const neuralParagraphPause = 0.4;
+
+
+// A soft limiter - linear below 0.8, approaching 1 above
+function softLimit(value) {
+    const magnitude = Math.abs(value);
+    if (magnitude <= 0.8) {
+        return value;
+    }
+    return Math.sign(value) * (0.8 + 0.2 * Math.tanh((magnitude - 0.8) / 0.2));
+}
+
+
+// Load a neural voice's model - cached, so each voice loads once
+const neuralModels = new Map();
+export function loadNeuralVoice(voice, fetchFn = fetch) {
+    if (!neuralModels.has(voice)) {
+        const base = new URL(`../data/nn/${neuralVoices[voice]}`, import.meta.url);
+        const fetchOk = (url) => fetchFn(url).then((response) => {
+            if (!response.ok) {
+                throw new Error(`The ${voice} voice couldn't be loaded (${response.status}).`);
+            }
+            return response;
+        });
+        const loading = Promise.all([
+            fetchOk(`${base}.json`).then((response) => response.json()),
+            fetchOk(`${base}.bin`).then((response) => response.arrayBuffer())
+        ]).then(([manifest, buffer]) => loadModel(manifest, buffer));
+        loading.catch(() => neuralModels.delete(voice));
+        neuralModels.set(voice, loading);
+    }
+    return neuralModels.get(voice);
+}
+
+
+// Stream a unit (sentence) with a neural model - a pause, then the unit's audio - calling onBlock(samples, sampleRate).
+// rate is the speaking speed (1 is normal); paragraphStart lengthens the pause.
+export function streamNeuralUnit(model, text, options, onBlock) {
+    const {rate = 1, seed = 1, paragraphStart = false} = options;
+    const sampleRate = 44100;
+    const pause = paragraphStart ? neuralParagraphPause : neuralSentencePause;
+    onBlock(new Float32Array(Math.round(sampleRate * pause / rate)), sampleRate);
+    const {frames, eq} = speakFrames(model, text, {'rate': 1 / rate});
+    const renderer = createRenderer({sampleRate, seed, eq, 'blockSize': 2048, 'onBlock': (block) => {
+        const samples = new Float32Array(block.length);
+        for (let ix = 0; ix < block.length; ix++) {
+            samples[ix] = softLimit(block[ix] * neuralGain);
+        }
+        onBlock(samples, sampleRate);
+    }});
+    for (const frame of frames) {
+        renderer.push([frame]);
+    }
+    renderer.end();
+}
 
 
 // Split text into paragraphs (separated by blank lines), dropping those with nothing to say
@@ -108,9 +176,16 @@ if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globa
             if (run !== currentRun) {
                 return;
             }
-            streamUnit(unit.text, {voice, rate, 'seed': seed * 1000 + unit.index, overrides}, unit.trim, (samples, sampleRate) => {
+            const post = (samples, sampleRate) => {
                 self.postMessage({'type': 'unitBlock', id, member, 'unit': unit.index, samples, sampleRate}, [samples.buffer]);
-            });
+            };
+            const unitSeed = seed * 1000 + unit.index;
+            if (voice in neuralVoices) {
+                const model = await loadNeuralVoice(voice);
+                streamNeuralUnit(model, unit.text, {rate, 'seed': unitSeed, 'paragraphStart': unit.trim === 0}, post);
+            } else {
+                streamUnit(unit.text, {voice, rate, 'seed': unitSeed, overrides}, unit.trim, post);
+            }
             self.postMessage({'type': 'unitDone', id, member, 'unit': unit.index});
             // Yield, so a newer run or a cancel can arrive
             await new Promise((resolve) => {
@@ -128,6 +203,15 @@ if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globa
             runUnits(event.data).catch((error) => {
                 self.postMessage({'type': 'error', 'id': event.data.id, 'member': event.data.member, 'message': error.message});
             });
+            return;
+        }
+        if (event.data.type === 'prepare') {
+            // Load a neural voice ahead of playback
+            if (event.data.voice in neuralVoices) {
+                loadNeuralVoice(event.data.voice).catch((error) => {
+                    self.postMessage({'type': 'error', 'id': null, 'member': 0, 'message': error.message});
+                });
+            }
             return;
         }
         if (event.data.type === 'cancel') {

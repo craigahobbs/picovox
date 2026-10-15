@@ -173,6 +173,8 @@ export class Engine {
         };
         this.unit = units.length === 0 ? 0 : this.unitAtChar(startChar);
         this.time = 0;
+        // Have the worker load the voice now, so the first play starts quickly
+        this.worker.postMessage({'type': 'prepare', voice});
         this.notify();
     }
 
