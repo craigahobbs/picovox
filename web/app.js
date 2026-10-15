@@ -79,14 +79,25 @@ const engine = new Engine({'onChange': onEngineChange});
 
 
 // The startup timeline overlay (?timing in the URL) - the engine's events since the last play, for diagnosing slow
-// starts on a device
-if (new URLSearchParams(window.location.search).has('timing')) {
+// starts on a device. With &log=<url>, the timeline, page errors, and the user agent are also posted to <url>/log every
+// two seconds (tools/devlog.js receives them).
+const debugParameters = new URLSearchParams(window.location.search);
+if (debugParameters.has('timing')) {
     const overlay = document.createElement('pre');
     overlay.className = 'timing-overlay';
     document.body.append(overlay);
+    window.addEventListener('error', (event) => engine.mark(`page error: ${event.message} ${event.filename}:${event.lineno}`));
+    window.addEventListener('unhandledrejection', (event) => engine.mark(`page rejection: ${event.reason?.stack || event.reason}`));
+    const logUrl = debugParameters.get('log');
+    let logged = '';
     setInterval(() => {
-        overlay.textContent = engine.timeline.map(({ms, event}) => `${String(ms).padStart(6)} ms  ${event}`).join('\n');
-    }, 250);
+        const text = engine.timeline.map(({ms, event}) => `${String(ms).padStart(6)} ms  ${event}`).join('\n');
+        overlay.textContent = text;
+        if (logUrl && text !== logged) {
+            logged = text;
+            navigator.sendBeacon(`${logUrl}/log`, JSON.stringify({'userAgent': navigator.userAgent, 'href': window.location.href, text}));
+        }
+    }, 2000);
 }
 
 

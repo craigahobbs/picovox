@@ -113,6 +113,12 @@ export function speechText(text) {
 
 // The engine - load a book, then play, pause, skip, and seek. onChange(state) is called when the state changes (playing,
 // paused, buffering, ended, or a new unit), and the caller may poll state() for the position.
+// Is this an iPhone or iPad (including iPadOS, which reports itself as a Mac with a touch screen)?
+function isAppleMobile() {
+    return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+
 export class Engine {
     constructor({onChange = () => {
         // No listener
@@ -153,6 +159,7 @@ export class Engine {
         this.worker.onmessage = (event) => this.onWorkerMessage(event.data);
         this.worker.onerror = (event) => {
             event.preventDefault();
+            this.mark(`worker error: ${event.message || '(no message)'} ${event.filename || ''}:${event.lineno || ''}`);
             if (!this.workerReady && this.workerStarts < 2) {
                 this.worker.terminate();
                 this.startWorker();
@@ -360,11 +367,22 @@ export class Engine {
             };
             this.mark(`audio created (${this.audioContext.sampleRate} Hz, ${this.audioContext.state})`);
             this.output = this.audioContext.createGain();
-            this.output.connect(this.audioContext.destination);
             this.mediaElement = document.createElement('audio');
-            this.mediaElement.loop = true;
             this.mediaElement.setAttribute('playsinline', '');
-            this.mediaElement.src = URL.createObjectURL(new Blob([encodeWav(new Float32Array(8000), 8000)], {'type': 'audio/wav'}));
+            if (isAppleMobile()) {
+                // iOS mutes a separate Web Audio output while a media element holds the audio session - so the speech
+                // plays through the media element itself (one output, treated as media playback)
+                const stream = this.audioContext.createMediaStreamDestination();
+                this.output.connect(stream);
+                this.mediaElement.srcObject = stream.stream;
+                this.mark('audio routed through the media element');
+            } else {
+                // Elsewhere, Web Audio plays directly, and a silent looping media element keeps playback alive (lock
+                // screen, background)
+                this.output.connect(this.audioContext.destination);
+                this.mediaElement.loop = true;
+                this.mediaElement.src = URL.createObjectURL(new Blob([encodeWav(new Float32Array(8000), 8000)], {'type': 'audio/wav'}));
+            }
         }
         this.audioContext.resume().then(() => {
             const {baseLatency = 0, outputLatency = 0} = this.audioContext;
@@ -378,6 +396,10 @@ export class Engine {
 
     // Handle a worker message - the worker's readiness, and unit audio (the first run to reach a unit owns it)
     onWorkerMessage(message) {
+        if (message.type === 'trace') {
+            this.mark(`worker: ${message.event} (worker +${message.ms} ms)`);
+            return;
+        }
         if (message.type === 'ready') {
             this.mark('worker ready');
             this.workerReady = true;
@@ -385,6 +407,7 @@ export class Engine {
             return;
         }
         if (message.type === 'error') {
+            this.mark(`worker error message: ${message.message}`);
             // A worker that couldn't load its models gets one fresh start, as a worker that failed to load
             if (!this.workerReady && this.workerStarts < 2) {
                 this.worker.terminate();
@@ -680,6 +703,11 @@ export class Engine {
             return;
         }
         this.pump();
+        if (this.playing && this.audioContext !== null && performance.now() - (this.lastClockMark || 0) > 2000) {
+            this.lastClockMark = performance.now();
+            const clock = this.audioContext.currentTime.toFixed(2);
+            this.mark(`clock ${clock} s, audio ${this.audioContext.state}, ${this.sources.size} sources`);
+        }
         const {unit} = this.position();
         if (this.playing) {
             this.ensureSynthesis(unit);

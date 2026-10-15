@@ -45,9 +45,15 @@ export function softLimit(value) {
 // Load the multi-speaker neural model - imported and unpacked once, shared by every neural voice. importModule is the
 // generated module's import (replaceable for tests).
 let neuralModel = null;
-export function loadNeuralModel(importModule = () => import('../lib/models/voiceModel.js')) {
+export function loadNeuralModel(importModule = () => import('../lib/models/voiceModel.js'), trace = () => null) {
     if (neuralModel === null) {
-        neuralModel = importModule().then((module) => loadPackagedModel(module));
+        neuralModel = importModule().then((module) => {
+            trace('voice model imported');
+            return loadPackagedModel(module);
+        }).then((model) => {
+            trace('voice model unpacked');
+            return model;
+        });
         neuralModel.catch(() => {
             neuralModel = null;
         });
@@ -91,13 +97,25 @@ export function streamNeuralUnit(model, text, options, onBlock) {
 
 // The worker message loop (only when running as a worker)
 if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globalThis.WorkerGlobalScope) {
+    // Trace the worker's milestones (ms since it started) - the engine's startup timeline
+    const workerStart = performance.now();
+    const trace = (event) => {
+        self.postMessage({'type': 'trace', event, 'ms': Math.round(performance.now() - workerStart)});
+    };
+    const loadModel = () => loadNeuralModel(undefined, trace);
+    trace('started');
+
     // Load the G2P network on startup - every word's pronunciation
-    const ready = import('../lib/models/g2pModel.js').then(({g2pModel}) => loadG2p(g2pModel)).then((pronounce) => {
+    const ready = import('../lib/models/g2pModel.js').then(({g2pModel}) => {
+        trace('G2P model imported');
+        return loadG2p(g2pModel);
+    }).then((pronounce) => {
         setPronouncer(pronounce);
+        trace('G2P model unpacked');
         self.postMessage({'type': 'ready'});
     });
     ready.catch((error) => {
-        self.postMessage({'type': 'error', 'id': null, 'message': error.message});
+        self.postMessage({'type': 'error', 'id': null, 'message': `${error.message} (${error.stack})`});
     });
 
     // Unit runs - the latest run supersedes earlier ones between units
@@ -105,16 +123,23 @@ if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globa
     const runUnits = async ({id, units, voice, rate}) => {
         const run = ++currentRun;
         await ready;
-        const model = await loadNeuralModel();
+        const model = await loadModel();
         const speaker = neuralSpeaker(model, voice);
         for (const unit of units) {
             if (run !== currentRun) {
                 return;
             }
+            const unitStart = performance.now();
+            let blocks = 0;
             const post = (samples, sampleRate) => {
+                if (blocks === 0) {
+                    trace(`unit ${unit.index} first block after ${Math.round(performance.now() - unitStart)} ms`);
+                }
+                blocks += 1;
                 self.postMessage({'type': 'unitBlock', id, 'unit': unit.index, samples, sampleRate}, [samples.buffer]);
             };
             streamNeuralUnit(model, unit.text, {rate, 'seed': 1000 + unit.index, 'paragraphStart': unit.paragraphStart, speaker}, post);
+            trace(`unit ${unit.index} done in ${Math.round(performance.now() - unitStart)} ms (${blocks} blocks)`);
             self.postMessage({'type': 'unitDone', id, 'unit': unit.index});
             // Yield, so a newer run or a cancel can arrive
             await new Promise((resolve) => {
@@ -129,12 +154,12 @@ if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globa
     self.onmessage = (event) => {
         if (event.data.type === 'units') {
             runUnits(event.data).catch((error) => {
-                self.postMessage({'type': 'error', 'id': event.data.id, 'message': error.message});
+                self.postMessage({'type': 'error', 'id': event.data.id, 'message': `${error.message} (${error.stack})`});
             });
         } else if (event.data.type === 'prepare') {
             // Load the voice's model ahead of playback
-            loadNeuralModel().catch((error) => {
-                self.postMessage({'type': 'error', 'id': null, 'message': error.message});
+            loadModel().catch((error) => {
+                self.postMessage({'type': 'error', 'id': null, 'message': `${error.message} (${error.stack})`});
             });
         } else if (event.data.type === 'cancel') {
             currentRun++;
