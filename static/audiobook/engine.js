@@ -125,14 +125,14 @@ function isAppleMobile() {
 
 // Import the generated model modules (lib/models/) once for every worker - each worker's own import would download them
 // again - as the workers' models message. A failed import (a dropped request, say) is tried once more.
-function importModels(retry = true) {
-    return Promise.all([import('../../lib/models/g2pModel.js'), import('../../lib/models/voiceModel.js')]).then(([g2p, voice]) => ({
+function importModels(voiceModelUrl = '../../lib/models/voiceModel.js', retry = true) {
+    return Promise.all([import('../../lib/models/g2pModel.js'), import(voiceModelUrl)]).then(([g2p, voice]) => ({
         'type': 'models',
         'g2pModel': g2p.g2pModel,
         'voiceModel': {'manifest': voice.manifest, 'encoding': voice.encoding, 'weights': voice.weights}
     }), (error) => {
         if (retry) {
-            return importModels(false);
+            return importModels(voiceModelUrl, false);
         }
         throw error;
     });
@@ -142,7 +142,7 @@ function importModels(retry = true) {
 export class Engine {
     constructor({onChange = () => {
         // No listener
-    }, slowdown = 1} = {}) {
+    }, slowdown = 1, voiceModelUrl = undefined} = {}) {
         this.onChange = onChange;
         this.slowdown = slowdown;
         this.audioContext = null;
@@ -173,7 +173,7 @@ export class Engine {
         this.synthesizedSeconds = 0;
         this.synthesisSeconds = 0;
         // (one on iPhones and iPads - Safari gives a page about one core's worth there, so more workers only compete)
-        this.models = importModels();
+        this.models = importModels(voiceModelUrl);
         const poolSize = isAppleMobile() ? 1 : Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 2) - 1));
         for (let slot = 0; slot < poolSize; slot++) {
             this.startWorker(slot);

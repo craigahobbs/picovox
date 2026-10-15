@@ -75,9 +75,14 @@ let current = null;
 const browseState = {'query': '', 'page': 1, 'books': [], 'hasMore': false, 'total': 0, 'error': null};
 let openSheetName = null;
 let lastSave = 0;
-// (?slowdown=N stretches synthesis N times - to reproduce a device slower than real time)
-const slowdown = Number(new URLSearchParams(window.location.search).get('slowdown')) || 1;
-const engine = new Engine({'onChange': onEngineChange, slowdown});
+// (?slowdown=N stretches synthesis N times - to reproduce a device slower than real time; ?model=<name> speaks with a
+// development voice model, build/app-models/<name>.js - a training checkpoint, say - on a development server)
+const appParameters = new URLSearchParams(window.location.search);
+const slowdown = Number(appParameters.get('slowdown')) || 1;
+const modelName = appParameters.get('model');
+const voiceModelUrl = modelName !== null && /^[a-z0-9-]+$/.test(modelName) ?
+    new URL(`../../build/app-models/${modelName}.js`, import.meta.url).href : undefined;
+const engine = new Engine({'onChange': onEngineChange, slowdown, voiceModelUrl});
 
 
 // The startup timeline overlay (?timing in the URL) - the engine's events since the last play, for diagnosing slow
