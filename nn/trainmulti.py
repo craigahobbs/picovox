@@ -483,10 +483,11 @@ def main(argv=None):
     parser.add_argument('--val-every', type=int, default=1000)
     parser.add_argument('--val-count', type=int, default=480, help='reader validation utterances')
     parser.add_argument('--log-every', type=int, default=50)
-    parser.add_argument('--keep-every', type=int, default=5000)
+    parser.add_argument('--keep-every', type=int, default=5000, help='keep step-<n>.pt every this many steps (0: none)')
     parser.add_argument('--device', default='mps' if torch.backends.mps.is_available() else 'cpu')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--init', default=None, help='initialize the weights from a checkpoint')
+    parser.add_argument('--init-critic', default=None, help='initialize the critic from a checkpoint\'s (with --adversarial)')
     parser.add_argument('--seed', type=int, default=1)
     args = parser.parse_args(argv)
     args.crop_frames = int(round(args.crop * params.FRAME_RATE))
@@ -525,6 +526,9 @@ def main(argv=None):
         print(f'init from {args.init}: missing {missing}, unexpected {unexpected}', file=sys.stderr)
     synth = dsynth.DSynth(args.rate).to(device)
     critic = discriminator.Critic(args.rate, args.max_hz, eps=1e-9).to(device) if args.adversarial > 0 else None
+    if critic is not None and args.init_critic:
+        critic.load_state_dict(torch.load(args.init_critic, map_location=device, weights_only=False)['critic'])
+        print(f'critic init from {args.init_critic}', file=sys.stderr)
     critic_optimizer = torch.optim.AdamW(critic.parameters(), lr=args.critic_lr, betas=(0.8, 0.99)) if critic else None
     # (on the GPU the fused AdamW - one kernel, not a loop over the parameters - which also skips a step with a
     # non-finite gradient norm on the device, so the step needn't read the norm)
@@ -657,7 +661,7 @@ def main(argv=None):
                 best = result['score']
                 save(os.path.join(directory, 'best.pt'), {'val': result})
             save(os.path.join(directory, 'last.pt'), {'val': result})
-            if step % args.keep_every == 0:
+            if args.keep_every and step % args.keep_every == 0:
                 save(os.path.join(directory, f'step-{step}.pt'), {'val': result})
     prefetcher.close()
     log.close()
