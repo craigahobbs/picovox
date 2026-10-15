@@ -515,7 +515,7 @@ def main(argv=None):
     parser.add_argument('--batch', type=int, default=16)
     parser.add_argument('--max-frames', type=int, default=16000, help='the most padded 10 ms frames in a batch')
     parser.add_argument('--crop', type=float, default=2.0, help='the rendered crop (seconds)')
-    parser.add_argument('--bucket-ratio', type=float, default=0.0,
+    parser.add_argument('--bucket-ratio', type=float, default=1.125,
                         help='pad token and frame counts up to a geometric ladder of this ratio (0: no fixed shapes)')
     parser.add_argument('--rate', type=int, default=24000)
     parser.add_argument('--max-hz', type=float, default=10500)
