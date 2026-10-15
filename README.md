@@ -1,12 +1,17 @@
 # voice-synth
 
-A from-scratch formant speech synthesizer in JavaScript, aiming for realistic male and female voices - no neural nets and
-no recorded speech. Text goes through a rule-based front end (normalization, the CMU Pronouncing Dictionary, Klatt's
-duration rules, intonation) to frames of synthesizer parameters every 5 ms, which drive a Klatt-style cascade
-synthesizer with an LF glottal source.
+A from-scratch speech synthesizer in JavaScript, aiming for realistic male and female voices - no recorded speech. Text
+goes through a front end (normalization, the CMU Pronouncing Dictionary) to frames of synthesizer parameters every 5 ms,
+which drive a source-filter synthesizer with an LF glottal source. The parameters come either from rules (Klatt's
+duration rules, intonation, formant targets - `lib/`) or from a small neural network trained through a differentiable
+copy of the synthesizer (`nn/`); the audiobook player uses the neural voices.
 
 It runs under Node (command-line tools and evaluation) and in the browser (Web Audio, synthesis in a Web Worker). There
 are no dependencies.
+
+The paper [Small Voices: Browser Speech Synthesis for Audiobooks](paper/paper.md) describes the methods and results -
+the rule-based synthesizer and its calibration, the neural voices that drive it, and the work in progress. On the
+published site it reads at `paper/` (rendered with [MarkdownUp](https://craigahobbs.github.io/markdown-up/)).
 
 
 ## The audiobook player
