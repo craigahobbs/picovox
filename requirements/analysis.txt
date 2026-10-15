@@ -1,0 +1,6 @@
+# The analysis environment for the human speech targets (tools/targets.py) - build/venv-analysis
+# (make build/venv-analysis.build; Python 3.12 through 3.14 have wheels)
+numpy>=2.0
+scipy>=1.13
+soundfile>=0.12
+praat-parselmouth>=0.4.4

@@ -126,6 +126,91 @@ node tools/words.js -v male --show                              # per-consonant 
 average spectrum), `tools/slices.js` (band spectra of time ranges), `tools/pitchstats.js`, and `tools/envelope.js`.
 
 
+## The listener panel
+
+Neural listener models score the synthesizer the way a panel of listeners would - a repeatable check of naturalness,
+speaker identity, and speaking style alongside Whisper's intelligibility. They run in a Python environment of their own
+(PyTorch), used only by the tools - the synthesizer and the app have no dependencies.
+
+```sh
+make listeners                                              # build/venv-listeners from requirements/listeners.txt
+node tools/panel.js -v male -v female -v samantha           # MOS, WER, speaker consistency, emotion, similarity
+node tools/panel.js -v male -o '{"f0": 95}' -v male --show  # a variant against the voice, per-text details
+node tools/panel.js -v female --style '{"scale": {"f0": 1.2, "rate": 0.9}}'
+node tools/panel.js -v male --ref data/corpora/arctic/cmu_us_bdl_arctic/wav \
+    --ref data/corpora/libritts_r/LibriTTS_R/dev-clean/174     # against human recordings
+node tools/panel.js -v male --json > out/male-panel.json   # machine-readable, every file's scores
+```
+
+| Listener | Model | Measures |
+| --- | --- | --- |
+| Intelligibility | Whisper `base.en` (whisper.cpp, as `tools/eval.js`) | Word error rate against the text |
+| Naturalness | [UTMOS22 strong](https://github.com/sarulab-speech/UTMOS22) (through torch.hub [tarepan/SpeechMOS](https://github.com/tarepan/SpeechMOS)) | Predicted mean opinion score, 1-5 |
+| Speaker identity | [ECAPA-TDNN](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb) (SpeechBrain, VoxCeleb) | A 192-dimension speaker embedding |
+| Style | [emotion2vec+ base](https://huggingface.co/emotion2vec/emotion2vec_plus_base) (FunASR) | Probabilities of angry, disgusted, fearful, happy, neutral, other, sad, surprised, unknown |
+
+`tools/panel.js` synthesizes a fixed evaluation set, `tools/panel-texts.json` - six Harvard sentences (none from
+`tools/eval.js`'s tuning set), six narrative passages from public-domain books with dialogue (Austen, Melville,
+Dickens, Doyle, Potter, Grahame), two questions, and two exclamations - with each voice (`-v`: a voice name, a voice
+spec JSON file, or an Apple system voice - samantha, daniel, fred, ...), and reports for each:
+
+- **MOS** - the mean, median, and minimum UTMOS, and the mean by kind of text
+- **WER** - Whisper's word error rate
+- **spkr** - speaker consistency, the mean cosine similarity of each utterance's embedding to the voice's mean (a
+  stable voice is above about 0.8)
+- **emotion** - the top mean emotion probabilities - the check that a style reads as the intended emotion
+- **similarity** - with several voices, the cosine similarity matrix of their mean speaker embeddings: distinctiveness.
+  Halves of one human speaker's recordings score about 0.9; different human speakers 0.0-0.5.
+
+`-o` (overrides JSON) and `--style` (a style JSON object or file - see `applyStyle` in `lib/voices.js`) apply to the
+`-v` before them, or to every voice when given first. `--ref <wav or directory ...>` adds reference recordings - human
+speech - to the table and the similarity matrix (a directory gives its first `--ref-count` WAV files, 16 by default;
+ARCTIC and LibriTTS transcripts are found for their WER; `--ref-label` names the group). `-n`, `--kind`, and `-s`
+choose the texts and the seed; `--no-wer` and `--no-emotion` skip listeners.
+
+Everything is cached under `out/panel/`: synthesized audio by a hash of the voice, the options, the text, and the
+library code and dictionary (`out/panel/audio/`), and the Whisper transcripts and listener scores by a hash of the
+audio itself (`out/panel/scores/`) - so a rerun is instant, and a refactor that leaves the audio bit-identical costs
+only the synthesis.
+
+`tools/listeners.py` is the scoring tool itself - WAV files of any sample rate in, one JSON line per file out:
+
+```sh
+build/venv-listeners/bin/python -I tools/listeners.py [--no-mos] [--no-embedding] [--no-emotion] [--device auto|cpu|mps] \
+    [--files-from list.txt|-] file.wav ...
+```
+
+```json
+{"file": "a.wav", "seconds": 2.63, "mos": 3.33, "embedding": [31.48, ...], "emotion": {"angry": 0.0, ..., "neutral": 1.0}}
+```
+
+The models load once per run (4-7 s) and then score about 35 seconds of speech a second (6 sentences) on an M3 Max's
+GPU (MPS, the default on Apple silicon - about 3x the CPU, with the same scores). Files longer than 20 s are scored in
+chunks. The models download on first use - about 1.5 GB, into `build/listeners/` (torch.hub, Hugging Face) - and
+later runs need no network.
+
+The environment is built with `python3` (3.14 here; 3.12 also works - `make listeners PYTHON_VENV=python3.12`). Its
+packages are pinned in `requirements/listeners.txt`: PyTorch 2.14, torchaudio 2.11 (resampling, for UTMOS),
+SpeechBrain 1.1, FunASR 1.4 (emotion2vec), and soundfile and soxr for reading and resampling audio.
+
+Calibration (the evaluation set, or 16 recordings of each human speaker; October 2026):
+
+| Speech | MOS mean | MOS min | WER |
+| --- | --- | --- | --- |
+| Human - CMU ARCTIC bdl, rms, aew (men), slt, clb (women) | 4.28-4.39 | 4.01-4.27 | 2.7-4.7% |
+| Human - CMU ARCTIC eey (woman) | 3.84 | 3.00 | 4.0% |
+| Human - LibriTTS-R dev-clean audiobook readers 174, 251, 1272 (men), 1462, 1673, 2035 (women) | 3.77-4.40 | 3.09-4.17 | 2.6-8.2% |
+| Apple Samantha (unit selection) | 3.94 | 3.58 | 3.9% |
+| Apple Daniel (unit selection, British) | 3.41 | 3.07 | 5.7% |
+| voice-synth female | 3.27 | 2.69 | 8.5% |
+| voice-synth male | 3.18 | 2.88 | 11.5% |
+| Apple Fred (1980s formant synthesis) | 2.81 | 2.52 | 10.6% |
+
+Speaker similarity: voice-synth male and female 0.66 (one speaker with a pitch and formant shift, to ECAPA), male and
+Fred 0.57 (a shared formant-synthesis signature), every human pair 0.0-0.48, and male against male at `f0` 95 Hz 0.99
+(F0 alone does not change the perceived speaker).
+
+
 ## The library
 
 | Module | |
@@ -134,7 +219,8 @@ average spectrum), `tools/slices.js` (band spectra of time ranges), `tools/pitch
 | `lib/klatt.js` | Klatt-style cascade synthesizer - voicing, aspiration, nasal pole/zero, F1-F6 and higher formants, frication |
 | `lib/phonemes.js` | ARPAbet tables - vowel formants, consonant loci and couplings, noise spectra |
 | `lib/lexicon.js` | Text normalization, the pronouncing dictionary, function words |
-| `lib/speak.js` | Voices, durations, stop phases, formant transitions, smoothing, intonation - `speak(text, voice, options)` |
+| `lib/voices.js` | Voice specs - the documented voice parameters, the voices, inheritance, and speaking styles |
+| `lib/speak.js` | Durations, stop phases, formant transitions, smoothing, intonation - `speak(text, voice, options)` |
 | `lib/room.js` | Optional room ambience (synthetic impulse response) |
 | `lib/wav.js` | WAV encoding (`encodeWav`), and file reading and writing under Node |
 | `lib/analysis.js` | FFT, spectrogram, LPC formants, pitch tracking |
@@ -148,6 +234,131 @@ import {speak} from './lib/speak.js';
 setDictionary(await (await fetch('data/cmudict.dict')).text());
 const {samples, sampleRate} = speak('Hello, world.', 'female', {'rate': 1, 'seed': 1});
 ```
+
+
+## Voice specs
+
+A voice is data - a spec in `lib/voices.js`. `voiceParameters` documents every synthesis parameter (its group, units,
+typical range, meaning, and default), and the defaults are the root voice, `baseVoice` (the reference adult male
+speaker of the phoneme tables). A spec is metadata - `name`, `label`, `description`, and `base` (the name or spec it
+inherits from; the root voice if none) - and parameter overrides. So a new voice is a few overrides of a base:
+
+```js
+import {speak} from './lib/speak.js';
+
+const baritone = {
+    'name': 'baritone', 'label': 'Baritone', 'description': 'A deep, unhurried storyteller',
+    'base': 'male', 'f0': 96, 'tractScale': 0.95, 'accent': 0.3, 'rate': 1.05, 'reduction': 0.8, 'sentencePause': 420
+};
+const {samples, sampleRate} = speak('Call me Ishmael.', baritone);
+```
+
+`speak(text, voice, options)` takes a voice name (`'male'`, `'female'`) or a spec. The parameter groups:
+
+| Group | Parameters |
+| --- | --- |
+| pitch | The F0 baseline (`f0`, `pitchScale`) and range (`accent`), and the intonation style - question and exclamation, final fall, declination, downstep, continuation, and pitch drift |
+| source | Voice quality - the LF pulse shape (`rd`), breathiness (`breathDb`), jitter, shimmer, creak, spectral tilt (`shelfDb`), and `voicing` (0 whispers) |
+| tract | The vocal tract - its length (`tractScale` scales every resonance), the vowel space (`vowelBlend` - 0 the men's average formants, 1 the women's), the consonant loci and noise scales, the fixed higher formants, and the nasal and lateral resonances |
+| articulation | Precision - vowel `reduction` and `transitionScale` (coarticulation) - and the burst, aspiration, frication, and liquid levels |
+| timing | The speaking `rate`, the comma and sentence pauses, and phrase-final lengthening |
+
+`resolveVoice(voice, {overrides, style, rate})` merges the root voice, the spec's base chain, the spec, the overrides,
+and the style into the complete parameters (`speak` returns them as `voice`); `validateVoice(spec)` lists a spec's
+unknown parameters, wrong types, and values outside the typical ranges.
+
+The speak options are `seed`, `rate` (a multiplier of the voice's), `overrides` (parameters, unchecked - for
+experiments and the evaluation tools' `-o`), `style`, and `onBlock` (streaming).
+
+### Speaking styles
+
+A style transforms a voice's parameters - `{'intensity', 'scale', 'add', 'set'}`, each of `scale`, `add`, and `set` an
+object of parameters. At full intensity a style multiplies, adds to, or replaces the parameters; at a lower intensity
+(0 to 1, default 1) it is blended: `scale` geometrically (`value * factor ** intensity`), `add` and numeric `set`
+linearly, and boolean `set` switches at one half. An array of styles applies in order. For example, a hypothetical
+whisper:
+
+```js
+const whisper = {'scale': {'accent': 0.6}, 'add': {'breathDb': 28}, 'set': {'voicing': 0, 'creak': 0, 'glottalAttack': false}};
+speak('Do not wake the baby.', 'female', {'style': {...whisper, 'intensity': 0.8}});
+```
+
+
+## Human speech targets
+
+The voices are calibrated against statistics of real American English speech, measured identically for a human
+speaker and for the synthesizer - so a voice can be fit to a target speaker, and checked against the range of human
+speakers. The analysis runs in a Python environment of its own (Praat through
+[parselmouth](https://parselmouth.readthedocs.io), numpy, scipy, soundfile), used only by the tools:
+
+```sh
+make build/venv-analysis.build                    # build/venv-analysis from requirements/analysis.txt
+# or directly: python3 -m venv build/venv-analysis && build/venv-analysis/bin/pip install -r requirements/analysis.txt
+build/venv-analysis/bin/python -I tools/corpora.py              # download the corpora (about 2.1 GB) into data/corpora/
+build/venv-analysis/bin/python -I tools/targets.py all          # every corpus speaker -> data/targets/<speaker>.json
+node tools/synthstats.js -v male --target data/targets/arctic-bdl.json   # our voice on the same prompts, measured and compared
+build/venv-analysis/bin/python -I tools/targets.py population out/synthstats/synth-male.json  # among the human speakers
+```
+
+**The corpora** (`tools/corpora.py` downloads and unpacks them idempotently and sequentially, resuming interrupted
+downloads; `--list` shows them; `data/corpora/` is gitignored and its `README.md` records each corpus's source, license,
+and size):
+
+| Corpus | Speakers | Download | License |
+| --- | --- | --- | --- |
+| [CMU ARCTIC](http://festvox.org/cmu_arctic/) 0.95 releases | bdl, rms (male); slt, clb (female) - 1,132 sentences each, 16 kHz, with phone labels | 460 MB | CMU ARCTIC free license (any use, keep the notice) |
+| CMU ARCTIC packed | aew (male); eey, ljm, lnh (female) - WAV and text only | 260 MB | CMU ARCTIC free license |
+| [LibriTTS-R](https://www.openslr.org/141/) dev-clean | 40 LibriVox audiobook readers (20 female, 20 male), 24 kHz | 1.36 GB | CC BY 4.0 |
+| [LibriTTSLabel](https://github.com/kan-bayashi/LibriTTSLabel) | Montreal Forced Aligner phone alignments of LibriTTS (dev-clean unpacked) | 178 MB | none stated - used locally, not redistributed |
+
+The ARCTIC speakers are American; LibriTTS-R has no accent metadata (its readers are mostly, not all, American). The
+speakers' sex comes from the corpus metadata (LibriTTS-R's `speakers.tsv`) - one LibriTTS reader (7976) is listed as
+male with a 200 Hz median F0, and `population` leaves out such conflicts.
+
+**The measures** (`tools/targets.py extract`; all audio is first resampled to 16 kHz, ARCTIC's rate):
+
+- **F0** - Praat autocorrelation pitch with a two-pass speaker-adaptive range (floor 0.75 x the first quartile, ceiling
+  1.5 x the third): the median, mean, and 5th and 95th percentiles in Hz; the spread and 5-95% range in semitones; and
+  per utterance, the range, declination (the slope of a line fit, semitones per second), the onset and the
+  statement-final fall relative to the utterance median, and the F0 velocity (median absolute rate of change).
+- **Vowel formants** - F1-F4 per vowel (Burg, 5 formants) at 50% (the median of 5 frames) and F1-F2 at 20% and 80%
+  (the onset and offset - diphthongs and vowel-inherent spectral change), with the formant ceiling chosen per speaker
+  as the one minimizing within-vowel variance (Escudero et al., 2009); the vowel quadrilateral area (IY, AE, AA, UW),
+  the formant dispersion, and the apparent vocal tract length.
+- **Timing** - per-phone and per-class mean durations, the articulation rate (syllables and phones per second, less
+  pauses), and phrase-final lengthening (final vowels' durations relative to their vowel's mean).
+- **Pauses** - found acoustically (runs of at least 100 ms more than 25 dB below the utterance's 95th-percentile
+  intensity, inside the speech), since aligners often fold pauses into neighboring phones: per minute, per punctuation
+  mark, the pause fraction, and the mean, median, and 90th-percentile durations.
+- **Spectrum** - the long-term average spectrum of the speech (and of the vowels) in 15 bands from 63 Hz to 8 kHz,
+  relative to the total; the alpha ratio, Hammarberg index, and slope (dB per octave, 0.5-6 kHz).
+- **Voice quality** at vowel middles - H1-H2 and H1*-H2* (corrected for F1 and F2, Iseli and Alwan 2004, with Hawks
+  and Miller bandwidths), H1-A1, H1-A3, H1*-A3*, HNR, jitter and shimmer (local), and cepstral peak prominence.
+- **Intensity** - the speech frames' spread and 5-95% range, the declination of the vowels' levels, and each phone
+  class's level relative to the full vowels (and the reduced vowel's).
+- **Fricatives** - the spectral center of gravity of each fricative's middle 20 ms.
+
+Phone-based measures need phone labels - ARCTIC's own (xwaves, 10 ms resolution), LibriTTSLabel's alignments (stress
+removed, AH0 as the reduced vowel AX), or the synthesizer's exact segments; unlabeled speakers (aew, eey, ljm, lnh) get
+the utterance-level measures only. Speakers with fewer than 40 utterances are skipped. A target file is about 12 KB.
+
+**Our speech, measured the same way** - `node tools/synthstats.js` speaks the ARCTIC prompts (`-v` a voice name or a
+JSON voice spec, `--overrides`, `--style`, `-r`, `-s`, `-n` count, `-j` worker threads) into `out/synthstats/<name>/`
+in the ARCTIC layout - 44.1 kHz WAVs, and labels written from `speak()`'s segments (pauses as `pau`, unstressed AH as
+`ax`) - then runs `tools/targets.py extract` on it, writing `out/synthstats/<name>.json`. It also checks the
+measurement: Praat's vowel formants against the synthesizer's own formant targets at the vowel middles (the median
+absolute error is about 8 Hz for F1 and F2 and 10-25 Hz for F3), and with `--target` it prints the comparison.
+
+**Comparing** - `tools/targets.py compare ours.json target.json` prints every measure (Hz differences in semitones,
+formants in Bark, durations as log ratios after removing the overall tempo difference, levels in dB), each divided by
+a scale of a clearly audible difference, and the weighted root-mean-square of those - a single distance for fitting
+(`--brief` prints only the distances and the largest discrepancies, `--json` everything). `tools/targets.py population
+ours.json` places a voice among the human speakers of its sex instead - each measure's z-score against their mean and
+spread - which separates what is merely another speaker's voice (F0 level, vowel space) from what no human speaker does.
+
+Runtimes: the corpora download in about 10 minutes; `targets.py all` measures the 43 speakers in about 13 minutes on
+16 cores (about 17 s for an ARCTIC speaker's 1,132 sentences); `synthstats.js` synthesizes the 1,131 prompts (56 minutes
+of speech, 290 MB of WAVs) in about 35 s with 8 threads, and measures them in about 20 s.
 
 
 ## License

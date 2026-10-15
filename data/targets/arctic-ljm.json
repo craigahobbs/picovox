@@ -1,0 +1,85 @@
+{
+ "version": 1,
+ "speaker": "arctic-ljm",
+ "source": {
+  "corpus": "CMU ARCTIC",
+  "speaker": "ljm"
+ },
+ "sex": "female",
+ "utterances": 593,
+ "labeledUtterances": 0,
+ "audioSeconds": 1617.9,
+ "analysis": {
+  "sampleRate": 16000,
+  "pitchFloor": 140.8,
+  "pitchCeiling": 345.8,
+  "seconds": 6.6
+ },
+ "f0": {
+  "medianHz": 207.8,
+  "meanHz": 211.4,
+  "p5Hz": 168.9,
+  "p95Hz": 267.2,
+  "sdSt": 2.45,
+  "rangeSt": 7.94,
+  "utteranceRangeSt": 7.17,
+  "declinationStPerS": -2.32,
+  "onsetSt": 1.66,
+  "finalFallSt": -3.13,
+  "velocityStPerS": 19.1,
+  "voicedFrames": 97297
+ },
+ "ltas": {
+  "bands": [
+   [63, 125, -34.07],
+   [125, 250, -5.2],
+   [250, 400, -6.45],
+   [400, 630, -5.69],
+   [630, 800, -11.62],
+   [800, 1000, -15.6],
+   [1000, 1250, -16.2],
+   [1250, 1600, -15.8],
+   [1600, 2000, -17.24],
+   [2000, 2500, -20.3],
+   [2500, 3150, -18.98],
+   [3150, 4000, -23.37],
+   [4000, 5000, -24.97],
+   [5000, 6300, -25.29],
+   [6300, 8000, -25.51]
+  ],
+  "summary": {
+   "0-500": -1.72,
+   "500-1000": -6.54,
+   "1000-2000": -11.6,
+   "2000-4000": -15.75,
+   "4000-8000": -20.48
+  },
+  "alphaRatioDb": -9.57,
+  "hammarbergDb": 22.07,
+  "slopeDbPerOctave": -7.57
+ },
+ "intensity": {
+  "sdDb": 7.7,
+  "rangeDb": 24.43,
+  "declinationDbPerS": null,
+  "reducedVowelDb": null,
+  "classesDb": {}
+ },
+ "pauses": {
+  "count": 301,
+  "perUtterance": 0.51,
+  "perMinute": 12.57,
+  "perPunctuation": 1.19,
+  "fraction": 0.035,
+  "meanMs": 166.0,
+  "medianMs": 130.0,
+  "p90Ms": 300.0
+ },
+ "voice": {
+  "hnrDb": 18.25,
+  "jitterPercent": 1.579,
+  "shimmerPercent": 5.59,
+  "cppsDb": 13.73,
+  "note": "utterance-level (no phone labels)"
+ }
+}

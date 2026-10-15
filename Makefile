@@ -43,6 +43,22 @@ data/catalog.json:
 	$(MAKE) catalog
 
 
+# Python virtual environments for the analysis tools - build/venv-<name> from requirements/<name>.txt (for example,
+# build/venv-listeners.build for the listener-model panel, tools/listeners.py). PYTHON_VENV is the Python that creates
+# them (3.12 through 3.14 are known to work).
+PYTHON_VENV ?= python3
+
+build/venv-%.build: requirements/%.txt
+	rm -rf build/venv-$*
+	$(PYTHON_VENV) -m venv build/venv-$*
+	build/venv-$*/bin/pip -q install --upgrade pip
+	build/venv-$*/bin/pip -q install -r requirements/$*.txt
+	touch $@
+
+.PHONY: listeners
+listeners: build/venv-listeners.build
+
+
 # The published site - the app, its library, the data, and the catalog
 .PHONY: site
 site: data/catalog.json

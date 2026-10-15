@@ -1,0 +1,85 @@
+{
+ "version": 1,
+ "speaker": "arctic-aew",
+ "source": {
+  "corpus": "CMU ARCTIC",
+  "speaker": "aew"
+ },
+ "sex": "male",
+ "utterances": 1132,
+ "labeledUtterances": 0,
+ "audioSeconds": 3887.2,
+ "analysis": {
+  "sampleRate": 16000,
+  "pitchFloor": 73.1,
+  "pitchCeiling": 187.6,
+  "seconds": 17.2
+ },
+ "f0": {
+  "medianHz": 108.2,
+  "meanHz": 113.3,
+  "p5Hz": 86.3,
+  "p95Hz": 159.5,
+  "sdSt": 3.18,
+  "rangeSt": 10.63,
+  "utteranceRangeSt": 9.65,
+  "declinationStPerS": -1.3,
+  "onsetSt": 1.53,
+  "finalFallSt": -2.74,
+  "velocityStPerS": 24.6,
+  "voicedFrames": 242313
+ },
+ "ltas": {
+  "bands": [
+   [63, 125, -12.2],
+   [125, 250, -3.83],
+   [250, 400, -7.04],
+   [400, 630, -8.54],
+   [630, 800, -14.22],
+   [800, 1000, -17.1],
+   [1000, 1250, -17.55],
+   [1250, 1600, -17.64],
+   [1600, 2000, -19.43],
+   [2000, 2500, -21.1],
+   [2500, 3150, -20.94],
+   [3150, 4000, -21.25],
+   [4000, 5000, -16.48],
+   [5000, 6300, -15.96],
+   [6300, 8000, -18.76]
+  ],
+  "summary": {
+   "0-500": -1.33,
+   "500-1000": -8.76,
+   "1000-2000": -13.35,
+   "2000-4000": -16.32,
+   "4000-8000": -12.14
+  },
+  "alphaRatioDb": -9.79,
+  "hammarbergDb": 19.24,
+  "slopeDbPerOctave": -4.49
+ },
+ "intensity": {
+  "sdDb": 7.09,
+  "rangeDb": 23.52,
+  "declinationDbPerS": null,
+  "reducedVowelDb": null,
+  "classesDb": {}
+ },
+ "pauses": {
+  "count": 593,
+  "perUtterance": 0.52,
+  "perMinute": 10.04,
+  "perPunctuation": 1.25,
+  "fraction": 0.033,
+  "meanMs": 197.0,
+  "medianMs": 160.0,
+  "p90Ms": 340.0
+ },
+ "voice": {
+  "hnrDb": 12.68,
+  "jitterPercent": 2.713,
+  "shimmerPercent": 7.43,
+  "cppsDb": 12.26,
+  "note": "utterance-level (no phone labels)"
+ }
+}

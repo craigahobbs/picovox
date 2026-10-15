@@ -36,49 +36,49 @@ test('phonemes.vowels', () => {
         const [inherent, minimum] = vowel.dur;
         assert(inherent > minimum && minimum > 0, ph);
 
-        // One target (monophthong) or two (diphthong or lax glide), the same for each voice
-        assert(vowel.male.length === 1 || vowel.male.length === 2, ph);
-        assert.equal(vowel.female.length, vowel.male.length, ph);
-        for (const [ixTarget, maleTarget] of vowel.male.entries()) {
-            const femaleTarget = vowel.female[ixTarget];
-            for (const target of [maleTarget, femaleTarget]) {
+        // One target (monophthong) or two (diphthong or lax glide), the same in each table
+        assert(vowel.men.length === 1 || vowel.men.length === 2, ph);
+        assert.equal(vowel.women.length, vowel.men.length, ph);
+        for (const [ixTarget, menTarget] of vowel.men.entries()) {
+            const womenTarget = vowel.women[ixTarget];
+            for (const target of [menTarget, womenTarget]) {
                 // Formants ascend - F1 < F2 < F3
                 assert.equal(target.length, 3, ph);
                 assert(target[0] < target[1] && target[1] < target[2], ph);
             }
 
-            // The female vocal tract is shorter - every formant is higher
+            // Women's vocal tracts are shorter - every formant is higher
             for (let ixFormant = 0; ixFormant < 3; ixFormant++) {
-                assert(femaleTarget[ixFormant] > maleTarget[ixFormant], ph);
+                assert(womenTarget[ixFormant] > menTarget[ixFormant], ph);
             }
         }
     }
 
     // Diphthongs move
     for (const ph of ['AY', 'AW', 'OY', 'EY', 'OW']) {
-        assert.equal(vowels[ph].male.length, 2, ph);
+        assert.equal(vowels[ph].men.length, 2, ph);
     }
 
     // Tense IY is longer than lax IH
     assert(vowels.IY.dur[0] > vowels.IH.dur[0]);
 
     // IY is the front high vowel - the lowest F1 and the highest F2
-    const [[iyF1, iyF2]] = vowels.IY.male;
+    const [[iyF1, iyF2]] = vowels.IY.men;
     for (const [ph, vowel] of Object.entries(vowels)) {
         if (ph !== 'IY') {
-            assert(vowel.male[0][0] >= iyF1, ph);
-            assert(vowel.male[0][1] < iyF2, ph);
+            assert(vowel.men[0][0] >= iyF1, ph);
+            assert(vowel.men[0][1] < iyF2, ph);
         }
     }
 });
 
 
 test('phonemes.schwa', () => {
-    for (const voice of ['male', 'female']) {
-        const [f1, f2, f3] = schwa[voice];
+    for (const table of ['men', 'women']) {
+        const [f1, f2, f3] = schwa[table];
         assert(f1 < f2 && f2 < f3);
     }
-    assert(schwa.female[0] > schwa.male[0]);
+    assert(schwa.women[0] > schwa.men[0]);
 });
 
 

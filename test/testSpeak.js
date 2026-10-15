@@ -1,12 +1,18 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
 
-import {prosodyDefaults, speak, voices} from '../lib/speak.js';
+import {baseVoice, resolveVoice, voices as voiceSpecs} from '../lib/voices.js';
+import {speak, voices} from '../lib/speak.js';
 import {strict as assert} from 'node:assert';
 import test from 'node:test';
 
 
 const frameMs = 5;
+
+
+// The resolved voices
+const maleVoice = resolveVoice('male');
+const femaleVoice = resolveVoice('female');
 
 
 // The non-pause segments of a word
@@ -81,21 +87,8 @@ function peak(samples) {
 
 
 test('speak.voices', () => {
-    // The female voice is higher pitched, with higher formants
-    assert(voices.female.f0 > voices.male.f0 * 1.4);
-    assert(voices.female.f4 > voices.male.f4);
-    for (const scale of voices.female.formantScale) {
-        assert(scale > 1);
-    }
-    assert.deepEqual(voices.male.formantScale, [1, 1, 1]);
-
-    // Both voices define the same parameters
-    assert.deepEqual(Object.keys(voices.female).sort(), Object.keys(voices.male).sort());
-    for (const voice of Object.values(voices)) {
-        for (const key of Object.keys(prosodyDefaults)) {
-            assert(!(key in voice), key);
-        }
-    }
+    // The voice specs, re-exported
+    assert.equal(voices, voiceSpecs);
 });
 
 
@@ -173,8 +166,8 @@ test('speak, female and male', () => {
     const femaleVowel = middleFrame(female, wordSegment(female, 'away', 'EY'));
     assert(femaleVowel.f2 > maleVowel.f2);
     assert(femaleVowel.f3 > maleVowel.f3);
-    assert.equal(male.frames[0].f4, voices.male.f4);
-    assert.equal(female.frames[0].f4, voices.female.f4);
+    assert.equal(male.frames[0].f4, maleVoice.f4);
+    assert.equal(female.frames[0].f4, femaleVoice.f4);
 
     // The male voice creaks at the end of a statement, the female voice does not
     assert(Math.max(...male.frames.map((frame) => frame.creak || 0)) > 0.3);
@@ -192,7 +185,7 @@ test('speak, statement intonation', () => {
     const startF0 = f0At(result, first.start + 10);
     const endF0 = f0At(result, last.start + last.dur - 10);
     assert(endF0 < 0.85 * startF0);
-    assert(endF0 < voices.male.f0);
+    assert(endF0 < maleVoice.f0);
 
     // The accent peaks rise above the start
     const maxF0 = Math.max(...result.frames.map((frame) => frame.f0));
@@ -215,7 +208,7 @@ test('speak, yes/no question intonation', () => {
     const startF0 = f0At(result, first.start + 10);
     const endF0 = f0At(result, last.start + last.dur - 10);
     assert(endF0 > 1.2 * startF0);
-    assert(endF0 > voices.male.f0 * 1.2);
+    assert(endF0 > maleVoice.f0 * 1.2);
 
     // The low nuclear accent - the rise starts low
     assert(f0At(result, last.start + 0.3 * last.dur) < endF0 * 0.85);
@@ -263,7 +256,7 @@ test('speak, continuation intonation', () => {
     // The comma pause
     const ixPause = result.segments.indexOf(commaLast) + 1;
     assert.equal(result.segments[ixPause].type, 'pause');
-    assert.equal(result.segments[ixPause].dur, prosodyDefaults.commaPause);
+    assert.equal(result.segments[ixPause].dur, baseVoice.commaPause);
 
     // The continuation - a fall, then a slight rise, ending above the statement's end
     const lowF0 = Math.min(...segmentFrames(result, commaLast).map((frame) => frame.f0));
@@ -282,7 +275,7 @@ test('speak, continuation intonation', () => {
 test('speak, sentence pause', () => {
     const result = speak('We ran. We ran.');
     const pauses = result.segments.filter((segment) => segment.type === 'pause');
-    assert.deepEqual(pauses.map((pause) => pause.dur), [180, prosodyDefaults.sentencePause, 250]);
+    assert.deepEqual(pauses.map((pause) => pause.dur), [180, baseVoice.sentencePause, 250]);
 
     // Overridden
     const overridden = speak('We ran. We ran.', 'male', {'overrides': {'sentencePause': 500}});
@@ -361,7 +354,7 @@ test('speak, consonant durations', () => {
 
 test('speak, stop phases', () => {
     const result = speak('The pie spy apt to bag a cat.');
-    const {rate} = voices.male;
+    const {rate} = maleVoice;
 
     // An aspirated voiceless stop before a stressed vowel - a burst and a long voice onset time
     const pieP = wordSegment(result, 'pie', 'P');
@@ -407,7 +400,7 @@ test('speak, stop phases', () => {
 
 test('speak, stop releases before consonants', () => {
     const result = speak('The cats bad apple, it lay at last, bad.');
-    const {rate} = voices.male;
+    const {rate} = maleVoice;
 
     // Before a fricative
     const catsT = wordSegment(result, 'cats', 'T');
@@ -428,7 +421,7 @@ test('speak, stop releases before consonants', () => {
 
 test('speak, flapping', () => {
     const result = speak('The butter and the ladder, a lot of water.');
-    const {rate} = voices.male;
+    const {rate} = maleVoice;
 
     // An alveolar stop between a vowel and an unstressed vowel is a flap
     for (const [word, ph] of [['butter', 'T'], ['ladder', 'D'], ['lot', 'T'], ['water', 'T']]) {
@@ -452,12 +445,12 @@ test('speak, flapping', () => {
 test('speak, clusters', () => {
     const plain = speak('the lay');
     const result = speak('the play, a tree.');
-    const {rate} = voices.male;
+    const {rate} = maleVoice;
 
     // A voiceless stop before a liquid in its word - a long voice onset time devoicing the liquid, which is shortened
     const playP = wordSegment(result, 'play', 'P');
     assert(playP.cluster);
-    assert(Math.abs(playP.aspiration - voices.male.clusterVot * 0.85 / rate) < 1e-9);
+    assert(Math.abs(playP.aspiration - maleVoice.clusterVot * 0.85 / rate) < 1e-9);
     const playL = wordSegment(result, 'play', 'L');
     const layL = wordSegment(plain, 'lay', 'L');
     assert(playL.dur < layL.dur * 0.5);
@@ -505,8 +498,8 @@ test('speak, laterals', () => {
     const result = speak('a lay');
     const layL = wordSegment(result, 'lay', 'L');
     const frame = middleFrame(result, layL);
-    assert(Math.abs(frame.fnz - voices.male.lateralZero) < 300);
-    assert(Math.abs(frame.fnp - voices.male.lateralPole) < 300);
+    assert(Math.abs(frame.fnz - maleVoice.lateralZero) < 300);
+    assert(Math.abs(frame.fnp - maleVoice.lateralPole) < 300);
 
     // A female lateral is scaled
     const female = speak('a lay', 'female');
@@ -529,7 +522,7 @@ test('speak, glides and aspirates', () => {
     // HH between vowels - breathy voicing
     const aheadHH = wordSegment(result, 'ahead', 'HH');
     assert(middleFrame(result, aheadHH).av > 0.2);
-    assert(middleFrame(result, aheadHH).rd > voices.male.rd * 1.5);
+    assert(middleFrame(result, aheadHH).rd > maleVoice.rd * 1.5);
 
     // HH after a pause - voiceless
     const home = speak('home');
@@ -671,7 +664,7 @@ test('speak, accents', () => {
 
     // A phrase of function words only - the first vowel is accented
     const functionOnly = speak('It is.');
-    assert(Math.max(...functionOnly.frames.map((frame) => frame.f0)) > voices.male.f0);
+    assert(Math.max(...functionOnly.frames.map((frame) => frame.f0)) > maleVoice.f0);
 
     // A phrase with no vowel
     const noVowel = speak('Shh.');
@@ -756,4 +749,140 @@ test('speak, streaming soft limit', () => {
     assert(streamPeak > 0.8);
     assert(streamPeak <= 1);
     assert(result.rawPeak * 0.89 / (3.2 * result.vowelLevel) > 1);
+});
+
+
+test('speak, voice specs', () => {
+    const text = 'We were away a year ago.';
+
+    // A spec is the same as its name
+    const female = speak(text, 'female');
+    assert.deepEqual(speak(text, voices.female).samples, female.samples);
+    assert.equal(female.voice.name, 'female');
+    assert.equal(female.voice.rate, voices.female.rate);
+
+    // A new voice - a few overrides of a base
+    const higher = speak(text, {'name': 'higher', 'base': 'female', 'f0': 200});
+    assert.equal(higher.voice.f0, 200);
+    assert.equal(higher.voice.vowelBlend, 1);
+    assert(meanF0(higher) > meanF0(female) * 1.1);
+
+    // The rate option multiplies the voice's rate
+    assert.equal(speak(text, 'male', {'rate': 2}).voice.rate, voices.male.rate * 2);
+
+    // An unknown voice
+    assert.throws(() => speak(text, 'nobody'), /Unknown voice "nobody"/);
+});
+
+
+test('speak, style', () => {
+    const text = 'We were away a year ago.';
+    const base = speak(text);
+
+    // A style scales the voice's parameters
+    const higher = speak(text, 'male', {'style': {'scale': {'f0': 1.2}}});
+    for (let ix = 0; ix < base.frames.length; ix += 10) {
+        assert(Math.abs(higher.frames[ix].f0 / base.frames[ix].f0 - 1.2) < 1e-6);
+    }
+
+    // At zero intensity, nothing changes
+    assert.deepEqual(speak(text, 'male', {'style': {'intensity': 0, 'scale': {'f0': 1.2}, 'add': {'breathDb': 10}}}).samples, base.samples);
+
+    // Styles in order
+    const both = speak(text, 'male', {'style': [{'scale': {'rate': 2}}, {'add': {'commaPause': 100}}]});
+    assert.equal(both.voice.rate, voices.male.rate * 2);
+    assert.equal(both.voice.commaPause, baseVoice.commaPause + 100);
+});
+
+
+test('speak, voicing', () => {
+    // No voicing - a whisper of the aspiration alone
+    const result = speak('We were away a year ago.', 'male', {'overrides': {'voicing': 0, 'breathDb': -10}});
+    assert(result.frames.every((frame) => frame.av === 0));
+    assert(result.frames.some((frame) => frame.ah > 0));
+    assert(result.rawPeak > 0);
+});
+
+
+test('speak, articulation precision', () => {
+    // Vowel reduction - a word-final unstressed IY is reduced a little toward schwa (its F2 lowered)
+    const text = 'the happy city of it';
+    const happyF2 = (reduction) => {
+        const result = speak(text, 'male', {'overrides': {reduction}});
+        return middleFrame(result, wordSegment(result, 'happy', 'IY')).f2;
+    };
+    assert(happyF2(0) > happyF2(1) + 20);
+    assert(happyF2(1) > happyF2(2) + 20);
+
+    // Slower transitions - the same timing, different formant tracks
+    const base = speak('a bad day');
+    const slow = speak('a bad day', 'male', {'overrides': {'transitionScale': 2}});
+    assert.deepEqual(slow.segments, base.segments);
+    const badAE = wordSegment(base, 'bad', 'AE');
+    const atOnset = (result) => frameValue(result, 'f2', badAE.start + 30);
+    assert(atOnset(slow) < atOnset(base));
+});
+
+
+test('speak, intonation parameters', () => {
+    // The question rise
+    const question = speak('Were you away a year ago?');
+    const higherQuestion = speak('Were you away a year ago?', 'male', {'overrides': {'questionRise': 1.8}});
+    const questionEnd = (result) => {
+        const last = vowelSegments(result).pop();
+        return f0At(result, last.start + last.dur - 10);
+    };
+    assert(questionEnd(higherQuestion) > questionEnd(question) * 1.1);
+
+    // Without the exclamation accent boost, an exclamation's pitch is a statement's
+    const statement = speak('We were away a year ago.');
+    const exclamation = speak('We were away a year ago!', 'male', {'overrides': {'exclamationAccent': 1}});
+    assert.deepEqual(exclamation.frames.map((frame) => frame.f0), statement.frames.map((frame) => frame.f0));
+
+    // Without pitch drift
+    const steady = speak('We were away a year ago.', 'male', {'overrides': {'pitchDrift': 0}});
+    assert.notDeepEqual(steady.frames.map((frame) => frame.f0), statement.frames.map((frame) => frame.f0));
+});
+
+
+test('speak, nasal parameters', () => {
+    const text = 'No man ran.';
+    const result = speak(text, 'male', {'overrides': {'nasalPole': 300, 'nasalZero': 500, 'nasalizationZero': 400}});
+    const manM = wordSegment(result, 'man', 'M');
+    assert(Math.abs(middleFrame(result, manM).fnz - 500) < 30);
+    assert(Math.abs(middleFrame(result, manM).fnp - 300) < 30);
+    const manAE = segmentFrames(result, wordSegment(result, 'man', 'AE'));
+    assert(manAE[manAE.length - 1].fnz > 390);
+
+    // A scaled nasal F1 locus - higher in the female voice
+    const female = speak(text, 'female');
+    const scaled = speak(text, 'female', {'overrides': {'scaleNasalF1': true}});
+    const nasalF1 = (voiceResult) => middleFrame(voiceResult, wordSegment(voiceResult, 'man', 'M')).f1;
+    assert(nasalF1(scaled) > nasalF1(female) * 1.05);
+});
+
+
+test('speak, source parameters', () => {
+    // A stronger HH
+    const home = speak('home');
+    const strongHome = speak('home', 'male', {'overrides': {'hhDb': -14}});
+    const hhAh = (result) => middleFrame(result, wordSegment(result, 'home', 'HH')).ah;
+    assert(hhAh(strongHome) > hhAh(home) * 2);
+
+    // The aspiration's glottal modulation
+    const unmodulated = speak('home', 'male', {'overrides': {'noiseModulation': 0}});
+    assert.notDeepEqual(unmodulated.samples, home.samples);
+});
+
+
+test('speak, vowel blend', () => {
+    // Between the men's and the women's vowel spaces
+    const text = 'Bob saw Bob.';
+    const vowelF1 = (vowelBlend) => {
+        const result = speak(text, 'male', {'overrides': {vowelBlend}});
+        return middleFrame(result, wordSegment(result, 'saw', 'AO')).f1;
+    };
+    const [men, half, women] = [vowelF1(0), vowelF1(0.5), vowelF1(1)];
+    assert(men < half && half < women);
+    assert(Math.abs(half - (men + women) / 2) < 0.1 * (women - men));
 });
