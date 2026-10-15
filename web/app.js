@@ -78,6 +78,18 @@ let lastSave = 0;
 const engine = new Engine({'onChange': onEngineChange});
 
 
+// The startup timeline overlay (?timing in the URL) - the engine's events since the last play, for diagnosing slow
+// starts on a device
+if (new URLSearchParams(window.location.search).has('timing')) {
+    const overlay = document.createElement('pre');
+    overlay.className = 'timing-overlay';
+    document.body.append(overlay);
+    setInterval(() => {
+        overlay.textContent = engine.timeline.map(({ms, event}) => `${String(ms).padStart(6)} ms  ${event}`).join('\n');
+    }, 250);
+}
+
+
 // Create an element with a class and text
 function make(tag, className = '', text = '') {
     const created = document.createElement(tag);

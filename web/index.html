@@ -628,6 +628,24 @@
         width: 100%;
         margin-bottom: 10px;
     }
+    /* The startup timeline overlay (?timing) */
+    .timing-overlay {
+        position: fixed;
+        left: 8px;
+        right: 8px;
+        bottom: 8px;
+        z-index: 100;
+        max-height: 40vh;
+        overflow: auto;
+        margin: 0;
+        padding: 8px;
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.82);
+        color: #e8f0e8;
+        font: 11px/1.4 ui-monospace, Menlo, monospace;
+        white-space: pre-wrap;
+        pointer-events: none;
+    }
 </style>
 </head>
 <body>

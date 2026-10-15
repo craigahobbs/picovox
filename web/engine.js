@@ -124,6 +124,12 @@ export class Engine {
         this.worker = null;
         this.workerReady = false;
         this.workerStarts = 0;
+        // The startup timeline - [{ms (since the last play), event}] - for diagnosing slow starts (the app shows it with
+        // ?timing)
+        this.timeline = [];
+        this.playStart = performance.now();
+        this.awaitingFirstBlock = false;
+        this.awaitingFirstSchedule = false;
         this.nextRunId = 1;
         this.session = null;
         this.playing = false;
@@ -193,8 +199,11 @@ export class Engine {
         };
         this.unit = units.length === 0 ? 0 : this.unitAtChar(startChar);
         this.time = 0;
-        // Have the worker load the voice now, so the first play starts quickly
+        // Have the worker load the voice and synthesize the first sentences now, so the first play starts at once
         this.worker.postMessage({'type': 'prepare', voice});
+        if (units.length !== 0) {
+            this.ensureSynthesis(this.unit);
+        }
         this.notify();
     }
 
@@ -211,11 +220,26 @@ export class Engine {
         }
     }
 
+    // Note a startup event on the timeline
+    mark(event) {
+        this.timeline.push({'ms': Math.round(performance.now() - this.playStart), event});
+        if (this.timeline.length > 40) {
+            this.timeline.shift();
+        }
+    }
+
     // Play from the position (from the start at the end) - call from a user gesture (it unlocks audio)
     play() {
         if (this.session === null || this.session.units.length === 0) {
             return;
         }
+        this.playStart = performance.now();
+        this.timeline = [];
+        const cell = this.session.cache[this.unit];
+        const worker = this.workerReady ? 'ready' : 'starting';
+        this.mark(`play (unit ${this.unit}: ${cell.blocks.length} blocks ready${cell.done ? ', complete' : ''}; worker ${worker})`);
+        this.awaitingFirstBlock = cell.blocks.length === 0;
+        this.awaitingFirstSchedule = true;
         this.ensureAudio();
         if (this.ended) {
             this.ended = false;
@@ -327,6 +351,14 @@ export class Engine {
                 navigator.audioSession.type = 'playback';
             }
             this.audioContext = new AudioContext({'latencyHint': 'playback'});
+            // iOS interrupts Web Audio (say, when the media element takes the audio session) - resume it while playing
+            this.audioContext.onstatechange = () => {
+                this.mark(`audio ${this.audioContext.state}`);
+                if (this.playing && this.audioContext.state !== 'running' && this.audioContext.state !== 'closed') {
+                    this.audioContext.resume();
+                }
+            };
+            this.mark(`audio created (${this.audioContext.sampleRate} Hz, ${this.audioContext.state})`);
             this.output = this.audioContext.createGain();
             this.output.connect(this.audioContext.destination);
             this.mediaElement = document.createElement('audio');
@@ -334,15 +366,20 @@ export class Engine {
             this.mediaElement.setAttribute('playsinline', '');
             this.mediaElement.src = URL.createObjectURL(new Blob([encodeWav(new Float32Array(8000), 8000)], {'type': 'audio/wav'}));
         }
-        this.audioContext.resume();
-        this.mediaElement.play().catch(() => {
+        this.audioContext.resume().then(() => {
+            const {baseLatency = 0, outputLatency = 0} = this.audioContext;
+            this.mark(`audio resumed (base latency ${Math.round(1000 * baseLatency)} ms, output ${Math.round(1000 * outputLatency)} ms)`);
+        });
+        this.mediaElement.play().then(() => this.mark('media element playing')).catch(() => {
             // Autoplay restrictions - Web Audio still plays after the gesture
+            this.mark('media element refused');
         });
     }
 
     // Handle a worker message - the worker's readiness, and unit audio (the first run to reach a unit owns it)
     onWorkerMessage(message) {
         if (message.type === 'ready') {
+            this.mark('worker ready');
             this.workerReady = true;
             this.notify();
             return;
@@ -377,6 +414,10 @@ export class Engine {
         if (message.type === 'unitBlock') {
             // Blocks keep their samples - audio buffers are made when they're scheduled (the audio context may not
             // exist yet, before the first play)
+            if (this.awaitingFirstBlock && this.playing && message.unit === this.chain[0]?.unit) {
+                this.awaitingFirstBlock = false;
+                this.mark('first audio block from the worker');
+            }
             const duration = message.samples.length / message.sampleRate;
             cell.blocks.push({'samples': message.samples, 'sampleRate': message.sampleRate, 'start': cell.length, duration});
             cell.length += duration;
@@ -536,6 +577,12 @@ export class Engine {
         source.buffer = buffer;
         source.connect(this.output);
         source.start(when, offset);
+        if (this.awaitingFirstSchedule) {
+            this.awaitingFirstSchedule = false;
+            const ahead = Math.round(1000 * (when - this.audioContext.currentTime));
+            const clock = this.audioContext.currentTime.toFixed(2);
+            this.mark(`first block scheduled (${ahead} ms ahead; audio ${this.audioContext.state}, clock ${clock} s)`);
+        }
         source.onended = () => this.sources.delete(source);
         this.sources.add(source);
     }
