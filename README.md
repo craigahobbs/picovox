@@ -261,7 +261,7 @@ const {samples, sampleRate} = speak('Call me Ishmael.', baritone);
 | source | Voice quality - the LF pulse shape (`rd`), breathiness (`breathDb`, and `noiseShelfDb`, the breath noise's high-frequency turbulence), jitter, shimmer, F0 flutter, creak, spectral tilt (`shelfDb`), the louder accents (`f0Loudness`), and `voicing` (0 whispers) |
 | tract | The vocal tract - its length (`tractScale` scales every resonance), the vowel space (`vowelBlend` - 0 the men's average formants, 1 the women's), the consonant loci and noise scales, the fixed higher formants, and the nasal and lateral resonances |
 | articulation | Precision - vowel `reduction` and `transitionScale` (coarticulation) - and the burst, aspiration, frication, and liquid levels |
-| timing | The speaking `rate`, the comma and sentence pauses, and phrase-final lengthening |
+| timing | The speaking `rate`, the pauses (comma - growing with the phrases' lengths - semicolon and colon, sentence, intermediate phrase, leading, and final), and phrase-final and unstressed-vowel durations |
 
 `resolveVoice(voice, {overrides, style, rate})` merges the root voice, the spec's base chain, the spec, the overrides,
 and the style into the complete parameters (`speak` returns them as `voice`); `validateVoice(spec)` lists a spec's

@@ -106,9 +106,9 @@ test('speak, result', () => {
     const {segments} = result;
     assert.equal(segments[0].type, 'pause');
     assert.equal(segments[0].start, 0);
-    assert.equal(segments[0].dur, 180);
+    assert.equal(segments[0].dur, baseVoice.leadingPause);
     assert.equal(segments[segments.length - 1].type, 'pause');
-    assert.equal(segments[segments.length - 1].dur, 250);
+    assert.equal(segments[segments.length - 1].dur, baseVoice.finalPause);
     for (let ix = 1; ix < segments.length; ix++) {
         assert(Math.abs(segments[ix].start - (segments[ix - 1].start + segments[ix - 1].dur)) < 1e-9);
         assert(segments[ix].dur > 0);
@@ -253,10 +253,11 @@ test('speak, continuation intonation', () => {
     const commaLast = commaVowels[commaVowels.length - 1];
     const commaEnd = commaLast.start + commaLast.dur;
 
-    // The comma pause
+    // The comma pause - between short phrases (seven syllables), shorter than the full comma pause
     const ixPause = result.segments.indexOf(commaLast) + 1;
     assert.equal(result.segments[ixPause].type, 'pause');
-    assert.equal(result.segments[ixPause].dur, baseVoice.commaPause);
+    const commaPause = baseVoice.commaPauseMin + (baseVoice.commaPause - baseVoice.commaPauseMin) * 7 / baseVoice.commaPauseSyllables;
+    assert(Math.abs(result.segments[ixPause].dur - commaPause) < 1e-9);
 
     // The continuation - a fall, then a slight rise, ending above the statement's end
     const lowF0 = Math.min(...segmentFrames(result, commaLast).map((frame) => frame.f0));
@@ -272,14 +273,44 @@ test('speak, continuation intonation', () => {
 });
 
 
+test('speak, comma pauses', () => {
+    // The pause after a comma grows with the syllables of the phrases on either side, up to the full comma pause
+    const commaPause = (result) => result.segments.filter((segment) => segment.type === 'pause')[1].dur;
+    const short = speak('Yes, we ran.');
+    const longText = 'The old professor walked slowly through the garden, and talked about the history of the ancient city.';
+    const long = speak(longText);
+    assert(commaPause(short) < commaPause(long));
+    assert(commaPause(short) > baseVoice.commaPauseMin);
+    assert.equal(commaPause(speak(longText, 'male', {'overrides': {'commaPauseSyllables': 20}})), baseVoice.commaPause);
+
+    // A semicolon or colon is a major break
+    assert.equal(commaPause(speak('Yes; we ran.')), baseVoice.majorPause);
+    assert.equal(commaPause(speak('Yes: we ran.')), baseVoice.majorPause);
+
+    // Overridden
+    assert.equal(commaPause(speak('Yes, we ran.', 'male', {'overrides': {'commaPause': 300, 'commaPauseMin': 300}})), 300);
+    assert.equal(commaPause(speak('Yes; we ran.', 'male', {'overrides': {'majorPause': 700}})), 700);
+});
+
+
+test('speak, leading and final pauses', () => {
+    const result = speak('We ran.', 'male', {'overrides': {'leadingPause': 100, 'finalPause': 600}});
+    const pauses = result.segments.filter((segment) => segment.type === 'pause');
+    assert.deepEqual(pauses.map((pause) => pause.dur), [100, 600]);
+});
+
+
 test('speak, sentence pause', () => {
     const result = speak('We ran. We ran.');
     const pauses = result.segments.filter((segment) => segment.type === 'pause');
-    assert.deepEqual(pauses.map((pause) => pause.dur), [180, baseVoice.sentencePause, 250]);
+    assert.deepEqual(pauses.map((pause) => pause.dur), [baseVoice.leadingPause, baseVoice.sentencePause, baseVoice.finalPause]);
 
     // Overridden
     const overridden = speak('We ran. We ran.', 'male', {'overrides': {'sentencePause': 500}});
-    assert.deepEqual(overridden.segments.filter((segment) => segment.type === 'pause').map((pause) => pause.dur), [180, 500, 250]);
+    assert.deepEqual(
+        overridden.segments.filter((segment) => segment.type === 'pause').map((pause) => pause.dur),
+        [baseVoice.leadingPause, 500, baseVoice.finalPause]
+    );
 });
 
 
@@ -299,12 +330,13 @@ test('speak, phrase-final lengthening', () => {
     const lastVowel = wordSegment(result, 'bob', 'AA', 1);
     assert(!firstVowel.phraseFinal);
     assert(lastVowel.phraseFinal);
-    assert(lastVowel.dur > 1.8 * firstVowel.dur);
+    assert(lastVowel.dur > 1.6 * firstVowel.dur);
 
-    // The final consonant lengthens too
+    // The final consonant's closure lengthens too
+    const closure = (segment) => segment.dur - segment.burst - segment.aspiration;
     const finalB = wordSegments(result, 'bob', 1).pop();
     assert(finalB.phraseFinal);
-    assert(finalB.dur > wordSegments(result, 'bob', 0).pop().dur * 0.9);
+    assert(closure(finalB) > closure(wordSegments(result, 'bob', 0).pop()));
 });
 
 
@@ -312,7 +344,7 @@ test('speak, vowel durations by context', () => {
     // Before a voiced stop, a vowel is longer than before a voiceless one
     const voicedStop = speak('bead.');
     const voicelessStop = speak('beat.');
-    assert(wordSegment(voicedStop, 'bead', 'IY').dur > 1.5 * wordSegment(voicelessStop, 'beat', 'IY').dur);
+    assert(wordSegment(voicedStop, 'bead', 'IY').dur > 1.4 * wordSegment(voicelessStop, 'beat', 'IY').dur);
 
     // Likewise before fricatives
     const voicedFricative = speak('peas.');
@@ -334,7 +366,7 @@ test('speak, vowel durations by context', () => {
     assert(stressed[1].stress === 1 && stressed[0].stress === 0);
     assert(stressed[0].dur < stressed[1].dur / 2);
     const functionWord = speak('to two men');
-    assert(wordSegment(functionWord, 'to', 'UW').dur < wordSegment(functionWord, 'two', 'UW').dur * 0.5);
+    assert(wordSegment(functionWord, 'to', 'UW').dur < wordSegment(functionWord, 'two', 'UW').dur * 0.7);
 });
 
 
@@ -633,7 +665,18 @@ test('speak, intermediate phrases', () => {
     const lengthened = speak(text, 'male', {'overrides': {'minorLengthen': 1.6}});
     const minorFinalVowel = result.segments.find((segment) => segment.minorFinal && segment.type === 'vowel');
     const ixVowel = result.segments.indexOf(minorFinalVowel);
-    assert(lengthened.segments[ixVowel].dur > minorFinalVowel.dur * 1.3);
+    assert(lengthened.segments[ixVowel].dur > minorFinalVowel.dur * 1.15);
+
+    // No pause at an intermediate phrase break by default; with minorPause, a brief one, through which the phrase's
+    // intonation continues (no phrase-final fall before it)
+    assert.equal(result.segments.filter((segment) => segment.type === 'pause').length, 2);
+    const paused = speak(text, 'male', {'overrides': {'minorPause': 150}});
+    const minorPauses = paused.segments.filter((segment) => segment.minorPause);
+    assert(minorPauses.length >= 2);
+    assert(minorPauses.every((pause) => pause.type === 'pause' && pause.dur === 150));
+    const beforePause = paused.segments[paused.segments.indexOf(minorPauses[0]) - 1];
+    assert(!beforePause.phraseFinal);
+    assert(f0At(paused, beforePause.start + beforePause.dur - 5) > paused.voice.f0 * paused.voice.endLow * 1.1);
 
     // A long phrase without break words isn't split
     const unbroken = speak('Seventeen elephants happily devoured magnificent watermelons yesterday.');

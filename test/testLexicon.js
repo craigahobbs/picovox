@@ -132,6 +132,7 @@ test('lexicon.textToPhrases, phrase ends', () => {
     assert.deepEqual(phrases.map((phrase) => phrase.end), [
         'comma', 'comma', 'comma', 'period', 'question', 'wh', 'wh', 'exclamation', 'period'
     ]);
+    assert.deepEqual(phrases.map((phrase) => phrase.major), [false, true, true, false, false, false, false, false, false]);
 });
 
 
