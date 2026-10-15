@@ -180,6 +180,24 @@ function median(values) {
 }
 
 
+// A run's card - or, if its log can't be shown, a card saying so (one odd run never blanks the dashboard)
+function safeRunCard(run) {
+    try {
+        return runCard(run);
+    } catch (error) {
+        const card = make('div', 'run');
+        card.append(make('span', 'run-name', run.name), make('div', 'run-facts', `can't show this run: ${error.message}`));
+        return card;
+    }
+}
+
+
+// A number to three decimals, or '-' if it isn't one (a run's log may lack a field)
+function fixed3(value) {
+    return Number.isFinite(value) ? value.toFixed(3) : '-';
+}
+
+
 // A run's status - live (recently updated), stalled (quiet for minutes), stopped (quiet for long), finished, or failed
 function runStatus(run) {
     const train = run.entries.train || [];
@@ -328,7 +346,7 @@ function renderRuns() {
         const left = Number.isFinite(progress.secondsLeft) ? ` · ${formatDuration(progress.secondsLeft)} left` : '';
         facts.textContent = `${counts}${percent}${left}`;
         fill.style.width = `${(100 * (progress.fraction || 0)).toFixed(1)}%`;
-        grid.replaceChildren(...group.runs.map(runCard));
+        grid.replaceChildren(...group.runs.map(safeRunCard));
     }
     const elements = groups.map((group) => runGroupElements.get(group.title).element);
     if (elements.some((element, index) => runsElement.children[index] !== element) || runsElement.children.length !== elements.length) {
@@ -390,7 +408,7 @@ function runCard(run) {
     const facts = [
         `step ${last ? last.step.toLocaleString() : 0}${run.info.targetSteps ? ` / ${run.info.targetSteps.toLocaleString()}` : ''}`,
         `${Number.isFinite(secondsPerStep) ? secondsPerStep.toFixed(2) : '-'} s/step · ${timeLeft}`,
-        `train total ${last ? last.total.toFixed(3) : '-'}${lastVal ? ` · val ${(lastVal.spectral ?? lastVal.total).toFixed(3)}` : ''}`,
+        `train total ${fixed3(last?.total)}${lastVal ? ` · val ${fixed3(lastVal.spectral ?? lastVal.total)}` : ''}`,
         `updated ${formatDuration((Date.now() - run.modified) / 1000)} ago`
     ];
     if (run.info.continuedAs) {
@@ -698,7 +716,7 @@ async function fileExists(path) {
 
 // The phase each unplanned log in an unknown folder was assigned to - the phase running when it first appeared,
 // remembered per browser
-const assignedKey = 'training-dashboard-assigned-v1';
+const assignedKey = 'training-dashboard-assigned-v2';
 let assigned = {};
 try {
     assigned = JSON.parse(localStorage.getItem(assignedKey)) || {};
@@ -854,14 +872,16 @@ async function pipelineRows(logs, activity) {
         }
         return assigned[id];
     };
+    // A phase's rows by index - clamped to the pipeline's phases (an assignment can outlive a pipeline change)
+    const phaseRows = (phaseIndex) => phases[Math.max(0, Math.min(phaseIndex, phases.length - 1))].rows;
     const addRow = (phaseIndex, row) => {
-        phases[Math.min(phaseIndex, phases.length - 1)].rows.push({...row, 'weight': 0, 'unplanned': true});
+        phaseRows(phaseIndex).push({...row, 'weight': 0, 'unplanned': true});
     };
 
     // Agents lead their phase
     for (const agent of activity?.agents || []) {
         const phaseIndex = assign(`agent:${agent.id}`, pipeline.phases.findIndex((phase) => phase.title === agent.phase));
-        phases[Math.min(phaseIndex, phases.length - 1)].rows.unshift({
+        phaseRows(phaseIndex).unshift({
             'id': `agent:${agent.id}`, 'title': `agent: ${agent.label}`, 'kind': 'agent', 'weight': 0, 'unplanned': true,
             'state': agentState(agent)
         });
@@ -879,12 +899,13 @@ async function pipelineRows(logs, activity) {
         addRow(assign(id, phaseOfFolder(`build/nn/${log.file.path}`)), row);
     }
 
-    // Other runs join the phase whose run prefixes match (else the training phase)
+    // Other runs join the phase whose run prefixes match (else the training phase, else the phase running when they appeared)
     const trainPhase = pipeline.phases.findIndex((phase) => phase.steps.some((step) => step.run));
     for (const run of newRuns.filter((item) => item !== newestRun)) {
         const phaseIndex = pipeline.phases.findIndex((phase) => (phase.runs || []).some((prefix) => run.name.startsWith(prefix)));
-        const row = {'id': `run:${run.name}`, 'title': `run ${run.name}`, 'kind': 'run', 'state': runState(run)};
-        addRow(phaseIndex === -1 ? trainPhase : phaseIndex, row);
+        const id = `run:${run.name}`;
+        const row = {id, 'title': `run ${run.name}`, 'kind': 'run', 'state': runState(run)};
+        addRow(phaseIndex === -1 ? assign(id, trainPhase) : phaseIndex, row);
     }
 
     // Unplanned processes join the phase whose process prefixes match
