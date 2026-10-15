@@ -36,6 +36,13 @@ import {fft} from './fft.js';
 
 // The parameter indexes
 const IX = Object.fromEntries(NAMES.map((name, ix) => [name, ix]));
+const IX_F0 = IX.f0;
+const IX_JITTER = IX.jitter;
+const IX_RD = IX.rd;
+const IX_SHIMMER = IX.shimmer;
+const IX_AV = IX.av;
+const IX_AH = IX.ah;
+const IX_AF = IX.af;
 const DB_SET = new Set(DB_NAMES);
 
 // Voicing below this linear amplitude (FLOOR_DB + 10 dB) is skipped
@@ -95,15 +102,22 @@ function resonator(center, bandwidth) {
 }
 
 
-// A biquad's complex response at (cos w, sin w, cos 2w, sin 2w) - [re, im]
+// A biquad's complex response at (cos w, sin w, cos 2w, sin 2w) - returns the real part; the imaginary part is left in
+// biquadIm (no allocation - these run per harmonic and per noise bin)
+let biquadIm = 0;
 function biquad(coefs, cos1, sin1, cos2, sin2) {
-    const [b0, b1, b2, a1, a2] = coefs;
+    const b0 = coefs[0];
+    const b1 = coefs[1];
+    const b2 = coefs[2];
+    const a1 = coefs[3];
+    const a2 = coefs[4];
     const numRe = b0 + b1 * cos1 + b2 * cos2;
     const numIm = -(b1 * sin1 + b2 * sin2);
     const denRe = 1 + a1 * cos1 + a2 * cos2;
     const denIm = -(a1 * sin1 + a2 * sin2);
     const den = denRe * denRe + denIm * denIm;
-    return [(numRe * denRe + numIm * denIm) / den, (numIm * denRe - numRe * denIm) / den];
+    biquadIm = (numIm * denRe - numRe * denIm) / den;
+    return (numRe * denRe + numIm * denIm) / den;
 }
 
 
@@ -142,52 +156,70 @@ function highpassCoefficients(cutoff) {
 }
 
 
-// A frame's filters (from linear parameter values) - the tract's poles and zero, the shelf, and the frication filter
+// The formants' (frequency, bandwidth) parameter indexes, and the tract's pole count
+const FORMANT_IX = [1, 2, 3, 4, 5, 6].map((kx) => [IX[`f${kx}`], IX[`b${kx}`]]);
+const POLE_COUNT = FORMANT_IX.length + 1 + HIGHER_POLES;
+
+
+// A frame's filters (from linear parameter values) - the tract's poles (their B and C coefficients) and zero, the
+// shelf, and the frication filter
 function frameFilters(linear) {
-    const poles = [];
-    for (let kx = 1; kx <= 6; kx++) {
-        poles.push(resonator(linear[IX[`f${kx}`]], linear[IX[`b${kx}`]]));
+    const poleB = new Float64Array(POLE_COUNT);
+    const poleC = new Float64Array(POLE_COUNT);
+    let pole = 0;
+    let gain = 1;
+    const addPole = ([coefA, coefB, coefC]) => {
+        gain *= coefA;
+        poleB[pole] = coefB;
+        poleC[pole] = coefC;
+        pole++;
+    };
+    const zero = resonator(linear[IX.fnz], linear[IX.bnz]);
+    gain /= zero[0];
+    for (const [frequencyIx, bandwidthIx] of FORMANT_IX) {
+        addPole(resonator(linear[frequencyIx], linear[bandwidthIx]));
     }
-    poles.push(resonator(linear[IX.fnp], linear[IX.bnp]));
+    addPole(resonator(linear[IX.fnp], linear[IX.bnp]));
     for (let kx = 1; kx <= HIGHER_POLES; kx++) {
         const bandwidth = HIGHER_POLE_BANDWIDTH + HIGHER_POLE_BANDWIDTH_STEP * (kx - 1);
-        poles.push(resonator(linear[IX.f6] * (1 + kx * HIGHER_POLE_SPACING), bandwidth));
-    }
-    const zero = resonator(linear[IX.fnz], linear[IX.bnz]);
-    let gain = 1 / zero[0];
-    for (const pole of poles) {
-        gain *= pole[0];
+        addPole(resonator(linear[IX.f6] * (1 + kx * HIGHER_POLE_SPACING), bandwidth));
     }
     return {
-        poles, zero, gain, 'shelf': shelfCoefficients(linear[IX.shelf]),
+        poleB, poleC, zero, gain, 'shelf': shelfCoefficients(linear[IX.shelf]),
         'bp1': bandpassCoefficients(linear[IX.fp1], linear[IX.bp1]), 'bp2': bandpassCoefficients(linear[IX.fp2], linear[IX.bp2]),
         'hp': highpassCoefficients(linear[IX.fhp])
     };
 }
 
 
-// The tract's complex response at (cos w, sin w) of the reference rate - [re, im]
+// The tract's complex response at (cos w, sin w) of the reference rate - returns the real part; the imaginary part is
+// left in tractIm
+let tractIm = 0;
 function tractResponse(filters, cos1, sin1) {
     const cos2 = 2 * cos1 * cos1 - 1;
     const sin2 = 2 * sin1 * cos1;
     // The product of the poles' denominators 1 - B e^-jw - C e^-2jw
     let prodRe = 1;
     let prodIm = 0;
-    for (const [, coefB, coefC] of filters.poles) {
+    const {poleB, poleC} = filters;
+    for (let pole = 0; pole < poleB.length; pole++) {
+        const coefB = poleB[pole];
+        const coefC = poleC[pole];
         const denRe = 1 - coefB * cos1 - coefC * cos2;
         const denIm = coefB * sin1 + coefC * sin2;
         const nextRe = prodRe * denRe - prodIm * denIm;
         prodIm = prodRe * denIm + prodIm * denRe;
         prodRe = nextRe;
     }
-    const [, zeroB, zeroC] = filters.zero;
+    const zeroB = filters.zero[1];
+    const zeroC = filters.zero[2];
     const zeroRe = 1 - zeroB * cos1 - zeroC * cos2;
     const zeroIm = zeroB * sin1 + zeroC * sin2;
     // gain * zero / product
     const prodAbs = prodRe * prodRe + prodIm * prodIm;
     const re = (zeroRe * prodRe + zeroIm * prodIm) / prodAbs;
-    const im = (zeroIm * prodRe - zeroRe * prodIm) / prodAbs;
-    return [filters.gain * re, filters.gain * im];
+    tractIm = filters.gain * ((zeroIm * prodRe - zeroRe * prodIm) / prodAbs);
+    return filters.gain * re;
 }
 
 
@@ -247,14 +279,16 @@ function harmonicAmplitudes(linear, filters, sampleRate, eq, correction = null) 
         const omega = 2 * Math.PI * frequency / REF_RATE;
         const cos1 = Math.cos(omega);
         const sin1 = Math.sin(omega);
-        const [tractRe, tractIm] = tractResponse(filters, cos1, sin1);
-        const [shelfRe, shelfIm] = biquad(filters.shelf, cos1, sin1, 2 * cos1 * cos1 - 1, 2 * sin1 * cos1);
+        const tractRe = tractResponse(filters, cos1, sin1);
+        const tractImag = tractIm;
+        const shelfRe = biquad(filters.shelf, cos1, sin1, 2 * cos1 * cos1 - 1, 2 * sin1 * cos1);
+        const shelfIm = biquadIm;
         let scale = 2 * av * harmonicTaper(frequency, sampleRate) * eqGain(eq, frequency);
         if (correction !== null) {
             scale *= correctionGain(correction, frequency);
         }
-        const filterRe = scale * (tractRe * shelfRe - tractIm * shelfIm);
-        const filterIm = scale * (tractRe * shelfIm + tractIm * shelfRe);
+        const filterRe = scale * (tractRe * shelfRe - tractImag * shelfIm);
+        const filterIm = scale * (tractRe * shelfIm + tractImag * shelfRe);
         const sourceRe = rowLow.re[kx] * (1 - weight) + rowHigh.re[kx] * weight;
         const sourceIm = rowLow.im[kx] * (1 - weight) + rowHigh.im[kx] * weight;
         re[kx] = sourceRe * filterRe - sourceIm * filterIm;
@@ -370,6 +404,9 @@ export function createRenderer({sampleRate = 44100, seed = 1, onBlock = null, bl
     let blockLength = 0;
 
     // Generate one sample's voicing and noise inputs
+    let pairIndex = -1;
+    let pairA = null;
+    let pairB = null;
     const generate = (index) => {
         const position = index * FRAME_RATE / sampleRate;
         const frameIndex = Math.floor(position);
@@ -378,11 +415,9 @@ export function createRenderer({sampleRate = 44100, seed = 1, onBlock = null, bl
         const valuesB = frames[frameIndex + 1 - frameBase];
         const linearA = linears[frameIndex - frameBase];
         const linearB = linears[frameIndex + 1 - frameBase];
-        const perSample = (ix) => valuesA[ix] * (1 - weight) + valuesB[ix] * weight;
-        const perSampleLinear = (ix) => linearA[ix] * (1 - weight) + linearB[ix] * weight;
-        const f0 = Math.max(F0_MIN, perSample(IX.f0));
-        const jitter = perSample(IX.jitter);
-        const rd = perSample(IX.rd);
+        const f0 = Math.max(F0_MIN, valuesA[IX_F0] * (1 - weight) + valuesB[IX_F0] * weight);
+        const jitter = valuesA[IX_JITTER] * (1 - weight) + valuesB[IX_JITTER] * weight;
+        const rd = valuesA[IX_RD] * (1 - weight) + valuesB[IX_RD] * weight;
 
         // The glottal cycle - jitter by the unperturbed phase's cycle, shimmer by the perturbed phase's
         const cycle0 = Math.floor(phase0);
@@ -402,9 +437,14 @@ export function createRenderer({sampleRate = 44100, seed = 1, onBlock = null, bl
         phase0 += f0 / sampleRate;
         phase += frequency / sampleRate;
 
-        // The harmonics, the amplitudes interpolated between the frames
-        const ampA = frameAmplitudes(frameIndex);
-        const ampB = frameAmplitudes(frameIndex + 1);
+        // The harmonics, the amplitudes interpolated between the frames (the frames' amplitudes kept while the frame is)
+        if (frameIndex !== pairIndex) {
+            pairIndex = frameIndex;
+            pairA = frameAmplitudes(frameIndex);
+            pairB = frameAmplitudes(frameIndex + 1);
+        }
+        const ampA = pairA;
+        const ampB = pairB;
         let sum = 0;
         if (ampA.count > 0 || ampB.count > 0) {
             const angle = 2 * Math.PI * fraction;
@@ -414,33 +454,57 @@ export function createRenderer({sampleRate = 44100, seed = 1, onBlock = null, bl
             let zIm = stepIm;
             let sumA = 0;
             let sumB = 0;
+            const reA = ampA.re;
+            const imA = ampA.im;
+            const reB = ampB.re;
+            const imB = ampB.im;
+            const both = Math.min(ampA.count, ampB.count);
             const count = Math.max(ampA.count, ampB.count);
-            for (let kx = 1; kx <= count; kx++) {
-                if (kx <= ampA.count) {
-                    sumA += ampA.re[kx] * zRe - ampA.im[kx] * zIm;
-                }
-                if (kx <= ampB.count) {
-                    sumB += ampB.re[kx] * zRe - ampB.im[kx] * zIm;
-                }
+            let kx = 1;
+            for (; kx <= both; kx++) {
+                sumA += reA[kx] * zRe - imA[kx] * zIm;
+                sumB += reB[kx] * zRe - imB[kx] * zIm;
                 const nextRe = zRe * stepRe - zIm * stepIm;
                 zIm = zRe * stepIm + zIm * stepRe;
                 zRe = nextRe;
             }
-            const shimmerAmount = perSampleLinear(IX.shimmer);
+            if (ampA.count > both) {
+                for (; kx <= count; kx++) {
+                    sumA += reA[kx] * zRe - imA[kx] * zIm;
+                    const nextRe = zRe * stepRe - zIm * stepIm;
+                    zIm = zRe * stepIm + zIm * stepRe;
+                    zRe = nextRe;
+                }
+            } else {
+                for (; kx <= count; kx++) {
+                    sumB += reB[kx] * zRe - imB[kx] * zIm;
+                    const nextRe = zRe * stepRe - zIm * stepIm;
+                    zIm = zRe * stepIm + zIm * stepRe;
+                    zRe = nextRe;
+                }
+            }
+            const shimmerAmount = linearA[IX_SHIMMER] * (1 - weight) + linearB[IX_SHIMMER] * weight;
             sum = (sumA * (1 - weight) + sumB * weight) * Math.max(0, 1 + shimmerAmount * shimmerDraw);
         }
         voicing.set(index, sum);
 
         // The noise inputs - the aspiration pulsing with the glottal cycle
-        const av = perSampleLinear(IX.av);
+        const av = linearA[IX_AV] * (1 - weight) + linearB[IX_AV] * weight;
         const modulation = isOpen ? 1 : 1 - NOISE_MODULATION * Math.min(1, 2 * av);
-        aspiration.set(index, gaussAt(seeds.aspiration, index) * noiseScale * perSampleLinear(IX.ah) * modulation);
-        frication.set(index, gaussAt(seeds.frication, index) * noiseScale * perSampleLinear(IX.af));
+        const ah = linearA[IX_AH] * (1 - weight) + linearB[IX_AH] * weight;
+        const af = linearA[IX_AF] * (1 - weight) + linearB[IX_AF] * weight;
+        aspiration.set(index, gaussAt(seeds.aspiration, index) * noiseScale * ah * modulation);
+        frication.set(index, gaussAt(seeds.frication, index) * noiseScale * af);
     };
 
     // Filter one noise frame and overlap-add it
     const re = new Float64Array(fftSize);
     const im = new Float64Array(fftSize);
+    const outRe = new Float64Array(fftSize);
+    const outIm = new Float64Array(fftSize);
+    const gainAspiration = new Float64Array(binCount);
+    const gainFrication = new Float64Array(binCount);
+    const noiseLinear = new Float64Array(NAMES.length);
     const filterNoiseFrame = (frameNumber, frameCount) => {
         // The parameters at the frame's center
         const position = frameNumber * hop * FRAME_RATE / sampleRate;
@@ -448,7 +512,7 @@ export function createRenderer({sampleRate = 44100, seed = 1, onBlock = null, bl
         const weight = Math.max(0, Math.min(1, position - frameIndex));
         const linearA = linears[frameIndex - frameBase];
         const linearB = linears[Math.min(frameIndex + 1, frameCount - 1) - frameBase];
-        const linear = new Float64Array(NAMES.length);
+        const linear = noiseLinear;
         for (let ix = 0; ix < NAMES.length; ix++) {
             linear[ix] = linearA[ix] * (1 - weight) + linearB[ix] * weight;
         }
@@ -487,26 +551,30 @@ export function createRenderer({sampleRate = 44100, seed = 1, onBlock = null, bl
         fft(re, im);
 
         // The filters' magnitudes (the spectral shapes - the levels are in the noise) per bin
-        const gainAspiration = new Float64Array(binCount);
-        const gainFrication = new Float64Array(binCount);
         for (let bin = 0; bin < binCount; bin++) {
             const cos1 = binCos[bin];
             const sin1 = binSin[bin];
             const cos2 = 2 * cos1 * cos1 - 1;
             const sin2 = 2 * sin1 * cos1;
             if (hasAspiration) {
-                const [tractRe, tractIm] = tractResponse(filters, cos1, sin1);
+                const tractRe = tractResponse(filters, cos1, sin1);
                 gainAspiration[bin] = binEq[bin] * aspirationShape[bin] * Math.sqrt(tractRe * tractRe + tractIm * tractIm);
+            } else {
+                gainAspiration[bin] = 0;
             }
             if (hasFrication) {
-                const [bp1Re, bp1Im] = biquad(filters.bp1, cos1, sin1, cos2, sin2);
-                const [bp2Re, bp2Im] = biquad(filters.bp2, cos1, sin1, cos2, sin2);
+                const bp1Re = biquad(filters.bp1, cos1, sin1, cos2, sin2);
+                const bp1Im = biquadIm;
+                const bp2Re = biquad(filters.bp2, cos1, sin1, cos2, sin2);
+                const bp2Im = biquadIm;
                 const sumRe = linear[IX.ab] + linear[IX.ap1] * (bp1Re * bp1Re - bp1Im * bp1Im) +
                     linear[IX.ap2] * (bp2Re * bp2Re - bp2Im * bp2Im);
                 const sumIm = linear[IX.ap1] * 2 * bp1Re * bp1Im + linear[IX.ap2] * 2 * bp2Re * bp2Im;
-                const [hpRe, hpIm] = biquad(filters.hp, cos1, sin1, cos2, sin2);
-                const highpass = hpRe * hpRe + hpIm * hpIm;
+                const hpRe = biquad(filters.hp, cos1, sin1, cos2, sin2);
+                const highpass = hpRe * hpRe + biquadIm * biquadIm;
                 gainFrication[bin] = binEq[bin] * Math.sqrt(sumRe * sumRe + sumIm * sumIm) * highpass;
+            } else {
+                gainFrication[bin] = 0;
             }
             if (correction !== null) {
                 const gain = correctionGain(correction, bin * sampleRate / fftSize);
@@ -516,8 +584,6 @@ export function createRenderer({sampleRate = 44100, seed = 1, onBlock = null, bl
         }
 
         // Separate the two spectra (Xa = (Z[k] + Z*[N-k]) / 2, Xf = (Z[k] - Z*[N-k]) / 2j), filter, and recombine
-        const outRe = new Float64Array(fftSize);
-        const outIm = new Float64Array(fftSize);
         for (let bin = 0; bin < fftSize; bin++) {
             const mirror = (fftSize - bin) % fftSize;
             const gainBin = bin <= half ? bin : fftSize - bin;

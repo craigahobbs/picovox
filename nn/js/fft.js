@@ -35,8 +35,12 @@ export function fft(re, im, inverse = false) {
     for (let ix = 1; ix < size; ix++) {
         const jx = reverse[ix];
         if (ix < jx) {
-            [re[ix], re[jx]] = [re[jx], re[ix]];
-            [im[ix], im[jx]] = [im[jx], im[ix]];
+            const swapRe = re[ix];
+            re[ix] = re[jx];
+            re[jx] = swapRe;
+            const swapIm = im[ix];
+            im[ix] = im[jx];
+            im[jx] = swapIm;
         }
     }
     const sign = inverse ? 1 : -1;
