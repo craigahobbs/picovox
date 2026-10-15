@@ -165,11 +165,26 @@ def batch_stream(corpus, batch_size, max_frames, rng):
         yield from make_batches(corpus, batch_size, max_frames, rng)
 
 
-# Collate utterances into padded host (CPU) tensors - a batch for upload()
-def collate_host(corpus, indices):
+# The smallest length of a geometric ladder (ratio, multiples of quantum) at least a length - the padded length of
+# fixed-shape batches (ratio 0: the length itself)
+def bucket_length(length, ratio, quantum=8):
+    if not ratio:
+        return length
+    bucket = quantum
+    while bucket < length:
+        bucket = max(bucket + quantum, int(math.ceil(bucket * ratio / quantum)) * quantum)
+    return bucket
+
+
+# Collate utterances into padded host (CPU) tensors - a batch for upload(); with bucket_ratio, the token and frame
+# counts are padded up to a few fixed lengths (bucket_length), so the GPU sees few distinct shapes (on MPS each new
+# shape compiles its graphs) - the padding is masked, so only the dropout masks' draws change
+def collate_host(corpus, indices, bucket_ratio=0):
     items = [corpus.items[index] for index in indices]
-    token_count = max(len(item['tokens']) for item in items)
+    token_count = bucket_length(max(len(item['tokens']) for item in items), bucket_ratio)
     frame_count = max(item['frameCount'] for item in items)
+    if bucket_ratio:
+        frame_count = bucket_length(max(frame_count, max(int(item['durations'].sum()) for item in items)), bucket_ratio)
     batch = len(items)
     tokens = numpy.zeros((batch, token_count), dtype=numpy.int64)
     durations = numpy.zeros((batch, token_count), dtype=numpy.int64)
@@ -194,8 +209,8 @@ def collate_host(corpus, indices):
         'intensity': torch.tensor([item['intensity'] for item in items], dtype=torch.float32),
         'renderCounts': torch.tensor([2 * item['frameCount'] for item in items])
     }
-    # The model's frame count (nn/model.py regulate - the longest utterance's total duration, at least 1)
-    model_frames = max(1, int(durations.sum(axis=1).max()))
+    # The model's frame count (nn/model.py regulate - the longest utterance's total duration, at least 1; or the bucket)
+    model_frames = frame_count if bucket_ratio else max(1, int(durations.sum(axis=1).max()))
     return {'corpus': corpus, 'host': host, 'frameCount': model_frames, 'frameCounts': [item['frameCount'] for item in items],
             'items': items}
 
@@ -296,7 +311,7 @@ class Prefetcher:
     def _prepare(self):
         args = self.args
         name = 'cremad' if 'cremad' in self.corpora and self.rng.random() < args.cremad else 'multi'
-        batch = collate_host(self.corpora[name], next(self.streams[name]))
+        batch = collate_host(self.corpora[name], next(self.streams[name]), getattr(args, 'bucket_ratio', 0))
         seed = int(self.rng.integers(1 << 30))
         total = 2 * batch['frameCount'] + 1
         starts, length = crop_starts(batch['items'], total, args.crop_frames, self.rng)
@@ -500,6 +515,8 @@ def main(argv=None):
     parser.add_argument('--batch', type=int, default=16)
     parser.add_argument('--max-frames', type=int, default=16000, help='the most padded 10 ms frames in a batch')
     parser.add_argument('--crop', type=float, default=2.0, help='the rendered crop (seconds)')
+    parser.add_argument('--bucket-ratio', type=float, default=0.0,
+                        help='pad token and frame counts up to a geometric ladder of this ratio (0: no fixed shapes)')
     parser.add_argument('--rate', type=int, default=24000)
     parser.add_argument('--max-hz', type=float, default=10500)
     parser.add_argument('--cremad', type=float, default=0.0, help='the share of batches from the emotional speech')
