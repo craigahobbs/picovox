@@ -27,7 +27,8 @@ $(eval $(call WGET, https://craigahobbs.github.io/javascript-build/eslint.config
 include Makefile.base
 
 
-ESLINT_ARGS := $(ESLINT_ARGS) web/ tools/
+# The generated model modules (lib/models/) aren't linted
+ESLINT_ARGS := $(ESLINT_ARGS) web/ tools/ --ignore-pattern 'lib/models/**'
 
 
 # The book catalog - every Standard Ebooks book and the top GUTENBERG_COUNT Project Gutenberg books (remote pages are
@@ -66,9 +67,8 @@ site: data/catalog.json
 	mkdir -p build/site/data
 	rsync -a --exclude .DS_Store index.html README.md web lib paper build/site/
 	cp data/LICENSE.cmudict data/catalog.json build/site/data/
-	mkdir -p build/site/nn build/site/data/nn
+	mkdir -p build/site/nn
 	rsync -a --exclude .DS_Store nn/js nn/vocab.json build/site/nn/
-	cp data/nn/multi.js build/site/data/nn/
 
 _gh-pages: site
 

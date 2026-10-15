@@ -4,7 +4,7 @@
 import {base64Bytes, loadG2p, unpackTensors} from '../lib/g2p.js';
 import {Buffer} from 'node:buffer';
 import {strict as assert} from 'node:assert';
-import {g2pModel} from '../lib/g2pModel.js';
+import {g2pModel} from '../lib/models/g2pModel.js';
 import test from 'node:test';
 
 

@@ -11,7 +11,7 @@ import {registerHooks} from 'node:module';
 
 
 // Fail any node: import (or bare package import) from the app-time code
-const browserRoots = ['lib', 'web', 'nn/js', 'data/nn'].map((dir) => new URL(`../${dir}/`, import.meta.url).href);
+const browserRoots = ['lib', 'web', 'nn/js'].map((dir) => new URL(`../${dir}/`, import.meta.url).href);
 registerHooks({
     resolve(specifier, context, nextResolve) {
         if (context.parentURL && browserRoots.some((root) => context.parentURL.startsWith(root)) &&
@@ -26,7 +26,7 @@ registerHooks({
 // Load the app's modules as a browser would - no process.getBuiltinModule
 const {getBuiltinModule} = process;
 process.getBuiltinModule = undefined;
-const modules = ['catalog', 'epub', 'g2p', 'g2pModel', 'gutenberg', 'lexicon', 'phonemes', 'wav', 'zip'];
+const modules = ['catalog', 'epub', 'g2p', 'models/g2pModel', 'gutenberg', 'lexicon', 'phonemes', 'wav', 'zip'];
 const lib = {};
 for (const name of modules) {
     lib[name] = await import(`../lib/${name}.js`);
@@ -48,7 +48,7 @@ if (!threw) {
 }
 
 // Pronounce with the G2P network, as the worker does - then speak with the worker's functions
-lib.lexicon.setPronouncer(await lib.g2p.loadG2p(lib.g2pModel.g2pModel));
+lib.lexicon.setPronouncer(await lib.g2p.loadG2p(lib['models/g2pModel'].g2pModel));
 const [phrase] = lib.lexicon.textToPhrases('Queequeg and Netherfield');
 const spelled = (word) => `${word.text} ${word.phones.map(({ph, stress}) => ph + (stress ?? '')).join(' ')}`;
 process.stdout.write(`G2P: ${phrase.words.map(spelled).join(', ')}\n`);

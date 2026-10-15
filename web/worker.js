@@ -10,7 +10,7 @@
 // - {'type': 'cancel'} stops the current run.
 // Messages out also include {'type': 'ready'} (the G2P network is loaded) and {'type': 'error', 'id', 'message'}.
 //
-// A voice is a speaker of the multi-speaker neural model (nn/js), a generated module (data/nn/multi.js) imported on first
+// A voice is a speaker of the multi-speaker neural model (nn/js), a generated module (lib/models/voiceModel.js) imported on first
 // use.
 
 import {createRenderer} from '../nn/js/render.js';
@@ -45,7 +45,7 @@ export function softLimit(value) {
 // Load the multi-speaker neural model - imported and unpacked once, shared by every neural voice. importModule is the
 // generated module's import (replaceable for tests).
 let neuralModel = null;
-export function loadNeuralModel(importModule = () => import('../data/nn/multi.js')) {
+export function loadNeuralModel(importModule = () => import('../lib/models/voiceModel.js')) {
     if (neuralModel === null) {
         neuralModel = importModule().then((module) => loadPackagedModel(module));
         neuralModel.catch(() => {
@@ -92,7 +92,7 @@ export function streamNeuralUnit(model, text, options, onBlock) {
 // The worker message loop (only when running as a worker)
 if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globalThis.WorkerGlobalScope) {
     // Load the G2P network on startup - every word's pronunciation
-    const ready = import('../lib/g2pModel.js').then(({g2pModel}) => loadG2p(g2pModel)).then((pronounce) => {
+    const ready = import('../lib/models/g2pModel.js').then(({g2pModel}) => loadG2p(g2pModel)).then((pronounce) => {
         setPronouncer(pronounce);
         self.postMessage({'type': 'ready'});
     });
