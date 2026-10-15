@@ -65,7 +65,22 @@
                 {"title": "Distillation, quantization, pruning", "log": "build/nn/g2p/compress.log", "weight": 3},
                 {"title": "Package as generated JavaScript", "log": "build/nn/g2p/package.log", "weight": 1},
                 {"title": "Integration and parity", "log": "build/nn/g2p/integrate.log", "weight": 1},
-                {"title": "Evaluation and listening samples", "log": "build/nn/g2p/eval.log", "weight": 1}
+                {"title": "Evaluation and listening samples", "log": "build/nn/g2p/eval.log", "weight": 1},
+                {"title": "Classical baseline (WFST joint-sequence model)", "log": "build/nn/g2p-wfst/wfst.log", "weight": 1}
+            ]
+        },
+        {
+            "title": "Architecture options",
+            "detail": "acoustic model: a spectral correction head, an all-convolution encoder, quantization-aware training, and the size-search harness",
+            "weight": 10,
+            "processes": ["nn.arch", "nn.sizesearch"],
+            "runs": ["arch-"],
+            "steps": [
+                {"title": "Spectral correction head (Python, JS, equivalence)", "log": "build/nn/arch/correction.log", "weight": 3},
+                {"title": "All-convolution encoder option", "log": "build/nn/arch/allconv.log", "weight": 2},
+                {"title": "Quantization-aware training", "log": "build/nn/arch/qat.log", "weight": 2},
+                {"title": "Short fine-tune experiments", "log": "build/nn/arch/experiments.log", "weight": 3},
+                {"title": "Size-search harness (ready to launch)", "log": "build/nn/arch/sizesearch.log", "weight": 1}
             ]
         },
         {
