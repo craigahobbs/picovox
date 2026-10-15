@@ -981,11 +981,12 @@ class DSynth(torch.nn.Module):
         return int(min(params.LF_HARMONICS - 1, math.ceil(params.HARMONIC_TAPER_END * self.sample_rate / lowest)))
 
     # The frames' complex harmonic amplitudes [B, T, K] (real, imaginary) and the harmonic numbers; linear is the
-    # values' linear_values, if already computed; correction the optional spectral correction's gains (dB) [B, T, bands]
-    def harmonic_amplitudes(self, values, harmonics, eq=None, linear=None, correction=None):
+    # values' linear_values, if already computed; correction the optional spectral correction's gains (dB) [B, T, bands];
+    # constant_f0 - the frames' F0 is a constant (a recording's), so the amplitudes aren't differentiated in it
+    def harmonic_amplitudes(self, values, harmonics, eq=None, linear=None, correction=None, constant_f0=False):
         split = split_values(values, linear)
         k = torch.arange(1, harmonics + 1, device=values.device, dtype=values.dtype)
-        f0 = torch.clamp(split['f0'], min=params.F0_MIN)
+        f0 = torch.clamp(split['f0'].detach() if constant_f0 else split['f0'], min=params.F0_MIN)
         frequency = f0 * k
         trig = frequency_trig(frequency)
 
@@ -1012,9 +1013,9 @@ class DSynth(torch.nn.Module):
         return source_re * filter_re - source_im * filter_im, source_re * filter_im + source_im * filter_re
 
     # The harmonic (voicing) signal [B, N]
-    def _voicing(self, values, linear, tensors, grid, harmonics, count, eq=None, correction=None):
+    def _voicing(self, values, linear, tensors, grid, harmonics, count, eq=None, correction=None, constant_f0=False):
         batch = values.shape[0]
-        amp_re, amp_im = self.harmonic_amplitudes(values, harmonics, eq, linear, correction)
+        amp_re, amp_im = self.harmonic_amplitudes(values, harmonics, eq, linear, correction, constant_f0)
         # (a deferred plan's harmonic count is on the device - the amplitudes are made for its upper bound)
         active = tensors.get('harmonics')
 
@@ -1115,13 +1116,16 @@ class DSynth(torch.nn.Module):
             window_sum[quarter:quarter + frames_count] += window_squared[quarter]
         return window_sum
 
-    def forward(self, values, seed=1, return_parts=False, eq=None, residual=None, plan=None, correction=None):
+    def forward(self, values, seed=1, return_parts=False, eq=None, residual=None, plan=None, correction=None,
+                constant_f0=False):
         """Render parameter values [B, T, COUNT] (or [T, COUNT]) to audio [B, N] (or [N]); seed is an int or a list; eq is
         the optional channel equalizer's gains (dB) [B, EQ_BAND_COUNT] (or [EQ_BAND_COUNT]); residual is the optional
         (experimental, PyTorch only) residual noise's band levels (dB) [B, T, RESIDUAL_BAND_COUNT]; plan is the
         optional cycle plan made ahead (plan_cycles, of these values' F0 and jitter and these seeds, optionally with its
         plan_host_tensors as 'host') - it leaves only a few columns to read from the device here; correction is the
-        optional spectral correction's band gains (dB) [B, T, K] (or [T, K]) - nn/params.py CORRECTION_*"""
+        optional spectral correction's band gains (dB) [B, T, K] (or [T, K]) - nn/params.py CORRECTION_*; constant_f0
+        says the values' F0 is a constant (a recording's, as training renders) - the rendering isn't differentiated in
+        it (the F0 column's gradient is zero), which saves the harmonic amplitudes' frequency gradients"""
         squeeze = values.dim() == 2
         if squeeze:
             values = values[None]
@@ -1164,7 +1168,7 @@ class DSynth(torch.nn.Module):
             harmonics = plan['harmonics']
 
         # The voicing, with shimmer, and the noise
-        voicing = self._voicing(values, linear, tensors, grid, harmonics, count, eq, correction)
+        voicing = self._voicing(values, linear, tensors, grid, harmonics, count, eq, correction, constant_f0)
         index, weight = grid['index'], grid['weight']
         shimmer_amount = linear[:, index, params.INDEX['shimmer']] * (1 - weight) + linear[:, index + 1, params.INDEX['shimmer']] * weight
         voicing = voicing * torch.relu(1 + shimmer_amount * tensors['shimmer'])

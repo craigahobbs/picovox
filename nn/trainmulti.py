@@ -444,7 +444,9 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
         if correction is not None:
             render_correction = torch.cat([correction, correction[:, -1:]], dim=1)
             crop_correction = torch.stack([render_correction[ix, start:start + length + 1] for ix, start in enumerate(starts)])
-    audio = synth(crop_values, seed=[seed + ix for ix in range(len(batch['items']))], eq=eq, plan=plan, correction=crop_correction)
+    # (the rendered F0 is the recording's - render_values's teacher F0 - so the synthesizer needn't differentiate in it)
+    audio = synth(crop_values, seed=[seed + ix for ix in range(len(batch['items']))], eq=eq, plan=plan, correction=crop_correction,
+                  constant_f0=True)
     target = target[:, :audio.shape[1]]
     cutoffs = [0.95 * item['bandwidth'] for item in batch['items']]
     audio = band_limit(audio, cutoffs, args.rate, batch.get('cutoffs'))
