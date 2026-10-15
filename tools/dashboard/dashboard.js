@@ -273,7 +273,8 @@ function selectRun(name) {
 
 // Render the run cards
 function renderRuns() {
-    const [live] = [...runs.values()].filter((run) => runStatus(run) === 'live').sort((first, second) => second.modified - first.modified);
+    // The Training tab's fact - the first group's live run (the voice training), by first-seen order
+    const [live] = groupRuns()[0].runs.filter((run) => runStatus(run) === 'live');
     const liveLast = live ? (live.entries.train || []).slice(-1)[0] : null;
     let trainingFact = '';
     if (live) {
@@ -1171,7 +1172,10 @@ let checkpointSteps = new Map();
 const renderSeconds = 90;
 function renderNextCheckpoint() {
     const section = document.getElementById('nextSection');
-    const [live] = [...runs.values()].filter((run) => runStatus(run) === 'live').sort((first, second) => second.modified - first.modified);
+    // Only the runs whose checkpoints get samples (pipeline.json samples.runs), newest first by first-seen order
+    const prefix = pipeline?.samples?.runs ?? '';
+    const [live] = [...runs.values()].filter((run) => run.name.startsWith(prefix) && runStatus(run) === 'live').
+        sort((first, second) => (runOrder[second.name] ?? 0) - (runOrder[first.name] ?? 0));
     const train = live ? live.entries.train || [] : [];
     const last = train[train.length - 1];
     if (!live || !last || !pipeline?.samples) {
