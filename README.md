@@ -127,14 +127,16 @@ average spectrum), `tools/slices.js` (band spectra of time ranges), `tools/pitch
 
 The training dashboard, `tools/dashboard/`, follows the neural voices' training as it runs: serve the repository
 (`python3 -m http.server`), start its monitor (`node tools/dashboard/monitor.js`), and open
-http://localhost:8000/tools/dashboard/. At the top is the pipeline in `tools/dashboard/pipeline.json`: each phase is a
+http://localhost:8000/tools/dashboard/. It has four tabs (each linkable, e.g. `#listen`): Progress, Listen, Training,
+and Logs. Progress is the pipeline in `tools/dashboard/pipeline.json`: each phase is a
 group with its progress, what's happening now, and how many of its steps are done, and it opens to its rows - the
 workflow's agents with their latest actions, the planned steps (each tracked by a log, the newest training run, an
 output file, and its process), and unplanned work since the pipeline started (other logs, runs, and processes), each
 with its progress bar and latest line. Rows are never removed. The overall progress is weighted by each step's expected
-time. Below are the runs in `build/nn/runs/` (their `log.jsonl` and `train.log`) with charts of their losses,
-validation, pitch error, and step times; the tails of the logs in `build/nn/`; and players for the samples there. It
-refreshes every second, read-only, re-fetching only what changed.
+time. Listen plays the checkpoint samples (below) and other samples in `build/nn/`, and marks a new checkpoint until
+it's heard. Training has the runs in `build/nn/runs/` (their `log.jsonl` and `train.log`) with charts of their losses,
+validation, pitch error, and step times. Logs has the tails of the logs in `build/nn/`. It refreshes every second,
+read-only, re-fetching only what changed, and reloads itself when its own code changes.
 
 The monitor writes `build/nn/activity.json` every second: the Python and Node processes working in the repository for
 10 seconds or more (with their multiprocessing workers folded in), running now or before, and the workflow's agents

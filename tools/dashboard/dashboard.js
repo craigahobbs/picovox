@@ -213,6 +213,13 @@ async function refreshRuns() {
 
 // Render the run cards
 function renderRuns() {
+    const [live] = [...runs.values()].filter((run) => runStatus(run) === 'live').sort((first, second) => second.modified - first.modified);
+    const liveLast = live ? (live.entries.train || []).slice(-1)[0] : null;
+    let trainingFact = '';
+    if (live) {
+        trainingFact = live.info.targetSteps && liveLast ? `${Math.round(100 * liveLast.step / live.info.targetSteps)}%` : 'live';
+    }
+    setTabFact('tabFactTraining', trainingFact);
     if (runs.size === 0) {
         runsElement.replaceChildren(make('p', 'empty', 'No runs yet - training writes to build/nn/runs/<run>/.'));
         return;
@@ -354,6 +361,9 @@ function drawChart(canvas, series, {logScale = false} = {}) {
 // Render the selected run's charts - only when its data changed, unless forced
 let chartsKey = null;
 function renderCharts(force = false) {
+    if (currentTab !== 'training') {
+        return;
+    }
     const run = runs.get(selectedRun);
     const dataKey = run ? `${run.name} ${run.modified} ${(run.entries.train || []).length} ${(run.entries.val || []).length}` : '';
     if (!force && dataKey === chartsKey) {
@@ -847,6 +857,7 @@ async function renderPipeline(logs) {
     const monitor = activity && Date.now() - activity.updated < 10000 ? '' :
         ' · the monitor isn\'t running (node tools/dashboard/monitor.js) - steps without logs aren\'t shown';
     pipelineFacts.textContent = `about ${Math.round(100 * overall)}% (weighted by expected time) · started ${elapsed} ago${monitor}`;
+    setTabFact('tabFactProgress', `${Math.round(100 * overall)}%`);
 }
 
 
@@ -872,6 +883,8 @@ async function loadLogs(allFiles) {
 let logsKey = null;
 let logHeads = [];
 function renderLogs(allLogs) {
+    const activeLogs = allLogs.filter(({result}) => Date.now() - result.modified < stalledMs).length;
+    setTabFact('tabFactLogs', activeLogs === 0 ? '' : `${activeLogs} active`);
     const logs = allLogs.slice(0, 8);
     const key = logs.map(({file, result}) => `${file.path} ${result.modified} ${result.text.length}`).join('\n');
     if (key === logsKey && logs.length !== 0) {
@@ -950,6 +963,16 @@ async function renderCheckpointSamples() {
         return element;
     };
     const checkpoints = [...index.checkpoints].sort((first, second) => second.rendered - first.rendered);
+    if (checkpoints.length !== 0) {
+        const [newest] = checkpoints;
+        newestCheckpoint = `${newest.run} ${newest.step}`;
+        setTabFact('tabFactListen', `step ${newest.step.toLocaleString()}`);
+        if (currentTab === 'listen') {
+            markHeard();
+        } else {
+            document.getElementById('tabDotListen').hidden = storageGet(heardKey) === newestCheckpoint;
+        }
+    }
     const blocks = checkpoints.map((checkpoint) => block(
         `${checkpoint.run} · step ${checkpoint.step.toLocaleString()}`,
         `female ${meanScore(checkpoint.samples, 'female')} · male ${meanScore(checkpoint.samples, 'male')} · ` +
@@ -992,6 +1015,81 @@ function renderSamples(allFiles) {
 }
 
 
+// Tabs - the selected tab is in the URL's hash (and remembered per browser); the Listen tab marks new checkpoints until
+// it's viewed
+const tabNames = ['progress', 'listen', 'training', 'logs'];
+const tabKey = 'training-dashboard-tab-v1';
+const heardKey = 'training-dashboard-heard-v1';
+let currentTab = 'progress';
+function storageGet(key) {
+    try {
+        return localStorage.getItem(key);
+    } catch {
+        return null;
+    }
+}
+function storageSet(key, value) {
+    try {
+        localStorage.setItem(key, value);
+    } catch {
+        // Unavailable storage - remembered this page load
+    }
+}
+function selectTab(name, {updateHash = true} = {}) {
+    currentTab = tabNames.includes(name) ? name : 'progress';
+    for (const tab of tabNames) {
+        const button = document.getElementById(`tab-${tab}`);
+        button.setAttribute('aria-selected', String(tab === currentTab));
+        button.tabIndex = tab === currentTab ? 0 : -1;
+        document.getElementById(`panel-${tab}`).hidden = tab !== currentTab;
+    }
+    storageSet(tabKey, currentTab);
+    if (updateHash && window.location.hash !== `#${currentTab}`) {
+        window.history.replaceState(null, '', `#${currentTab}`);
+    }
+    if (currentTab === 'training') {
+        // The charts draw at their visible size
+        renderCharts(true);
+    }
+    if (currentTab === 'listen') {
+        markHeard();
+    }
+}
+for (const tab of tabNames) {
+    const button = document.getElementById(`tab-${tab}`);
+    button.addEventListener('click', () => selectTab(tab));
+    button.addEventListener('keydown', (event) => {
+        // Arrow keys move between the tabs
+        const step = {'ArrowRight': 1, 'ArrowLeft': -1}[event.key];
+        if (step) {
+            const next = tabNames[(tabNames.indexOf(tab) + step + tabNames.length) % tabNames.length];
+            selectTab(next);
+            document.getElementById(`tab-${next}`).focus();
+        }
+    });
+}
+window.addEventListener('hashchange', () => selectTab(window.location.hash.slice(1), {'updateHash': false}));
+
+
+// The newest checkpoint's key, and marking it heard (the Listen tab's dot)
+let newestCheckpoint = null;
+function markHeard() {
+    if (newestCheckpoint !== null) {
+        storageSet(heardKey, newestCheckpoint);
+    }
+    document.getElementById('tabDotListen').hidden = true;
+}
+
+
+// Update the tabs' facts - the overall progress, the newest checkpoint, the live run, and the active logs
+function setTabFact(id, text) {
+    const element = document.getElementById(id);
+    if (element.textContent !== text) {
+        element.textContent = text;
+    }
+}
+
+
 // Reload the page when the dashboard's own files change (checked every 5 seconds), so it never runs stale code
 const codeFiles = ['index.html', 'dashboard.js'].map((name) => new URL(`tools/dashboard/${name}`, rootUrl));
 let codeVersions = null;
@@ -1011,6 +1109,7 @@ async function checkCode() {
 }
 checkCode();
 setInterval(checkCode, 5000);
+selectTab(window.location.hash.slice(1) || storageGet(tabKey) || 'progress');
 
 
 // Refresh - then again a second later, so refreshes never overlap
