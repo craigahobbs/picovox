@@ -39,7 +39,7 @@ from .model import BOS, FIRST_PHONE, PAD, Model, is_boundary, parameter_count
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RUNS_DIR = os.path.join(ROOT, 'build', 'nn', 'runs')
+RUNS_DIR = os.environ.get('NN_RUNS_DIR', os.path.join(ROOT, 'build', 'nn', 'runs'))
 
 # Parameter priors per speaker (the analysis-by-synthesis fits' medians, nn/fit.py) - the head's starting point
 PRIORS = {

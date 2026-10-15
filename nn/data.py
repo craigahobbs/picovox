@@ -44,7 +44,7 @@ import time
 import numpy as np
 
 from . import align
-from .frontend import BOUNDARIES, PHRASE_ENDS, ROOT, WORD, tokenize, vocabulary
+from .frontend import BOUNDARIES, PHRASE_ENDS, ROOT, WORD, pronounce_texts, set_pronunciations, tokenize, vocabulary
 
 
 CORPORA_DIR = os.path.join(ROOT, 'data', 'corpora')
@@ -327,7 +327,8 @@ def build(args):
         mean_seconds = mean_label_seconds(utterances)
         settings = speaker_settings(speaker)
         tasks.extend((utterance, mean_seconds, settings) for utterance in utterances)
-    with multiprocessing.Pool(args.jobs) as pool:
+    pronunciations = pronounce_texts([utterance['text'] for utterance, _, _ in tasks], args.jobs)
+    with multiprocessing.Pool(args.jobs, initializer=set_pronunciations, initargs=(pronunciations,)) as pool:
         results = pool.map(process_utterance, tasks, chunksize=4)
 
     # Concatenate
@@ -587,6 +588,7 @@ def verify_tokens(args):
             with open(path, encoding='utf-8') as file:
                 texts.add(file.read().strip())
     texts = sorted(texts)
+    pronounce_texts(texts, args.jobs)
     js_results = js_tokenize(texts)
     mismatches = 0
     for text, js_result in zip(texts, js_results):
@@ -880,6 +882,7 @@ def main(argv=None):
     build_parser.add_argument('-j', '--jobs', type=int, default=None, help='worker processes (default: all cores)')
     verify_parser = commands.add_parser('verify-tokens', help='check nn/js/tokens.js against nn/frontend.py')
     verify_parser.add_argument('--arctic-only', action='store_true', help='only the ARCTIC texts')
+    verify_parser.add_argument('-j', '--jobs', type=int, default=None, help='worker processes pronouncing the words (default: all cores)')
     commands.add_parser('stats', help='dataset statistics')
     listen_parser = commands.add_parser('listen', help='UTMOS of original and processed test utterances')
     listen_parser.add_argument('-n', '--count', type=int, default=8, help='utterances per speaker')

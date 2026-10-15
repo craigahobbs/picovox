@@ -10,7 +10,9 @@
 // phrase ends are <comma>, <period>, <question>, <wh>, and <exclamation>. The Python side, nn/frontend.py, makes the
 // training data's tokens - `python -m nn.data verify-tokens` checks that both give the same ids.
 //
-// The words' pronunciations come from lib/lexicon.js - in the browser, call setPronouncer first.
+// The words' pronunciations come from lib/lexicon.js's pronouncer - set the app's G2P network first (setPronouncer with
+// lib/g2p.js loadG2p), as the app and nn/js/tokenizeLines.js do: the training data is pronounced by it (under Node,
+// lib/lexicon.js otherwise falls back to the CMU dictionary).
 
 import {textToPhrases} from '../../lib/lexicon.js';
 

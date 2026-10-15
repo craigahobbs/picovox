@@ -17,6 +17,8 @@ dictionary). They mostly agree; where they don't, a weighted edit-distance align
 - the leading silence goes to <bos>, the trailing silence to the last phrase end
 """
 
+import functools
+
 from .frontend import BOS, BOUNDARIES, VOWELS
 
 
@@ -66,7 +68,8 @@ def is_vowel_key(key):
     return key == 'AX' or key in VOWELS
 
 
-# The substitution cost of our phone key for a label phone key
+# The substitution cost of our phone key for a label phone key (memoized - a few thousand pairs, looked up millions of times)
+@functools.cache
 def substitution_cost(ours, label):
     if ours == label:
         return 0.0

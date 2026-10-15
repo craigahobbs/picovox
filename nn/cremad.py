@@ -14,6 +14,7 @@ medium, and high intensity), 7,442 clips, 16 kHz WAV, with crowd-sourced ratings
     build/venv-listeners/bin/python -B -m nn.cremad accent    # CommonAccent accent ID -> build/nn/cremad/accent.jsonl (GPU, 2 min)
     build/venv-nn/bin/python -B -m nn.cremad emotion          # emotion2vec+ (tools/listeners.py) -> emotion-summary.json (GPU, 5 min)
     build/venv-nn/bin/python -B -m nn.cremad build            # build/nn/data/cremad/ and data/nn/cremad.json (1 minute)
+    build/venv-nn/bin/python -B -m nn.cremad build --out DIR  # elsewhere, its summary (cremad.json) beside it
 
 The align, arctic-check, and accent commands need transformers and speechbrain, so they run in build/venv-listeners
 (no new packages); build needs Praat (parselmouth), so it runs in build/venv-nn.
@@ -25,7 +26,9 @@ the recognizer's r-colored and syllabic merged tokens); a Viterbi pass over the 
 frames; the blank frames between two runs are split at the midpoint; the first and last phones extend to the speech's
 energy onset and offset; then nn/align.py turns the labels into token durations and moves silences into boundary
 tokens, exactly as for ARCTIC. Checked against ARCTIC's EHMM labels (arctic-check, 300 utterances of slt and bdl):
-phone onsets within 20 ms 68%, within 40 ms 93%, mean absolute error 18 ms, bias 0.5 ms.
+phone onsets within 20 ms 68%, within 40 ms 93%, mean absolute error 18 ms, bias 0.5 ms. The data's tokens are the
+front end's at build time: a clip's alignment is reused when its phones without stress (all the alignment sees) are
+the same, else build asks for align again.
 
 Checks per clip (build) - the recognizer's greedy phone string against the sentence: a clip reading another of the 12
 sentences is relabeled (two), a clip cut short (its final phones missing) or garbled (greedy phone error above 0.6)
@@ -908,7 +911,7 @@ def process_clip(task):
             'noiseFloorDb': round(float(np.percentile(energy, 5) - np.percentile(energy, 95)), 2)}
 
 
-# Build build/nn/data/cremad/ and data/nn/cremad.json
+# Build build/nn/data/cremad/ (or --out) and data/nn/cremad.json (or the summary beside it)
 def build(args):
     import collections  # pylint: disable=import-outside-toplevel
     import multiprocessing  # pylint: disable=import-outside-toplevel
@@ -916,7 +919,8 @@ def build(args):
     from . import align, data  # pylint: disable=import-outside-toplevel
     from .frontend import BOUNDARIES, TOKEN_IDS, tokenize, vocabulary  # pylint: disable=import-outside-toplevel
     start_time = time.time()
-    os.makedirs(DATA_DIR, exist_ok=True)
+    out_dir = args.out or DATA_DIR
+    os.makedirs(out_dir, exist_ok=True)
     items = clips()
     actor_info = actors()
     ratings = voice_ratings()
@@ -994,7 +998,11 @@ def build(args):
         sex = actor_info[item['actor']]['sex']
         floor, ceiling = ranges.get((item['actor'], item['emotion']), ranges[item['actor']])
         clip = dict(item, sentence=checks[item['id']]['sentence'], text=SENTENCES[checks[item['id']]['sentence']])
-        tasks.append((clip, record['tokens'], record['labels'], mean_seconds, (floor, ceiling, FORMANT_CEILINGS[sex])))
+        tokens = sentence_tokens[clip['sentence']]
+        if [align.token_key(token) for token in tokens] != [align.token_key(token) for token in record['tokens']]:
+            raise ValueError(f'{item["id"]}: the front end\'s phones of sentence {clip["sentence"]} differ from its alignment\'s - '
+                             'run align again (and realign the relabeled clips)')
+        tasks.append((clip, tokens, record['labels'], mean_seconds, (floor, ceiling, FORMANT_CEILINGS[sex])))
     with multiprocessing.Pool(args.jobs) as pool:
         results = pool.map(process_clip, tasks, chunksize=4)
 
@@ -1018,7 +1026,7 @@ def build(args):
     emotion_ids = {name: index for index, name in enumerate(EMOTIONS.values())}
     intensity_ids = {name: index for index, name in enumerate(INTENSITIES.values())}
     by_id = {result['item']['id']: result for result in results}
-    with open(os.path.join(DATA_DIR, 'alignment.jsonl'), 'w', encoding='utf-8') as alignment_file:
+    with open(os.path.join(out_dir, 'alignment.jsonl'), 'w', encoding='utf-8') as alignment_file:
         for item in items:
             result = by_id.get(item['id'])
             check = checks[item['id']]
@@ -1077,11 +1085,11 @@ def build(args):
             alignment_file.write(json.dumps({'id': entry['id'], 'tokens': ' '.join(result['tokens']),
                                              'frames': result['frames'], 'greedy': record['greedy'],
                                              'confidences': confidences}, ensure_ascii=False) + '\n')
-    np.save(os.path.join(DATA_DIR, 'tokens.npy'), np.concatenate(tokens))
-    np.save(os.path.join(DATA_DIR, 'durations.npy'), np.concatenate(durations))
-    np.save(os.path.join(DATA_DIR, 'seconds.npy'), np.concatenate(seconds))
-    np.save(os.path.join(DATA_DIR, 'audio.npy'), np.concatenate(audio))
-    np.save(os.path.join(DATA_DIR, 'frames.npy'), np.concatenate(frames))
+    np.save(os.path.join(out_dir, 'tokens.npy'), np.concatenate(tokens))
+    np.save(os.path.join(out_dir, 'durations.npy'), np.concatenate(durations))
+    np.save(os.path.join(out_dir, 'seconds.npy'), np.concatenate(seconds))
+    np.save(os.path.join(out_dir, 'audio.npy'), np.concatenate(audio))
+    np.save(os.path.join(out_dir, 'frames.npy'), np.concatenate(frames))
     index = {
         'version': data.FORMAT_VERSION,
         'corpus': 'CREMA-D',
@@ -1112,12 +1120,13 @@ def build(args):
         'speakers': speakers,
         'utterances': entries
     }
-    with open(os.path.join(DATA_DIR, 'index.json'), 'w', encoding='utf-8') as file:
+    with open(os.path.join(out_dir, 'index.json'), 'w', encoding='utf-8') as file:
         json.dump(index, file, indent=1)
         file.write('\n')
-    write_summary(index)
+    default_dir = os.path.abspath(out_dir) == os.path.abspath(DATA_DIR)
+    write_summary(index, SUMMARY_PATH if default_dir else os.path.join(out_dir, 'cremad.json'))
     included = [entry for entry in entries if entry['include']]
-    print(f'Built {DATA_DIR}: {len(entries)} clips ({len(included)} included), {frame_offset / 100 / 3600:.2f} hours '
+    print(f'Built {out_dir}: {len(entries)} clips ({len(included)} included), {frame_offset / 100 / 3600:.2f} hours '
           f'({sum(entry["frameCount"] for entry in included) / 100 / 3600:.2f} included), {time.time() - start_time:.0f} s')
     reasons = collections.Counter(reason.split(' (')[0] for entry in entries for reason in entry['reason'].split('; ') if reason)
     print(f'  excluded: {dict(reasons)}')
@@ -1127,7 +1136,7 @@ def build(args):
 # Write data/nn/cremad.json - the small committed summary: the corpus, its license, the counts by emotion, intensity,
 # and split, the actors (demographics, accent, pitch range, clips included), the alignment's check against ARCTIC, and
 # the emotion classifier's recognition of the recordings
-def write_summary(index):
+def write_summary(index, path=SUMMARY_PATH):
     import collections  # pylint: disable=import-outside-toplevel
     entries = index['utterances']
     included = [entry for entry in entries if entry['include']]
@@ -1167,8 +1176,8 @@ def write_summary(index):
     if os.path.exists(emotion_path):
         with open(emotion_path, encoding='utf-8') as file:
             summary['emotionRecognition'] = json.load(file)
-    os.makedirs(os.path.dirname(SUMMARY_PATH), exist_ok=True)
-    with open(SUMMARY_PATH, 'w', encoding='utf-8') as file:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as file:
         file.write(json.dumps(summary, indent=1) + '\n')
 
 
@@ -1237,6 +1246,7 @@ def main(argv=None):
     build_parser = commands.add_parser('build', help='build build/nn/data/cremad/ (build/venv-nn)')
     build_parser.add_argument('--limit', type=int, help='a sample of this many clips (a quick test)')
     build_parser.add_argument('--realign', action='store_true', help='realign the relabeled clips again')
+    build_parser.add_argument('--out', help='the data directory (default: build/nn/data/cremad/, its summary data/nn/cremad.json)')
     build_parser.add_argument('-j', '--jobs', type=int, default=None, help='worker processes (default: all cores)')
     realign_parser = commands.add_parser('realign', help='realign clips to another sentence (clip=SENTENCE ...)')
     realign_parser.add_argument('ids', nargs='+')

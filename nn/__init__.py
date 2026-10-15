@@ -5,7 +5,10 @@
 The neural-network experiment - a small network that maps our front end's phoneme tokens to durations and
 interpretable source-filter parameters, trained end to end through a differentiable synthesizer against recordings.
 
-- nn/frontend.py - the token vocabulary (nn/vocab.json) and a Python port of lib/lexicon.js textToPhrases
+- nn/frontend.py - the token vocabulary (nn/vocab.json) and a Python port of lib/lexicon.js textToPhrases, every word
+  pronounced by the app's G2P network (nn/g2pmodel.py - lib/g2p.js's inference, bit for bit, on lib/models/g2pModel.js)
+- nn/g2p.py - the G2P network's training and export (lib/models/g2pModel.js), the recipe in data/nn/train.json;
+  nn/heteronyms.py - its relabeled words from readers' usage (data/nn/g2p-relabel.json)
 - nn/data.py - the training data (CMU ARCTIC slt and bdl) under build/nn/data/, its loader, and its statistics
 - nn/js/tokens.js - the same tokens in JavaScript, from lib/lexicon.js, for browser-side inference
 - nn/cremad.py - emotional speech for the style modifiers: CREMA-D fetched, force-aligned (a wav2vec2 phoneme CTC
@@ -54,4 +57,9 @@ Architecture options and model size (each off by default):
 - nn/archeval.py - a checkpoint at an export precision: validation, the panel (UTMOS, WER, speaker similarity), size;
   nn/sizesearch.py - the minimal-size search over widths, depths, encoders, and bit widths (Pareto front)
 - nn/stepcheck.py - the trainer's step-0 losses on fixed batches, exactly, to check a change leaves training unchanged
+
+Shrinking and checking:
+
+- nn/distill.py - knowledge distillation of the multi-speaker model into small students (data/nn/distill.json)
+- nn/smoke.py - every training entry point for a few steps on the CPU (the pipeline's smoke test)
 """

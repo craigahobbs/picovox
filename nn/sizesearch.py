@@ -50,7 +50,7 @@ from .archeval import ARCH_DIR, evaluate
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SEARCH_DIR = os.path.join(ROOT, 'build', 'nn', 'sizesearch')
-RUNS_DIR = os.path.join(ROOT, 'build', 'nn', 'runs')
+RUNS_DIR = os.environ.get('NN_RUNS_DIR', os.path.join(ROOT, 'build', 'nn', 'runs'))
 PYTHON = sys.executable
 
 # The ladder - widths (dim = decoderDim; ffnMultiple 2, two attention heads) and depths (encoder, decoder layers), by
