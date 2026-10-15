@@ -1,4 +1,4 @@
-// The synthesis Web Worker - loads the pronouncing dictionary and warms up the voices, then synthesizes text. In
+// The synthesis Web Worker - loads the pronouncing dictionary, then synthesizes text. In
 // streaming mode, it posts small blocks of samples as they are synthesized so playback starts almost immediately (the
 // page applies the room ambience); otherwise it posts each finished paragraph. The synthesis functions are exported so
 // they also run under Node.
@@ -142,14 +142,6 @@ export function streamUnit(text, options, trim, onBlock) {
 }
 
 
-// Warm up the voices - the first synthesis with each voice calibrates its levels
-export function warmUp() {
-    for (const voice of ['male', 'female']) {
-        speak('Hi.', voice);
-    }
-}
-
-
 // The worker message loop (only when running as a worker)
 if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globalThis.WorkerGlobalScope) {
     // Fetch the dictionary on startup
@@ -160,7 +152,6 @@ if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globa
         return response.text();
     }).then((text) => {
         setDictionary(text);
-        warmUp();
         self.postMessage({'type': 'ready'});
     });
     ready.catch((error) => {

@@ -25,9 +25,7 @@ const catalogPromise = fetch(new URL('../data/catalog.json', import.meta.url)).t
 // The skip distance (s), the narrator speeds, and the narrator voices
 const skipSeconds = 30;
 const speeds = [0.8, 1, 1.2, 1.4, 1.6];
-const voiceChoices = [
-    ['neural-male', 'Neural male'], ['neural-female', 'Neural female'], ['male', 'Classic male'], ['female', 'Classic female']
-];
+const voiceChoices = [['neural-male', 'Male'], ['neural-female', 'Female']];
 
 
 // Elements
@@ -66,13 +64,12 @@ const sheetBody = element('sheetBody');
 // State - the persisted state, the open book ({key, chapters, loading, progress, error}), the browse results, and the
 // sheet being shown
 const state = loadState();
-if (!state.settings.neuralDefault) {
-    // The neural voices became the default - switch listeners from the old default once
-    state.settings.neuralDefault = true;
-    if (state.settings.voice === 'male') {
-        state.settings.voice = 'neural-male';
-    }
+// The narrator is a neural voice - listeners who chose a classic (rule) voice get its neural counterpart
+const classicVoices = {'male': 'neural-male', 'female': 'neural-female'};
+if (!voiceChoices.some(([voice]) => voice === state.settings.voice)) {
+    state.settings.voice = classicVoices[state.settings.voice] || voiceChoices[0][0];
 }
+delete state.settings.neuralDefault;
 state.sourceTab ||= 'all';
 let current = null;
 const browseState = {'query': '', 'page': 1, 'books': [], 'hasMore': false, 'total': 0, 'error': null};
@@ -880,9 +877,8 @@ function renderSettings() {
         engine.setVoice(state.settings);
         renderSettings();
     };
-    const note = make('p', 'muted', 'Every voice is synthesized in your browser from a model of the human voice - no recordings. ' +
-        'The neural voices learned how to drive it from about an hour of a real speaker each; the classic voices follow ' +
-        'hand-written rules.');
+    const note = make('p', 'muted', 'The voices are synthesized in your browser - no recordings. A small neural network, ' +
+        'trained on about an hour of a real speaker, drives a model of the human voice.');
     sheetBody.replaceChildren(
         choice('Voice', voiceChoices, state.settings.voice, (voice) => apply({voice})),
         choice('Speed', speeds.map((speed) => [speed, `${speed}×`]), state.settings.rate, (rate) => apply({rate})),
