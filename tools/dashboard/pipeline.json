@@ -2,7 +2,7 @@
     "title": "Small voices: one voice, one G2P, make train, and the library",
     "since": "2026-10-15T11:00:00-07:00",
     "stopAt": {"scratch-s64-a": 15000, "mlx-s64-a": 15000},
-    "compare": {"mlx-": "scratch-s64-a", "pgo-q-": "scratch-s64-a"},
+    "compare": {"mlx-s64-b": "scratch-s64-b", "mlx-": "scratch-s64-a", "pgo-q-": "scratch-s64-a"},
     "samples": {"checkpointEvery": 5000, "runs": "multi-", "text": "Call me Ishmael. Some years ago, never mind how long precisely, having little or no money in my purse, and nothing particular to interest me on shore, I thought I would sail about a little and see the watery part of the world.", "speakers": [{"key": "arctic-slt", "label": "ARCTIC slt", "sex": "female"}, {"key": "libritts-5895", "label": "reader 5895", "sex": "female"}, {"key": "libritts-6345", "label": "reader 6345", "sex": "female"}, {"key": "arctic-bdl", "label": "ARCTIC bdl", "sex": "male"}, {"key": "libritts-5750", "label": "reader 5750", "sex": "male"}, {"key": "libritts-2843", "label": "reader 2843", "sex": "male"}], "reference": [{"model": "data/nn/slt", "label": "app female (slt)", "sex": "female"}, {"model": "data/nn/bdl", "label": "app male (bdl)", "sex": "male"}]},
     "phases": [
         {
@@ -41,7 +41,7 @@
             "steps": [
                 {"title": "Profile 2", "log": "build/nn/profile2/profile.log", "doneWhen": "done:", "weight": 3},
                 {"title": "Profile-guided optimization of small-model training (scratch-s64-a)", "log": "build/nn/pgo/pgo.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 5},
-                {"title": "MLX experiment: s64 stage A from scratch in Apple's MLX vs PyTorch", "log": "build/nn/mlx/mlx.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 6}
+                {"title": "MLX: voice training ported (stage A, stage B critic, distillation, export) and PyTorch training code removed", "log": "build/nn/mlx/mlx.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 12}
             ]
         },
         {
