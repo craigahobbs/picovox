@@ -267,7 +267,7 @@ async function refreshRuns() {
 const runGroupSpecs = [
     {'title': 'Multi-speaker voice', 'prefixes': ['multi-'], 'open': true},
     {'title': 'G2P', 'prefixes': ['g2p-'], 'open': false},
-    {'title': 'Voice students (distilled and from scratch)', 'prefixes': ['distill-', 'scratch-'], 'open': true},
+    {'title': 'Voice students and experiments (distilled, from scratch, MLX)', 'prefixes': ['distill-', 'scratch-', 'mlx-'], 'open': true},
     {'title': 'Earlier single-speaker voices', 'prefixes': ['slt-', 'bdl-', 'joint-'], 'open': false},
     {'title': 'Other', 'prefixes': [''], 'open': false}
 ];
@@ -445,6 +445,14 @@ function runCard(run) {
 function parentRun(run) {
     const parent = [...runs.values()].find((other) => other.info.continuedAs === run.name);
     return parent ? {'run': parent, 'offset': parent.info.stoppedStep} : null;
+}
+
+
+// A run's reference run, drawn faded on its charts for comparison - pipeline.json's compare, {run name prefix: the
+// reference run's name} (for example, an MLX run against the PyTorch run it reproduces), or null
+function referenceRun(run) {
+    const entry = Object.entries(pipeline?.compare || {}).find(([prefix]) => run.name.startsWith(prefix));
+    return entry && entry[1] !== run.name ? runs.get(entry[1]) ?? null : null;
 }
 
 
@@ -659,7 +667,9 @@ function renderCharts(force = false) {
         return;
     }
     const run = runs.get(selectedRun);
-    const dataKey = run ? `${run.name} ${run.modified} ${(run.entries.train || []).length} ${(run.entries.val || []).length}` : '';
+    const reference = run ? referenceRun(run) : null;
+    const dataKey = run ?
+        [run.name, run.modified, (run.entries.train || []).length, (run.entries.val || []).length, reference?.name].join(' ') : '';
     if (!force && dataKey === chartsKey) {
         return;
     }
@@ -671,6 +681,9 @@ function renderCharts(force = false) {
     }
     const continues = parentRun(run);
     chartsTitle.textContent = continues ? `Curves - ${run.name} (continuing ${continues.run.name}, faded)` : `Curves - ${run.name}`;
+    if (reference) {
+        chartsTitle.textContent += ` - compared with ${reference.name} (faded)`;
+    }
     const styles = getComputedStyle(document.documentElement);
     const colors = ['--accent', '--series-2', '--series-3', '--series-4'].map((name) => styles.getPropertyValue(name));
     const train = run.entries.train || [];
@@ -721,12 +734,20 @@ function renderCharts(force = false) {
         chart.series = chart.series.flatMap(([label, kind, key, smoothed, color]) => {
             const own = series(entriesOf[kind], key);
             const ownSeries = {label, 'points': smoothed ? smoothSeries(own, 0.8) : own, color};
+            const drawn = [ownSeries];
             const before = parentSeries(kind, key);
-            if (before.length === 0) {
-                return [ownSeries];
+            if (before.length !== 0) {
+                const parentPoints = smoothed ? smoothSeries(before, 0.8) : before;
+                drawn.unshift({'label': `${parent.run.name} ${label}`, 'points': parentPoints, 'color': faded(color)});
             }
-            const parentPoints = smoothed ? smoothSeries(before, 0.8) : before;
-            return [{'label': `${parent.run.name} ${label}`, 'points': parentPoints, 'color': faded(color)}, ownSeries];
+            if (reference) {
+                const theirs = series(reference.entries[kind] || [], key).map(([step, value]) => [step - offset, value]);
+                if (theirs.length !== 0) {
+                    drawn.unshift({'label': `${reference.name} ${label}`, 'points': smoothed ? smoothSeries(theirs, 0.8) : theirs,
+                        'color': faded(color)});
+                }
+            }
+            return drawn;
         });
     }
     chartsElement.replaceChildren(...charts.map((chart) => {
