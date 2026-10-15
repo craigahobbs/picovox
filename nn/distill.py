@@ -1024,7 +1024,8 @@ def pick(args):
         rows.append(row)
     rows.sort(key=lambda row: row['parameters'], reverse=True)
     passing = [row for row in rows if row.get('withinTolerance')]
-    chosen = min(passing, key=lambda row: (row['moduleBytes'], row['parameters'])) if passing else None
+    # (the fewest parameters; of one size - a student and its polish - the higher UTMOS)
+    chosen = min(passing, key=lambda row: (row['parameters'], -row['mos'])) if passing else None
     summary = {'teacher': teacher['checkpoint'], 'tolerance': tolerance, 'rows': rows, 'chosen': chosen and chosen['name'],
                'results': {name: brief(result) for name, result in results.items()}}
     samples = []
