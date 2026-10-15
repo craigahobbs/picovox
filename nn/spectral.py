@@ -19,11 +19,20 @@ def _hann(size, device):
     return torch.hann_window(size, device=device)
 
 
+# The complex STFT [B, bins, frames] of audio [B, N] (Hann window, centered)
+def stft(audio, fft_size, hop):
+    return torch.stft(audio, fft_size, hop_length=hop, window=_hann(fft_size, str(audio.device)), center=True,
+                      return_complex=True)
+
+
+# The magnitude [B, frames, bins] of a complex STFT [B, bins, frames]
+def spectrum_magnitude(spectrum, eps=1e-7):
+    return torch.sqrt(spectrum.real ** 2 + spectrum.imag ** 2 + eps).transpose(1, 2)
+
+
 # The STFT magnitude [B, frames, bins] of audio [B, N]
 def stft_magnitude(audio, fft_size, hop, eps=1e-7):
-    spectrum = torch.stft(audio, fft_size, hop_length=hop, window=_hann(fft_size, str(audio.device)), center=True,
-                          return_complex=True)
-    return torch.sqrt(spectrum.real ** 2 + spectrum.imag ** 2 + eps).transpose(1, 2)
+    return spectrum_magnitude(stft(audio, fft_size, hop), eps)
 
 
 # The multi-resolution STFT loss - for each FFT size, the spectral convergence plus the mean absolute log-magnitude
