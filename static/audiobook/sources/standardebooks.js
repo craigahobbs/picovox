@@ -4,8 +4,8 @@
 // EPUB (the catalog's book.text.url) is fetched directly from the browser, unzipped (lib/zip.js), and converted to text
 // and chapters (lib/epub.js).
 
-import {convertEpub, isEpubTextEntry} from '../../lib/epub.js';
-import {openZip, readZipDirectory, readZipEnd, zipEntrySpans, zipTailSize} from '../../lib/zip.js';
+import {convertEpub, isEpubTextEntry} from '../../../lib/epub.js';
+import {openZip, readZipDirectory, readZipEnd, zipEntrySpans, zipTailSize} from '../../../lib/zip.js';
 
 
 // Error messages

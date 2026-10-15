@@ -1,4 +1,4 @@
-// Check that the browser build works - the app-time modules (lib/, web/, nn/js/, and the generated model modules) load
+// Check that the browser build works - the app-time modules (lib/, static/audiobook/, nn/js/, and the generated model modules) load
 // with no Node built-ins (any node: import from them fails, and process.getBuiltinModule is hidden, as in a browser), the
 // front end pronounces with the G2P network (no dictionary), and the worker's neural speech matches the same pipeline run
 // directly (speakFrames, render, gain, and limiter), sample for sample
@@ -11,7 +11,7 @@ import {registerHooks} from 'node:module';
 
 
 // Fail any node: import (or bare package import) from the app-time code
-const browserRoots = ['lib', 'web', 'nn/js'].map((dir) => new URL(`../${dir}/`, import.meta.url).href);
+const browserRoots = ['lib', 'static', 'nn/js'].map((dir) => new URL(`../${dir}/`, import.meta.url).href);
 registerHooks({
     resolve(specifier, context, nextResolve) {
         if (context.parentURL && browserRoots.some((root) => context.parentURL.startsWith(root)) &&
@@ -31,10 +31,10 @@ const lib = {};
 for (const name of modules) {
     lib[name] = await import(`../lib/${name}.js`);
 }
-const worker = await import('../web/worker.js');
+const worker = await import('../static/audiobook/worker.js');
 const {speakFrames} = await import('../nn/js/model.js');
 const {render} = await import('../nn/js/render.js');
-process.stdout.write(`Loaded lib/{${modules.join(',')}}.js, web/worker.js, and nn/js/ with no node: imports\n`);
+process.stdout.write(`Loaded lib/{${modules.join(',')}}.js, static/audiobook/worker.js, and nn/js/ with no node: imports\n`);
 
 // Without a pronouncer (and no Node to load a dictionary), the text front end must ask for one
 let threw = false;

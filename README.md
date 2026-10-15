@@ -16,12 +16,12 @@ published site it reads at `paper/` (rendered with [MarkdownUp](https://craigaho
 
 ## The audiobook player
 
-A public-domain audiobook player, read aloud by the synthesizer. Serve the repository root statically and open it - the
-root `index.html` redirects to `web/`:
+A public-domain audiobook player, read aloud by the synthesizer - [open the audiobook player](static/audiobook/). Serve
+the repository root statically and open `static/audiobook/` (the root `index.html` shows this README):
 
 ```sh
 python3 -m http.server 8000
-open http://localhost:8000/
+open http://localhost:8000/static/audiobook/
 ```
 
 To listen on a phone, open `http://<your computer's LAN address>:8000/` on it (same network).
@@ -46,15 +46,15 @@ The page needs HTTP - it does not work from a `file:` URL, since module workers 
 
 | Module | |
 | --- | --- |
-| `web/app.js` | The library and player interface |
-| `web/engine.js` | Playback - the text timeline, on-demand synthesis, scheduling, skipping, speech normalization |
-| `web/worker.js` | The synthesis Web Worker - speaks the player's units (sentences) with the neural voices |
-| `web/sources/standardebooks.js` | Standard Ebooks - browse, search, and EPUB loading |
-| `web/sources/gutenberg.js` | Project Gutenberg - Gutendex browse and search, GITenberg texts, boilerplate and chapters |
-| `web/store.js` | The listener's state in browser storage - places, bookmarks, settings |
-| `web/bookcache.js` | Downloaded books in IndexedDB |
+| `static/audiobook/app.js` | The library and player interface |
+| `static/audiobook/engine.js` | Playback - the text timeline, on-demand synthesis, scheduling, skipping, speech normalization |
+| `static/audiobook/worker.js` | The synthesis Web Worker - speaks the player's units (sentences) with the neural voices |
+| `static/audiobook/sources/standardebooks.js` | Standard Ebooks - browse, search, and EPUB loading |
+| `static/audiobook/sources/gutenberg.js` | Project Gutenberg - Gutendex browse and search, GITenberg texts, boilerplate and chapters |
+| `static/audiobook/store.js` | The listener's state in browser storage - places, bookmarks, settings |
+| `static/audiobook/bookcache.js` | Downloaded books in IndexedDB |
 
-`node tools/browsercheck.js` checks the browser build under Node: it loads the app-time modules (`lib/`, `web/worker.js`,
+`node tools/browsercheck.js` checks the browser build under Node: it loads the app-time modules (`lib/`, `static/audiobook/worker.js`,
 `nn/js/`, and the generated model module) with `node:` imports forbidden, speaks with the worker's functions from a
 dictionary string, and checks the audio matches the same neural pipeline run directly, sample for sample.
 

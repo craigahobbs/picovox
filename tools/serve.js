@@ -1,4 +1,4 @@
-// Serve the repository statically, for the browser page (web/index.html)
+// Serve the repository statically, for the browser page (static/audiobook/index.html)
 //
 // node tools/serve.js [-p port]
 
@@ -36,5 +36,5 @@ createServer(async (request, response) => {
         response.writeHead(404).end('Not found');
     }
 }).listen(port, () => {
-    process.stdout.write(`http://localhost:${port}/web/\n`);
+    process.stdout.write(`http://localhost:${port}/static/audiobook/\n`);
 });

@@ -1,4 +1,4 @@
-// Check the Project Gutenberg source (web/sources/gutenberg.js) in headless Chrome - load catalog books (each with its
+// Check the Project Gutenberg source (static/audiobook/sources/gutenberg.js) in headless Chrome - load catalog books (each with its
 // GITenberg text URL and encoding) and print each book's title, author, text length, chapters, opening text, load
 // time, and download size. GITenberg's raw texts are cached under out/gutenberg/cache, so a rerun doesn't fetch them
 // again (the cache serves whole, uncompressed bodies); --no-cache fetches everything live, without interception, as a
@@ -246,7 +246,7 @@ try {
     // Load a page from the server, so the module imports from the page's origin
     await send('Page.navigate', {'url': `http://127.0.0.1:${httpPort}/package.json`});
     await sleep(500);
-    await evaluate(`import('/web/sources/gutenberg.js').then((module) => { window.gutenberg = module; return true; })`);
+    await evaluate(`import('/static/audiobook/sources/gutenberg.js').then((module) => { window.gutenberg = module; return true; })`);
     print(`Source: ${await evaluate('JSON.stringify({id: gutenberg.source.id, name: gutenberg.source.name})')}\n`);
 
     // Load each book - a second apart when fetching live, to be considerate to GitHub

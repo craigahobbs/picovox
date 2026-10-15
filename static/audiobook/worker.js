@@ -17,11 +17,11 @@
 // A voice is a speaker of the multi-speaker neural model (nn/js), a generated module (lib/models/voiceModel.js) unpacked on first
 // use.
 
-import {setPronouncer, textToPhrases} from '../lib/lexicon.js';
-import {createRenderer} from '../nn/js/render.js';
-import {loadG2p} from '../lib/g2p.js';
-import {loadPackagedModel} from '../nn/js/package.js';
-import {streamFrames} from '../nn/js/model.js';
+import {setPronouncer, textToPhrases} from '../../lib/lexicon.js';
+import {createRenderer} from '../../nn/js/render.js';
+import {loadG2p} from '../../lib/g2p.js';
+import {loadPackagedModel} from '../../nn/js/package.js';
+import {streamFrames} from '../../nn/js/model.js';
 
 
 // The neural voices - each a speaker (by key) of the multi-speaker model's speaker table
@@ -49,7 +49,7 @@ export function softLimit(value) {
 // Load the multi-speaker neural model - imported and unpacked once, shared by every neural voice. importModule is the
 // generated module's import (replaceable for tests).
 let neuralModel = null;
-export function loadNeuralModel(importModule = () => import('../lib/models/voiceModel.js'), trace = () => null) {
+export function loadNeuralModel(importModule = () => import('../../lib/models/voiceModel.js'), trace = () => null) {
     if (neuralModel === null) {
         neuralModel = importModule().then((module) => {
             trace('voice model imported');

@@ -1,4 +1,4 @@
-// Check the Standard Ebooks source (web/sources/standardebooks.js) in headless Chrome over CDP - load catalog books
+// Check the Standard Ebooks source (static/audiobook/sources/standardebooks.js) in headless Chrome over CDP - load catalog books
 // (each with its EPUB's text URL), printing per book: title, author, text length, chapters, the first 4 and last 2
 // chapter titles, the first 300 characters, load time, and download size
 //
@@ -236,7 +236,7 @@ for (let ix = 0; ix < 40; ix++) {
     }
 }
 const imported = await evaluate(
-    `import('/web/sources/standardebooks.js').then((module) => { window.source = module.source; return true; })`
+    `import('/static/audiobook/sources/standardebooks.js').then((module) => { window.source = module.source; return true; })`
 );
 if (imported !== true) {
     print(`import failed: ${JSON.stringify(imported)}`);

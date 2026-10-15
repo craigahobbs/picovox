@@ -1,11 +1,17 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta http-equiv="refresh" content="0; url=web/">
-<title>Voice Synth</title>
-</head>
-<body>
-<p><a href="web/">Open Voice Synth</a></p>
-</body>
+    <head>
+        <title>Voice Synth</title>
+        <meta charset="utf-8">
+        <meta name="description" content="Small neural voices for the browser and Node, and a public-domain audiobook player">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="stylesheet" href="https://craigahobbs.github.io/markdown-up/app.css">
+        <link rel="preload" href="https://craigahobbs.github.io/markdown-up/bare-script/static/markdown.css" as="style">
+        <link rel="modulepreload" href="https://craigahobbs.github.io/markdown-up/lib/appImports.js" as="script">
+    </head>
+    <script type="module">
+        import {MarkdownUp} from 'https://craigahobbs.github.io/markdown-up/lib/appImports.js';
+        const app = new MarkdownUp(window, {'url': 'README.md'});
+        app.run();
+    </script>
 </html>

@@ -295,7 +295,7 @@ recognition rates will be added here.
 
 ## 8. Browser deployment
 
-The audiobook player (`web/`) reads public-domain books from Standard Ebooks (EPUB, fetched in byte ranges) and
+The audiobook player (`static/audiobook/`) reads public-domain books from Standard Ebooks (EPUB, fetched in byte ranges) and
 Project Gutenberg (plain text), with a 2,097-book catalog published as static JSON. Synthesis runs in a Web Worker,
 a sentence at a time, streaming blocks of samples to the page so playback starts within about half a second
 (567-696 ms from Play to playback in headless-browser tests at phone size; the model loads when a book opens).

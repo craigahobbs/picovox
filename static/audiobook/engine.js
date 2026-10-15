@@ -3,7 +3,7 @@
 // the position. Playback schedules each unit's streamed blocks with Web Audio, and only the audio near the position is
 // kept, so a whole book costs no more than a chapter.
 
-import {encodeWav} from '../lib/wav.js';
+import {encodeWav} from '../../lib/wav.js';
 
 
 // Timing (s) - the playback lead, and how far ahead to schedule blocks
@@ -126,7 +126,7 @@ function isAppleMobile() {
 // Import the generated model modules (lib/models/) once for every worker - each worker's own import would download them
 // again - as the workers' models message. A failed import (a dropped request, say) is tried once more.
 function importModels(retry = true) {
-    return Promise.all([import('../lib/models/g2pModel.js'), import('../lib/models/voiceModel.js')]).then(([g2p, voice]) => ({
+    return Promise.all([import('../../lib/models/g2pModel.js'), import('../../lib/models/voiceModel.js')]).then(([g2p, voice]) => ({
         'type': 'models',
         'g2pModel': g2p.g2pModel,
         'voiceModel': {'manifest': voice.manifest, 'encoding': voice.encoding, 'weights': voice.weights}

@@ -5,7 +5,7 @@
 // book.text.encoding, and prepared for reading aloud (lib/gutenberg.js): no license boilerplate, no table of contents
 // or markup, paragraphs unwrapped, and chapter headings found and listed.
 
-import {decodeText, prepareText} from '../../lib/gutenberg.js';
+import {decodeText, prepareText} from '../../../lib/gutenberg.js';
 
 
 // Error messages

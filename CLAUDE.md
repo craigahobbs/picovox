@@ -10,9 +10,9 @@ dependencies) and a public-domain audiobook player web app built on it.
 - `lib/` - the synthesizer and the pure (DOM-free) library code: the LF glottal source, the Klatt-style cascade
   synthesizer, phoneme tables, the lexicon (CMU Pronouncing Dictionary in `data/cmudict.dict`), text-to-speech
   (durations, transitions, intonation), and book-text preparation. Runs in Node and browsers. 100% test coverage.
-- `web/` - the audiobook player app (static files, ES modules, no build step): the interface (`app.js`), playback
+- `static/audiobook/` - the audiobook player app (static files, ES modules, no build step): the interface (`app.js`), playback
   (`engine.js`), the synthesis worker (`worker.js`), listener state (`store.js`), the downloaded-book cache
-  (`bookcache.js`), and the book sources (`sources/`). The root `index.html` redirects to `web/`.
+  (`bookcache.js`), and the book sources (`sources/`). The root `index.html` shows `README.md` (MarkdownUp).
 - `tools/` - Node command-line tools: speech output (`say.js`), analysis (spectrograms, spectra, pitch), and
   intelligibility evaluation with whisper.cpp (`eval.js`, `words.js`, `stops.js`, `nasals.js`, `prosody.js`).
 - `test/` - unit tests (`node:test`), one `test<Module>.js` per `lib/` module.
@@ -26,7 +26,7 @@ skill before running tests, lint, coverage, or changing the Makefile:
 
 Local Makefile overrides:
 
-- `ESLINT_ARGS` - also `web/` and `tools/`
+- `ESLINT_ARGS` - also `static/audiobook/` and `tools/`
 - `GHPAGES_SRC` - `build/site/` (the published app and catalog)
 
 `make commit` (test, lint, doc, cover) is the gate before committing.

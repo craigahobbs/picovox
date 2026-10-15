@@ -2,7 +2,7 @@
 # https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
 
 
-# The published site - the app (web/), its library (lib/), the data, and the catalog
+# The published site - the app (static/audiobook/), its library (lib/), the data, and the catalog
 GHPAGES_SRC := build/site/
 
 # jsdom - a DOM for testing the book parsers (DOMParser) and for building the catalog
@@ -28,7 +28,7 @@ include Makefile.base
 
 
 # The generated model modules (lib/models/) aren't linted
-ESLINT_ARGS := $(ESLINT_ARGS) web/ tools/ --ignore-pattern 'lib/models/**'
+ESLINT_ARGS := $(ESLINT_ARGS) static/audiobook/ tools/ --ignore-pattern 'lib/models/**'
 
 
 # The book catalog - every Standard Ebooks book and the top GUTENBERG_COUNT Project Gutenberg books (remote pages are
@@ -65,7 +65,7 @@ listeners: build/venv-listeners.build
 site: data/catalog.json
 	rm -rf build/site
 	mkdir -p build/site/data
-	rsync -a --exclude .DS_Store index.html README.md web lib paper build/site/
+	rsync -a --exclude .DS_Store index.html README.md static lib paper build/site/
 	cp data/LICENSE.cmudict data/catalog.json build/site/data/
 	mkdir -p build/site/nn
 	rsync -a --exclude .DS_Store nn/js nn/vocab.json build/site/nn/

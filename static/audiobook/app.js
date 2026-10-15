@@ -4,7 +4,7 @@
 // place in every book is kept in browser storage, so reloading or leaving and coming back resumes where they were.
 
 import {deleteCachedBook, getCachedBook, putCachedBook} from './bookcache.js';
-import {findBook, listBooks, pageItems, searchBooks} from '../lib/catalog.js';
+import {findBook, listBooks, pageItems, searchBooks} from '../../lib/catalog.js';
 import {loadState, newId, saveState} from './store.js';
 import {Engine} from './engine.js';
 import {source as gutenberg} from './sources/gutenberg.js';
@@ -14,7 +14,7 @@ import {source as standardEbooks} from './sources/standardebooks.js';
 // The book sources' loaders, and the catalog (loaded at startup)
 const loaders = Object.fromEntries([standardEbooks, gutenberg].map((source) => [source.id, source]));
 let catalog = null;
-const catalogPromise = fetch(new URL('../data/catalog.json', import.meta.url)).then((response) => {
+const catalogPromise = fetch(new URL('../../data/catalog.json', import.meta.url)).then((response) => {
     if (!response.ok) {
         throw new Error(`The book catalog couldn't be loaded (${response.status}).`);
     }
