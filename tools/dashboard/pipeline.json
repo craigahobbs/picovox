@@ -31,6 +31,7 @@
             "processes": ["nn.train", "nn.model", "nn.discriminator", "nn.evaluate", "nn.export", "nn.parity", "nn.fit", "nn/js/"],
             "steps": [
                 {"title": "Training", "run": true, "process": "nn.train", "weight": 9},
+                {"title": "Profile and optimize training", "log": "build/nn/profile/profile.log", "weight": 0},
                 {"title": "Export for the browser", "file": "data/nn/multi.json", "process": "nn.export", "weight": 1}
             ]
         },

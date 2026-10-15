@@ -106,7 +106,9 @@ function runningSteps(now) {
     const byPid = new Map(processes.map((entry) => [entry.pid, entry]));
     const candidates = new Set(processes.filter((entry) => {
         const [executable] = entry.command.split(/\s+/);
-        return interpreterPattern.test(executable) && !ignorePattern.test(entry.command) && processCwd(entry.pid) === repository;
+        const cwd = processCwd(entry.pid);
+        const inRepository = cwd === repository || cwd.startsWith(`${repository}/`);
+        return interpreterPattern.test(executable) && !ignorePattern.test(entry.command) && inRepository;
     }).map((entry) => entry.pid));
     const steps = new Map();
     for (const pid of candidates) {
