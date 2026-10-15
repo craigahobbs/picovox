@@ -41,7 +41,8 @@
             "steps": [
                 {"title": "Profile 2", "log": "build/nn/profile2/profile.log", "doneWhen": "done:", "weight": 3},
                 {"title": "Profile-guided optimization of small-model training (scratch-s64-a)", "log": "build/nn/pgo/pgo.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 5},
-                {"title": "MLX: voice training ported (stage A, stage B critic, distillation, export) and PyTorch training code removed", "log": "build/nn/mlx/mlx.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 12}
+                {"title": "MLX: voice training ported (stage A, stage B critic, distillation, export) and PyTorch training code removed", "log": "build/nn/mlx/mlx.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 12},
+                {"title": "MLX review: M3-specific speedups, then simplify and clean up the code", "log": "build/nn/mlxreview/review.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 8}
             ]
         },
         {
