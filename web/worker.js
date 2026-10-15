@@ -13,10 +13,10 @@
 // A voice is a speaker of the multi-speaker neural model (nn/js), a generated module (lib/models/voiceModel.js) imported on first
 // use.
 
+import {setPronouncer, textToPhrases} from '../lib/lexicon.js';
 import {createRenderer} from '../nn/js/render.js';
 import {loadG2p} from '../lib/g2p.js';
 import {loadPackagedModel} from '../nn/js/package.js';
-import {setPronouncer} from '../lib/lexicon.js';
 import {speakFrames} from '../nn/js/model.js';
 
 
@@ -80,7 +80,9 @@ export function streamNeuralUnit(model, text, options, onBlock) {
     const sampleRate = 44100;
     const pause = paragraphStart ? neuralParagraphPause : neuralSentencePause;
     onBlock(new Float32Array(Math.round(sampleRate * pause / rate)), sampleRate);
+    const networkStart = performance.now();
     const {frames, eq} = speakFrames(model, text, {'rate': 1 / rate, speaker});
+    options.onNetwork?.(performance.now() - networkStart);
     const renderer = createRenderer({sampleRate, seed, eq, 'blockSize': 2048, 'onBlock': (block) => {
         const samples = new Float32Array(block.length);
         for (let ix = 0; ix < block.length; ix++) {
@@ -104,6 +106,19 @@ if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globa
     };
     const loadModel = () => loadNeuralModel(undefined, trace);
     trace('started');
+
+    // A JavaScript speed check - a fixed arithmetic workload (a few milliseconds with a JIT; far slower without one, as
+    // in iOS Lockdown Mode)
+    const speedStart = performance.now();
+    const values = new Float64Array(4096);
+    let sum = 0;
+    for (let pass = 0; pass < 500; pass++) {
+        for (let ix = 0; ix < values.length; ix++) {
+            values[ix] = values[ix] * 0.999 + ix;
+            sum += values[ix];
+        }
+    }
+    trace(`speed check: ${Math.round(performance.now() - speedStart)} ms (checksum ${Math.round(sum) % 1000})`);
 
     // Load the G2P network on startup - every word's pronunciation
     const ready = import('../lib/models/g2pModel.js').then(({g2pModel}) => {
@@ -138,7 +153,12 @@ if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globa
                 blocks += 1;
                 self.postMessage({'type': 'unitBlock', id, 'unit': unit.index, samples, sampleRate}, [samples.buffer]);
             };
-            streamNeuralUnit(model, unit.text, {rate, 'seed': 1000 + unit.index, 'paragraphStart': unit.paragraphStart, speaker}, post);
+            // Pronounce the unit's words first (cached), to time the G2P apart from the voice network
+            const words = textToPhrases(unit.text).reduce((count, phrase) => count + phrase.words.length, 0);
+            trace(`unit ${unit.index}: G2P ${words} words in ${Math.round(performance.now() - unitStart)} ms`);
+            const onNetwork = (ms) => trace(`unit ${unit.index}: voice network in ${Math.round(ms)} ms`);
+            const unitOptions = {rate, 'seed': 1000 + unit.index, 'paragraphStart': unit.paragraphStart, speaker, onNetwork};
+            streamNeuralUnit(model, unit.text, unitOptions, post);
             trace(`unit ${unit.index} done in ${Math.round(performance.now() - unitStart)} ms (${blocks} blocks)`);
             self.postMessage({'type': 'unitDone', id, 'unit': unit.index});
             // Yield, so a newer run or a cancel can arrive

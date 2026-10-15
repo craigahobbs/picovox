@@ -230,7 +230,7 @@ export class Engine {
     // Note a startup event on the timeline
     mark(event) {
         this.timeline.push({'ms': Math.round(performance.now() - this.playStart), event});
-        if (this.timeline.length > 40) {
+        if (this.timeline.length > 60) {
             this.timeline.shift();
         }
     }
@@ -241,7 +241,7 @@ export class Engine {
             return;
         }
         this.playStart = performance.now();
-        this.timeline = [];
+        this.mark('--- play (times from here) ---');
         const cell = this.session.cache[this.unit];
         const worker = this.workerReady ? 'ready' : 'starting';
         this.mark(`play (unit ${this.unit}: ${cell.blocks.length} blocks ready${cell.done ? ', complete' : ''}; worker ${worker})`);
