@@ -1,127 +1,102 @@
 {
-    "title": "Ten neural voices",
-    "since": "2026-10-15T01:50:00-07:00",
-    "workflow": "wf_71f8b2f9-e0f",
-    "samples": {
-        "checkpointEvery": 5000,
-        "runs": "multi-",
-        "text": "Call me Ishmael. Some years ago, never mind how long precisely, having little or no money in my purse, and nothing particular to interest me on shore, I thought I would sail about a little and see the watery part of the world.",
-        "speakers": [
-            {"key": "arctic-slt", "label": "ARCTIC slt", "sex": "female"},
-            {"key": "libritts-5895", "label": "reader 5895", "sex": "female"},
-            {"key": "libritts-6345", "label": "reader 6345", "sex": "female"},
-            {"key": "arctic-bdl", "label": "ARCTIC bdl", "sex": "male"},
-            {"key": "libritts-5750", "label": "reader 5750", "sex": "male"},
-            {"key": "libritts-2843", "label": "reader 2843", "sex": "male"}
-        ],
-        "reference": [
-            {"model": "data/nn/slt", "label": "app female (slt)", "sex": "female"},
-            {"model": "data/nn/bdl", "label": "app male (bdl)", "sex": "male"}
-        ]
-    },
+    "title": "Small voices: one voice, one G2P, make train, and the library",
+    "since": "2026-10-15T11:00:00-07:00",
+    "samples": {"checkpointEvery": 5000, "runs": "multi-", "text": "Call me Ishmael. Some years ago, never mind how long precisely, having little or no money in my purse, and nothing particular to interest me on shore, I thought I would sail about a little and see the watery part of the world.", "speakers": [{"key": "arctic-slt", "label": "ARCTIC slt", "sex": "female"}, {"key": "libritts-5895", "label": "reader 5895", "sex": "female"}, {"key": "libritts-6345", "label": "reader 6345", "sex": "female"}, {"key": "arctic-bdl", "label": "ARCTIC bdl", "sex": "male"}, {"key": "libritts-5750", "label": "reader 5750", "sex": "male"}, {"key": "libritts-2843", "label": "reader 2843", "sex": "male"}], "reference": [{"model": "data/nn/slt", "label": "app female (slt)", "sex": "female"}, {"model": "data/nn/bdl", "label": "app male (bdl)", "sex": "male"}]},
     "phases": [
         {
-            "title": "Data",
-            "detail": "American audiobook readers and emotional speech, prepared for training",
-            "weight": 10,
-            "processes": ["nn.multi", "nn.cremad", "nn.accent", "nn.align", "tools/corpora.py"],
-            "steps": [
-                {"title": "Download audiobook readers", "log": "build/nn/multi/corpora.log", "process": "tools/corpora.py", "weight": 3},
-                {"title": "Accent check - readers", "log": "build/nn/multi/accent.log", "weight": 1},
-                {"title": "Voice settings - readers", "log": "build/nn/multi/settings.log", "process": "nn.multi settings", "weight": 1},
-                {"title": "Training examples - readers", "log": "build/nn/multi/build.log", "process": "nn.multi build", "weight": 2},
-                {
-                    "title": "Naturalness scores - readers", "file": "data/nn/speakers.json", "contains": "\"utmos\"",
-                    "process": "nn.multi listen", "weight": 1
-                },
-                {"title": "Download emotional speech", "log": "build/nn/cremad/fetch.log", "process": "nn.cremad fetch", "weight": 2},
-                {"title": "Phoneme alignment - emotional", "log": "build/nn/cremad/align.log", "process": "nn.cremad align", "weight": 1},
-                {"title": "Accent check - emotional", "log": "build/nn/cremad/accent.log", "process": "nn.cremad accent", "weight": 1},
-                {"title": "Emotion recognizer check", "log": "build/nn/cremad/emotion.log", "process": "nn.cremad emotion", "weight": 1},
-                {"title": "Training examples - emotional", "file": "build/nn/data/cremad/index.json", "process": "nn.cremad build", "weight": 1}
-            ]
-        },
-        {
-            "title": "Train",
-            "detail": "one multi-speaker, multi-style model",
-            "weight": 70,
-            "processes": ["nn.train", "nn.model", "nn.discriminator", "nn.evaluate", "nn.export", "nn.parity", "nn.fit", "nn/js/"],
-            "runs": ["multi-", "test-"],
-            "steps": [
-                {"title": "Training", "run": "multi-", "process": "nn.train", "weight": 9},
-                {"title": "Profile and optimize training", "log": "build/nn/profile/profile.log", "weight": 0},
-                {"title": "Profile 2: the critic path and fixed-shape batches (after multi-b)", "log": "build/nn/profile2/profile.log", "weight": 0},
-                {"title": "Export for the browser", "file": "data/nn/multi.json", "process": "nn.export", "weight": 1}
-            ]
-        },
-        {
-            "title": "G2P",
-            "detail": "a minimal neural letters-to-phonemes model for words the dictionary lacks, packaged as generated JavaScript",
-            "weight": 5,
-            "processes": ["nn.g2p", "tools/g2p"],
-            "runs": ["g2p-"],
-            "steps": [
-                {"title": "Data and spelling rules", "log": "build/nn/g2p/data.log", "weight": 1},
-                {"title": "Size sweep", "log": "build/nn/g2p/sweep.log", "weight": 4},
-                {"title": "Distillation, quantization, pruning", "log": "build/nn/g2p/compress.log", "weight": 3},
-                {"title": "Package as generated JavaScript", "log": "build/nn/g2p/package.log", "weight": 1},
-                {"title": "Integration and parity", "log": "build/nn/g2p/integrate.log", "weight": 1},
-                {"title": "Evaluation and listening samples", "log": "build/nn/g2p/eval.log", "weight": 1},
-                {"title": "Classical baseline (WFST joint-sequence model)", "log": "build/nn/g2p-wfst/wfst.log", "weight": 1},
-                {"title": "Challenger: beat the WFST's 34.4% in at most 200 KB", "log": "build/nn/g2p-challenge/challenge.log", "weight": 3},
-                {"title": "NN only: reproduce the dictionary (book-token error under 0.5%) and generalize", "log": "build/nn/g2p-nnonly/nnonly.log", "weight": 4}
-            ]
-        },
-        {
-            "title": "Architecture options",
-            "detail": "acoustic model: a spectral correction head, an all-convolution encoder, quantization-aware training, and the size-search harness",
-            "weight": 10,
-            "processes": ["nn.arch", "nn.sizesearch"],
-            "runs": ["arch-"],
-            "steps": [
-                {"title": "Spectral correction head (Python, JS, equivalence)", "log": "build/nn/arch/correction.log", "weight": 3},
-                {"title": "All-convolution encoder option", "log": "build/nn/arch/allconv.log", "weight": 2},
-                {"title": "Quantization-aware training", "log": "build/nn/arch/qat.log", "weight": 2},
-                {"title": "Short fine-tune experiments", "log": "build/nn/arch/experiments.log", "weight": 3},
-                {"title": "Size-search harness (ready to launch)", "log": "build/nn/arch/sizesearch.log", "weight": 1}
-            ]
-        },
-        {
-            "title": "Distillation",
-            "detail": "voice students distilled from the stage-B teacher - the smallest within tolerance, then the retraining pipeline",
-            "weight": 15,
-            "processes": ["nn.distill"],
+            "title": "Choose the voice model",
+            "detail": "one distilled student that balances quality and phone compute (the iPhone at 1.2x real time or better)",
+            "weight": 20,
+            "processes": ["nn.distill", "nn.trainmulti"],
             "runs": ["distill-", "scratch-"],
             "steps": [
-                {"title": "Distillation code (teacher targets, student training, evaluation)", "log": "build/nn/distill/code.log", "weight": 2},
-                {"title": "Teacher targets: training utterances and book sentences", "log": "build/nn/distill/targets.log", "weight": 2},
-                {"title": "Student ladder", "log": "build/nn/distill/students.log", "weight": 5},
-                {"title": "Evaluation and the chosen student", "log": "build/nn/distill/eval.log", "weight": 2},
+                {"title": "Student ladder (s32-s96)", "log": "build/nn/distill/students.log", "weight": 3},
+                {"title": "Polish and evaluation", "log": "build/nn/distill/eval.log", "weight": 3},
                 {"title": "From-scratch s64 (no teacher): can a full retrain skip the teacher?", "log": "build/nn/scratch/scratch.log", "doneWhen": "runs done", "failWhen": "FAILED", "weight": 3},
-                {"title": "Merge the worktrees into the main tree", "file": "build/nn/pipeline/merged.json", "weight": 1},
-                {"title": "Retraining pipeline (make targets, configs, gates, docs)", "file": "build/nn/pipeline/pipeline-ready.json", "weight": 2}
+                {"title": "iPhone timing of the finalists", "file": "build/nn/pipeline/iphone-timing.json", "weight": 1},
+                {"title": "The chosen voice model in the app", "file": "build/nn/pipeline/voice-chosen.json", "weight": 1}
             ]
         },
         {
-            "title": "Data efficiency",
-            "detail": "is the data right, clean, and enough - an audit of every training utterance, then scaling curves and automatic stopping in the size search",
-            "weight": 8,
-            "processes": ["audit"],
+            "title": "Choose the G2P model",
+            "detail": "one NN-only G2P - the smallest that holds book accuracy",
+            "weight": 10,
+            "processes": ["nnonly.py", "chtrain.py"],
+            "runs": ["g2p-"],
             "steps": [
-                {"title": "Per-utterance loss audit (multi-a step 15,000)", "log": "build/nn/audit/audit.log", "weight": 3},
-                {"title": "Listening and Whisper checks of the worst utterances", "log": "build/nn/audit/review.log", "weight": 1},
-                {"title": "Data-scaling curves (with the size search)", "file": "build/nn/sizesearch/scaling.json", "weight": 3},
-                {"title": "Automatic stopping rule (with the size search)", "file": "build/nn/sizesearch/stopping.json", "weight": 1}
+                {"title": "NN-only G2P runs", "log": "build/nn/g2p-nnonly/nnonly.log", "weight": 3},
+                {"title": "Small ladder (the challenger's recipe on every dictionary word)", "file": "build/nn/pipeline/g2p-ladder.json", "weight": 3},
+                {"title": "The chosen G2P in the app", "file": "build/nn/pipeline/g2p-chosen.json", "weight": 1}
             ]
         },
         {
-            "title": "Design",
-            "detail": "5 male and 5 female voices, styles, and samples",
+            "title": "Training speed",
+            "detail": "the last profiling pass - the critic path and fixed-shape batches",
+            "weight": 5,
+            "processes": ["nn.trainmulti --name prof2"],
+            "runs": ["prof2-"],
+            "steps": [
+                {"title": "Profile 2", "log": "build/nn/profile2/profile.log", "doneWhen": "done:", "weight": 3}
+            ]
+        },
+        {
+            "title": "Merge the worktrees",
+            "detail": "distillation, profile 2, the G2P tooling, and the challenger's recipe into main",
+            "weight": 10,
+            "processes": [],
+            "runs": [],
+            "steps": [
+                {"title": "Merged into main", "file": "build/nn/pipeline/merged.json", "weight": 1}
+            ]
+        },
+        {
+            "title": "make train",
+            "detail": "one command that recreates lib/models/*.js from a clean checkout",
             "weight": 20,
-            "processes": ["nn.voices", "nn.design", "nn.samples", "tools/listeners.py", "tools/panel.js"],
+            "processes": [],
+            "runs": [],
             "steps": [
-                {"title": "Design the 10 voices", "file": "data/nn/voices.json", "weight": 2},
-                {"title": "Render samples", "file": "build/nn/samples-voices/manifest.json", "weight": 1}
+                {"title": "Data targets", "file": "build/nn/pipeline/train-data.json", "weight": 1},
+                {"title": "Teacher (stage A and B) with a stopping rule", "file": "build/nn/pipeline/train-teacher.json", "weight": 2},
+                {"title": "Students: targets, train, polish, pick", "file": "build/nn/pipeline/train-students.json", "weight": 2},
+                {"title": "G2P: train, quantize, pick", "file": "build/nn/pipeline/train-g2p.json", "weight": 1},
+                {"title": "Package and gates (quality, size, phone speed)", "file": "build/nn/pipeline/train-gates.json", "weight": 1}
+            ]
+        },
+        {
+            "title": "The library (small-voices)",
+            "detail": "a voice library for the browser and Node - speak, synthesize, stream, a player, a script-tag global",
+            "weight": 20,
+            "processes": [],
+            "runs": [],
+            "steps": [
+                {"title": "Interface agreed", "file": "build/nn/pipeline/library-interface.json", "weight": 1},
+                {"title": "Runtime moved into lib/ (network, renderer, worker, player) at 100% coverage", "file": "build/nn/pipeline/library-lib.json", "weight": 3},
+                {"title": "Public API, script-tag loader, and Node CLI", "file": "build/nn/pipeline/library-api.json", "weight": 2},
+                {"title": "The audiobook app on the library", "file": "build/nn/pipeline/library-app.json", "weight": 1},
+                {"title": "package.json, README, and docs", "file": "build/nn/pipeline/library-docs.json", "weight": 1}
+            ]
+        },
+        {
+            "title": "Publish",
+            "detail": "the site on GitHub Pages, the package on npm",
+            "weight": 5,
+            "processes": [],
+            "runs": [],
+            "steps": [
+                {"title": "Site on gh-pages", "file": "build/nn/pipeline/published-site.json", "weight": 1},
+                {"title": "Package on npm", "file": "build/nn/pipeline/published-npm.json", "weight": 1}
+            ]
+        },
+        {
+            "title": "Voices and paper",
+            "detail": "the 10 designed voices on the chosen model, and the paper brought up to date",
+            "weight": 10,
+            "processes": [],
+            "runs": [],
+            "steps": [
+                {"title": "The 10 designed voices on the chosen student", "file": "build/nn/pipeline/voices-student.json", "weight": 2},
+                {"title": "Paper: NN-only G2P, distillation, the phone, the library", "file": "build/nn/pipeline/paper-updated.json", "weight": 2}
             ]
         }
     ]
