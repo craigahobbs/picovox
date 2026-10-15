@@ -38,15 +38,24 @@ class SpectrogramDiscriminator(torch.nn.Module):
         ])
         self.out = torch.nn.Conv2d(channels, 1, (3, 3), padding=(1, 1))
 
-    def forward(self, audio):
-        """Audio [B, N] to (scores [B, 1, T, M'], intermediate features)"""
+    def spectrogram(self, audio):
+        """Audio [B, N] to the discriminator's input, its log-mel spectrogram [B, 1, T, M] - it doesn't depend on the
+        discriminator's weights, so a training step computes it once per signal for all the critic's passes"""
         magnitude = spectral.stft_magnitude(audio, self.fft_size, self.fft_size // 4, eps=self.eps)
-        x = torch.log(magnitude ** 2 @ self.bank.T + 1e-5)[:, None]
+        return torch.log(magnitude ** 2 @ self.bank.T + 1e-5)[:, None]
+
+    def score(self, spectrogram):
+        """A log-mel spectrogram [B, 1, T, M] to (scores [B, 1, T, M'], intermediate features)"""
+        x = spectrogram
         features = []
         for layer in self.layers:
             x = layer(x)
             features.append(x)
         return self.out(x), features
+
+    def forward(self, audio):
+        """Audio [B, N] to (scores [B, 1, T, M'], intermediate features)"""
+        return self.score(self.spectrogram(audio))
 
 
 class Critic(torch.nn.Module):
@@ -60,8 +69,16 @@ class Critic(torch.nn.Module):
             SpectrogramDiscriminator(sample_rate, 256, 32, max_hz, eps=eps)
         ])
 
+    def spectrograms(self, audio):
+        """Each discriminator's input spectrogram of audio [B, N]"""
+        return [discriminator.spectrogram(audio) for discriminator in self.discriminators]
+
+    def score(self, spectrograms):
+        """Each discriminator's (scores, features) of its input spectrogram (spectrograms())"""
+        return [discriminator.score(spectrogram) for discriminator, spectrogram in zip(self.discriminators, spectrograms)]
+
     def forward(self, audio):
-        return [discriminator(audio) for discriminator in self.discriminators]
+        return self.score(self.spectrograms(audio))
 
 
 # The discriminators' loss (least squares) - real toward 1, rendered toward 0

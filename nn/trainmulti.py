@@ -653,14 +653,27 @@ def main(argv=None):
             losses, audio, target, stats = batch_losses(model, synth, batch, args, None, prepared['seed'], guide, sonorants, prepared)
         if critic is not None and corpus == 'multi':
             # The critic's step (on the rendering, detached), then the generator's adversarial and feature-matching
-            # losses (after --adversarial-start steps of the critic alone)
-            critic_loss = discriminator.discriminator_loss(critic(target), critic(audio.detach()))
+            # losses (after --adversarial-start steps of the critic alone). The discriminators' input spectrograms don't
+            # depend on their weights, so each signal's are computed once for both passes.
+            generator_pass = step >= args.adversarial_start
+            real_spectrograms = critic.spectrograms(target)
+            with torch.set_grad_enabled(generator_pass):
+                fake_spectrograms = critic.spectrograms(audio)
+            critic_loss = discriminator.discriminator_loss(critic.score(real_spectrograms),
+                                                           critic.score([value.detach() for value in fake_spectrograms]))
             critic_optimizer.zero_grad()
             critic_loss.backward()
             critic_optimizer.step()
             losses['critic'] = critic_loss.detach()
-            if step >= args.adversarial_start:
-                adversarial, matching = discriminator.generator_losses(critic(target), critic(audio))
+            if generator_pass:
+                # (the real features are targets only - no graph; and the generator's backward needs the gradient
+                # of the rendering's scores and features with respect to the audio only, not to the critic's weights)
+                with torch.no_grad():
+                    real_outputs = critic.score(real_spectrograms)
+                critic.requires_grad_(False)
+                fake_outputs = critic.score(fake_spectrograms)
+                critic.requires_grad_(True)
+                adversarial, matching = discriminator.generator_losses(real_outputs, fake_outputs)
                 losses['adversarial'] = adversarial.detach()
                 losses['matching'] = matching.detach()
                 losses['total'] = losses['total'] + args.adversarial * adversarial + args.feature_matching * matching
