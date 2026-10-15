@@ -54,6 +54,26 @@ test('phonemes.vowels', () => {
         }
     }
 
+    // Back rounded vowels front after coronals - UW the most
+    for (const [ph, vowel] of Object.entries(vowels)) {
+        assert.equal('fronting' in vowel, ['UW', 'UH', 'OW'].includes(ph), ph);
+    }
+    assert.equal(vowels.UW.fronting, 1);
+    assert(vowels.UH.fronting > 0 && vowels.UH.fronting < 1);
+    assert(vowels.OW.fronting > 0 && vowels.OW.fronting < vowels.UH.fronting);
+
+    // A vowel's glide (two targets) runs within the vowel - the wide diphthongs glide late
+    for (const [ph, vowel] of Object.entries(vowels)) {
+        if ('glide' in vowel) {
+            const [start, end] = vowel.glide;
+            assert.equal(vowel.men.length, 2, ph);
+            assert(start >= 0 && start < end && end <= 1, ph);
+        }
+    }
+    for (const ph of ['AY', 'AW', 'OY']) {
+        assert(vowels[ph].glide[0] > 0.2, ph);
+    }
+
     // Diphthongs move
     for (const ph of ['AY', 'AW', 'OY', 'EY', 'OW']) {
         assert.equal(vowels[ph].men.length, 2, ph);
@@ -124,7 +144,10 @@ test('phonemes.noiseSpectra', () => {
         }
     }
     for (const [name, spectrum] of Object.entries(noiseSpectra)) {
-        assert.deepEqual(Object.keys(spectrum), ['fp1', 'bp1', 'ap1', 'fp2', 'bp2', 'ap2', 'ab', 'fhp', 'db'], name);
+        const keys = ['fp1', 'bp1', 'ap1', 'fp2', 'bp2', 'ap2', 'ab', 'fhp', 'db'];
+        const isNonSibilant = ['F', 'V', 'TH', 'DH'].includes(name);
+        assert.deepEqual(Object.keys(spectrum), isNonSibilant ? [...keys, 'sibilant'] : keys, name);
+        assert.equal(spectrum.sibilant, isNonSibilant ? false : undefined, name);
         assert(spectrum.db < 0, name);
         assert(spectrum.fhp < spectrum.fp1, name);
     }

@@ -608,6 +608,51 @@ test('speak, velars', () => {
 });
 
 
+test('speak, coronal fronting', () => {
+    // A back rounded vowel after a coronal starts fronted (F2 high) and glides back; after a labial it doesn't
+    const text = 'a boot, a toot.';
+    const result = speak(text);
+    const bootUW = wordSegment(result, 'boot', 'UW');
+    const tootUW = wordSegment(result, 'toot', 'UW');
+    assert(!bootUW.coronalOnset && tootUW.coronalOnset);
+    const f2At = (res, segment, fraction) => frameValue(res, 'f2', segment.start + fraction * segment.dur);
+    assert(f2At(result, tootUW, 0.3) > f2At(result, bootUW, 0.3) + 300);
+    assert(f2At(result, tootUW, 0.3) > f2At(result, tootUW, 0.75) + 200);
+
+    // Without fronting, the vowel's F2 holds near its target
+    const unfronted = speak(text, 'male', {'overrides': {'coronalFronting': 0}});
+    const unfrontedUW = wordSegment(unfronted, 'toot', 'UW');
+    assert(f2At(unfronted, unfrontedUW, 0.3) < f2At(result, tootUW, 0.3) - 300);
+
+    // Liquids don't front a following vowel
+    assert(!wordSegment(speak('a loot.'), 'loot', 'UW').coronalOnset);
+});
+
+
+test('speak, diphthong glide timing', () => {
+    // A wide diphthong holds its nucleus before gliding late; a narrow one glides early
+    const result = speak('a bide, a bayed.');
+    const progress = (segment, fraction) => {
+        const [[startF1], [endF1]] = maleVoice.vowelTargets[segment.ph];
+        return (startF1 - frameValue(result, 'f1', segment.start + fraction * segment.dur)) / (startF1 - endF1);
+    };
+    assert(progress(wordSegment(result, 'bide', 'AY'), 0.45) < progress(wordSegment(result, 'bayed', 'EY'), 0.45));
+});
+
+
+test('speak, non-sibilant frication', () => {
+    // The non-sibilants' flat spectra scale by nonSibilantScale, the sibilants' by noiseScale
+    const text = 'a fuss.';
+    const result = speak(text, 'female');
+    const fFrame = middleFrame(result, wordSegment(result, 'fuss', 'F'));
+    const sFrame = middleFrame(result, wordSegment(result, 'fuss', 'S'));
+    const scaled = speak(text, 'female', {'overrides': {'nonSibilantScale': 1.1}});
+    assert(Math.abs(middleFrame(scaled, wordSegment(scaled, 'fuss', 'F')).fp1 - fFrame.fp1 * 1.1) < 1);
+    assert.equal(middleFrame(scaled, wordSegment(scaled, 'fuss', 'S')).fp1, sFrame.fp1);
+    assert(femaleVoice.noiseScale !== femaleVoice.nonSibilantScale);
+});
+
+
 test('speak, vowel reduction', () => {
     // An unstressed vowel moves toward schwa - a word-final IY much less so ("happy")
     const result = speak('the happy city of it');
