@@ -149,7 +149,8 @@ export class Engine {
         this.lastMaintenance = 0;
         this.measuredChars = 0;
         this.measuredSeconds = 0;
-        const poolSize = Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 2) - 1));
+        // (one on iPhones and iPads - Safari gives a page about one core's worth there, so more workers only compete)
+        const poolSize = isAppleMobile() ? 1 : Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 2) - 1));
         for (let slot = 0; slot < poolSize; slot++) {
             this.startWorker(slot);
         }
@@ -449,6 +450,9 @@ export class Engine {
             return;
         }
         cell.run = message.id;
+        if (message.type === 'unitStart') {
+            return;
+        }
         if (message.type === 'unitBlock') {
             // Blocks keep their samples - audio buffers are made when they're scheduled (the audio context may not
             // exist yet, before the first play)
@@ -550,19 +554,26 @@ export class Engine {
         if (remaining.length === 0) {
             return;
         }
-        // Every remaining unit already in an active run - nothing to do
+        // Every remaining unit already in an active run, or started by a worker - nothing to do
         const assigned = new Set(session.runs.filter((run) => run.active).flatMap((run) => run.order));
+        for (const unit of remaining) {
+            if (session.cache[unit].run !== null) {
+                assigned.add(unit);
+            }
+        }
         if (remaining.every((unit) => assigned.has(unit))) {
             return;
         }
 
-        // Deal the remaining units to the workers in turn - each worker's new run supersedes its old one
+        // Deal the remaining units to the workers in turn - each worker's new run supersedes its old one, and a unit a
+        // worker has already started stays with it (a worker finishes its current unit before taking a new run)
         for (const run of session.runs) {
             run.active = false;
         }
         session.runs = [];
+        const unstarted = remaining.filter((unit) => session.cache[unit].run === null);
         this.workers.forEach(({worker}, slot) => {
-            const order = remaining.filter((unit, index) => index % this.workers.length === slot);
+            const order = unstarted.filter((unit, index) => index % this.workers.length === slot);
             if (order.length !== 0) {
                 const id = this.nextRunId++;
                 session.runs.push({id, order, 'active': true});

@@ -4,8 +4,8 @@
 //
 // Messages in:
 // - {'type': 'units', 'id', 'units': [{'index', 'text', 'paragraphStart'}], 'voice', 'rate'} speaks the units in order,
-//   posting {'type': 'unitBlock', 'id', 'unit', 'samples', 'sampleRate'} and {'type': 'unitDone', 'id', 'unit'}, then
-//   {'type': 'runDone', 'id'}. A newer run or a cancel supersedes a run between units.
+//   posting {'type': 'unitStart', 'id', 'unit'}, {'type': 'unitBlock', 'id', 'unit', 'samples', 'sampleRate'}, and
+//   {'type': 'unitDone', 'id', 'unit'} for each, then {'type': 'runDone', 'id'}. A newer run or a cancel supersedes a run between units.
 // - {'type': 'prepare', 'voice'} loads the voice's model ahead of playback.
 // - {'type': 'cancel'} stops the current run.
 // Messages out also include {'type': 'ready'} (the G2P network is loaded) and {'type': 'error', 'id', 'message'}.
@@ -146,6 +146,8 @@ if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globa
                 return;
             }
             const unitStart = performance.now();
+            // Claim the unit at once, so the engine doesn't deal it to another run while it's pronounced
+            self.postMessage({'type': 'unitStart', id, 'unit': unit.index});
             let blocks = 0;
             const post = (samples, sampleRate) => {
                 if (blocks === 0) {
