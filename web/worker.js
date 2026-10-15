@@ -8,7 +8,8 @@
 //   {'type': 'unitDone', 'id', 'unit'} for each, then {'type': 'runDone', 'id'}. A newer run or a cancel supersedes a run between units.
 // - {'type': 'models', 'g2pModel', 'voiceModel': {'manifest', 'encoding', 'weights'}} - the generated model modules
 //   (lib/models/), imported once by the engine for all of its workers (a worker's own import would download them again).
-//   The worker waits for it before loading either network.
+//   The worker waits for it before loading either network. Its slowdown (default 1) stretches each unit's synthesis that
+//   many times, by waiting - to reproduce a device slower than real time.
 // - {'type': 'prepare', 'voice'} loads the voice's model ahead of playback.
 // - {'type': 'cancel'} stops the current run.
 // Messages out also include {'type': 'ready'} (the G2P network is loaded) and {'type': 'error', 'id', 'message'}.
@@ -121,6 +122,7 @@ if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globa
         receiveModels = resolve;
     });
     const loadModel = () => loadNeuralModel(() => models.then(({voiceModel}) => voiceModel), trace);
+    let slowdown = 1;
     trace('started');
 
     // A JavaScript speed check - a fixed arithmetic workload (a few milliseconds with a JIT; far slower without one, as
@@ -149,22 +151,36 @@ if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globa
         self.postMessage({'type': 'error', 'id': null, 'message': `${error.message} (${error.stack})`});
     });
 
-    // Unit runs - the latest run supersedes earlier ones between units
+    // Unit runs - the latest run supersedes earlier ones between units. The unit a superseded run was finishing may also
+    // start the new run (the engine dealt it before the unit's start reached it) - it's skipped, already done.
     let currentRun = 0;
+    let finished = null;
     const runUnits = async ({id, units, voice, rate}) => {
         const run = ++currentRun;
+        const factor = slowdown;
         await ready;
         const model = await loadModel();
         const speaker = neuralSpeaker(model, voice);
-        for (const unit of units) {
+        for (const [index, unit] of units.entries()) {
             if (run !== currentRun) {
                 return;
+            }
+            if (index === 0 && finished !== null && finished.run === run - 1 && finished.unit === unit.index &&
+                finished.voice === voice && finished.rate === rate) {
+                continue;
             }
             const unitStart = performance.now();
             // Claim the unit at once, so the engine doesn't deal it to another run while it's pronounced
             self.postMessage({'type': 'unitStart', id, 'unit': unit.index});
             let blocks = 0;
+            let waited = 0;
             const post = (samples, sampleRate) => {
+                // The slowdown - wait until the unit has taken slowdown times its synthesis time so far
+                const work = performance.now() - unitStart - waited;
+                while (performance.now() < unitStart + factor * work) {
+                    // Busy - as a slow device would be
+                }
+                waited = performance.now() - unitStart - work;
                 if (blocks === 0) {
                     trace(`unit ${unit.index} first block after ${Math.round(performance.now() - unitStart)} ms`);
                 } else if (blocks === 1) {
@@ -181,6 +197,7 @@ if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globa
             streamNeuralUnit(model, unit.text, unitOptions, post);
             trace(`unit ${unit.index} done in ${Math.round(performance.now() - unitStart)} ms (${blocks} blocks)`);
             self.postMessage({'type': 'unitDone', id, 'unit': unit.index});
+            finished = {run, 'unit': unit.index, voice, rate};
             // Yield, so a newer run or a cancel can arrive
             await new Promise((resolve) => {
                 setTimeout(resolve, 0);
@@ -193,6 +210,7 @@ if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globa
 
     self.onmessage = (event) => {
         if (event.data.type === 'models') {
+            slowdown = event.data.slowdown ?? 1;
             receiveModels(event.data);
         } else if (event.data.type === 'units') {
             runUnits(event.data).catch((error) => {

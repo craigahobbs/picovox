@@ -75,7 +75,9 @@ let current = null;
 const browseState = {'query': '', 'page': 1, 'books': [], 'hasMore': false, 'total': 0, 'error': null};
 let openSheetName = null;
 let lastSave = 0;
-const engine = new Engine({'onChange': onEngineChange});
+// (?slowdown=N stretches synthesis N times - to reproduce a device slower than real time)
+const slowdown = Number(new URLSearchParams(window.location.search).get('slowdown')) || 1;
+const engine = new Engine({'onChange': onEngineChange, slowdown});
 
 
 // The startup timeline overlay (?timing in the URL) - the engine's events since the last play, for diagnosing slow

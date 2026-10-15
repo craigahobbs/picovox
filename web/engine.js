@@ -9,6 +9,10 @@ import {encodeWav} from '../lib/wav.js';
 // Timing (s) - the playback lead, and how far ahead to schedule blocks
 const leadSeconds = 0.06;
 const scheduleAheadSeconds = 6;
+// A streaming unit starts when what's synthesized covers playing it through at the measured synthesis speed, with this
+// margin (s); a late block delays the rest of its unit (a stall) - audio is never dropped
+const playThroughMarginSeconds = 0.5;
+const stallLeadSeconds = 0.03;
 
 
 // The synthesis window - synthesize at most this many units (and characters) ahead of the position, keep this many units
@@ -138,8 +142,9 @@ function importModels(retry = true) {
 export class Engine {
     constructor({onChange = () => {
         // No listener
-    }} = {}) {
+    }, slowdown = 1} = {}) {
         this.onChange = onChange;
+        this.slowdown = slowdown;
         this.audioContext = null;
         this.output = null;
         this.mediaElement = null;
@@ -165,6 +170,8 @@ export class Engine {
         this.lastMaintenance = 0;
         this.measuredChars = 0;
         this.measuredSeconds = 0;
+        this.synthesizedSeconds = 0;
+        this.synthesisSeconds = 0;
         // (one on iPhones and iPads - Safari gives a page about one core's worth there, so more workers only compete)
         this.models = importModels();
         const poolSize = isAppleMobile() ? 1 : Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 2) - 1));
@@ -182,7 +189,7 @@ export class Engine {
         this.workers[slot] = {worker, 'ready': false, starts};
         worker.onmessage = (event) => this.onWorkerMessage(event.data, slot);
         this.models.then((message) => {
-            worker.postMessage(message);
+            worker.postMessage({...message, 'slowdown': this.slowdown});
         }, (error) => {
             this.mark(`model import error: ${error.message}`);
             this.error = `The speech synthesizer failed to load its models: ${error.message}`;
@@ -222,7 +229,7 @@ export class Engine {
             session.runs = [];
             for (const cell of session.cache) {
                 if (!cell.done) {
-                    Object.assign(cell, {'blocks': [], 'length': 0, 'run': null});
+                    Object.assign(cell, {'blocks': [], 'length': 0, 'run': null, 'startedAt': null});
                 }
             }
             this.postAll({'type': 'prepare', 'voice': session.voice});
@@ -246,7 +253,7 @@ export class Engine {
         const units = splitUnits(text);
         this.session = {
             text, units, voice, rate, 'runs': [], 'runIds': new Set(),
-            'cache': units.map(() => ({'blocks': [], 'length': 0, 'done': false, 'run': null}))
+            'cache': units.map(() => ({'blocks': [], 'length': 0, 'done': false, 'run': null, 'startedAt': null}))
         };
         this.unit = units.length === 0 ? 0 : this.unitAtChar(startChar);
         this.time = 0;
@@ -274,7 +281,7 @@ export class Engine {
     // Note a startup event on the timeline
     mark(event) {
         this.timeline.push({'ms': Math.round(performance.now() - this.playStart), event});
-        if (this.timeline.length > 60) {
+        if (this.timeline.length > 300) {
             this.timeline.shift();
         }
     }
@@ -475,6 +482,7 @@ export class Engine {
         }
         cell.run = message.id;
         if (message.type === 'unitStart') {
+            cell.startedAt = performance.now();
             return;
         }
         if (message.type === 'unitBlock') {
@@ -491,18 +499,45 @@ export class Engine {
             cell.done = true;
             this.measuredChars += session.units[message.unit].text.length;
             this.measuredSeconds += cell.length;
+            if (cell.startedAt !== null) {
+                this.synthesizedSeconds += cell.length;
+                this.synthesisSeconds += (performance.now() - cell.startedAt) / 1000;
+            }
         }
         this.pump();
     }
 
-    // Unit queries - is a unit ready to start (it has audio), complete, and its length (s)
-    unitReady(unit) {
-        const cell = this.session.cache[unit];
-        return cell.blocks.length !== 0 || cell.done;
-    }
-
+    // Unit queries - is a unit complete, and its length (s)
     unitComplete(unit) {
         return this.session.cache[unit].done;
+    }
+
+    // Can a unit start playing (from a time) - complete, or with enough synthesized to play through without stalling at
+    // the synthesis speed: of a unit of length L, synthesized at s seconds of audio per second, the first L (1 - s)
+    unitCanStart(unit, from = 0) {
+        const cell = this.session.cache[unit];
+        if (cell.done) {
+            return true;
+        }
+        if (cell.blocks.length === 0) {
+            return false;
+        }
+        const speed = this.synthesisSpeed(cell);
+        if (speed >= 1) {
+            return true;
+        }
+        const length = Math.max(cell.length, this.session.units[unit].text.length / this.charsPerSecond());
+        return cell.length - from >= (length - from) * (1 - speed) + playThroughMarginSeconds;
+    }
+
+    // The synthesis speed (seconds of audio per second) - the unit's own so far (after half a second), else the measured
+    // speed of the completed units, else 0 (unknown - wait for the unit, or a measurement)
+    synthesisSpeed(cell) {
+        const elapsed = cell.startedAt === null ? 0 : (performance.now() - cell.startedAt) / 1000;
+        if (elapsed >= 0.5) {
+            return cell.length / elapsed;
+        }
+        return this.synthesisSeconds > 0 ? this.synthesizedSeconds / this.synthesisSeconds : 0;
     }
 
     unitLength(unit) {
@@ -596,6 +631,7 @@ export class Engine {
         }
         session.runs = [];
         const unstarted = remaining.filter((unit) => session.cache[unit].run === null);
+        this.mark(`synthesis from unit ${from}: units ${unstarted[0]}-${unstarted[unstarted.length - 1]} dealt`);
         this.workers.forEach(({worker}, slot) => {
             const order = unstarted.filter((unit, index) => index % this.workers.length === slot);
             if (order.length !== 0) {
@@ -636,7 +672,7 @@ export class Engine {
             const inWindow = unit >= center - keepBehindUnits && unit < center + windowUnits &&
                 (unit <= center + 1 || session.units[unit].start <= charLimit);
             if (!inWindow && !playing.has(unit)) {
-                session.cache[unit] = {'blocks': [], 'length': 0, 'done': false, 'run': null};
+                session.cache[unit] = {'blocks': [], 'length': 0, 'done': false, 'run': null, 'startedAt': null};
             }
         }
     }
@@ -724,9 +760,9 @@ export class Engine {
             const entry = this.chain[ix];
             if (entry.startTime === null) {
                 const previous = this.chain[ix - 1];
-                if (ix === 0 && this.unitReady(entry.unit)) {
+                if (ix === 0 && this.unitCanStart(entry.unit, entry.from)) {
                     entry.startTime = now + leadSeconds - entry.from;
-                } else if (ix !== 0 && previous.startTime !== null && this.unitComplete(previous.unit) && this.unitReady(entry.unit)) {
+                } else if (ix !== 0 && previous.startTime !== null && this.unitComplete(previous.unit) && this.unitCanStart(entry.unit)) {
                     entry.startTime = Math.max(previous.startTime + this.unitLength(previous.unit), now + 0.03);
                 } else {
                     break;
@@ -735,7 +771,15 @@ export class Engine {
             const cell = this.session.cache[entry.unit];
             const horizon = now + scheduleAheadSeconds;
             while (entry.cursor < cell.blocks.length && entry.startTime + cell.blocks[entry.cursor].start < horizon) {
-                this.scheduleBlock(entry, cell.blocks[entry.cursor]);
+                // A block that arrived too late to play on time delays the rest of its unit (a stall) - a block before
+                // a seek's start is skipped
+                const block = cell.blocks[entry.cursor];
+                const late = now + stallLeadSeconds - (entry.startTime + block.start);
+                if (late > 0 && block.start >= entry.from) {
+                    entry.startTime += late;
+                    this.mark(`unit ${entry.unit} stalled ${Math.round(1000 * late)} ms (block ${entry.cursor})`);
+                }
+                this.scheduleBlock(entry, block);
                 entry.cursor++;
             }
             if (ix === this.chain.length - 1 && this.unitComplete(entry.unit) && entry.unit + 1 < this.session.units.length) {
