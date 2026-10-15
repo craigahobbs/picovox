@@ -992,6 +992,27 @@ function renderSamples(allFiles) {
 }
 
 
+// Reload the page when the dashboard's own files change (checked every 5 seconds), so it never runs stale code
+const codeFiles = ['index.html', 'dashboard.js'].map((name) => new URL(`tools/dashboard/${name}`, rootUrl));
+let codeVersions = null;
+async function checkCode() {
+    try {
+        const versions = await Promise.all(codeFiles.map(async (url) => (
+            (await fetch(url, {'method': 'HEAD', 'cache': 'no-store'})).headers.get('Last-Modified')
+        )));
+        if (codeVersions === null) {
+            codeVersions = versions;
+        } else if (versions.some((version, index) => version !== codeVersions[index])) {
+            window.location.reload();
+        }
+    } catch {
+        // Unreachable server - check again later
+    }
+}
+checkCode();
+setInterval(checkCode, 5000);
+
+
 // Refresh - then again a second later, so refreshes never overlap
 async function refresh() {
     try {

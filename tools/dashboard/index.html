@@ -484,6 +484,9 @@
         <div id="samples" class="samples"><p class="empty">No samples yet.</p></div>
     </section>
 </main>
-<script type="module" src="dashboard.js"></script>
+<script type="module">
+    // Load the dashboard's script fresh (python3 -m http.server sends no cache headers, so a browser may reuse a stale copy)
+    import(`./dashboard.js?v=${Date.now()}`);
+</script>
 </body>
 </html>
