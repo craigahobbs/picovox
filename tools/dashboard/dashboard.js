@@ -267,7 +267,7 @@ async function refreshRuns() {
 const runGroupSpecs = [
     {'title': 'Multi-speaker voice', 'prefixes': ['multi-'], 'open': true},
     {'title': 'G2P', 'prefixes': ['g2p-'], 'open': false},
-    {'title': 'Voice students and experiments (distilled, from scratch, MLX)', 'prefixes': ['distill-', 'scratch-', 'mlx-'], 'open': true},
+    {'title': 'Voice students (distilled and from scratch)', 'prefixes': ['distill-', 'scratch-'], 'open': true},
     {'title': 'Earlier single-speaker voices', 'prefixes': ['slt-', 'bdl-', 'joint-'], 'open': false},
     {'title': 'Other', 'prefixes': [''], 'open': false}
 ];
@@ -449,7 +449,7 @@ function parentRun(run) {
 
 
 // A run's reference run, drawn faded on its charts for comparison - pipeline.json's compare, {run name prefix: the
-// reference run's name} (for example, an MLX run against the PyTorch run it reproduces), or null
+// reference run's name} (for example, a quality run against its same-seed control), or null
 function referenceRun(run) {
     const entry = Object.entries(pipeline?.compare || {}).find(([prefix]) => run.name.startsWith(prefix));
     return entry && entry[1] !== run.name ? runs.get(entry[1]) ?? null : null;
