@@ -298,7 +298,9 @@ recognition rates will be added here.
 The audiobook player (`web/`) reads public-domain books from Standard Ebooks (EPUB, fetched in byte ranges) and
 Project Gutenberg (plain text), with a 2,097-book catalog published as static JSON. Synthesis runs in a Web Worker,
 a sentence at a time, streaming blocks of samples to the page so playback starts within about half a second
-(567 ms from Play to playback in a headless-browser test at phone size; the 812 KB model loads when a book opens). Positions are
+(567-696 ms from Play to playback in headless-browser tests at phone size; the model loads when a book opens).
+The player now speaks with the multi-speaker model's ARCTIC bdl and slt speakers (stage B, step 5,000), shipped as a
+1.45 MB generated JavaScript module (1.06 MB as served gzipped). Positions are
 kept as character offsets into the book's text, so the player can skip by time, jump to chapters, bookmark, and
 resume after a reload without having synthesized the audio in between.
 
