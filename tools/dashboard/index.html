@@ -425,6 +425,36 @@
         height: 190px;
         display: block;
     }
+    .help-button {
+        width: 1.25rem;
+        height: 1.25rem;
+        padding: 0;
+        border: 1px solid var(--rule);
+        border-radius: 50%;
+        background: var(--panel);
+        color: var(--muted);
+        font-size: 0.72rem;
+        font-weight: 600;
+        line-height: 1;
+        cursor: pointer;
+        vertical-align: middle;
+    }
+    .help-button:hover,
+    .help-button[aria-expanded="true"] {
+        color: var(--accent);
+        border-color: var(--accent);
+    }
+    .help-text {
+        display: block;
+        margin-top: 4px;
+        font-size: 0.8rem;
+        font-weight: 400;
+        line-height: 1.4;
+        color: var(--muted);
+    }
+    .help-text[hidden] {
+        display: none;
+    }
     .legend {
         display: flex;
         flex-wrap: wrap;
@@ -592,7 +622,7 @@
     </div>
     <div class="tab-panel" id="panel-training" role="tabpanel" aria-labelledby="tab-training" hidden>
         <section>
-            <h2>Runs</h2>
+            <h2 id="runsTitle">Runs</h2>
             <div id="runs"><p class="empty">Looking for runs in build/nn/runs/...</p></div>
         </section>
         <section>

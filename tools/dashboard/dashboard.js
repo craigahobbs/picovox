@@ -448,6 +448,124 @@ function parentRun(run) {
 }
 
 
+// What the training measurements mean - each chart's (?) explanation. Losses are lower-is-better. "val" is measured on
+// held-out recordings every 1,000 steps; "train (smoothed)" is the training batches' running value. A "cremad." prefix
+// is the same measurement on the emotional speech (the CREMA-D actors).
+const chartHelp = {
+    'total': 'The weighted sum of every training loss below - what the optimizer minimizes. It mixes units, so compare it ' +
+        'only within one run; the spectral loss is the cleaner yardstick.',
+    'spectral': 'How far the synthesized voice\'s spectrum is from the real recording\'s - multi-resolution STFT and log-mel ' +
+        'differences. The main training loss and the best progress gauge, but blind to some of what sounds synthetic: the ' +
+        'critic stage raises naturalness (UTMOS) far more than it lowers this.',
+    'durations': 'How well the model predicts timing - phone lengths (durPhone), whether a pause happens at a word or phrase ' +
+        'boundary (durPause), and how long the pauses are (durPaused). Errors are in log-duration units.',
+    'f0Cents': 'Pitch error on held-out recordings - the average difference between the voice\'s pitch (F0) and the ' +
+        'recording\'s, in cents (100 cents = one semitone).',
+    'secondsPerStep': 'Wall-clock seconds per training step (one batch). Spikes are stalls - the GPU shared with other jobs, ' +
+        'or new batch shapes compiling.',
+    'lr': 'The learning rate - how big each update is. It warms up, then decays on a cosine schedule.',
+    'durPhone': 'Phone-duration error (log units) - how far the predicted length of each speech sound is from the ' +
+        'recording\'s.',
+    'durPause': 'Pause-placement error - whether the model puts a pause at each word or phrase boundary where the reader ' +
+        'did (a classification loss).',
+    'durPaused': 'Pause-length error (log units), at the boundaries where the reader paused.',
+    'f0': 'Pitch (F0) error in log units on voiced frames - the training loss behind the cents chart.',
+    'formant': 'The formant guide - how far the first three formants (F1-F3, the vocal-tract resonances that make vowels) ' +
+        'are from Praat\'s measurements of the recording. Weighted heavily early, then faded (guide), so the spectral loss ' +
+        'takes over.',
+    'guide': 'The formant guide\'s weight - starts high to steer the vocal tract into place, then fades toward its floor.',
+    'order': 'A penalty when formants come out of order or closer than 150 Hz apart (F1 below F2 below F3...), which a real ' +
+        'vocal tract can\'t do.',
+    'smooth': 'A penalty on frame-to-frame jumps in the synthesizer parameters - keeps the voice from buzzing or warbling.',
+    'band': 'A penalty when the frication resonances (the hiss of s, sh, f) move above the recording\'s bandwidth limit.',
+    'sonorantAf': 'A penalty on hiss (frication) inside vowels and other sonorants, where there shouldn\'t be any - in dB/10 ' +
+        'above the allowed level.',
+    'eqSmooth': 'A penalty on jagged channel equalizers - each speaker\'s smooth recording-channel coloring.',
+    'score': 'The validation score used to pick the best checkpoint: spectral + phone durations + pitch.',
+    'b1': 'The median first-formant bandwidth (Hz) on the voice\'s strong frames - narrow (about 80-150 Hz) sounds clear; ' +
+        'wide sounds muffled. The critic exists largely to keep these narrow.',
+    'b2': 'The median second-formant bandwidth (Hz) on strong frames - lower is sharper.',
+    'b3': 'The median third-formant bandwidth (Hz) on strong frames - lower is sharper.',
+    'ahRel': 'Aspiration (breathy noise) level relative to voicing, in dB, on strong frames - too high sounds breathy.',
+    'afRel': 'Frication (hiss) level relative to voicing, in dB, on strong frames - too high sounds hissy.',
+    'critic': 'The critic\'s own loss (stage B) - how well it tells real recordings from synthesized ones. If it falls toward ' +
+        'zero, it is winning too easily.',
+    'adversarial': 'The voice\'s adversarial loss (stage B) - how well it fools the critic. Pushes toward sharper, more ' +
+        'natural-sounding detail than the spectral loss can.',
+    'matching': 'Feature matching (stage B) - the voice matching the critic\'s internal features of real recordings; ' +
+        'steadies the adversarial training.',
+    'corrL2': 'The spectral correction head\'s size penalty (an optional architecture feature).',
+    'corrSmooth': 'The spectral correction head\'s smoothness penalty, over time and frequency.',
+    'frames': 'Distillation: how far the student\'s synthesizer parameters are from the teacher\'s, per frame.',
+    'features': 'Distillation: how far the student\'s internal features are from the teacher\'s (feature matching).',
+    'durationErrorFrames': 'Distillation: how far the student\'s phone durations are from the teacher\'s, in 10 ms frames.',
+    'book': 'G2P: the share of word tokens in the evaluation books whose predicted pronunciation is wrong (weighted by how ' +
+        'often each word occurs - what a listener hears).',
+    'bookAny': 'G2P: book-token error, counting any of the dictionary\'s pronunciations as right.',
+    'bookSeen': 'G2P: book-token error on words the model trained on.',
+    'bookSeenAny': 'G2P: book-token error on trained words, any listed pronunciation counting as right.',
+    'bookStripped': 'G2P: book-token error after stripping suffixes.',
+    'bookWrongDistinct': 'G2P: the number of distinct book words pronounced wrong (each word counted once).',
+    'top10kWrong': 'G2P: how many of the 10,000 most frequent book words are pronounced wrong.',
+    'top10kWrongSeen': 'G2P: how many of the 10,000 most frequent words, among those trained on, are wrong.',
+    'wer': 'G2P: word error rate - the share of words with any phone wrong.',
+    'per': 'G2P: phone error rate - the share of phones wrong.',
+    'testWer': 'G2P: word error rate on held-out dictionary words the model never saw (generalization to new spellings).',
+    'testWerFirst': 'G2P: held-out word error rate against only each word\'s first listed pronunciation.',
+    'testPer': 'G2P: phone error rate on held-out words.',
+    'trainWer': 'G2P: word error rate on the training words.',
+    'monitorWer': 'G2P: word error rate on a fixed monitoring sample, tracked during training.'
+};
+
+
+// The explanation of a measurement - its own, or an emotional-speech variant of one
+function measureHelp(key) {
+    if (key in chartHelp) {
+        return chartHelp[key];
+    }
+    const base = key.startsWith('cremad.') ? key.slice('cremad.'.length) : null;
+    return base !== null && base in chartHelp ? `On the emotional speech (CREMA-D): ${chartHelp[base]}` : null;
+}
+
+
+// A (?) button that shows an explanation - on hover (its title) and, tapped or clicked, beside it (remembered by key
+// across refreshes)
+const openHelp = new Set();
+function helpTip(key, text) {
+    const wrap = make('span', 'help');
+    const button = make('button', 'help-button', '?');
+    button.type = 'button';
+    button.title = text;
+    button.setAttribute('aria-label', 'What is this?');
+    const note = make('span', 'help-text', text);
+    const show = (open) => {
+        note.hidden = !open;
+        button.setAttribute('aria-expanded', String(open));
+    };
+    show(openHelp.has(key));
+    button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (openHelp.has(key)) {
+            openHelp.delete(key);
+        } else {
+            openHelp.add(key);
+        }
+        show(openHelp.has(key));
+    });
+    wrap.append(button, note);
+    return wrap;
+}
+
+
+// The Runs heading's explanation - the run cards' facts
+document.getElementById('runsTitle').append(' ', helpTip('runs', 'Each card is a training run: its status (live - updating; ' +
+    'stalled - quiet for minutes; stopped - quiet for long; finished - reached its target), steps done of its target, ' +
+    'seconds per step and the time left at that pace, the latest training total loss and validation loss (lower is ' +
+    'better - the spectral loss for training on recordings; for distillation runs (distill-sNN), the loss against the ' +
+    'teacher, on its own small scale), and when its log last changed. Select a card for its curves; each chart\'s (?) ' +
+    'explains its measurement.'));
+
+
 // An exponential moving average of a series' values
 function smoothSeries(points, factor) {
     let value = null;
@@ -571,28 +689,28 @@ function renderCharts(force = false) {
     const faded = (color) => `${color.trim()}55`;
     // Each series: [label, kind (train or val), key, smoothed, color]
     const charts = [
-        {'title': 'Loss (total)', 'logScale': true, 'series': [
+        {'title': 'Loss (total)', 'help': 'total', 'logScale': true, 'series': [
             ['train (smoothed)', 'train', 'total', true, colors[0]], ['val', 'val', 'total', false, colors[1]]
         ]},
-        {'title': 'Spectral loss', 'series': [
+        {'title': 'Spectral loss', 'help': 'spectral', 'series': [
             ['train (smoothed)', 'train', 'spectral', true, colors[0]], ['val', 'val', 'spectral', false, colors[1]]
         ]},
-        {'title': 'Durations', 'logScale': true, 'series': [
+        {'title': 'Durations', 'help': 'durations', 'logScale': true, 'series': [
             ['phones (train)', 'train', 'durPhone', true, colors[0]], ['phones (val)', 'val', 'durPhone', false, colors[1]],
             ['pauses (val)', 'val', 'durPaused', false, colors[2]]
         ]},
-        {'title': 'Pitch error (val, cents)', 'series': [['F0 error', 'val', 'f0Cents', false, colors[3]]]},
-        {'title': 'Seconds per step (stalls show as spikes)', 'logScale': true, 'series': [
+        {'title': 'Pitch error (val, cents)', 'help': 'f0Cents', 'series': [['F0 error', 'val', 'f0Cents', false, colors[3]]]},
+        {'title': 'Seconds per step (stalls show as spikes)', 'help': 'secondsPerStep', 'logScale': true, 'series': [
             ['s/step', 'train', 'secondsPerStep', false, colors[2]]
         ]},
-        {'title': 'Learning rate', 'series': [['lr', 'train', 'lr', false, colors[0]]]}
+        {'title': 'Learning rate', 'help': 'lr', 'series': [['lr', 'train', 'lr', false, colors[0]]]}
     ];
 
     // Any other numeric training or validation keys become extra charts (e.g. adversarial losses)
     const known = new Set(['step', 'lr', 'secondsPerStep', 'total', 'spectral', 'durPhone', 'durPause', 'durPaused', 'f0Cents', 'guide']);
     const extraKeys = [...new Set([...train, ...val].flatMap((entry) => Object.keys(entry)))].filter((key) => !known.has(key));
     for (const key of extraKeys) {
-        charts.push({'title': key, 'logScale': false, 'series': [
+        charts.push({'title': key, 'help': key, 'logScale': false, 'series': [
             ['train (smoothed)', 'train', key, true, colors[0]], ['val', 'val', key, false, colors[1]]
         ]});
     }
@@ -620,7 +738,12 @@ function renderCharts(force = false) {
             swatch.style.setProperty('--swatch', item.color);
             legend.append(swatch);
         }
-        wrap.append(make('h3', '', chart.title), canvas, legend);
+        const title = make('h3', '', chart.title);
+        const help = measureHelp(chart.help);
+        if (help !== null) {
+            title.append(' ', helpTip(`chart:${chart.help}`, help));
+        }
+        wrap.append(title, canvas, legend);
         requestAnimationFrame(() => drawChart(canvas, chart.series, {'logScale': chart.logScale}));
         return wrap;
     }));
