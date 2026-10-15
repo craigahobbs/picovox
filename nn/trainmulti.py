@@ -540,7 +540,7 @@ def main(argv=None):
     parser.add_argument('--adversarial-start', type=int, default=500, help='steps of the critic alone first')
     parser.add_argument('--critic-lr', type=float, default=2e-4)
     parser.add_argument('--critic-every', type=int, default=1, help='update the critic every this many reader steps')
-    parser.add_argument('--critic-precision', choices=['float32', 'bfloat16', 'float16'], default='float32',
+    parser.add_argument('--critic-precision', choices=['float32', 'bfloat16', 'float16'], default='bfloat16',
                         help="the critic's convolutions' precision")
     parser.add_argument('--critic-channels', type=int, default=32)
     parser.add_argument('--critic-scales', default='1024,512,256', help="the critic's FFT sizes")
