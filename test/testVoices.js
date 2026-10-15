@@ -106,7 +106,7 @@ test('voices.resolveVoice', () => {
     assert.throws(() => resolveVoice(second), /Voice base cycle at "second"/);
 
     // The specs are unchanged
-    assert.equal(voices.male.f0, 108);
+    assert.equal(voices.male.f0, 101);
     assert.equal(alto.base, 'female');
 });
 

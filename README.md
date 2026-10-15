@@ -257,7 +257,7 @@ const {samples, sampleRate} = speak('Call me Ishmael.', baritone);
 
 | Group | Parameters |
 | --- | --- |
-| pitch | The F0 baseline (`f0`, `pitchScale`) and range (`accent`), and the intonation style - question and exclamation, final fall, declination, downstep, continuation, and the slow, aperiodic pitch drift |
+| pitch | The F0 baseline (`f0`, `pitchScale`) and range (`accent`), and the intonation style - accent placement (deaccented given words, accent spacing), phrase onset, question and exclamation, final fall, declination and its reset at commas, downstep, continuation, and the slow, aperiodic pitch drift |
 | source | Voice quality - the LF pulse shape (`rd`), breathiness (`breathDb`, and `noiseShelfDb`, the breath noise's high-frequency turbulence), jitter, shimmer, F0 flutter, creak, spectral tilt (`shelfDb`), the louder accents (`f0Loudness`), and `voicing` (0 whispers) |
 | tract | The vocal tract - its length (`tractScale` scales every resonance), the vowel space (`vowelBlend` - 0 the men's average formants, 1 the women's), the consonant loci and noise scales, the fixed higher formants, and the nasal and lateral resonances |
 | articulation | Precision - vowel `reduction` and `transitionScale` (coarticulation) - and the burst, aspiration, frication, and liquid levels |

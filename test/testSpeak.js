@@ -750,6 +750,36 @@ test('speak, accents', () => {
     const noClashEnd = speak(clashEndText, 'male', {'overrides': {'clashAccent': 1}});
     assert(wordPeak(clashEnd, 'green', 'IY') < wordPeak(noClashEnd, 'green', 'IY'));
 
+    // Dense accent runs - an interior accent close after a full accent is weakened
+    const denseText = 'Tall men eat red apples daily.';
+    const dense = speak(denseText);
+    const sparse = speak(denseText, 'male', {'overrides': {'accentSpacing': 1}});
+    assert(wordPeak(dense, 'eat', 'IY') < wordPeak(sparse, 'eat', 'IY'));
+
+    // A given (repeated) word is deaccented
+    const givenText = 'The red bird sang, and the red bird flew.';
+    const given = speak(givenText);
+    const notGiven = speak(givenText, 'male', {'overrides': {'givenWords': 0}});
+    const secondRed = (result) => Math.max(...segmentFrames(result, wordSegment(result, 'red', 'EH', 1)).map((frame) => frame.f0));
+    assert(secondRed(given) < secondRed(notGiven) * 0.97);
+    assert(Math.abs(wordPeak(given, 'red', 'EH') - wordPeak(notGiven, 'red', 'EH')) < 1);
+
+    // A given word after the phrase's last new word is unaccented - the nucleus moves to the new word
+    const postText = 'I saw the cat, and then I fed the cat.';
+    const post = speak(postText);
+    const notPost = speak(postText, 'male', {'overrides': {'givenWords': 0}});
+    const secondCat = (result) => Math.max(...segmentFrames(result, wordSegment(result, 'cat', 'AE', 1)).map((frame) => frame.f0));
+    assert(secondCat(post) < secondCat(notPost) * 0.95);
+
+    // A phrase of given words only keeps its accents
+    const allGiven = speak('The cat. The cat.');
+    const allGivenCat = Math.max(...segmentFrames(allGiven, wordSegment(allGiven, 'cat', 'AE', 1)).map((frame) => frame.f0));
+    assert(allGivenCat > f0At(allGiven, wordSegment(allGiven, 'cat', 'K', 1).start));
+
+    // A reporting verb is unaccented
+    const reported = speak('Come home, said Jonathan.');
+    assert(wordPeak(reported, 'said', 'EH') < wordPeak(reported, 'jonathan', 'AA'));
+
     // A phrase of function words only - the first vowel is accented
     const functionOnly = speak('It is.');
     assert(Math.max(...functionOnly.frames.map((frame) => frame.f0)) > maleVoice.f0);
@@ -816,7 +846,7 @@ test('speak, streaming', () => {
         offset += block.length;
     }
     assert.equal(streamed.length, result.samples.length);
-    const streamGain = 0.89 / (3.2 * result.vowelLevel);
+    const streamGain = 0.89 / (4 * result.vowelLevel);
     const scale = result.rawPeak / 0.89 * streamGain;
     for (let ix = 0; ix < streamed.length; ix++) {
         const expected = result.samples[ix] * scale;
@@ -926,6 +956,22 @@ test('speak, intonation parameters', () => {
     const statement = speak('We were away a year ago.');
     const exclamation = speak('We were away a year ago!', 'male', {'overrides': {'exclamationAccent': 1}});
     assert.deepEqual(exclamation.frames.map((frame) => frame.f0), statement.frames.map((frame) => frame.f0));
+
+    // A lower phrase onset
+    const onsetStart = (result) => f0At(result, vowelSegments(result)[0].start + 5);
+    const lowerOnset = speak('We were away a year ago.', 'male', {'overrides': {'phraseOnset': 1}});
+    assert(onsetStart(lowerOnset) < onsetStart(statement) * 0.95);
+
+    // A contour that comes to rest at each target is different
+    const resting = speak('We were away a year ago.', 'male', {'overrides': {'contourFlow': 0}});
+    assert.notDeepEqual(resting.frames.map((frame) => frame.f0), statement.frames.map((frame) => frame.f0));
+
+    // The declination continues across a comma without a reset
+    const commaText = 'When we were away, we ran far.';
+    const commaReset = speak(commaText, 'male', {'overrides': {'commaReset': 1}});
+    const commaCarry = speak(commaText, 'male', {'overrides': {'commaReset': 0}});
+    const secondPhraseStart = (result) => f0At(result, wordSegment(result, 'we', 'W', 1).start);
+    assert(secondPhraseStart(commaCarry) < secondPhraseStart(commaReset) * 0.98);
 
     // Without pitch drift, and without flutter - the F0 wander is aperiodic low-passed noise
     const statementF0 = statement.frames.map((frame) => frame.f0);
