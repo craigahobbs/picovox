@@ -84,6 +84,18 @@
             ]
         },
         {
+            "title": "Data efficiency",
+            "detail": "is the data right, clean, and enough - an audit of every training utterance, then scaling curves and automatic stopping in the size search",
+            "weight": 8,
+            "processes": ["audit"],
+            "steps": [
+                {"title": "Per-utterance loss audit (multi-a step 15,000)", "log": "build/nn/audit/audit.log", "weight": 3},
+                {"title": "Listening and Whisper checks of the worst utterances", "log": "build/nn/audit/review.log", "weight": 1},
+                {"title": "Data-scaling curves (with the size search)", "file": "build/nn/sizesearch/scaling.json", "weight": 3},
+                {"title": "Automatic stopping rule (with the size search)", "file": "build/nn/sizesearch/stopping.json", "weight": 1}
+            ]
+        },
+        {
             "title": "Design",
             "detail": "5 male and 5 female voices, styles, and samples",
             "weight": 20,

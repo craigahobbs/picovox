@@ -350,6 +350,16 @@ model next:
 3. Shrink the chosen point further by distillation from the largest model, by lower-precision quantization (8, 6, 5,
    and 4 bits with per-row or per-group scales), and by pruning - each kept only within the tolerance.
 4. Measure size as the bytes of the final generated JavaScript module.
+5. Size the data with the model: train each candidate size on fractions of the data (an eighth to all of it), and
+   separately on more speakers versus more hours per speaker, to see where quality stops improving with data.
+6. Clean the data first: score every training utterance with a trained checkpoint, review the worst (misalignments,
+   wrong transcripts, noise), and keep an exclusion only if training without it measurably helps.
+7. Stop each run when validation and the sample voices' UTMOS stop improving, rather than at a fixed step count.
+
+Stage A of the multi-speaker model shows why the last two matter: its validation loss flattened near step 8,000 while
+its training loss kept falling (3.00 to 2.84 by step 15,000, validation 3.17 to 3.15) - the model began memorizing
+its 34,010 utterances, so steps 8,000-15,000 bought little, and more varied or cleaner data, not more capacity, is
+what it lacks.
 
 The current acoustic model's size (966K parameters) was chosen by judgment, not by such a search.
 
