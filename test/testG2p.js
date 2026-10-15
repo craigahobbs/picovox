@@ -29,9 +29,9 @@ function otherLayout(model, bytes) {
     let offset = scaleBytes;
     for (const [index, {bits}] of model.tensors.entries()) {
         const count = shapes[index][0] * shapes[index][1];
-        const values = [];
+        let values = [];
         if (model.layout === 'bytes') {
-            values.push(...bytes.subarray(offset, offset + count));
+            values = Array.from(bytes.subarray(offset, offset + count));
             offset += count;
             const packed = new Uint8Array(Math.ceil(count * bits / 8));
             for (const [valueIndex, value] of values.entries()) {
@@ -122,17 +122,17 @@ test('g2p.loadG2p', async () => {
 });
 
 
-// The shipped model's format - per-row scales, a byte per value, deflated
+// The shipped model's format - per-row scales, values bit-packed, deflated
 test('g2p.g2pModel format', () => {
-    assert.equal(g2pModel.design, 'ctc');
+    assert.equal(g2pModel.design, 'ar');
     assert.equal(g2pModel.groupSize, 0);
-    assert.equal(g2pModel.layout, 'bytes');
+    assert.equal(g2pModel.layout, 'packed');
     assert.equal(g2pModel.deflate, true);
 });
 
 
 test('g2p.loadG2p, unsupported design', async () => {
-    await assert.rejects(loadG2p({...g2pModel, 'design': 'ar'}), {'message': 'Unsupported G2P model design ar'});
+    await assert.rejects(loadG2p({...g2pModel, 'design': 'ctc'}), {'message': 'Unsupported G2P model design ctc'});
 });
 
 
@@ -148,7 +148,7 @@ test('g2p.loadG2p, both layouts', async () => {
     const raw = await streamBytes(base64Bytes(g2pModel.weights), new DecompressionStream('deflate-raw'));
     const other = {
         ...g2pModel,
-        'layout': 'packed',
+        'layout': 'bytes',
         'deflate': false,
         'weights': bytesBase64(otherLayout(g2pModel, raw))
     };
