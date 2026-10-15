@@ -237,6 +237,70 @@ Fred 0.57 (a shared formant-synthesis signature), every human pair 0.0-0.48, and
 (F0 alone does not change the perceived speaker).
 
 
+## Distilling the voice model
+
+Each retrain of the multi-speaker acoustic model ends the same way: train a big teacher, then distill small students
+from it and ship the smallest one that keeps the teacher's quality. `nn/distill.py` runs that pipeline, with its
+settings in `data/nn/distill.json` (the teacher, the distillation set, the training settings, the student ladder, the
+polish, the evaluation speakers, and the tolerance):
+
+```sh
+build/venv-nn/bin/python -B -m nn.distill ladder                  # everything below, in order
+build/venv-nn/bin/python -B -m nn.distill targets                 # 1. the teacher's targets (about 10 minutes on the GPU)
+build/venv-nn/bin/python -B -m nn.distill train --student s64     # 2. each student of the ladder
+build/venv-nn/bin/python -B -m nn.distill polish --student s64    # 3. optional: a short fine-tune on the recordings
+build/venv-nn/bin/python -B -m nn.distill eval teacher s96 s64 s48 s32   # 4. each model through the browser path
+build/venv-nn/bin/python -B -m nn.distill pick                    # 5. speed, samples, and the smallest within tolerance
+```
+
+1. **Targets** - sequence-level distillation in parameter space. The teacher speaks (tokens, speaker, style) to its
+   durations (pauses included) and its 32 synthesizer parameters every 5 ms, as inference does, with no audio
+   rendered. The inputs are the training utterances with their own speakers and styles, and every sentence of the
+   Project Gutenberg books in `build/nn/g2p/books/` (tokenized by `nn/frontend.py`, split into sentences as inference
+   splits text) spoken twice, each time by a random reader (8% an emotional-corpus actor, 10% a blend of two readers)
+   in a neutral or, 30% of the time, an emotional style at a random intensity. The set goes to
+   `build/nn/distill/targets/` (frames as float16).
+2. **Students** - the same `MultiModel` with smaller widths and depths. They share the teacher's conditioning: its
+   speaker, style, and channel-equalizer tables are copied and frozen, so a voice designed as a blend of the teacher's
+   speakers is the same voice in a student. A student runs with the teacher's durations (teacher forcing on its length
+   regulator) and learns L1 on the normalized parameter frames plus the duration losses against the teacher's
+   duration outputs. `--init-teacher` copies every teacher tensor of the same shape; `--feature-weight` adds
+   intermediate-feature matching. Runs go to `build/nn/runs/distill-<student>/`.
+3. **Polish** - `nn/trainmulti.py`'s real-audio losses (the spectral loss through the differentiable synthesizer on
+   the recordings, the adversarial critic - started from the teacher's - and feature matching) for a short fine-tune.
+4. **Evaluation** - each model is exported (`nn/export.py`), packaged (`nn/package.py`, the generated module's bytes
+   and gzip bytes), and spoken by `nn/js/speak.js` on `tools/panel-texts.json` for six speakers; the renderings are
+   scored with UTMOS, Whisper's WER, and the ECAPA speaker similarity to the teacher's rendering of the same speaker.
+   `pick` measures `nn/js/speak.js`'s real-time factor, renders listening samples to `build/nn/distill-samples/`, and
+   chooses the smallest student within the tolerance - mean UTMOS within 0.05 of the teacher's, WER at most 1 point
+   worse, and speaker similarity at least 0.85 - writing `build/nn/distill/summary.json`.
+
+Progress lines go to `build/nn/distill/` (`targets.log`, `students.log`, `eval.log`), which the training dashboard
+follows.
+
+The first distillation (October 2026), from stage B's best checkpoint (`multi-b` step 19,000): 294,678 sentence-speaker
+pairs - 40,624 training utterances and 254,054 book sentences - 397 hours of teacher speech, 18.5 GB, made in 9
+minutes on an M3 Max's GPU. Each student trained 20,000 steps (16-35 minutes); polish is 2,000 steps (28-46 minutes,
+the GPU shared). Six speakers by 16 panel texts; the real-time factor is `nn/js/speak.js`'s at 44.1 kHz (the best of
+three, about +/-15%):
+
+| Model | Parameters | Module (gzip) | UTMOS | WER | Similarity | Real time (network / total) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Teacher (dim 128, 3 + 6 layers) | 965,803 | 1,447 KB (1,062 KB) | 4.144 | 2.37% | 1 | 18x / 8.4x |
+| s96 (dim 96, 3 + 6) | 570,987 | 925 KB (666 KB) | 4.147 | 1.86% | 0.978 | 24x / 8.8x |
+| **s80 + polish (dim 80, 3 + 4) - chosen** | 349,547 | 614 KB (431 KB) | 4.130 | 1.71% | 0.969 | 50x / 12.1x |
+| s80 | 349,547 | 613 KB (431 KB) | 4.096 | 1.91% | 0.966 | 48x / 11.5x |
+| s64 + feature matching + polish | 238,251 | 459 KB (313 KB) | 4.076 | 1.76% | 0.959 | 73x / 13.6x |
+| s64 + polish | 238,251 | 459 KB (313 KB) | 4.070 | 1.86% | 0.956 | 67x / 12.9x |
+| s64 + feature matching | 238,251 | 457 KB (312 KB) | 4.065 | 1.61% | 0.952 | 60x / 11.5x |
+| s64 (dim 64, 3 + 4) | 238,251 | 457 KB (312 KB) | 4.045 | 2.17% | 0.949 | 73x / 13.0x |
+| s48 (dim 48, 2 + 4) | 127,035 | 302 KB (196 KB) | 3.935 | 2.32% | 0.924 | 147x / 17.6x |
+| s32 (dim 32, 2 + 3) | 64,683 | 209 KB (125 KB) | 3.593 | 2.72% | 0.831 | 220x / 16.8x |
+
+The polish adds 0.025-0.034 UTMOS, most of it to the two ARCTIC voices the app uses (bdl and slt), which pure
+distillation loses most; intermediate-feature matching (weight 0.05) adds about 0.02, and the two barely stack.
+
+
 ## The library
 
 | Module | |
