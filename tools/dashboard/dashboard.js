@@ -473,7 +473,8 @@ function progressTimeLeft(path, fraction) {
 }
 
 
-// The pipeline (pipeline.json) - its phases' steps, each tracked by a log, the newest training run, or an output file
+// The pipeline (pipeline.json) - its phases' steps, each tracked by a log, the newest training run, an output file (or
+// a file containing a text), and its process
 let pipeline = null;
 let pipelineLoaded = 0;
 async function loadPipeline() {
@@ -556,9 +557,10 @@ function logState(path, log) {
 function runState(run) {
     const train = run.entries.train || [];
     const last = train[train.length - 1];
-    const fraction = last && run.info.targetSteps ? Math.min(1, last.step / run.info.targetSteps) : 0;
+    const fraction = run.info.targetSteps ? Math.min(1, (last?.step ?? 0) / run.info.targetSteps) : null;
     const status = runStatus(run);
-    const line = `step ${last ? last.step.toLocaleString() : 0} of ${(run.info.targetSteps || 0).toLocaleString()}`;
+    const target = run.info.targetSteps ? ` of ${run.info.targetSteps.toLocaleString()}` : '';
+    const line = `step ${last ? last.step.toLocaleString() : 0}${target}`;
     if (status === 'failed') {
         return {status, fraction, line};
     }
@@ -571,70 +573,167 @@ function runState(run) {
 }
 
 
-// The pipeline's rows - the planned steps of each phase, then the unplanned work that appeared during it (logs and runs
-// since the pipeline started), each with its state. Rows are never removed.
-async function pipelineRows(logs) {
+// The monitor's activity (tools/dashboard/monitor.js writes build/nn/activity.json) - {updated, steps, agents} or null
+async function loadActivity() {
+    const result = await fetchText(new URL('activity.json', buildUrl));
+    try {
+        return result === null ? null : JSON.parse(result.text);
+    } catch {
+        return null;
+    }
+}
+
+
+// A process's state - running (with its workers, CPU, and time), or ended
+function processState(entry) {
+    const workers = entry.workers ? `${entry.workers} workers · ` : '';
+    if (entry.running) {
+        const line = `${workers}${entry.cpu}% CPU · running ${formatDuration((Date.now() - entry.started) / 1000)}`;
+        return {'status': 'running', 'fraction': null, line};
+    }
+    const ran = formatDuration((entry.lastSeen - entry.started) / 1000);
+    const line = `ran ${ran}, ended ${formatDuration((Date.now() - entry.lastSeen) / 1000)} ago`;
+    return {'status': 'done', 'fraction': 1, line};
+}
+
+
+// An agent's state - its latest action and when
+function agentState(agent) {
+    const ago = formatDuration((Date.now() - (agent.actionTime || agent.updated)) / 1000);
+    const line = agent.action ? `${agent.action} · ${ago} ago` : 'starting';
+    return agent.status === 'done' ? {'status': 'done', 'fraction': 1, line} : {'status': 'running', 'fraction': null, line};
+}
+
+
+// The pipeline's rows - each phase's agents, its planned steps, then the unplanned work that appeared during it (logs,
+// runs, and processes since the pipeline started), each with its state. Rows are never removed.
+async function pipelineRows(logs, activity) {
     const since = Date.parse(pipeline.since);
     const logsByPath = new Map(logs.map((log) => [`build/nn/${log.file.path}`, log]));
     const newRuns = [...runs.values()].filter((run) => run.modified >= since).sort((first, second) => first.modified - second.modified);
     const newestRun = newRuns[newRuns.length - 1];
-    const planned = new Set(pipeline.phases.flatMap((phase) => phase.steps).filter((step) => step.log).map((step) => step.log));
+    const plannedSteps = pipeline.phases.flatMap((phase) => phase.steps);
+    const planned = new Set(plannedSteps.filter((step) => step.log).map((step) => step.log));
+    const processes = (activity?.steps || []).filter((entry) => entry.started >= since);
+    const latestProcess = (prefix) => processes.filter((entry) => entry.label.startsWith(prefix)).pop();
+    const notStarted = {'status': 'waiting', 'fraction': 0, 'line': 'not started'};
     const phases = await Promise.all(pipeline.phases.map(async (phase) => ({
         phase, 'rows': await Promise.all(phase.steps.map(async (step) => {
             let state;
             if (step.log) {
                 state = logState(step.log, logsByPath.get(step.log));
             } else if (step.run) {
-                state = newestRun ? runState(newestRun) : {'status': 'waiting', 'fraction': 0, 'line': 'not started'};
+                state = newestRun ? runState(newestRun) : notStarted;
                 if (newestRun) {
                     state.line = `${newestRun.name} - ${state.line}`;
                 }
+            } else if (step.contains) {
+                // Done when the file contains the text
+                const result = await fetchText(new URL(step.file, rootUrl));
+                const contains = result !== null && result.text.includes(step.contains);
+                state = contains ? {'status': 'done', 'fraction': 1, 'line': step.file} : notStarted;
             } else {
-                state = await fileExists(step.file) ? {'status': 'done', 'fraction': 1, 'line': step.file} :
-                    {'status': 'waiting', 'fraction': 0, 'line': 'not started'};
+                state = await fileExists(step.file) ? {'status': 'done', 'fraction': 1, 'line': step.file} : notStarted;
             }
-            return {'id': step.title, 'title': step.title, 'weight': step.weight, state};
+
+            // The step's process - running shows (if the log or run doesn't), and ended without output counts as done
+            const entry = step.process ? latestProcess(step.process) : undefined;
+            if (entry && entry.running && state.status !== 'running') {
+                state = processState(entry);
+            } else if (entry && !entry.running && state.status === 'waiting') {
+                state = processState(entry);
+            }
+            return {'id': step.title, 'title': step.title, 'kind': 'step', 'weight': step.weight, state};
         }))
     })));
 
     // The phase running now - the first not done (for assigning unplanned work)
-    const phaseDone = (rows) => rows.every((row) => row.state.status === 'done');
-    const currentPhase = Math.max(0, phases.findIndex(({rows}) => !phaseDone(rows)));
-    const unplanned = [
-        ...logs.filter((log) => log.result.modified >= since && !planned.has(`build/nn/${log.file.path}`)).
-            sort((first, second) => first.result.modified - second.result.modified).
-            map((log) => ({'id': `log:${log.file.path}`, 'title': log.file.path, 'state': logState(log.file.path, log)})),
-        ...newRuns.filter((run) => run !== newestRun).
-            map((run) => ({'id': `run:${run.name}`, 'title': `run ${run.name}`, 'state': runState(run)}))
-    ];
-    // Unplanned work joins the phase whose planned logs share its folder - runs join the training phase, and others the
-    // phase running when they appeared
+    const currentPhase = Math.max(0, phases.findIndex(({rows}) => !rows.every((row) => row.state.status === 'done')));
+    const assign = (id, phaseIndex) => {
+        if (phaseIndex !== -1) {
+            return phaseIndex;
+        }
+        if (!(id in assigned)) {
+            assigned[id] = currentPhase;
+            saveAssigned();
+        }
+        return assigned[id];
+    };
+    const addRow = (phaseIndex, row) => {
+        phases[Math.min(phaseIndex, phases.length - 1)].rows.push({...row, 'weight': 0, 'unplanned': true});
+    };
+
+    // Agents lead their phase
+    for (const agent of activity?.agents || []) {
+        const phaseIndex = assign(`agent:${agent.id}`, pipeline.phases.findIndex((phase) => phase.title === agent.phase));
+        phases[Math.min(phaseIndex, phases.length - 1)].rows.unshift({
+            'id': `agent:${agent.id}`, 'title': `agent: ${agent.label}`, 'kind': 'agent', 'weight': 0, 'unplanned': true,
+            'state': agentState(agent)
+        });
+    }
+
+    // Unplanned logs join the phase whose planned logs share their folder
     const folder = (path) => path.slice(0, path.lastIndexOf('/') + 1);
     const phaseOfFolder = (path) => pipeline.phases.findIndex((phase) => phase.steps.some((step) => (
         step.log && folder(step.log) === folder(path)
     )));
-    const trainPhase = pipeline.phases.findIndex((phase) => phase.steps.some((step) => step.run));
-    let changed = false;
-    for (const row of unplanned) {
-        let phaseIndex = row.id.startsWith('run:') ? trainPhase : phaseOfFolder(`build/nn/${row.id.slice(4)}`);
-        if (phaseIndex === -1) {
-            if (!(row.id in assigned)) {
-                assigned[row.id] = currentPhase;
-                changed = true;
-            }
-            phaseIndex = assigned[row.id];
-        }
-        phases[Math.min(phaseIndex, phases.length - 1)].rows.push({...row, 'weight': 0, 'unplanned': true});
+    for (const log of logs.filter((item) => item.result.modified >= since && !planned.has(`build/nn/${item.file.path}`)).
+        sort((first, second) => first.result.modified - second.result.modified)) {
+        const id = `log:${log.file.path}`;
+        const row = {id, 'title': log.file.path, 'kind': 'log', 'state': logState(log.file.path, log)};
+        addRow(assign(id, phaseOfFolder(`build/nn/${log.file.path}`)), row);
     }
-    if (changed) {
-        saveAssigned();
+
+    // Earlier runs join the training phase
+    const trainPhase = pipeline.phases.findIndex((phase) => phase.steps.some((step) => step.run));
+    for (const run of newRuns.filter((item) => item !== newestRun)) {
+        addRow(trainPhase, {'id': `run:${run.name}`, 'title': `run ${run.name}`, 'kind': 'run', 'state': runState(run)});
+    }
+
+    // Unplanned processes join the phase whose process prefixes match
+    const plannedProcess = (entry) => plannedSteps.some((step) => step.process && entry.label.startsWith(step.process));
+    for (const entry of processes.filter((item) => !plannedProcess(item))) {
+        const id = `process:${entry.label} ${Math.round(entry.started / 10000)}`;
+        const phaseIndex = pipeline.phases.findIndex((phase) => (phase.processes || []).some((prefix) => entry.label.startsWith(prefix)));
+        addRow(assign(id, phaseIndex), {id, 'title': entry.label, 'kind': 'process', 'state': processState(entry)});
     }
     return phases;
 }
 
 
-// Render the pipeline - a checklist of every phase's steps, stable rows updated in place, and the overall progress (by
-// the phases' and steps' weights, roughly their expected time)
+// The phases open in the pipeline (by title), remembered per browser
+const openKey = 'training-dashboard-open-v1';
+let openPhases = new Set();
+try {
+    openPhases = new Set(JSON.parse(localStorage.getItem(openKey)) || []);
+} catch {
+    openPhases = new Set();
+}
+function saveOpen() {
+    try {
+        localStorage.setItem(openKey, JSON.stringify([...openPhases]));
+    } catch {
+        // Unavailable storage - remembered this page load
+    }
+}
+
+
+// A row's status label - its percent and time left when running
+function statusLabel({status, fraction, timeLeft}) {
+    if (status !== 'running') {
+        return status;
+    }
+    let label = fraction === null ? 'running' : `${Math.round(100 * fraction)}%`;
+    if (Number.isFinite(timeLeft)) {
+        label += ` · ${formatDuration(timeLeft)} left`;
+    }
+    return label;
+}
+
+
+// Render the pipeline - each phase a group (its progress, what's happening now, and how many steps are done) that opens
+// to its rows - agents, steps, and other work - updated in place; and the overall progress (by the phases' and steps'
+// weights, roughly their expected time)
 const stepIcons = {'waiting': '○', 'running': '●', 'done': '✓', 'failed': '✕'};
 let pipelineKey = null;
 let rowElements = new Map();
@@ -645,55 +744,64 @@ async function renderPipeline(logs) {
     if (pipeline === null) {
         return;
     }
-    const phases = await pipelineRows(logs);
+    const activity = await loadActivity();
+    const phases = await pipelineRows(logs, activity);
 
-    // Build the rows when the set of rows changes (a step appeared), otherwise update them in place
+    // Build the groups when the set of rows changes (a step appeared), otherwise update them in place
     const key = phases.map(({rows}) => rows.map((row) => row.id).join('|')).join('||');
     if (key !== pipelineKey) {
         pipelineKey = key;
         rowElements = new Map();
         phaseElements = phases.map(({phase, rows}) => {
-            const element = make('div', 'phase');
+            const element = make('details', 'phase');
+            element.open = openPhases.has(phase.title);
+            element.addEventListener('toggle', () => {
+                if (element.open) {
+                    openPhases.add(phase.title);
+                } else {
+                    openPhases.delete(phase.title);
+                }
+                saveOpen();
+            });
+            const summary = make('summary');
             const head = make('div', 'pipeline-head');
             const facts = make('span', 'facts');
             head.append(make('h3', '', phase.title), facts);
+            const bar = make('div', 'bar');
+            const fill = make('div');
+            bar.append(fill);
+            const now = make('div', 'phase-now');
+            const count = make('div', 'phase-count');
+            summary.append(head, bar, now, count);
             const list = make('ul', 'steps');
             for (const row of rows) {
                 const item = make('li', 'step');
                 const icon = make('span', 'icon');
                 const percent = make('span', 'facts');
-                const bar = make('div', 'bar');
-                const fill = make('div');
-                bar.append(fill);
+                const rowBar = make('div', 'bar');
+                const rowFill = make('div');
+                rowBar.append(rowFill);
                 const line = make('div', 'progress-line');
-                item.append(icon, make('span', row.unplanned ? 'unplanned' : '', row.title), percent, bar, line);
+                item.append(icon, make('span', row.unplanned ? `unplanned ${row.kind}` : '', row.title), percent, rowBar, line);
                 list.append(item);
-                rowElements.set(row.id, {item, icon, percent, fill, line});
+                rowElements.set(row.id, {item, icon, percent, 'fill': rowFill, line});
             }
-            element.append(head, make('div', 'phase-detail', phase.detail), list);
-            phasesElement.append(element);
-            return {element, facts};
+            element.append(summary, make('div', 'phase-detail', phase.detail), list);
+            return {element, facts, fill, now, count};
         });
         phasesElement.replaceChildren(...phaseElements.map(({element}) => element));
     }
 
-    // Update the rows and the phases
+    // Update the rows and the groups
     let overall = 0;
     const totalWeight = phases.reduce((sum, {phase}) => sum + phase.weight, 0);
     phases.forEach(({phase, rows}, index) => {
         for (const row of rows) {
             const {item, icon, percent, fill, line} = rowElements.get(row.id);
-            const {status, fraction, timeLeft} = row.state;
+            const {status, fraction} = row.state;
             item.className = `step ${status}`;
             icon.textContent = stepIcons[status];
-            let label = status;
-            if (status === 'running') {
-                label = fraction === null ? 'running' : `${Math.round(100 * fraction)}%`;
-                if (Number.isFinite(timeLeft)) {
-                    label += ` · ${formatDuration(timeLeft)} left`;
-                }
-            }
-            percent.textContent = label;
+            percent.textContent = statusLabel(row.state);
             fill.style.width = `${(100 * (fraction ?? 0)).toFixed(1)}%`;
             fill.classList.toggle('indeterminate', status === 'running' && fraction === null);
             line.textContent = row.state.line || '';
@@ -703,19 +811,40 @@ async function renderPipeline(logs) {
         const stepWeight = plannedRows.reduce((sum, row) => sum + row.weight, 0);
         const done = plannedRows.reduce((sum, row) => sum + row.weight * (row.state.fraction ?? 0.5), 0) / stepWeight;
         overall += phase.weight * done / totalWeight;
+        const work = rows.filter((row) => row.kind !== 'agent');
         let status = 'waiting';
         if (rows.every((row) => row.state.status === 'done')) {
             status = 'done';
         } else if (rows.some((row) => row.state.status !== 'waiting')) {
             status = 'running';
         }
-        phaseElements[index].element.className = `phase ${status}`;
-        phaseElements[index].facts.textContent = status === 'waiting' ? 'waiting' : `${Math.round(100 * done)}%`;
+
+        // What's happening now - the running work, else the running agent's latest action
+        const running = work.filter((row) => row.state.status === 'running' || row.state.status === 'failed');
+        const agent = rows.find((row) => row.kind === 'agent' && row.state.status === 'running');
+        let now = '';
+        if (running.length !== 0) {
+            now = running.map((row) => `${stepIcons[row.state.status]} ${row.title} · ${statusLabel(row.state)}`).join('   ');
+        } else if (agent) {
+            now = `${agent.title} - ${agent.state.line}`;
+        } else if (status === 'done') {
+            now = 'complete';
+        }
+        const group = phaseElements[index];
+        group.element.className = `phase ${status}`;
+        group.facts.textContent = status === 'waiting' ? 'waiting' : `${Math.round(100 * done)}%`;
+        group.fill.style.width = `${(100 * done).toFixed(1)}%`;
+        group.now.textContent = now;
+        group.now.title = now;
+        const doneCount = work.filter((row) => row.state.status === 'done').length;
+        group.count.textContent = `${doneCount} of ${work.length} steps done`;
     });
     pipelineTitle.textContent = pipeline.title;
     pipelineBar.style.width = `${(100 * overall).toFixed(1)}%`;
     const elapsed = formatDuration((Date.now() - Date.parse(pipeline.since)) / 1000);
-    pipelineFacts.textContent = `about ${Math.round(100 * overall)}% (weighted by expected time) · started ${elapsed} ago`;
+    const monitor = activity && Date.now() - activity.updated < 10000 ? '' :
+        ' · the monitor isn\'t running (node tools/dashboard/monitor.js) - steps without logs aren\'t shown';
+    pipelineFacts.textContent = `about ${Math.round(100 * overall)}% (weighted by expected time) · started ${elapsed} ago${monitor}`;
 }
 
 

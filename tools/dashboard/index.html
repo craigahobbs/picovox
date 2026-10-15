@@ -163,8 +163,7 @@
     }
     .phases {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: 12px;
+        gap: 10px;
     }
     .phase {
         display: grid;
@@ -178,6 +177,41 @@
     }
     .phase.running {
         border-color: var(--accent);
+    }
+    .phase summary {
+        display: grid;
+        gap: 6px;
+        list-style: none;
+        cursor: pointer;
+    }
+    .phase summary::-webkit-details-marker {
+        display: none;
+    }
+    .phase summary .bar {
+        height: 8px;
+    }
+    .phase.done summary .bar > div {
+        background: var(--good);
+    }
+    .phase-now {
+        min-height: 1.2em;
+        font: 0.8rem/1.4 var(--mono);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .phase-count {
+        font-size: 0.8rem;
+        color: var(--accent);
+    }
+    .phase-count::before {
+        content: "▸ ";
+    }
+    .phase[open] .phase-count::before {
+        content: "▾ ";
+    }
+    .phase:not([open]) .phase-detail {
+        display: none;
     }
     .phase-detail {
         font-size: 0.8rem;
@@ -233,6 +267,11 @@
     .step .unplanned {
         font-family: var(--mono);
         font-size: 0.8rem;
+    }
+    .step .unplanned.agent {
+        font-family: inherit;
+        font-size: inherit;
+        font-style: italic;
     }
     .step.done .bar > div {
         background: var(--good);

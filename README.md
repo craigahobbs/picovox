@@ -126,13 +126,20 @@ node tools/words.js -v male --show                              # per-consonant 
 average spectrum), `tools/slices.js` (band spectra of time ranges), `tools/pitchstats.js`, and `tools/envelope.js`.
 
 The training dashboard, `tools/dashboard/`, follows the neural voices' training as it runs: serve the repository
-(`python3 -m http.server`) and open http://localhost:8000/tools/dashboard/. At the top is a checklist of the pipeline in
-`tools/dashboard/pipeline.json` - every phase's steps, each tracked by a log, the newest training run, or an output file,
-always listed with its progress bar and latest line, and an overall progress weighted by each step's expected time.
-Unplanned work (other logs and runs since the pipeline started) joins the phase running when it appeared, and stays.
-Below are the runs in `build/nn/runs/` (their `log.jsonl` and `train.log`) with charts of their losses, validation, pitch
-error, and step times; the tails of the logs in `build/nn/`; and players for the samples there. It refreshes every
-second, read-only, re-fetching only what changed.
+(`python3 -m http.server`), start its monitor (`node tools/dashboard/monitor.js`), and open
+http://localhost:8000/tools/dashboard/. At the top is the pipeline in `tools/dashboard/pipeline.json`: each phase is a
+group with its progress, what's happening now, and how many of its steps are done, and it opens to its rows - the
+workflow's agents with their latest actions, the planned steps (each tracked by a log, the newest training run, an
+output file, and its process), and unplanned work since the pipeline started (other logs, runs, and processes), each
+with its progress bar and latest line. Rows are never removed. The overall progress is weighted by each step's expected
+time. Below are the runs in `build/nn/runs/` (their `log.jsonl` and `train.log`) with charts of their losses,
+validation, pitch error, and step times; the tails of the logs in `build/nn/`; and players for the samples there. It
+refreshes every second, read-only, re-fetching only what changed.
+
+The monitor writes `build/nn/activity.json` every second: the Python and Node processes working in the repository for
+10 seconds or more (with their multiprocessing workers folded in), running now or before, and the workflow's agents
+(`pipeline.json`'s workflow, else the newest workflow in `~/.claude/projects/`) - so the dashboard shows the steps that
+write no log.
 
 
 ## The listener panel

@@ -1,35 +1,44 @@
 {
     "title": "Ten neural voices",
     "since": "2026-10-15T01:50:00-07:00",
+    "workflow": "wf_71f8b2f9-e0f",
     "phases": [
         {
             "title": "Data",
             "detail": "American audiobook readers and emotional speech, prepared for training",
             "weight": 10,
+            "processes": ["nn.multi", "nn.cremad", "nn.accent", "nn.align", "tools/corpora.py"],
             "steps": [
-                {"title": "Download audiobook readers", "log": "build/nn/multi/corpora.log", "weight": 3},
+                {"title": "Download audiobook readers", "log": "build/nn/multi/corpora.log", "process": "tools/corpora.py", "weight": 3},
                 {"title": "Accent check - readers", "log": "build/nn/multi/accent.log", "weight": 1},
-                {"title": "Voice settings - readers", "log": "build/nn/multi/settings.log", "weight": 1},
-                {"title": "Training examples - readers", "log": "build/nn/multi/build.log", "weight": 2},
-                {"title": "Download emotional speech", "log": "build/nn/cremad/fetch.log", "weight": 2},
-                {"title": "Phoneme alignment - emotional", "log": "build/nn/cremad/align.log", "weight": 1},
-                {"title": "Accent check - emotional", "log": "build/nn/cremad/accent.log", "weight": 1},
-                {"title": "Emotion recognizer check", "log": "build/nn/cremad/emotion.log", "weight": 1}
+                {"title": "Voice settings - readers", "log": "build/nn/multi/settings.log", "process": "nn.multi settings", "weight": 1},
+                {"title": "Training examples - readers", "log": "build/nn/multi/build.log", "process": "nn.multi build", "weight": 2},
+                {
+                    "title": "Naturalness scores - readers", "file": "data/nn/speakers.json", "contains": "\"utmos\"",
+                    "process": "nn.multi listen", "weight": 1
+                },
+                {"title": "Download emotional speech", "log": "build/nn/cremad/fetch.log", "process": "nn.cremad fetch", "weight": 2},
+                {"title": "Phoneme alignment - emotional", "log": "build/nn/cremad/align.log", "process": "nn.cremad align", "weight": 1},
+                {"title": "Accent check - emotional", "log": "build/nn/cremad/accent.log", "process": "nn.cremad accent", "weight": 1},
+                {"title": "Emotion recognizer check", "log": "build/nn/cremad/emotion.log", "process": "nn.cremad emotion", "weight": 1},
+                {"title": "Training examples - emotional", "file": "build/nn/data/cremad/index.json", "process": "nn.cremad build", "weight": 1}
             ]
         },
         {
             "title": "Train",
             "detail": "one multi-speaker, multi-style model",
             "weight": 70,
+            "processes": ["nn.train", "nn.model", "nn.discriminator", "nn.evaluate", "nn.export", "nn.parity", "nn.fit", "nn/js/"],
             "steps": [
-                {"title": "Training", "run": true, "weight": 9},
-                {"title": "Export for the browser", "file": "data/nn/multi.json", "weight": 1}
+                {"title": "Training", "run": true, "process": "nn.train", "weight": 9},
+                {"title": "Export for the browser", "file": "data/nn/multi.json", "process": "nn.export", "weight": 1}
             ]
         },
         {
             "title": "Design",
             "detail": "5 male and 5 female voices, styles, and samples",
             "weight": 20,
+            "processes": ["nn.voices", "nn.design", "nn.samples", "tools/listeners.py", "tools/panel.js"],
             "steps": [
                 {"title": "Design the 10 voices", "file": "data/nn/voices.json", "weight": 2},
                 {"title": "Render samples", "file": "build/nn/samples-voices/manifest.json", "weight": 1}
