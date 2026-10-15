@@ -337,7 +337,26 @@ pilot's pronunciations, and transcribed them with Whisper:
 | *Moby-Dick* | "Captain Bill Dad ... the hair punters obeyed them" | "Captain Builded ... the Harpoon ears obeyed them" |
 
 UTMOS rose from 3.96 to 4.05 (mean of the six). The pilot still errs (Klipspringer loses its "s"; "harpooneers" gains
-a syllable), as its error rate predicts. The size search and final results will be added here.
+a syllable), as its error rate predicts.
+
+**Against the classical approach.** A Phonetisaurus joint-sequence WFST (a Kneser-Ney 7-gram over aligned
+letter-phoneme pairs, trained on the same split) is more accurate than any neural model so far - 34.4% test word
+error and 9.0% phoneme error, where order 7 is the plateau - but it is 9.1 MB in a compact 8-bit form (6.2 MB
+gzipped). Size decides it for the browser:
+
+| Model | Size | Test word error |
+| --- | --- | --- |
+| Neural pilot (178K parameters, 8 bits) | 164 KB | 38.0% |
+| Neural encoder-decoder (657K parameters) | about 650 KB | 36.1% |
+| WFST, pruned | 209 KB (gzipped) | 56.3% |
+| WFST, pruned | 1.6 MB (gzipped) | 39.2% |
+| WFST, full order 7 | 6.2 MB (gzipped) | 34.4% |
+
+At equal size the network wins by about 18 points; the WFST needs 4-10 times the bytes just to match the pilot. The
+two families also err differently: they agree on 58.5% of test words (right 85.8% of the time there), and an oracle
+choosing the better of the two would reach 23.6%. We are therefore using the WFST as a free, deterministic teacher -
+combined with the largest network - to distill a small student that aims to match the WFST's 34.4% in at most
+about 200 KB. The results will be added here.
 
 ### 9.2 Minimal model sizes
 
