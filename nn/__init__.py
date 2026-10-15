@@ -5,7 +5,8 @@
 The neural-network experiment - a small network that maps our front end's phoneme tokens to durations and
 interpretable source-filter parameters, trained end to end through a differentiable synthesizer against recordings.
 
-- nn/frontend.py - the token vocabulary (nn/vocab.json) and a Python port of lib/lexicon.js textToPhrases
+- nn/frontend.py - the token vocabulary (nn/vocab.json) and a Python port of lib/lexicon.js textToPhrases, every word
+  pronounced by the app's G2P network (nn/g2pmodel.py - lib/g2p.js's inference, bit for bit, on lib/models/g2pModel.js)
 - nn/data.py - the training data (CMU ARCTIC slt and bdl) under build/nn/data/, its loader, and its statistics
 - nn/js/tokens.js - the same tokens in JavaScript, from lib/lexicon.js, for browser-side inference
 - nn/cremad.py - emotional speech for the style modifiers: CREMA-D fetched, force-aligned (a wav2vec2 phoneme CTC

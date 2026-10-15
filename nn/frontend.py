@@ -3,8 +3,8 @@
 
 """
 The network's input tokens - the vocabulary (nn/vocab.json) and a Python port of the text front end,
-lib/lexicon.js textToPhrases, so training data is tokenized exactly as the browser tokenizes at inference
-(nn/js/tokens.js; `python -m nn.data verify-tokens` checks that the two agree).
+lib/lexicon.js textToPhrases, so training data is tokenized exactly as the app tokenizes at inference
+(nn/js/tokens.js with the G2P network; `python -m nn.data verify-tokens` checks that the two agree).
 
 A token sequence is:
 
@@ -12,8 +12,8 @@ A token sequence is:
 
 - <bos> - the start (it carries the leading silence's duration)
 - phones - ARPAbet with lexical stress on the vowels (AH0, AH1, AH2, ...; consonants have none), as textToPhrases
-  gives them - CMU dictionary first pronunciations, function words' vowels reduced to stress 0, and the letter-to-sound
-  fallback for unknown words
+  gives them - every word pronounced by the app's G2P network (lib/models/g2pModel.js, run by nn/g2pmodel.py exactly
+  as lib/g2p.js runs it - no dictionary), function words' vowels reduced to stress 0
 - _ - a word boundary inside a phrase (it carries any pause between the words - usually none)
 - <comma>, <period>, <question>, <wh>, <exclamation> - the phrase ends textToPhrases gives (comma for , ; : - wh for a
   question starting with a question word); each carries the pause after its phrase, and the last one the trailing
@@ -21,12 +21,18 @@ A token sequence is:
 
     python -m nn.frontend vocab                 # write nn/vocab.json
     python -m nn.frontend tokens 'Hello, world.'
+
+The CMU Pronouncing Dictionary (data/cmudict.dict, get_dictionary) is the G2P network's training labels - a training
+tool, not the front end's.
 """
 
 import json
+import multiprocessing
 import os
 import re
 import sys
+
+from . import g2pmodel
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -81,9 +87,66 @@ TOKEN_IDS = {token: index for index, token in enumerate(vocabulary())}
 #
 
 _DICTIONARY = None
+_G2P = None
 
 
-# Load the pronouncing dictionary (setDictionary) - word to its first pronunciation; comments stripped
+# The G2P network (lib/models/g2pModel.js) - loaded on first use
+def get_g2p():
+    global _G2P  # pylint: disable=global-statement
+    if _G2P is None:
+        _G2P = g2pmodel.G2p(g2pmodel.read_module())
+    return _G2P
+
+
+# The pronunciations of words - {word: phones}, pronounced in batches, by up to jobs worker processes (default: all
+# cores; worth it for thousands of new words), and kept in the G2P network's cache
+def pronounce_words(words, jobs=None):
+    g2p = get_g2p()
+    missing = sorted({word for word in words if word not in g2p.cache})
+    jobs = min(jobs or os.cpu_count(), max(1, len(missing) // 1000))
+    if jobs > 1:
+        chunks = [missing[index::jobs] for index in range(jobs)]
+        with multiprocessing.Pool(jobs) as pool:
+            for chunk, phones in zip(chunks, pool.map(_pronounce_chunk, chunks)):
+                g2p.cache.update(zip(chunk, phones))
+    else:
+        g2p.pronounce_many(missing)
+    return {word: g2p.cache[word] for word in words}
+
+
+# Pronounce words with the G2P network (a worker task)
+def _pronounce_chunk(words):
+    return get_g2p().pronounce_many(words)
+
+
+# Add pronunciations to the G2P network's cache - {word: phones} (a worker process's initializer, so its texts'
+# words are pronounced once, before the work is shared out)
+def set_pronunciations(pronunciations):
+    get_g2p().cache.update(pronunciations)
+
+
+# The words of texts as the front end pronounces them (after numbers and abbreviations are spelled out) - distinct, in
+# first-seen order
+def text_words(texts):
+    words = {}
+
+    # Record a word (no phones)
+    def record(word):
+        words[word] = None
+        return []
+
+    for text in texts:
+        text_to_phrases(text, record)
+    return list(words)
+
+
+# Pronounce every word of texts (pronounce_words) - {word: phones}, for set_pronunciations
+def pronounce_texts(texts, jobs=None):
+    return pronounce_words(text_words(texts), jobs)
+
+
+# Load the CMU Pronouncing Dictionary - word to its first pronunciation; comments stripped (the G2P network's training
+# labels)
 def get_dictionary(path=DICTIONARY_PATH):
     global _DICTIONARY  # pylint: disable=global-statement
     if _DICTIONARY is None:
@@ -120,13 +183,6 @@ ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 
         'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen']
 TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety']
 
-# The letter-to-sound fallback
-SUFFIXES = [('s', ['Z']), ('es', ['IH0', 'Z']), ('ed', ['D']), ('ing', ['IH0', 'NG']), ('er', ['ER0']), ('ly', ['L', 'IY0'])]
-LETTERS = {'a': ['AE1'], 'b': ['B'], 'c': ['K'], 'd': ['D'], 'e': ['EH1'], 'f': ['F'], 'g': ['G'], 'h': ['HH'],
-           'i': ['IH1'], 'j': ['JH'], 'k': ['K'], 'l': ['L'], 'm': ['M'], 'n': ['N'], 'o': ['AA1'], 'p': ['P'],
-           'q': ['K'], 'r': ['R'], 's': ['S'], 't': ['T'], 'u': ['AH1'], 'v': ['V'], 'w': ['W'], 'x': ['K', 'S'],
-           'y': ['Y'], 'z': ['Z']}
-
 TOKEN_REGEX = re.compile(r"[a-z][a-z']*\.?|\d+(?:\.\d+)?|[.,;:!?]", re.ASCII)
 PHONE_REGEX = re.compile(r'^([A-Z]+)(\d)?$')
 
@@ -144,22 +200,12 @@ def number_words(value):
     return []
 
 
-# Pronounce a word not in the dictionary (pronounceUnknown)
-def pronounce_unknown(word):
-    dictionary = get_dictionary()
-    for suffix, phones in SUFFIXES:
-        if word.endswith(suffix) and word[:-len(suffix)] in dictionary:
-            return dictionary[word[:-len(suffix)]] + phones
-    phones = []
-    for letter in word:
-        if letter in LETTERS and (not phones or LETTERS[letter][0] != phones[-1]):
-            phones.extend(LETTERS[letter])
-    return phones
-
-
-# Tokenize text into phrases (textToPhrases) - [{words: [{text, phones: [{ph, stress}], isFunction, syllables}], end}]
-def text_to_phrases(text):
-    dictionary = get_dictionary()
+# Tokenize text into phrases (textToPhrases) - [{words: [{text, phones: [{ph, stress}], isFunction, syllables}], end}];
+# pronounce_word(word) gives a word's ARPAbet phones (default: the G2P network's - lib/lexicon.js setPronouncer with
+# lib/g2p.js loadG2p, as the app does)
+def text_to_phrases(text, pronounce_word=None):
+    if pronounce_word is None:
+        pronounce_word = get_g2p().pronounce
     tokens = TOKEN_REGEX.findall(text.lower().replace('‘', '\'').replace('’', '\''))
     phrases = []
     words = []
@@ -173,7 +219,7 @@ def text_to_phrases(text):
     def add_word(word_text):
         word = word_text.strip('\'')
         phones = []
-        for phone in dictionary[word] if word in dictionary else pronounce_unknown(word):
+        for phone in pronounce_word(word):
             match = PHONE_REGEX.match(phone)
             phones.append({'ph': match.group(1), 'stress': None if match.group(2) is None else int(match.group(2))})
         is_function = word in FUNCTION_WORDS
@@ -219,11 +265,11 @@ def phone_token(phone):
 
 
 # Tokenize text - {'tokens': [name], 'ids': [id], 'words': [{text, start, end}]} (each word's token index range, and
-# the phrase-end tokens have no word)
-def tokenize(text):
+# the phrase-end tokens have no word); pronounce_word as text_to_phrases
+def tokenize(text, pronounce_word=None):
     tokens = [BOS]
     words = []
-    for phrase in text_to_phrases(text):
+    for phrase in text_to_phrases(text, pronounce_word):
         for index, word in enumerate(phrase['words']):
             if index > 0:
                 tokens.append(WORD)
