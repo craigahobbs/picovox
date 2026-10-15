@@ -7,10 +7,10 @@ import test from 'node:test';
 
 
 test('models.voiceModel', () => {
-    // The generated voice model module - its manifest (the multi-speaker model's distilled s64 student, with the app's two
+    // The generated voice model module - its manifest (the multi-speaker model's distilled s80 student, with the app's two
     // speakers) and its deflated weights as base64
     assert.equal(voiceModel.manifest.kind, 'multi');
-    assert.equal(voiceModel.manifest.parameterCount, 238251);
+    assert.equal(voiceModel.manifest.parameterCount, 349547);
     assert(voiceModel.manifest.speakers.some((speaker) => speaker.key === 'arctic-slt'));
     assert(voiceModel.manifest.speakers.some((speaker) => speaker.key === 'arctic-bdl'));
     assert.equal(voiceModel.encoding, 'deflate-raw');
