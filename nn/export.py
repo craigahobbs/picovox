@@ -6,6 +6,13 @@ Export - a trained model (nn/train.py checkpoint) to the browser's format, data/
 which nn/js/model.js loads.
 
     build/venv-nn/bin/python -B -m nn.export build/nn/runs/slt/best.pt --voice slt
+    build/venv-nn/bin/python -B -m nn.export build/nn/runs/multi-b/best.pt --voice multi     # the multi-speaker model
+
+A multi-speaker, multi-style model (nn/model.py's MultiModel) exports whole: its speaker table (a row per speaker -
+the readers' data/nn/speakers.json ids, then the emotional corpus's actors), its style table (nn/model.py's
+STYLE_NAMES; neutral is the zero vector), and its channel equalizers (eq_table, dB, a row per speaker, float32); the
+manifest lists the speakers (id, key, sex, corpus, role) and the styles, so nn/js/model.js can blend speakers and
+scale styles.
 
 The weights are quantized to 8 bits: every weight matrix, convolution kernel, and embedding table as int8 with one
 float32 scale per output channel (row) - symmetric, the scale the row's largest magnitude / 127; the biases and layer
@@ -30,8 +37,8 @@ import numpy
 import torch
 
 from . import params
-from .data import ArcticData
-from .model import Model, parameter_count
+from .data import DATA_DIR, ArcticData
+from .model import STYLE_NAMES, build_model, parameter_count
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -45,15 +52,32 @@ MIN_QUANTIZED = 1024
 # Load a checkpoint's model (on the CPU, in eval mode) - (model, checkpoint)
 def load_model(path, device='cpu'):
     state = torch.load(path, map_location=device, weights_only=False)
-    model = Model(state['config'], priors=state.get('priors'))
+    model = build_model(state['config'], priors=state.get('priors'))
     model.load_state_dict(state['model'])
     return model.to(device).eval(), state
+
+
+# Whether a model is the multi-speaker model
+def is_multi(model):
+    return model.config.get('kind') == 'multi'
+
+
+# The tensors that stay float32 whatever their size
+FLOAT_TENSORS = ('eq_table',)
 
 
 # The exported tensors of a model's state - {name: tensor} - for one speaker of a multi-speaker model (its rows of the
 # speaker embeddings); the channel equalizer is exported in the manifest instead
 def exported_tensors(model, speaker=0):
     tensors = collections.OrderedDict()
+    if is_multi(model):
+        # The whole speaker table, and the channel equalizers as a table of gains (dB)
+        for name, tensor in model.state_dict().items():
+            if name == 'eq_free':
+                tensor = params.EQ_RANGE_DB * torch.tanh(tensor)
+                name = 'eq_table'
+            tensors[name] = tensor.detach().cpu().float()
+        return tensors
     for name, tensor in model.state_dict().items():
         if name == 'eq_free':
             continue
@@ -73,8 +97,8 @@ def quantize(tensor):
 
 
 # Whether a tensor is quantized
-def is_quantized(tensor):
-    return tensor.dim() >= 2 and tensor.numel() >= MIN_QUANTIZED
+def is_quantized(tensor, name=None):
+    return tensor.dim() >= 2 and tensor.numel() >= MIN_QUANTIZED and name not in FLOAT_TENSORS
 
 
 # A copy of a model with its weights quantized and dequantized - the exported model, in PyTorch
@@ -82,7 +106,7 @@ def quantized_model(model):
     model = copy.deepcopy(model)
     state = model.state_dict()
     for name, tensor in exported_tensors(model).items():
-        if is_quantized(tensor):
+        if is_quantized(tensor, name):
             values, scales = quantize(tensor)
             state[name] = torch.tensor(values.astype(numpy.float32) * scales[:, None]).reshape(tensor.shape)
     model.load_state_dict(state)
@@ -108,13 +132,41 @@ def token_remap(vocab, counts, minimum=10):
     return remap
 
 
-# The training token counts of a checkpoint's speakers
-def training_token_counts(speakers):
+# The training token counts of a checkpoint (its state) - of its speakers, or of the multi-speaker model's corpora
+def training_token_counts(state):
+    if state['config'].get('kind') == 'multi':
+        counts = collections.Counter()
+        corpora = ['multi'] + (['cremad'] if state.get('args', {}).get('cremad', 0) > 0 else [])
+        for corpus in corpora:
+            data = ArcticData(os.path.join(DATA_DIR, corpus))
+            for entry in data.entries('train'):
+                counts.update(numpy.asarray(data.tokens[entry['tokenOffset']:entry['tokenOffset'] + entry['tokenCount']]).tolist())
+        return counts, data.index['vocab']
     data = ArcticData()
     counts = collections.Counter()
-    for entry in data.entries('train', speakers):
+    for entry in data.entries('train', state['speakers']):
         counts.update(data.arrays(entry)['tokens'].tolist())
     return counts, data.index['vocab']
+
+
+# The multi-speaker model's speaker list - [{id, key, sex, corpus, role ('reader' - the American reader pool, or
+# 'style' - an actor of the emotional corpus), and for readers the reader's name, median F0, and UTMOS}]
+def speaker_list(state):
+    with open(os.path.join(ROOT, 'data', 'nn', 'speakers.json'), encoding='utf-8') as file:
+        readers = {speaker['key']: speaker for speaker in json.load(file)['speakers']}
+    cremad = ArcticData(os.path.join(DATA_DIR, 'cremad')).index['speakers']
+    out = []
+    for index, key in enumerate(state['speakers']):
+        if key in readers:
+            reader = readers[key]
+            if reader['id'] != index:
+                raise ValueError(f'speaker {key}: table row {index} is not its data/nn/speakers.json id {reader["id"]}')
+            out.append({'id': index, 'key': key, 'sex': reader['sex'], 'corpus': reader['source'], 'role': 'reader',
+                        'reader': reader.get('reader'), 'medianF0': reader.get('medianF0'), 'utmos': reader.get('utmos')})
+        else:
+            actor = cremad.get(key, {})
+            out.append({'id': index, 'key': key, 'sex': actor.get('sex'), 'corpus': 'CREMA-D', 'role': 'style'})
+    return out
 
 
 # Export a model - writes <out>/<voice>.bin and <voice>.json, returns the manifest
@@ -125,7 +177,7 @@ def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0, bandwidt
     tensors = []
     for name, tensor in exported_tensors(model, speaker).items():
         entry = {'name': name, 'shape': list(tensor.shape)}
-        if is_quantized(tensor):
+        if is_quantized(tensor, name):
             values, scales = quantize(tensor)
             data = values.tobytes()
             entry.update({'encoding': 'int8', 'offset': offset, 'scaleOffset': offset + _aligned(len(data))})
@@ -139,9 +191,33 @@ def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0, bandwidt
             offset += len(data)
         tensors.append(entry)
     binary = b''.join(chunks)
-    counts, vocab = training_token_counts(state['speakers'])
+    counts, vocab = training_token_counts(state)
     with torch.no_grad():
         eq = [round(float(value), 3) for value in model.eq(torch.tensor([speaker]))[0]]
+    if is_multi(model):
+        manifest = {
+            'format': 'voice-synth-nn', 'version': FORMAT_VERSION, 'voice': voice, 'kind': 'multi',
+            'description': 'The multi-speaker, multi-style neural model (nn/trainmulti.py) - tokens to durations to '
+                           'synthesizer parameter frames (nn/params.py), rendered by nn/js/render.js; a voice is any blend of '
+                           'the speaker table\'s rows, a style any blend of the style table\'s rows (neutral is zero)',
+            'config': model.config, 'parameterNames': params.NAMES, 'frameRate': params.FRAME_RATE,
+            'speakers': speaker_list(state), 'styles': list(STYLE_NAMES), 'defaultSpeaker': speaker,
+            'eq': eq, 'remap': token_remap(vocab, counts), 'vocab': vocab,
+            'inference': {'pauseThreshold': 0.5, 'bandwidthScale': bandwidth_scale},
+            'parameterCount': parameter_count(model),
+            'parameterCountCore': parameter_count(model) - model.speaker.weight.numel() - model.eq_free.numel(),
+            'bytes': len(binary), 'tensors': tensors,
+            'training': {'step': state.get('step'), 'val': state.get('val'), 'args': state.get('args')},
+            'license': 'Trained on LibriTTS-R (CC BY 4.0), CMU ARCTIC (free use with attribution), and CREMA-D (a Produced '
+                       'Work of the Open Database License 1.0 database - Cao, Cooper, Keutmann, Gur, Nenkova, and Verma, '
+                       '"CREMA-D: Crowd-sourced Emotional Multimodal Actors Dataset", IEEE Transactions on Affective '
+                       'Computing 5(4), 2014)', **(extra or {})
+        }
+        with open(os.path.join(out_dir, f'{voice}.bin'), 'wb') as file:
+            file.write(binary)
+        with open(os.path.join(out_dir, f'{voice}.json'), 'w', encoding='utf-8') as file:
+            json.dump(manifest, file, indent=1)
+        return manifest
     manifest = {
         'format': 'voice-synth-nn', 'version': FORMAT_VERSION, 'voice': voice, 'speaker': state['speakers'][speaker],
         'trainingSpeakers': state['speakers'],
@@ -179,6 +255,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     model, state = load_model(args.checkpoint)
     speaker = state['speakers'].index(args.speaker) if args.speaker else 0
+    if is_multi(model) and not args.speaker:
+        speaker = state['speakers'].index('arctic-bdl')
     manifest = export(model, state, args.voice, args.out, speaker=speaker, bandwidth_scale=args.bandwidth_scale)
     sizes = {suffix: os.path.getsize(os.path.join(args.out, f'{args.voice}.{suffix}')) for suffix in ('bin', 'json')}
     print(json.dumps({'voice': args.voice, 'parameters': manifest['parameterCount'], 'bytes': sizes,

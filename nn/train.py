@@ -148,7 +148,7 @@ def collate(utterances, indices, device):
 #
 
 # The multi-resolution STFT loss below a frequency (spectral convergence + mean absolute log magnitude) plus a log-mel L1
-def spectral_loss(predicted, target, rate, max_hz, fft_sizes=(2048, 1024, 512, 256, 128), mel_weight=1.0):
+def spectral_loss(predicted, target, rate, max_hz, fft_sizes=(2048, 1024, 512, 256, 128), mel_weight=1.0, mel_eps=0.0):
     total = 0
     for fft_size in fft_sizes:
         hop = fft_size // 4
@@ -164,8 +164,8 @@ def spectral_loss(predicted, target, rate, max_hz, fft_sizes=(2048, 1024, 512, 2
         mel_total = 0
         for fft_size in (1024, 256):
             bank = mel_bank(rate, fft_size, max_hz, predicted.device)
-            mel_predicted = torch.log(spectral.stft_magnitude(predicted, fft_size, fft_size // 4, eps=0) ** 2 @ bank.T + 1e-5)
-            mel_target = torch.log(spectral.stft_magnitude(target, fft_size, fft_size // 4, eps=0) ** 2 @ bank.T + 1e-5)
+            mel_predicted = torch.log(spectral.stft_magnitude(predicted, fft_size, fft_size // 4, eps=mel_eps) ** 2 @ bank.T + 1e-5)
+            mel_target = torch.log(spectral.stft_magnitude(target, fft_size, fft_size // 4, eps=mel_eps) ** 2 @ bank.T + 1e-5)
             mel_total = mel_total + (mel_predicted - mel_target).abs().mean()
         total = total + mel_weight * mel_total / 2 * 0.25
     return total
@@ -214,18 +214,33 @@ def silent_values(device):
     return values
 
 
+# The silent frame and the mask of the levels that silence it (av, ah, af) on a device - made once per device
+_SILENCE = {}
+
+
+def _silence(device):
+    key = str(device)
+    if key not in _SILENCE:
+        silence_mask = torch.zeros(params.COUNT, device=device)
+        for name in ('av', 'ah', 'af'):
+            silence_mask[params.INDEX[name]] = 1
+        _SILENCE[key] = (silent_values(device), silence_mask)
+    return _SILENCE[key]
+
+
 # The model's parameter frames for a batch, ready to render - [B, 2F + 1, COUNT]: the end frame appended, frames past
 # each utterance's end silent, and F0 replaced by the recorded F0 (teacher_f0) when given
 def render_values(model, unit, batch, teacher_f0=True):
     values = model.parameters_from_unit(unit)
     values = torch.cat([values, values[:, -1:]], dim=1)
     total = values.shape[1]
-    counts = torch.tensor([2 * count for count in batch['frameCounts']], device=values.device)
+    # (the batch's 'renderCounts' - 2 x its frame counts, on the device - if it has them: on MPS a blocking
+    # host-to-device copy waits for the whole GPU queue)
+    counts = batch.get('renderCounts')
+    if counts is None:
+        counts = torch.tensor([2 * count for count in batch['frameCounts']], device=values.device)
     past = (torch.arange(total, device=values.device)[None] > counts[:, None]).float()[..., None]
-    silence = silent_values(values.device)
-    silence_mask = torch.zeros(params.COUNT, device=values.device)
-    for name in ('av', 'ah', 'af'):
-        silence_mask[params.INDEX[name]] = 1
+    silence, silence_mask = _silence(values.device)
     values = values * (1 - past * silence_mask) + silence * past * silence_mask
     if teacher_f0:
         f0 = batch['f0'][:, :total]
