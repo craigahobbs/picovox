@@ -1,0 +1,117 @@
+// Licensed under the MIT License
+// https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+
+// Speak text with a neural voice (nn/js/model.js) rendered by nn/js/render.js, under Node
+//
+//     node nn/js/speak.js -m data/nn/slt "Hello, world." -o hello.wav [-r 44100] [-s seed] [--params out.json]
+//         [--transform '[{"pitchScale": 1.2}]'] [--pause 0.5] [--rate 1] [--bandwidth-scale 1 (the network's own)]
+//     node nn/js/speak.js -m data/nn/slt --batch list.json    # [{text, wav, params, seed, transform}, ...]
+//
+// It prints one JSON line: the audio seconds, and the seconds spent loading, in the network, and rendering.
+// --frames-only skips the rendering (the params file only).
+
+/* eslint-disable no-console */
+
+import {loadModel, speakFrames} from './model.js';
+import {readFileSync, writeFileSync} from 'node:fs';
+import {NAMES} from './params.js';
+import {applyTransforms} from './transforms.js';
+import {encodeWav} from '../../lib/wav.js';
+import process from 'node:process';
+import {render} from './render.js';
+
+
+// Parse the command line
+function parseArgs(argv) {
+    const args = {'model': 'data/nn/slt', 'text': null, 'wav': null, 'params': null, 'sampleRate': 44100, 'seed': 1, 'batch': null,
+        'transform': null, 'pauseThreshold': 0.5, 'rate': 1, 'framesOnly': false, 'peak': 0.89, 'bandwidthScale': null};
+    for (let ix = 0; ix < argv.length; ix++) {
+        const arg = argv[ix];
+        const take = () => argv[++ix];
+        if (arg === '-m') {
+            args.model = take();
+        } else if (arg === '-o') {
+            args.wav = take();
+        } else if (arg === '-r') {
+            args.sampleRate = Number(take());
+        } else if (arg === '-s') {
+            args.seed = Number(take());
+        } else if (arg === '--params') {
+            args.params = take();
+        } else if (arg === '--batch') {
+            args.batch = take();
+        } else if (arg === '--transform') {
+            args.transform = JSON.parse(take());
+        } else if (arg === '--pause') {
+            args.pauseThreshold = Number(take());
+        } else if (arg === '--rate') {
+            args.rate = Number(take());
+        } else if (arg === '--bandwidth-scale') {
+            args.bandwidthScale = Number(take());
+        } else if (arg === '--peak') {
+            args.peak = Number(take());
+        } else if (arg === '--frames-only') {
+            args.framesOnly = true;
+        } else {
+            args.text = arg;
+        }
+    }
+    return args;
+}
+
+
+// A Node buffer's bytes as an ArrayBuffer of their own
+function toArrayBuffer(buffer) {
+    return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+}
+
+
+// Peak-normalize samples (in place)
+function normalize(samples, peak) {
+    let max = 0;
+    for (const sample of samples) {
+        max = Math.max(max, Math.abs(sample));
+    }
+    const scale = max > 0 ? peak / max : 1;
+    for (let ix = 0; ix < samples.length; ix++) {
+        samples[ix] *= scale;
+    }
+    return samples;
+}
+
+
+function main() {
+    const args = parseArgs(process.argv.slice(2));
+    const startLoad = performance.now();
+    const model = loadModel(JSON.parse(readFileSync(`${args.model}.json`, 'utf8')), toArrayBuffer(readFileSync(`${args.model}.bin`)));
+    const loadSeconds = (performance.now() - startLoad) / 1000;
+    const items = args.batch ? JSON.parse(readFileSync(args.batch, 'utf8')) :
+        [{'text': args.text, 'wav': args.wav, 'params': args.params, 'seed': args.seed, 'transform': args.transform}];
+    let networkSeconds = 0;
+    let renderSeconds = 0;
+    let audioSeconds = 0;
+    for (const item of items) {
+        const startNetwork = performance.now();
+        const spoken = speakFrames(model, item.text, {'pauseThreshold': item.pauseThreshold ?? args.pauseThreshold,
+            'rate': item.rate ?? args.rate, 'bandwidthScale': item.bandwidthScale ?? args.bandwidthScale ?? undefined});
+        networkSeconds += (performance.now() - startNetwork) / 1000;
+        const frames = applyTransforms(spoken.frames, item.transform ?? args.transform ?? []);
+        if (item.params) {
+            const rows = frames.map((frame) => Array.from(frame, (value) => Math.round(value * 10000) / 10000));
+            writeFileSync(item.params, JSON.stringify({'frameRate': 200, 'names': NAMES, 'frames': rows, 'eq': spoken.eq,
+                'sentences': spoken.sentences}));
+        }
+        audioSeconds += Math.max(0, frames.length - 1) / 200;
+        if (!args.framesOnly && item.wav) {
+            const startRender = performance.now();
+            const samples = render(frames, {'sampleRate': args.sampleRate, 'seed': item.seed ?? args.seed, 'eq': spoken.eq});
+            renderSeconds += (performance.now() - startRender) / 1000;
+            writeFileSync(item.wav, encodeWav(normalize(samples, args.peak), args.sampleRate));
+        }
+    }
+    console.log(JSON.stringify({'count': items.length, audioSeconds, loadSeconds, networkSeconds, renderSeconds,
+        'realTimeNetwork': audioSeconds / networkSeconds, 'realTimeRender': renderSeconds > 0 ? audioSeconds / renderSeconds : null,
+        'realTimeTotal': audioSeconds / (networkSeconds + renderSeconds)}));
+}
+
+main();

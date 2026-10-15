@@ -9,3 +9,5 @@ data/whisper/
 /package-lock.json
 .DS_Store
 data/corpora/
+__pycache__/
+*.pyc

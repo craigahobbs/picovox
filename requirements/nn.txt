@@ -1,0 +1,11 @@
+# The neural-network experiment environment (nn/) - build/venv-nn (make build/venv-nn.build)
+#   PyTorch with MPS for training, torchaudio for spectral losses and resampling, soxr for resampling the corpora,
+#   Praat (parselmouth) for the auxiliary F0, voicing, and formant tracks, and soundfile for audio I/O
+#   (versions match build/venv-listeners and build/venv-analysis; Python 3.12 through 3.14)
+torch==2.14.1
+torchaudio==2.11.0
+numpy==2.5.4
+scipy==1.18.1
+soundfile==0.14.0
+soxr==1.1.0
+praat-parselmouth==0.4.7
