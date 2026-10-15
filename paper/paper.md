@@ -321,7 +321,22 @@ hundreds of times:
 
 The current letter-based fallback mispronounces them badly (Queequeg becomes `K AH1 EH1 K AH1 EH1 G`). We are
 training a small letters-to-phonemes network on the dictionary itself, used only for misses, with a
-British-to-American spelling pass in front of it. Results will be added here.
+British-to-American spelling pass in front of it. Across 22 books (2.36 million words), 1.86% of word tokens miss
+the dictionary (11,956 distinct words); the spelling rules alone resolve 3.4% of those.
+
+**An interim result.** A pilot network (an encoder-decoder of 178K parameters, 6,000 training steps; 37.6% word and
+10.4% phoneme error on held-out dictionary words, which are mostly hard names) already changes how the books sound.
+We spoke six sentences built from frequent misses with the neural male voice, with the old fallback and with the
+pilot's pronunciations, and transcribed them with Whisper:
+
+| Sentence | Old fallback, as Whisper heard it | Pilot network, as Whisper heard it |
+| --- | --- | --- |
+| *Pride and Prejudice* | "walked from lung bar into net hair failed ... saw Pemberle" | "walked from Longburn to Netherfield ... saw Pemberley" |
+| *Moby-Dick* | "Clack-clack and stubs sailed on the peck-odd with TAS-TAGAW and DAGAW" | "Pekwigan stubs sailed on the Peekwad with Tashtego and Daggu" |
+| *Moby-Dick* | "Captain Bill Dad ... the hair punters obeyed them" | "Captain Builded ... the Harpoon ears obeyed them" |
+
+UTMOS rose from 3.96 to 4.05 (mean of the six). The pilot still errs (Klipspringer loses its "s"; "harpooneers" gains
+a syllable), as its error rate predicts. The size search and final results will be added here.
 
 ### 9.2 Minimal model sizes
 
