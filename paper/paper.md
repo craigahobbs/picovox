@@ -274,18 +274,23 @@ and a 120-step smoke test confirmed falling losses before the relaunch.
 UTMOS of the stage-A checkpoints, reading the *Moby-Dick* opening (the single-speaker neural voices score 4.21 for
 bdl and 3.99 for slt on the same text):
 
-| Voice | Step 5,000 | Step 10,000 | Step 15,000 |
-| --- | --- | --- | --- |
-| Reader 2843 (male) | 3.82 | 3.75 | 3.99 |
-| Reader 5750 (male) | 3.74 | 3.85 | 4.07 |
-| ARCTIC bdl (male) | 3.73 | 3.71 | 3.98 |
-| ARCTIC slt (female) | 3.61 | 3.78 | 3.97 |
-| Reader 5895 (female) | 3.50 | 3.37 | 3.54 |
-| Reader 6345 (female) | 3.38 | 3.42 | 3.59 |
+| Voice | A: step 5,000 | A: step 10,000 | A: step 15,000 | **B: step 5,000** |
+| --- | --- | --- | --- | --- |
+| Reader 2843 (male) | 3.82 | 3.75 | 3.99 | **4.22** |
+| Reader 5750 (male) | 3.74 | 3.85 | 4.07 | **4.23** |
+| ARCTIC bdl (male) | 3.73 | 3.71 | 3.98 | **4.24** |
+| ARCTIC slt (female) | 3.61 | 3.78 | 3.97 | **4.23** |
+| Reader 5895 (female) | 3.50 | 3.37 | 3.54 | **4.11** |
+| Reader 6345 (female) | 3.38 | 3.42 | 3.59 | **4.09** |
 
-One network for 237 speakers now matches the dedicated single-speaker slt model (3.97 against 3.99) and comes within
-0.23 of the single-speaker bdl model. Stage B (emotional styles and the adversarial critic), the ten designed voices,
-and style recognition rates will be added here.
+By the end of stage A, one network for 237 speakers matched the dedicated single-speaker slt model (3.97 against 3.99).
+Stage B - the emotional data plus an adversarial spectrogram critic with feature matching, aimed at the
+over-smoothing behind the female voice's "tinny" sound - lifted every voice above 4.0 within 5,000 steps (female mean
+3.70 to 4.14, male 4.02 to 4.23), past both single-speaker models (4.23 against 3.99 for slt, 4.24 against 4.21 for
+bdl) and into the range of human recordings (4.1-4.3 on this predictor). Validation loss rose slightly meanwhile
+(3.154 to 3.185): the critic trades spectral loss for realism. Because a neural judge and an adversarial critic may
+reward the same artifacts, this result awaits human listening. The rest of stage B, the ten designed voices, and style
+recognition rates will be added here.
 
 
 ## 8. Browser deployment
