@@ -39,7 +39,8 @@
             "runs": ["prof2-"],
             "steps": [
                 {"title": "Profile 2", "log": "build/nn/profile2/profile.log", "doneWhen": "done:", "weight": 3},
-                {"title": "Profile-guided optimization of small-model training (scratch-s64-a)", "log": "build/nn/pgo/pgo.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 5}
+                {"title": "Profile-guided optimization of small-model training (scratch-s64-a)", "log": "build/nn/pgo/pgo.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 5},
+                {"title": "MLX experiment: s64 stage A from scratch in Apple's MLX vs PyTorch", "log": "build/nn/mlx/mlx.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 6}
             ]
         },
         {
