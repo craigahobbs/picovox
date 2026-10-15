@@ -271,20 +271,21 @@ and a 120-step smoke test confirmed falling losses before the relaunch.
 
 ### 7.3 Interim results
 
-UTMOS of the `multi-a` checkpoint at step 5,000 (one sixth of stage A), reading the *Moby-Dick* opening:
+UTMOS of the stage-A checkpoints, reading the *Moby-Dick* opening (the single-speaker neural voices score 4.21 for
+bdl and 3.99 for slt on the same text):
 
-| Voice | UTMOS |
-| --- | --- |
-| Reader 2843 (male) | 3.82 |
-| Reader 5750 (male) | 3.74 |
-| ARCTIC bdl (male) | 3.73 |
-| ARCTIC slt (female) | 3.61 |
-| Reader 5895 (female) | 3.50 |
-| Reader 6345 (female) | 3.38 |
-| *Reference: single-speaker neural bdl / slt* | *4.21 / 3.99* |
+| Voice | Step 5,000 | Step 10,000 | Step 15,000 |
+| --- | --- | --- | --- |
+| Reader 2843 (male) | 3.82 | 3.75 | 3.99 |
+| Reader 5750 (male) | 3.74 | 3.85 | 4.07 |
+| ARCTIC bdl (male) | 3.73 | 3.71 | 3.98 |
+| ARCTIC slt (female) | 3.61 | 3.78 | 3.97 |
+| Reader 5895 (female) | 3.50 | 3.37 | 3.54 |
+| Reader 6345 (female) | 3.38 | 3.42 | 3.59 |
 
-Early checkpoints trail the single-speaker models, as expected for one network learning 237 voices at a high
-learning rate. Final results, the ten designed voices, and style recognition rates will be added here.
+One network for 237 speakers now matches the dedicated single-speaker slt model (3.97 against 3.99) and comes within
+0.23 of the single-speaker bdl model. Stage B (emotional styles and the adversarial critic), the ten designed voices,
+and style recognition rates will be added here.
 
 
 ## 8. Browser deployment
@@ -356,10 +357,11 @@ model next:
    wrong transcripts, noise), and keep an exclusion only if training without it measurably helps.
 7. Stop each run when validation and the sample voices' UTMOS stop improving, rather than at a fixed step count.
 
-Stage A of the multi-speaker model shows why the last two matter: its validation loss flattened near step 8,000 while
-its training loss kept falling (3.00 to 2.84 by step 15,000, validation 3.17 to 3.15) - the model began memorizing
-its 34,010 utterances, so steps 8,000-15,000 bought little, and more varied or cleaner data, not more capacity, is
-what it lacks.
+Stage A of the multi-speaker model shows why the stopping rule must listen, not just read the loss: its validation
+loss flattened near step 8,000 while its training loss kept falling (3.00 to 2.84 by step 15,000, validation 3.17 to
+3.15) - yet the sample voices' UTMOS rose most in exactly that stretch, from 3.52 to 3.70 (female) and 3.77 to 4.02
+(male) between steps 10,000 and 15,000, as the learning rate decayed. Validation loss is a poor proxy for perceived
+quality here, so the stopping rule uses the sample voices' scores.
 
 The current acoustic model's size (966K parameters) was chosen by judgment, not by such a search.
 
