@@ -77,7 +77,8 @@ export function neuralSpeaker(model, voice) {
 // rate is the speaking speed (1 is normal); paragraphStart lengthens the pause.
 export function streamNeuralUnit(model, text, options, onBlock) {
     const {rate = 1, seed = 1, paragraphStart = false, speaker} = options;
-    const sampleRate = 44100;
+    // 24 kHz - the voices' training rate (their content stops below 10.5 kHz), at about half 44.1 kHz's rendering cost
+    const sampleRate = 24000;
     const pause = paragraphStart ? neuralParagraphPause : neuralSentencePause;
     onBlock(new Float32Array(Math.round(sampleRate * pause / rate)), sampleRate);
     const networkStart = performance.now();

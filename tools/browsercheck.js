@@ -65,13 +65,13 @@ for (const block of blocks) {
     samples.set(block.samples, offset);
     offset += block.samples.length;
 }
-const wav = lib.wav.encodeWav(samples, 44100);
+const wav = lib.wav.encodeWav(samples, 24000);
 process.getBuiltinModule = getBuiltinModule;
-process.stdout.write(`Worker speech: ${blocks.length} blocks, ${(total / 44100).toFixed(2)} s, WAV ${wav.length} bytes\n`);
+process.stdout.write(`Worker speech: ${blocks.length} blocks, ${(total / 24000).toFixed(2)} s, WAV ${wav.length} bytes\n`);
 
 // The worker's audio must match the pipeline run directly: the pause, then the rendered frames with the gain and limiter
 const {frames, eq} = speakFrames(model, text, {'rate': 1 / options.rate, speaker});
-const rendered = render(frames, {'sampleRate': 44100, 'seed': options.seed, eq});
+const rendered = render(frames, {'sampleRate': 24000, 'seed': options.seed, eq});
 const pause = total - rendered.length;
 const expected = new Float32Array(total);
 rendered.forEach((value, index) => {

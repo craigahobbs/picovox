@@ -127,9 +127,10 @@ export class Engine {
         this.audioContext = null;
         this.output = null;
         this.mediaElement = null;
-        this.worker = null;
+        // The synthesis workers - [{worker, ready, starts}] - several on multi-core devices, each speaking different
+        // upcoming units (phones synthesize slower than real time on one core)
+        this.workers = [];
         this.workerReady = false;
-        this.workerStarts = 0;
         // The startup timeline - [{ms (since the last play), event}] - for diagnosing slow starts (the app shows it with
         // ?timing)
         this.timeline = [];
@@ -148,40 +149,58 @@ export class Engine {
         this.lastMaintenance = 0;
         this.measuredChars = 0;
         this.measuredSeconds = 0;
-        this.startWorker();
+        const poolSize = Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 2) - 1));
+        for (let slot = 0; slot < poolSize; slot++) {
+            this.startWorker(slot);
+        }
         this.timer = setInterval(() => this.tick(), 100);
     }
 
-    // Start the synthesis worker - one that fails before it's ready (a dropped module request, say) gets one fresh start
-    startWorker() {
-        this.workerStarts += 1;
-        this.worker = new Worker(new URL('worker.js', import.meta.url), {'type': 'module'});
-        this.worker.onmessage = (event) => this.onWorkerMessage(event.data);
-        this.worker.onerror = (event) => {
+    // Start a synthesis worker in a slot - one that fails before it's ready (a dropped module request, say) gets one fresh
+    // start
+    startWorker(slot) {
+        const starts = (this.workers[slot]?.starts ?? 0) + 1;
+        const worker = new Worker(new URL('worker.js', import.meta.url), {'type': 'module'});
+        this.workers[slot] = {worker, 'ready': false, starts};
+        worker.onmessage = (event) => this.onWorkerMessage(event.data, slot);
+        worker.onerror = (event) => {
             event.preventDefault();
-            this.mark(`worker error: ${event.message || '(no message)'} ${event.filename || ''}:${event.lineno || ''}`);
-            if (!this.workerReady && this.workerStarts < 2) {
-                this.worker.terminate();
-                this.startWorker();
-                this.restartRuns();
-                return;
-            }
-            this.error = `The speech synthesizer failed to start: ${event.message || 'serve the app over HTTP'}`;
-            this.notify();
+            this.mark(`worker ${slot} error: ${event.message || '(no message)'} ${event.filename || ''}:${event.lineno || ''}`);
+            this.workerFailed(slot, `The speech synthesizer failed to start: ${event.message || 'serve the app over HTTP'}`);
         };
     }
 
-    // After a worker restart - forget the old worker's runs (their units are asked of the new one) and prepare the voice
+    // A worker failed - restart it once if it failed before it was ready, else report the error
+    workerFailed(slot, message) {
+        const {ready, starts, worker} = this.workers[slot];
+        if (!ready && starts < 2) {
+            worker.terminate();
+            this.startWorker(slot);
+            this.restartRuns();
+            return;
+        }
+        this.error = message;
+        this.notify();
+    }
+
+    // Post a message to every worker
+    postAll(message) {
+        for (const {worker} of this.workers) {
+            worker.postMessage(message);
+        }
+    }
+
+    // After a worker restart - forget the runs (their units are asked again) and prepare the voice
     restartRuns() {
         const {session} = this;
         if (session !== null) {
-            session.run = null;
+            session.runs = [];
             for (const cell of session.cache) {
                 if (!cell.done) {
                     Object.assign(cell, {'blocks': [], 'length': 0, 'run': null});
                 }
             }
-            this.worker.postMessage({'type': 'prepare', 'voice': session.voice});
+            this.postAll({'type': 'prepare', 'voice': session.voice});
         }
     }
 
@@ -201,13 +220,13 @@ export class Engine {
         this.measuredSeconds = 0;
         const units = splitUnits(text);
         this.session = {
-            text, units, voice, rate, 'run': null, 'runIds': new Set(),
+            text, units, voice, rate, 'runs': [], 'runIds': new Set(),
             'cache': units.map(() => ({'blocks': [], 'length': 0, 'done': false, 'run': null}))
         };
         this.unit = units.length === 0 ? 0 : this.unitAtChar(startChar);
         this.time = 0;
         // Have the worker load the voice and synthesize the first sentences now, so the first play starts at once
-        this.worker.postMessage({'type': 'prepare', voice});
+        this.postAll({'type': 'prepare', voice});
         if (units.length !== 0) {
             this.ensureSynthesis(this.unit);
         }
@@ -395,28 +414,22 @@ export class Engine {
     }
 
     // Handle a worker message - the worker's readiness, and unit audio (the first run to reach a unit owns it)
-    onWorkerMessage(message) {
+    onWorkerMessage(message, slot = 0) {
         if (message.type === 'trace') {
-            this.mark(`worker: ${message.event} (worker +${message.ms} ms)`);
+            this.mark(`worker ${slot}: ${message.event} (+${message.ms} ms)`);
             return;
         }
         if (message.type === 'ready') {
-            this.mark('worker ready');
+            this.mark(`worker ${slot} ready`);
+            this.workers[slot].ready = true;
             this.workerReady = true;
             this.notify();
             return;
         }
         if (message.type === 'error') {
-            this.mark(`worker error message: ${message.message}`);
+            this.mark(`worker ${slot} error message: ${message.message}`);
             // A worker that couldn't load its models gets one fresh start, as a worker that failed to load
-            if (!this.workerReady && this.workerStarts < 2) {
-                this.worker.terminate();
-                this.startWorker();
-                this.restartRuns();
-                return;
-            }
-            this.error = message.message;
-            this.notify();
+            this.workerFailed(slot, message.message);
             return;
         }
         const {session} = this;
@@ -424,8 +437,10 @@ export class Engine {
             return;
         }
         if (message.type === 'runDone') {
-            if (session.run !== null && session.run.id === message.id) {
-                session.run.active = false;
+            for (const run of session.runs) {
+                if (run.id === message.id) {
+                    run.active = false;
+                }
             }
             return;
         }
@@ -535,32 +550,41 @@ export class Engine {
         if (remaining.length === 0) {
             return;
         }
-        const {run} = session;
-        if (run !== null && run.active) {
-            const index = run.order.indexOf(remaining[0]);
-            if (index !== -1 && run.order.slice(0, index).every((unit) => this.unitComplete(unit))) {
-                return;
-            }
+        // Every remaining unit already in an active run - nothing to do
+        const assigned = new Set(session.runs.filter((run) => run.active).flatMap((run) => run.order));
+        if (remaining.every((unit) => assigned.has(unit))) {
+            return;
         }
-        const id = this.nextRunId++;
-        session.run = {id, 'order': remaining, 'active': true};
-        session.runIds.add(id);
-        this.worker.postMessage({
-            'type': 'units', id, 'voice': session.voice, 'rate': session.rate,
-            'units': remaining.map((unit) => {
-                const {index, text, paragraphStart} = session.units[unit];
-                return {index, 'text': speechText(text), paragraphStart};
-            })
+
+        // Deal the remaining units to the workers in turn - each worker's new run supersedes its old one
+        for (const run of session.runs) {
+            run.active = false;
+        }
+        session.runs = [];
+        this.workers.forEach(({worker}, slot) => {
+            const order = remaining.filter((unit, index) => index % this.workers.length === slot);
+            if (order.length !== 0) {
+                const id = this.nextRunId++;
+                session.runs.push({id, order, 'active': true});
+                session.runIds.add(id);
+                worker.postMessage({
+                    'type': 'units', id, 'voice': session.voice, 'rate': session.rate,
+                    'units': order.map((unit) => {
+                        const {index, text, paragraphStart} = session.units[unit];
+                        return {index, 'text': speechText(text), paragraphStart};
+                    })
+                });
+            }
         });
     }
 
-    // Cancel the worker's unit run
+    // Cancel the workers' unit runs
     cancelRun() {
-        if (this.worker !== null) {
-            this.worker.postMessage({'type': 'cancel'});
-        }
-        if (this.session !== null && this.session.run !== null) {
-            this.session.run.active = false;
+        this.postAll({'type': 'cancel'});
+        if (this.session !== null) {
+            for (const run of this.session.runs) {
+                run.active = false;
+            }
         }
     }
 
