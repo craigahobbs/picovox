@@ -3,7 +3,7 @@
     "teacher": "build/nn/runs/multi-b/best.pt",
     "targets": {
         "books": "build/nn/g2p/books",
-        "bookCopies": 1,
+        "bookCopies": 2,
         "actorShare": 0.08,
         "blendShare": 0.1,
         "emotionShare": 0.3,
@@ -14,7 +14,7 @@
         "seed": 1
     },
     "train": {
-        "steps": 30000,
+        "steps": 20000,
         "batch": 48,
         "maxFrames": 24000,
         "lr": 0.0015,
@@ -26,6 +26,7 @@
     },
     "students": [
         {"name": "s96", "config": {"dim": 96, "decoderDim": 96, "encoderLayers": 3, "decoderLayers": 6}},
+        {"name": "s80", "config": {"dim": 80, "decoderDim": 80, "encoderLayers": 3, "decoderLayers": 4}},
         {"name": "s64", "config": {"dim": 64, "decoderDim": 64, "encoderLayers": 3, "decoderLayers": 4}},
         {"name": "s48", "config": {"dim": 48, "decoderDim": 48, "encoderLayers": 2, "decoderLayers": 4}},
         {"name": "s32", "config": {"dim": 32, "decoderDim": 32, "encoderLayers": 2, "decoderLayers": 3}}
