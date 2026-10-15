@@ -147,6 +147,29 @@
         height: 100%;
         background: var(--accent);
     }
+    .progress-list {
+        display: grid;
+        gap: 12px;
+    }
+    .progress-item {
+        display: grid;
+        gap: 5px;
+        min-width: 0;
+    }
+    .progress-head {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 2px 12px;
+    }
+    .progress-item .bar {
+        height: 8px;
+    }
+    .progress-line {
+        font: 0.75rem/1.4 var(--mono);
+        color: var(--muted);
+        overflow-wrap: anywhere;
+    }
     .facts {
         font: 0.78rem/1.5 var(--mono);
         color: var(--muted);
@@ -235,6 +258,10 @@
         <span class="muted">voice-synth neural voices - build/nn/</span>
         <span id="updated" class="updated"></span>
     </header>
+    <section id="progressSection" hidden>
+        <h2>In progress</h2>
+        <div id="progress" class="progress-list"></div>
+    </section>
     <section>
         <h2>Runs</h2>
         <div id="runs" class="runs"><p class="empty">Looking for runs in build/nn/runs/...</p></div>

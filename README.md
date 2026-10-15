@@ -128,7 +128,8 @@ average spectrum), `tools/slices.js` (band spectra of time ranges), `tools/pitch
 The training dashboard, `tools/dashboard/`, follows the neural voices' training as it runs: serve the repository
 (`python3 -m http.server`) and open http://localhost:8000/tools/dashboard/. It finds the runs in `build/nn/runs/`
 (their `log.jsonl` and `train.log`), charts their losses, validation, pitch error, and step times, shows the tails of
-the data pipelines' logs in `build/nn/`, and plays the samples there - refreshing every 10 seconds, read-only.
+the data pipelines' logs in `build/nn/` with progress bars and time-left estimates for the active ones (any log line with a
+percentage or an n/m count), and plays the samples there - refreshing every 10 seconds, read-only.
 
 
 ## The listener panel

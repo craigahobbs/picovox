@@ -16,6 +16,8 @@ const chartsElement = document.getElementById('charts');
 const chartsTitle = document.getElementById('chartsTitle');
 const logsElement = document.getElementById('logs');
 const samplesElement = document.getElementById('samples');
+const progressSection = document.getElementById('progressSection');
+const progressElement = document.getElementById('progress');
 const updatedElement = document.getElementById('updated');
 
 
@@ -23,6 +25,10 @@ const updatedElement = document.getElementById('updated');
 const runs = new Map();
 let selectedRun = null;
 const fileCache = new Map();
+
+
+// Each active log's progress readings by path - [{time, fraction}], for the time-left estimates
+const progressHistory = new Map();
 
 
 // Create an element with a class and text
@@ -405,20 +411,79 @@ async function findFiles(extension) {
 }
 
 
+// A log's latest progress - the last of its final lines reporting a percentage or an n/m count - {fraction, line} or null
+function parseProgress(lines) {
+    for (const line of lines.slice(-5).reverse()) {
+        const percents = [...line.matchAll(/(\d+(?:\.\d+)?)\s*%/g)];
+        if (percents.length !== 0) {
+            return {'fraction': Number(percents[percents.length - 1][1]) / 100, 'line': line.trim()};
+        }
+        const counts = [...line.matchAll(/(\d[\d,]*)\s*\/\s*(\d[\d,]*)/g)].map((match) => [
+            Number(match[1].replace(/,/g, '')), Number(match[2].replace(/,/g, ''))
+        ]).filter(([done, total]) => total > 0 && done <= total);
+        if (counts.length !== 0) {
+            const [done, total] = counts[counts.length - 1];
+            return {'fraction': done / total, 'line': line.trim()};
+        }
+    }
+    return null;
+}
+
+
+// The time left (s) for a log's progress, from its readings over the last few minutes
+function progressTimeLeft(path, fraction) {
+    const now = Date.now();
+    const recent = (reading) => now - reading.time < 5 * 60 * 1000 && reading.fraction <= fraction;
+    const readings = (progressHistory.get(path) || []).filter(recent);
+    readings.push({'time': now, fraction});
+    progressHistory.set(path, readings);
+    const [first] = readings;
+    const rate = (fraction - first.fraction) / ((now - first.time) / 1000);
+    return rate > 0 ? (1 - fraction) / rate : NaN;
+}
+
+
+// Render the progress of the active logs (updated in the last few minutes, not yet complete)
+function renderProgress(logs) {
+    const active = logs.filter(({result}) => Date.now() - result.modified < stalledMs).map(({file, result, lines}) => {
+        const progress = parseProgress(lines);
+        return progress === null || progress.fraction >= 1 ? null : {file, result, progress};
+    }).filter((item) => item !== null);
+    progressSection.hidden = active.length === 0;
+    progressElement.replaceChildren(...active.map(({file, progress}) => {
+        const item = make('div', 'progress-item');
+        const head = make('div', 'progress-head');
+        const timeLeft = progressTimeLeft(file.path, progress.fraction);
+        const estimate = Number.isFinite(timeLeft) ? ` · about ${formatDuration(timeLeft)} left` : '';
+        head.append(make('h3', '', file.path), make('span', 'facts', `${(100 * progress.fraction).toFixed(0)}%${estimate}`));
+        const bar = make('div', 'bar');
+        const fill = make('div');
+        fill.style.width = `${(100 * progress.fraction).toFixed(1)}%`;
+        bar.append(fill);
+        item.append(head, bar, make('div', 'progress-line', progress.line));
+        return item;
+    }));
+}
+
+
 // Render the activity logs - the most recently updated first, each one's tail
 async function renderLogs() {
     const files = await findFiles('.log');
-    const logs = (await Promise.all(files.map(async (file) => ({file, 'result': await fetchText(file.url)})))).
-        filter((item) => item.result !== null).sort((first, second) => second.result.modified - first.result.modified).slice(0, 8);
+    const allLogs = (await Promise.all(files.map(async (file) => ({file, 'result': await fetchText(file.url)})))).
+        filter((item) => item.result !== null).sort((first, second) => second.result.modified - first.result.modified);
+    for (const log of allLogs) {
+        log.lines = log.result.text.replace(/\r/g, '\n').split('\n').filter((line) => line.trim() !== '');
+    }
+    renderProgress(allLogs);
+    const logs = allLogs.slice(0, 8);
     if (logs.length === 0) {
         logsElement.replaceChildren(make('p', 'empty', 'No logs yet.'));
         return;
     }
-    logsElement.replaceChildren(...logs.map(({file, result}) => {
+    logsElement.replaceChildren(...logs.map(({file, result, lines}) => {
         const wrap = make('div', 'log');
         const age = formatDuration((Date.now() - result.modified) / 1000);
         wrap.append(make('h3', '', `${file.path} · updated ${age} ago`));
-        const lines = result.text.replace(/\r/g, '\n').split('\n').filter((line) => line.trim() !== '');
         const pre = make('pre', '', lines.slice(-14).join('\n'));
         wrap.append(pre);
         requestAnimationFrame(() => {
