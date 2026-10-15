@@ -358,14 +358,13 @@ def quality_stats(values, frame_mask):
     peak = torch.where(frame_mask > 0, av, torch.full_like(av, params.FLOOR_DB)).max(dim=1, keepdim=True).values
     strong = (frame_mask > 0) & (av > peak - 15)
 
-    # The median of the strong frames' values - the NaN-ignoring median of the values with the others NaN, the same
-    # (lower) median as of the selected values, without the boolean selection's synchronization
-    def median(column):
-        return torch.where(strong, column, torch.full_like(column, math.nan)).nanmedian()
-    out = {f'b{number}': median(values[..., params.INDEX[f'b{number}']]) for number in (1, 2, 3)}
-    out['ahRel'] = median(values[..., params.INDEX['ah']] - av)
-    out['afRel'] = median(values[..., params.INDEX['af']] - av)
-    return out
+    # The medians of the strong frames' values - the NaN-ignoring medians of the values with the others NaN, the same
+    # (lower) medians as of the selected values, without the boolean selection's synchronization (the five at once)
+    names = ('b1', 'b2', 'b3', 'ahRel', 'afRel')
+    columns = torch.stack([values[..., params.INDEX['b1']], values[..., params.INDEX['b2']], values[..., params.INDEX['b3']],
+                           values[..., params.INDEX['ah']] - av, values[..., params.INDEX['af']] - av])
+    medians = torch.where(strong, columns, torch.full_like(columns, math.nan)).reshape(len(names), -1).nanmedian(dim=-1).values
+    return dict(zip(names, medians.unbind()))
 
 
 # The loss terms of a batch - ({name: tensor}, the rendered crops, the recorded crops), both band-limited; prepared is
