@@ -50,6 +50,7 @@ Architecture options (off by default - with none given, training is unchanged):
 """
 
 import argparse
+import collections
 import contextlib
 import json
 import math
@@ -71,6 +72,9 @@ from .train import F_INDEX, PRIORS, RUNS_DIR, duration_loss, f0_track, render_va
 
 # The data's sample rate
 SOURCE_RATE = 24000
+
+# The most training steps the CPU runs ahead of the GPU (MPS)
+IN_FLIGHT = 2
 
 # The style intensities of CREMA-D's intensity labels
 INTENSITY = {'low': 0.5, 'medium': 0.75, 'high': 1.0, 'unspecified': 0.75}
@@ -165,11 +169,26 @@ def batch_stream(corpus, batch_size, max_frames, rng):
         yield from make_batches(corpus, batch_size, max_frames, rng)
 
 
-# Collate utterances into padded host (CPU) tensors - a batch for upload()
-def collate_host(corpus, indices):
+# The smallest length of a geometric ladder (ratio, multiples of quantum) at least a length - the padded length of
+# fixed-shape batches (ratio 0: the length itself)
+def bucket_length(length, ratio, quantum=8):
+    if not ratio:
+        return length
+    bucket = quantum
+    while bucket < length:
+        bucket = max(bucket + quantum, int(math.ceil(bucket * ratio / quantum)) * quantum)
+    return bucket
+
+
+# Collate utterances into padded host (CPU) tensors - a batch for upload(); with bucket_ratio, the token and frame
+# counts are padded up to a few fixed lengths (bucket_length), so the GPU sees few distinct shapes (on MPS each new
+# shape compiles its graphs) - the padding is masked, so only the dropout masks' draws change
+def collate_host(corpus, indices, bucket_ratio=0):
     items = [corpus.items[index] for index in indices]
-    token_count = max(len(item['tokens']) for item in items)
+    token_count = bucket_length(max(len(item['tokens']) for item in items), bucket_ratio)
     frame_count = max(item['frameCount'] for item in items)
+    if bucket_ratio:
+        frame_count = bucket_length(max(frame_count, max(int(item['durations'].sum()) for item in items)), bucket_ratio)
     batch = len(items)
     tokens = numpy.zeros((batch, token_count), dtype=numpy.int64)
     durations = numpy.zeros((batch, token_count), dtype=numpy.int64)
@@ -194,8 +213,8 @@ def collate_host(corpus, indices):
         'intensity': torch.tensor([item['intensity'] for item in items], dtype=torch.float32),
         'renderCounts': torch.tensor([2 * item['frameCount'] for item in items])
     }
-    # The model's frame count (nn/model.py regulate - the longest utterance's total duration, at least 1)
-    model_frames = max(1, int(durations.sum(axis=1).max()))
+    # The model's frame count (nn/model.py regulate - the longest utterance's total duration, at least 1; or the bucket)
+    model_frames = frame_count if bucket_ratio else max(1, int(durations.sum(axis=1).max()))
     return {'corpus': corpus, 'host': host, 'frameCount': model_frames, 'frameCounts': [item['frameCount'] for item in items],
             'items': items}
 
@@ -296,7 +315,7 @@ class Prefetcher:
     def _prepare(self):
         args = self.args
         name = 'cremad' if 'cremad' in self.corpora and self.rng.random() < args.cremad else 'multi'
-        batch = collate_host(self.corpora[name], next(self.streams[name]))
+        batch = collate_host(self.corpora[name], next(self.streams[name]), getattr(args, 'bucket_ratio', 0))
         seed = int(self.rng.integers(1 << 30))
         total = 2 * batch['frameCount'] + 1
         starts, length = crop_starts(batch['items'], total, args.crop_frames, self.rng)
@@ -343,14 +362,13 @@ def quality_stats(values, frame_mask):
     peak = torch.where(frame_mask > 0, av, torch.full_like(av, params.FLOOR_DB)).max(dim=1, keepdim=True).values
     strong = (frame_mask > 0) & (av > peak - 15)
 
-    # The median of the strong frames' values - the NaN-ignoring median of the values with the others NaN, the same
-    # (lower) median as of the selected values, without the boolean selection's synchronization
-    def median(column):
-        return torch.where(strong, column, torch.full_like(column, math.nan)).nanmedian()
-    out = {f'b{number}': median(values[..., params.INDEX[f'b{number}']]) for number in (1, 2, 3)}
-    out['ahRel'] = median(values[..., params.INDEX['ah']] - av)
-    out['afRel'] = median(values[..., params.INDEX['af']] - av)
-    return out
+    # The medians of the strong frames' values - the NaN-ignoring medians of the values with the others NaN, the same
+    # (lower) medians as of the selected values, without the boolean selection's synchronization (the five at once)
+    names = ('b1', 'b2', 'b3', 'ahRel', 'afRel')
+    columns = torch.stack([values[..., params.INDEX['b1']], values[..., params.INDEX['b2']], values[..., params.INDEX['b3']],
+                           values[..., params.INDEX['ah']] - av, values[..., params.INDEX['af']] - av])
+    medians = torch.where(strong, columns, torch.full_like(columns, math.nan)).reshape(len(names), -1).nanmedian(dim=-1).values
+    return dict(zip(names, medians.unbind()))
 
 
 # The loss terms of a batch - ({name: tensor}, the rendered crops, the recorded crops), both band-limited; prepared is
@@ -426,7 +444,9 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
         if correction is not None:
             render_correction = torch.cat([correction, correction[:, -1:]], dim=1)
             crop_correction = torch.stack([render_correction[ix, start:start + length + 1] for ix, start in enumerate(starts)])
-    audio = synth(crop_values, seed=[seed + ix for ix in range(len(batch['items']))], eq=eq, plan=plan, correction=crop_correction)
+    # (the rendered F0 is the recording's - render_values's teacher F0 - so the synthesizer needn't differentiate in it)
+    audio = synth(crop_values, seed=[seed + ix for ix in range(len(batch['items']))], eq=eq, plan=plan, correction=crop_correction,
+                  constant_f0=True)
     target = target[:, :audio.shape[1]]
     cutoffs = [0.95 * item['bandwidth'] for item in batch['items']]
     audio = band_limit(audio, cutoffs, args.rate, batch.get('cutoffs'))
@@ -500,6 +520,8 @@ def main(argv=None):
     parser.add_argument('--batch', type=int, default=16)
     parser.add_argument('--max-frames', type=int, default=16000, help='the most padded 10 ms frames in a batch')
     parser.add_argument('--crop', type=float, default=2.0, help='the rendered crop (seconds)')
+    parser.add_argument('--bucket-ratio', type=float, default=1.125,
+                        help='pad token and frame counts up to a geometric ladder of this ratio (0: no fixed shapes)')
     parser.add_argument('--rate', type=int, default=24000)
     parser.add_argument('--max-hz', type=float, default=10500)
     parser.add_argument('--cremad', type=float, default=0.0, help='the share of batches from the emotional speech')
@@ -522,6 +544,8 @@ def main(argv=None):
     parser.add_argument('--feature-matching', type=float, default=1.0)
     parser.add_argument('--adversarial-start', type=int, default=500, help='steps of the critic alone first')
     parser.add_argument('--critic-lr', type=float, default=2e-4)
+    parser.add_argument('--critic-precision', choices=['float32', 'bfloat16', 'float16'], default='bfloat16',
+                        help="the critic's convolutions' precision")
     parser.add_argument('--val-every', type=int, default=1000)
     parser.add_argument('--val-count', type=int, default=480, help='reader validation utterances')
     parser.add_argument('--log-every', type=int, default=50)
@@ -580,11 +604,15 @@ def main(argv=None):
         missing, unexpected = model.load_state_dict(state['model'], strict=False)
         print(f'init from {args.init}: missing {missing}, unexpected {unexpected}', file=sys.stderr)
     synth = dsynth.DSynth(args.rate).to(device)
-    critic = discriminator.Critic(args.rate, args.max_hz, eps=1e-9).to(device) if args.adversarial > 0 else None
-    critic_optimizer = torch.optim.AdamW(critic.parameters(), lr=args.critic_lr, betas=(0.8, 0.99)) if critic else None
+    critic = None
+    if args.adversarial > 0:
+        critic_dtype = None if args.critic_precision == 'float32' else getattr(torch, args.critic_precision)
+        critic = discriminator.Critic(args.rate, args.max_hz, eps=1e-9, dtype=critic_dtype).to(device)
     # (on the GPU the fused AdamW - one kernel, not a loop over the parameters - which also skips a step with a
     # non-finite gradient norm on the device, so the step needn't read the norm)
     fused = device.type in ('mps', 'cuda')
+    critic_optimizer = torch.optim.AdamW(critic.parameters(), lr=args.critic_lr, betas=(0.8, 0.99),
+                                         fused=fused or None) if critic else None
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, betas=(0.9, 0.98),
                                   fused=fused or None)
 
@@ -610,6 +638,8 @@ def main(argv=None):
         best = state.get('best', math.inf)
         if critic is not None and 'critic' in state:
             critic.load_state_dict(state['critic'])
+            for group in state['criticOptimizer']['param_groups']:
+                group['fused'] = fused or None
             critic_optimizer.load_state_dict(state['criticOptimizer'])
         rng = numpy.random.default_rng(args.seed + step)
     core = parameter_count(model) - model.speaker.weight.numel() - model.eq_free.numel()
@@ -639,6 +669,10 @@ def main(argv=None):
     # The steps' data, made ahead on a thread - all the draws from rng are its, in the order the steps made them
     jitter = float(model.fixed[params.INDEX['jitter']].cpu())
     prefetcher = Prefetcher(corpora, streams, args, rng, synth, jitter)
+    # The recent steps' data - their host tensors are the sources of non-blocking uploads, so each is kept until the
+    # GPU is past its step (an event after it): on MPS the steps don't read the device (the synthesizer finishes its
+    # plans made ahead there), so the CPU runs up to IN_FLIGHT steps ahead of the GPU
+    in_flight = collections.deque()
     while step < args.steps:
         prepared = prefetcher.next()
         corpus = prepared['corpusName']
@@ -653,14 +687,27 @@ def main(argv=None):
             losses, audio, target, stats = batch_losses(model, synth, batch, args, None, prepared['seed'], guide, sonorants, prepared)
         if critic is not None and corpus == 'multi':
             # The critic's step (on the rendering, detached), then the generator's adversarial and feature-matching
-            # losses (after --adversarial-start steps of the critic alone)
-            critic_loss = discriminator.discriminator_loss(critic(target), critic(audio.detach()))
+            # losses (after --adversarial-start steps of the critic alone). The discriminators' input spectrograms don't
+            # depend on their weights, so each signal's are computed once for both passes.
+            generator_pass = step >= args.adversarial_start
+            real_spectrograms = critic.spectrograms(target)
+            with torch.set_grad_enabled(generator_pass):
+                fake_spectrograms = critic.spectrograms(audio)
+            critic_loss = discriminator.discriminator_loss(critic.score(real_spectrograms),
+                                                           critic.score([value.detach() for value in fake_spectrograms]))
             critic_optimizer.zero_grad()
             critic_loss.backward()
             critic_optimizer.step()
             losses['critic'] = critic_loss.detach()
-            if step >= args.adversarial_start:
-                adversarial, matching = discriminator.generator_losses(critic(target), critic(audio))
+            if generator_pass:
+                # (the real features are targets only - no graph; and the generator's backward needs the gradient
+                # of the rendering's scores and features with respect to the audio only, not to the critic's weights)
+                with torch.no_grad():
+                    real_outputs = critic.score(real_spectrograms)
+                critic.requires_grad_(False)
+                fake_outputs = critic.score(fake_spectrograms)
+                critic.requires_grad_(True)
+                adversarial, matching = discriminator.generator_losses(real_outputs, fake_outputs)
                 losses['adversarial'] = adversarial.detach()
                 losses['matching'] = matching.detach()
                 losses['total'] = losses['total'] + args.adversarial * adversarial + args.feature_matching * matching
@@ -675,6 +722,12 @@ def main(argv=None):
             optimizer.step()
         scheduler.step()
         step += 1
+        if device.type == 'mps':
+            event = torch.mps.Event()
+            event.record()
+            in_flight.append((event, prepared))
+            while len(in_flight) > IN_FLIGHT:
+                in_flight.popleft()[0].synchronize()
         prefix = '' if corpus == 'multi' else 'cremad.'
         pending.append((prefix, list(losses), list(stats),
                         torch.stack([value.detach().float() for value in losses.values()] + list(stats.values()))))
@@ -692,6 +745,9 @@ def main(argv=None):
                     sums[prefix_keys + key] = sums.get(prefix_keys + key, 0) + value
                     sum_counts[prefix_keys + key] = sum_counts.get(prefix_keys + key, 0) + 1
             pending = []
+            # (a plan made ahead that didn't match its frames - one finished on the device can't be made again)
+            if synth.deferred_plan_mismatches():
+                raise RuntimeError('a synthesis cycle plan made ahead did not match its frames')
         if step % args.log_every == 0:
             elapsed = time.time() - last_time
             last_time = time.time()

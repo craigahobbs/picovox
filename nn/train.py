@@ -148,13 +148,20 @@ def collate(utterances, indices, device):
 #
 
 # The multi-resolution STFT loss below a frequency (spectral convergence + mean absolute log magnitude) plus a log-mel L1
+# (each signal's STFT is taken once per size - the log-mel terms reuse the resolutions' spectra)
 def spectral_loss(predicted, target, rate, max_hz, fft_sizes=(2048, 1024, 512, 256, 128), mel_weight=1.0, mel_eps=0.0):
+    spectra = {}
+
+    def spectra_of(fft_size):
+        if fft_size not in spectra:
+            spectra[fft_size] = (spectral.stft(predicted, fft_size, fft_size // 4), spectral.stft(target, fft_size, fft_size // 4))
+        return spectra[fft_size]
     total = 0
     for fft_size in fft_sizes:
-        hop = fft_size // 4
         bins = int(max_hz * fft_size / rate) + 1
-        magnitude_predicted = spectral.stft_magnitude(predicted, fft_size, hop)[..., :bins]
-        magnitude_target = spectral.stft_magnitude(target, fft_size, hop)[..., :bins]
+        spectrum_predicted, spectrum_target = spectra_of(fft_size)
+        magnitude_predicted = spectral.spectrum_magnitude(spectrum_predicted)[..., :bins]
+        magnitude_target = spectral.spectrum_magnitude(spectrum_target)[..., :bins]
         convergence = torch.linalg.norm(magnitude_target - magnitude_predicted, dim=(1, 2)) / \
             (torch.linalg.norm(magnitude_target, dim=(1, 2)) + 1e-7)
         log_distance = (torch.log(magnitude_target) - torch.log(magnitude_predicted)).abs().mean(dim=(1, 2))
@@ -164,8 +171,9 @@ def spectral_loss(predicted, target, rate, max_hz, fft_sizes=(2048, 1024, 512, 2
         mel_total = 0
         for fft_size in (1024, 256):
             bank = mel_bank(rate, fft_size, max_hz, predicted.device)
-            mel_predicted = torch.log(spectral.stft_magnitude(predicted, fft_size, fft_size // 4, eps=mel_eps) ** 2 @ bank.T + 1e-5)
-            mel_target = torch.log(spectral.stft_magnitude(target, fft_size, fft_size // 4, eps=mel_eps) ** 2 @ bank.T + 1e-5)
+            spectrum_predicted, spectrum_target = spectra_of(fft_size)
+            mel_predicted = torch.log(spectral.spectrum_magnitude(spectrum_predicted, eps=mel_eps) ** 2 @ bank.T + 1e-5)
+            mel_target = torch.log(spectral.spectrum_magnitude(spectrum_target, eps=mel_eps) ** 2 @ bank.T + 1e-5)
             mel_total = mel_total + (mel_predicted - mel_target).abs().mean()
         total = total + mel_weight * mel_total / 2 * 0.25
     return total
