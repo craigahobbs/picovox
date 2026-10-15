@@ -123,6 +123,7 @@ export class Engine {
         this.mediaElement = null;
         this.worker = null;
         this.workerReady = false;
+        this.workerStarts = 0;
         this.nextRunId = 1;
         this.session = null;
         this.playing = false;
@@ -139,15 +140,36 @@ export class Engine {
         this.timer = setInterval(() => this.tick(), 100);
     }
 
-    // Start the synthesis worker
+    // Start the synthesis worker - one that fails before it's ready (a dropped module request, say) gets one fresh start
     startWorker() {
+        this.workerStarts += 1;
         this.worker = new Worker(new URL('worker.js', import.meta.url), {'type': 'module'});
         this.worker.onmessage = (event) => this.onWorkerMessage(event.data);
         this.worker.onerror = (event) => {
             event.preventDefault();
+            if (!this.workerReady && this.workerStarts < 2) {
+                this.worker.terminate();
+                this.startWorker();
+                this.restartRuns();
+                return;
+            }
             this.error = `The speech synthesizer failed to start: ${event.message || 'serve the app over HTTP'}`;
             this.notify();
         };
+    }
+
+    // After a worker restart - forget the old worker's runs (their units are asked of the new one) and prepare the voice
+    restartRuns() {
+        const {session} = this;
+        if (session !== null) {
+            session.run = null;
+            for (const cell of session.cache) {
+                if (!cell.done) {
+                    Object.assign(cell, {'blocks': [], 'length': 0, 'run': null});
+                }
+            }
+            this.worker.postMessage({'type': 'prepare', 'voice': session.voice});
+        }
     }
 
     // Is a book loaded?
@@ -326,6 +348,13 @@ export class Engine {
             return;
         }
         if (message.type === 'error') {
+            // A worker that couldn't load its models gets one fresh start, as a worker that failed to load
+            if (!this.workerReady && this.workerStarts < 2) {
+                this.worker.terminate();
+                this.startWorker();
+                this.restartRuns();
+                return;
+            }
             this.error = message.message;
             this.notify();
             return;

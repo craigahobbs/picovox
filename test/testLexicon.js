@@ -37,14 +37,14 @@ have HH AE1 V
 `;
 
 
-test('lexicon.setDictionary, no dictionary', async () => {
+test('lexicon.setDictionary, no pronouncer', async () => {
     const lexicon = await freshLexicon('no-dictionary');
     // As in a browser - no Node built-in modules
     const {process} = globalThis;
     const {getBuiltinModule} = process;
     process.getBuiltinModule = undefined;
     try {
-        assert.throws(() => lexicon.textToPhrases('walk'), {'message': 'No pronouncing dictionary - call setDictionary(text) first'});
+        assert.throws(() => lexicon.textToPhrases('walk'), {'message': 'No pronouncer - call setPronouncer(pronounce) first'});
     } finally {
         process.getBuiltinModule = getBuiltinModule;
     }
@@ -62,6 +62,25 @@ test('lexicon.setDictionary', async () => {
     // Setting the dictionary again replaces it
     lexicon.setDictionary('walk W AA1 K\n');
     assert.deepEqual(wordPhones(lexicon.textToPhrases('walk')[0]), ['W AA1 K']);
+});
+
+
+test('lexicon.setPronouncer', async () => {
+    const lexicon = await freshLexicon('set-pronouncer');
+    lexicon.setDictionary(miniDictionary);
+
+    // A pronouncer replaces the dictionary for every word - function words still lose their stress
+    const words = [];
+    lexicon.setPronouncer((word) => {
+        words.push(word);
+        return word === 'the' ? ['DH', 'IY1'] : ['B', 'AA1', 'K', 'S'];
+    });
+    assert.deepEqual(wordPhones(lexicon.textToPhrases('the walk')[0]), ['DH IY0', 'B AA1 K S']);
+    assert.deepEqual(words, ['the', 'walk']);
+
+    // Null restores the dictionary
+    lexicon.setPronouncer(null);
+    assert.deepEqual(wordPhones(lexicon.textToPhrases('the walk')[0]), ['DH AH0', 'W AO1 K']);
 });
 
 

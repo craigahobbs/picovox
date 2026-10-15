@@ -1,12 +1,12 @@
-// Check that the browser build works - the app-time modules (lib/, web/, nn/js/, and the generated model module) load with
-// no Node built-ins (any node: import from them fails, and process.getBuiltinModule is hidden, as in a browser), and the
-// worker's neural speech matches the same pipeline run directly (speakFrames, render, gain, and limiter), sample for sample
+// Check that the browser build works - the app-time modules (lib/, web/, nn/js/, and the generated model modules) load
+// with no Node built-ins (any node: import from them fails, and process.getBuiltinModule is hidden, as in a browser), the
+// front end pronounces with the G2P network (no dictionary), and the worker's neural speech matches the same pipeline run
+// directly (speakFrames, render, gain, and limiter), sample for sample
 //
 // node tools/browsercheck.js
 
 import {createHash} from 'node:crypto';
 import process from 'node:process';
-import {readFileSync} from 'node:fs';
 import {registerHooks} from 'node:module';
 
 
@@ -24,10 +24,9 @@ registerHooks({
 
 
 // Load the app's modules as a browser would - no process.getBuiltinModule
-const dictionaryText = readFileSync(new URL('../data/cmudict.dict', import.meta.url), 'utf8');
 const {getBuiltinModule} = process;
 process.getBuiltinModule = undefined;
-const modules = ['catalog', 'epub', 'gutenberg', 'lexicon', 'phonemes', 'wav', 'zip'];
+const modules = ['catalog', 'epub', 'g2p', 'g2pModel', 'gutenberg', 'lexicon', 'phonemes', 'wav', 'zip'];
 const lib = {};
 for (const name of modules) {
     lib[name] = await import(`../lib/${name}.js`);
@@ -37,7 +36,7 @@ const {speakFrames} = await import('../nn/js/model.js');
 const {render} = await import('../nn/js/render.js');
 process.stdout.write(`Loaded lib/{${modules.join(',')}}.js, web/worker.js, and nn/js/ with no node: imports\n`);
 
-// Without a dictionary, the text front end must ask for one
+// Without a pronouncer (and no Node to load a dictionary), the text front end must ask for one
 let threw = false;
 try {
     lib.lexicon.textToPhrases('hello');
@@ -45,11 +44,14 @@ try {
     threw = true;
 }
 if (!threw) {
-    throw new Error('textToPhrases worked without a dictionary or Node');
+    throw new Error('textToPhrases worked without a pronouncer or Node');
 }
 
-// Speak with the worker's functions - the generated model module imported as the browser would
-lib.lexicon.setDictionary(dictionaryText);
+// Pronounce with the G2P network, as the worker does - then speak with the worker's functions
+lib.lexicon.setPronouncer(await lib.g2p.loadG2p(lib.g2pModel.g2pModel));
+const [phrase] = lib.lexicon.textToPhrases('Queequeg and Netherfield');
+const spelled = (word) => `${word.text} ${word.phones.map(({ph, stress}) => ph + (stress ?? '')).join(' ')}`;
+process.stdout.write(`G2P: ${phrase.words.map(spelled).join(', ')}\n`);
 const model = await worker.loadNeuralModel();
 const speaker = worker.neuralSpeaker(model, 'neural-female');
 const text = 'The birch canoe slid on the smooth planks.';

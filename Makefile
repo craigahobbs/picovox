@@ -65,7 +65,7 @@ site: data/catalog.json
 	rm -rf build/site
 	mkdir -p build/site/data
 	rsync -a --exclude .DS_Store index.html README.md web lib paper build/site/
-	cp data/cmudict.dict data/LICENSE.cmudict data/catalog.json build/site/data/
+	cp data/LICENSE.cmudict data/catalog.json build/site/data/
 	mkdir -p build/site/nn build/site/data/nn
 	rsync -a --exclude .DS_Store nn/js nn/vocab.json build/site/nn/
 	cp data/nn/multi.js build/site/data/nn/

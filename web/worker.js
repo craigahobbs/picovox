@@ -1,6 +1,6 @@
-// The synthesis Web Worker - loads the pronouncing dictionary, then speaks the player's units (sentences) with the
-// neural voices, posting small blocks of samples as they are synthesized so playback starts almost immediately. The
-// synthesis functions are exported so they also run under Node.
+// The synthesis Web Worker - loads the G2P network (letters to phonemes, for every word - no dictionary), then speaks
+// the player's units (sentences) with the neural voices, posting small blocks of samples as they are synthesized so
+// playback starts almost immediately. The synthesis functions are exported so they also run under Node.
 //
 // Messages in:
 // - {'type': 'units', 'id', 'units': [{'index', 'text', 'paragraphStart'}], 'voice', 'rate'} speaks the units in order,
@@ -8,14 +8,15 @@
 //   {'type': 'runDone', 'id'}. A newer run or a cancel supersedes a run between units.
 // - {'type': 'prepare', 'voice'} loads the voice's model ahead of playback.
 // - {'type': 'cancel'} stops the current run.
-// Messages out also include {'type': 'ready'} (the dictionary is loaded) and {'type': 'error', 'id', 'message'}.
+// Messages out also include {'type': 'ready'} (the G2P network is loaded) and {'type': 'error', 'id', 'message'}.
 //
 // A voice is a speaker of the multi-speaker neural model (nn/js), a generated module (data/nn/multi.js) imported on first
 // use.
 
 import {createRenderer} from '../nn/js/render.js';
+import {loadG2p} from '../lib/g2p.js';
 import {loadPackagedModel} from '../nn/js/package.js';
-import {setDictionary} from '../lib/lexicon.js';
+import {setPronouncer} from '../lib/lexicon.js';
 import {speakFrames} from '../nn/js/model.js';
 
 
@@ -90,14 +91,9 @@ export function streamNeuralUnit(model, text, options, onBlock) {
 
 // The worker message loop (only when running as a worker)
 if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globalThis.WorkerGlobalScope) {
-    // Fetch the dictionary on startup
-    const ready = fetch(new URL('../data/cmudict.dict', import.meta.url)).then((response) => {
-        if (!response.ok) {
-            throw new Error(`Could not load the pronouncing dictionary (${response.status})`);
-        }
-        return response.text();
-    }).then((text) => {
-        setDictionary(text);
+    // Load the G2P network on startup - every word's pronunciation
+    const ready = import('../lib/g2pModel.js').then(({g2pModel}) => loadG2p(g2pModel)).then((pronounce) => {
+        setPronouncer(pronounce);
         self.postMessage({'type': 'ready'});
     });
     ready.catch((error) => {
