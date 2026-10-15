@@ -141,6 +141,12 @@ function parseTextLog(text) {
     if (data) {
         info.data = data[1].replace(/\s*\(.*\)$/, '');
     }
+    const continued = text.match(/stopped at step (\d+) \(continued as ([^)\s]+)\)/);
+    if (continued) {
+        const [, stoppedStep, continuedAs] = continued;
+        info.stoppedStep = Number(stoppedStep);
+        info.continuedAs = continuedAs;
+    }
     if (/Traceback|Error:/.test(text)) {
         info.error = text.split('\n').filter((line) => /Error/.test(line)).pop();
     }
@@ -204,10 +210,64 @@ async function refreshRuns() {
             'modified': Math.max(jsonLog?.modified || 0, textLog?.modified || 0)
         });
     }
-    if (selectedRun === null || !runs.has(selectedRun)) {
-        // Select the most recently updated run
-        selectedRun = [...runs.values()].sort((first, second) => second.modified - first.modified)[0]?.name ?? null;
+    // First-seen order - each run's place is fixed when the page first sees it (remembered per browser)
+    let changed = false;
+    for (const run of runs.values()) {
+        if (!(run.name in runOrder)) {
+            runOrder[run.name] = runOrderLoaded ? Date.now() : run.modified;
+            changed = true;
+        }
     }
+    if (changed) {
+        storageSet(runOrderKey, JSON.stringify(runOrder));
+    }
+    runOrderLoaded = true;
+    if (selectedRun === null || !runs.has(selectedRun)) {
+        // The remembered run, else the newest live run of the first group, else the newest run there, else any
+        const remembered = storageGet(selectedKey);
+        const [firstGroup] = groupRuns();
+        const live = firstGroup.runs.find((run) => runStatus(run) === 'live');
+        selectedRun = runs.has(remembered) ? remembered : (live || firstGroup.runs[0] || [...runs.values()][0])?.name ?? null;
+    }
+}
+
+
+// The run groups, each run in the first group whose prefixes match its name, newest first by first-seen order
+const runGroupSpecs = [
+    {'title': 'Multi-speaker voice', 'prefixes': ['multi-'], 'open': true},
+    {'title': 'G2P', 'prefixes': ['g2p-'], 'open': false},
+    {'title': 'Earlier single-speaker voices', 'prefixes': ['slt-', 'bdl-', 'joint-'], 'open': false},
+    {'title': 'Other', 'prefixes': [''], 'open': false}
+];
+const runOrderKey = 'training-dashboard-run-order-v1';
+const selectedKey = 'training-dashboard-run-v1';
+const groupsOpenKey = 'training-dashboard-run-groups-v1';
+let runOrder = {};
+try {
+    runOrder = JSON.parse(storageGet(runOrderKey)) || {};
+} catch {
+    runOrder = {};
+}
+let runOrderLoaded = false;
+function groupRuns() {
+    const groups = runGroupSpecs.map((spec) => ({...spec, 'runs': []}));
+    for (const run of runs.values()) {
+        groups.find((group) => group.prefixes.some((prefix) => run.name.startsWith(prefix))).runs.push(run);
+    }
+    for (const group of groups) {
+        const seen = (run) => runOrder[run.name] ?? 0;
+        group.runs.sort((first, second) => seen(second) - seen(first) || first.name.localeCompare(second.name));
+    }
+    return groups;
+}
+
+
+// Select a run - remembered per browser
+function selectRun(name) {
+    selectedRun = name;
+    storageSet(selectedKey, name);
+    renderRuns();
+    renderCharts(true);
 }
 
 
@@ -224,51 +284,132 @@ function renderRuns() {
         runsElement.replaceChildren(make('p', 'empty', 'No runs yet - training writes to build/nn/runs/<run>/.'));
         return;
     }
-    const sorted = [...runs.values()].sort((first, second) => second.modified - first.modified);
-    runsElement.replaceChildren(...sorted.map((run) => {
+    let groupsOpen = {};
+    try {
+        groupsOpen = JSON.parse(storageGet(groupsOpenKey)) || {};
+    } catch {
+        groupsOpen = {};
+    }
+    const groups = groupRuns().filter((group) => group.runs.length !== 0);
+    // The groups' elements persist (so their open state does), and their cards are rebuilt each refresh
+    for (const group of groups) {
+        if (!runGroupElements.has(group.title)) {
+            const element = make('details', 'run-group');
+            element.open = groupsOpen[group.title] ?? group.open;
+            element.addEventListener('toggle', () => {
+                groupsOpen[group.title] = element.open;
+                storageSet(groupsOpenKey, JSON.stringify(groupsOpen));
+            });
+            const summary = make('summary');
+            const title = make('h3', '', group.title);
+            const facts = make('span', 'facts');
+            const bar = make('div', 'bar');
+            const fill = make('div');
+            bar.append(fill);
+            summary.append(title, facts, bar);
+            const grid = make('div', 'runs');
+            element.append(summary, grid);
+            runGroupElements.set(group.title, {element, facts, fill, grid});
+        }
+        const {facts, fill, grid} = runGroupElements.get(group.title);
+        const progress = groupProgress(group.runs);
+        const counts = `${group.runs.length} run${group.runs.length === 1 ? '' : 's'}${progress.live ? ` · ${progress.live} live` : ''}`;
+        const percent = Number.isFinite(progress.fraction) ? ` · ${Math.round(100 * progress.fraction)}% of steps` : '';
+        const left = Number.isFinite(progress.secondsLeft) ? ` · ${formatDuration(progress.secondsLeft)} left` : '';
+        facts.textContent = `${counts}${percent}${left}`;
+        fill.style.width = `${(100 * (progress.fraction || 0)).toFixed(1)}%`;
+        grid.replaceChildren(...group.runs.map(runCard));
+    }
+    const elements = groups.map((group) => runGroupElements.get(group.title).element);
+    if (elements.some((element, index) => runsElement.children[index] !== element) || runsElement.children.length !== elements.length) {
+        runsElement.replaceChildren(...elements);
+    }
+}
+
+
+// A group's overall progress - {fraction (steps done of the runs' targets), live (count), secondsLeft (the longest live
+// run's)}; a run stopped and continued as another counts as complete at its stopping step
+function groupProgress(members) {
+    let done = 0;
+    let total = 0;
+    let live = 0;
+    let secondsLeft = NaN;
+    for (const run of members) {
         const train = run.entries.train || [];
-        const last = train[train.length - 1];
-        const status = runStatus(run);
-        const card = make('button', 'run');
-        card.type = 'button';
-        card.setAttribute('aria-pressed', String(run.name === selectedRun));
-        const head = make('div', 'run-head');
-        head.append(make('span', 'run-name', run.name), make('span', `pill ${status}`, status));
-        const bar = make('div', 'bar');
-        const fill = make('div');
-        const fraction = last && run.info.targetSteps ? Math.min(1, last.step / run.info.targetSteps) : 0;
-        fill.style.width = `${(100 * fraction).toFixed(1)}%`;
-        bar.append(fill);
-        const recent = train.slice(-20).map((entry) => entry.secondsPerStep).filter(Number.isFinite);
-        const secondsPerStep = median(recent);
-        const remaining = last && run.info.targetSteps ? (run.info.targetSteps - last.step) * secondsPerStep : NaN;
-        const timeLeft = status === 'live' ? `${formatDuration(remaining)} left` : '-';
-        const val = run.entries.val || [];
-        const lastVal = val[val.length - 1];
-        const facts = [
-            `step ${last ? last.step.toLocaleString() : 0}${run.info.targetSteps ? ` / ${run.info.targetSteps.toLocaleString()}` : ''}`,
-            `${Number.isFinite(secondsPerStep) ? secondsPerStep.toFixed(2) : '-'} s/step · ${timeLeft}`,
-            `train total ${last ? last.total.toFixed(3) : '-'}${lastVal ? ` · val ${(lastVal.spectral ?? lastVal.total).toFixed(3)}` : ''}`,
-            `updated ${formatDuration((Date.now() - run.modified) / 1000)} ago`
-        ];
-        if (run.info.parameters) {
-            facts.push(`${run.info.parameters.toLocaleString()} parameters`);
+        const step = train.length === 0 ? 0 : train[train.length - 1].step;
+        const target = run.info.continuedAs ? run.info.stoppedStep : run.info.targetSteps;
+        if (target) {
+            done += Math.min(step, target);
+            total += target;
         }
-        if (run.info.error) {
-            facts.push(run.info.error);
+        if (runStatus(run) === 'live') {
+            live += 1;
+            const secondsPerStep = median(train.slice(-20).map((entry) => entry.secondsPerStep).filter(Number.isFinite));
+            const remaining = target ? (target - step) * secondsPerStep : NaN;
+            if (Number.isFinite(remaining)) {
+                secondsLeft = Number.isFinite(secondsLeft) ? Math.max(secondsLeft, remaining) : remaining;
+            }
         }
-        const factsElement = make('div', 'facts');
-        for (const fact of facts) {
-            factsElement.append(make('div', '', fact));
-        }
-        card.append(head, bar, factsElement);
-        card.addEventListener('click', () => {
-            selectedRun = run.name;
-            renderRuns();
-            renderCharts(true);
-        });
-        return card;
-    }));
+    }
+    return {'fraction': total === 0 ? NaN : done / total, live, secondsLeft};
+}
+
+
+// A run's card
+const runGroupElements = new Map();
+function runCard(run) {
+    const train = run.entries.train || [];
+    const last = train[train.length - 1];
+    const status = runStatus(run);
+    const card = make('button', 'run');
+    card.type = 'button';
+    card.setAttribute('aria-pressed', String(run.name === selectedRun));
+    const head = make('div', 'run-head');
+    head.append(make('span', 'run-name', run.name), make('span', `pill ${status}`, status));
+    const bar = make('div', 'bar');
+    const fill = make('div');
+    const fraction = last && run.info.targetSteps ? Math.min(1, last.step / run.info.targetSteps) : 0;
+    fill.style.width = `${(100 * fraction).toFixed(1)}%`;
+    bar.append(fill);
+    const recent = train.slice(-20).map((entry) => entry.secondsPerStep).filter(Number.isFinite);
+    const secondsPerStep = median(recent);
+    const remaining = last && run.info.targetSteps ? (run.info.targetSteps - last.step) * secondsPerStep : NaN;
+    const timeLeft = status === 'live' ? `${formatDuration(remaining)} left` : '-';
+    const val = run.entries.val || [];
+    const lastVal = val[val.length - 1];
+    const facts = [
+        `step ${last ? last.step.toLocaleString() : 0}${run.info.targetSteps ? ` / ${run.info.targetSteps.toLocaleString()}` : ''}`,
+        `${Number.isFinite(secondsPerStep) ? secondsPerStep.toFixed(2) : '-'} s/step · ${timeLeft}`,
+        `train total ${last ? last.total.toFixed(3) : '-'}${lastVal ? ` · val ${(lastVal.spectral ?? lastVal.total).toFixed(3)}` : ''}`,
+        `updated ${formatDuration((Date.now() - run.modified) / 1000)} ago`
+    ];
+    if (run.info.continuedAs) {
+        facts.push(`continued as ${run.info.continuedAs} at step ${run.info.stoppedStep.toLocaleString()}`);
+    }
+    const parent = parentRun(run);
+    if (parent) {
+        facts.push(`continues ${parent.run.name} from step ${parent.offset.toLocaleString()}`);
+    }
+    if (run.info.parameters) {
+        facts.push(`${run.info.parameters.toLocaleString()} parameters`);
+    }
+    if (run.info.error) {
+        facts.push(run.info.error);
+    }
+    const factsElement = make('div', 'facts');
+    for (const fact of facts) {
+        factsElement.append(make('div', '', fact));
+    }
+    card.append(head, bar, factsElement);
+    card.addEventListener('click', () => selectRun(run.name));
+    return card;
+}
+
+
+// The run a run continues - {run, offset} (the parent's step it started from), or null
+function parentRun(run) {
+    const parent = [...runs.values()].find((other) => other.info.continuedAs === run.name);
+    return parent ? {'run': parent, 'offset': parent.info.stoppedStep} : null;
 }
 
 
@@ -375,31 +516,41 @@ function renderCharts(force = false) {
         chartsElement.replaceChildren(make('p', 'empty', 'Select a run.'));
         return;
     }
-    chartsTitle.textContent = `Curves - ${run.name}`;
+    const continues = parentRun(run);
+    chartsTitle.textContent = continues ? `Curves - ${run.name} (continuing ${continues.run.name}, faded)` : `Curves - ${run.name}`;
     const styles = getComputedStyle(document.documentElement);
     const colors = ['--accent', '--series-2', '--series-3', '--series-4'].map((name) => styles.getPropertyValue(name));
     const train = run.entries.train || [];
     const val = run.entries.val || [];
-    const series = (entries, key) => entries.filter((entry) => Number.isFinite(entry[key])).map((entry) => [entry.step, entry[key]]);
+    const parent = parentRun(run);
+    const offset = parent ? parent.offset : 0;
+    const series = (entries, key) => entries.filter((entry) => Number.isFinite(entry[key])).
+        map((entry) => [entry.step + offset, entry[key]]);
+    const parentSeries = (kind, key) => {
+        if (!parent) {
+            return [];
+        }
+        const entries = (parent.run.entries[kind] || []).filter((entry) => Number.isFinite(entry[key]) && entry.step <= offset);
+        return entries.map((entry) => [entry.step, entry[key]]);
+    };
+    const faded = (color) => `${color.trim()}55`;
+    // Each series: [label, kind (train or val), key, smoothed, color]
     const charts = [
         {'title': 'Loss (total)', 'logScale': true, 'series': [
-            {'label': 'train (smoothed)', 'points': smoothSeries(series(train, 'total'), 0.8), 'color': colors[0]},
-            {'label': 'val', 'points': series(val, 'total'), 'color': colors[1]}
+            ['train (smoothed)', 'train', 'total', true, colors[0]], ['val', 'val', 'total', false, colors[1]]
         ]},
         {'title': 'Spectral loss', 'series': [
-            {'label': 'train (smoothed)', 'points': smoothSeries(series(train, 'spectral'), 0.8), 'color': colors[0]},
-            {'label': 'val', 'points': series(val, 'spectral'), 'color': colors[1]}
+            ['train (smoothed)', 'train', 'spectral', true, colors[0]], ['val', 'val', 'spectral', false, colors[1]]
         ]},
         {'title': 'Durations', 'logScale': true, 'series': [
-            {'label': 'phones (train)', 'points': smoothSeries(series(train, 'durPhone'), 0.8), 'color': colors[0]},
-            {'label': 'phones (val)', 'points': series(val, 'durPhone'), 'color': colors[1]},
-            {'label': 'pauses (val)', 'points': series(val, 'durPaused'), 'color': colors[2]}
+            ['phones (train)', 'train', 'durPhone', true, colors[0]], ['phones (val)', 'val', 'durPhone', false, colors[1]],
+            ['pauses (val)', 'val', 'durPaused', false, colors[2]]
         ]},
-        {'title': 'Pitch error (val, cents)', 'series': [{'label': 'F0 error', 'points': series(val, 'f0Cents'), 'color': colors[3]}]},
+        {'title': 'Pitch error (val, cents)', 'series': [['F0 error', 'val', 'f0Cents', false, colors[3]]]},
         {'title': 'Seconds per step (stalls show as spikes)', 'logScale': true, 'series': [
-            {'label': 's/step', 'points': series(train, 'secondsPerStep'), 'color': colors[2]}
+            ['s/step', 'train', 'secondsPerStep', false, colors[2]]
         ]},
-        {'title': 'Learning rate', 'series': [{'label': 'lr', 'points': series(train, 'lr'), 'color': colors[0]}]}
+        {'title': 'Learning rate', 'series': [['lr', 'train', 'lr', false, colors[0]]]}
     ];
 
     // Any other numeric training or validation keys become extra charts (e.g. adversarial losses)
@@ -407,9 +558,23 @@ function renderCharts(force = false) {
     const extraKeys = [...new Set([...train, ...val].flatMap((entry) => Object.keys(entry)))].filter((key) => !known.has(key));
     for (const key of extraKeys) {
         charts.push({'title': key, 'logScale': false, 'series': [
-            {'label': 'train (smoothed)', 'points': smoothSeries(series(train, key), 0.8), 'color': colors[0]},
-            {'label': 'val', 'points': series(val, key), 'color': colors[1]}
+            ['train (smoothed)', 'train', key, true, colors[0]], ['val', 'val', key, false, colors[1]]
         ]});
+    }
+
+    // The series' points - a continued run's parent drawn behind it, faded, up to the step the run started from
+    const entriesOf = {train, val};
+    for (const chart of charts) {
+        chart.series = chart.series.flatMap(([label, kind, key, smoothed, color]) => {
+            const own = series(entriesOf[kind], key);
+            const ownSeries = {label, 'points': smoothed ? smoothSeries(own, 0.8) : own, color};
+            const before = parentSeries(kind, key);
+            if (before.length === 0) {
+                return [ownSeries];
+            }
+            const parentPoints = smoothed ? smoothSeries(before, 0.8) : before;
+            return [{'label': `${parent.run.name} ${label}`, 'points': parentPoints, 'color': faded(color)}, ownSeries];
+        });
     }
     chartsElement.replaceChildren(...charts.map((chart) => {
         const wrap = make('div', 'chart');
@@ -799,7 +964,7 @@ async function renderPipeline(logs) {
                 const rowFill = make('div');
                 rowBar.append(rowFill);
                 const line = make('div', 'progress-line');
-                item.append(icon, make('span', row.unplanned ? `unplanned ${row.kind}` : '', row.title), percent, rowBar, line);
+                item.append(icon, make('span', row.unplanned ? `unplanned kind-${row.kind}` : '', row.title), percent, rowBar, line);
                 list.append(item);
                 rowElements.set(row.id, {item, icon, percent, 'fill': rowFill, line});
             }

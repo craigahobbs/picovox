@@ -141,6 +141,35 @@
         padding: 16px;
         min-width: 0;
     }
+    #runs {
+        display: grid;
+        gap: 10px;
+    }
+    .run-group summary {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 6px 8px;
+        padding: 6px 0;
+        cursor: pointer;
+    }
+    .run-group summary h3::before {
+        content: "▸ ";
+        color: var(--accent);
+    }
+    .run-group[open] summary h3::before {
+        content: "▾ ";
+    }
+    .run-group summary .bar {
+        flex-basis: 100%;
+    }
+    .run-group summary::-webkit-details-marker {
+        display: none;
+    }
+    .run-group .runs {
+        margin-top: 6px;
+    }
     .runs {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
@@ -322,7 +351,7 @@
         font-family: var(--mono);
         font-size: 0.8rem;
     }
-    .step .unplanned.agent {
+    .step .unplanned.kind-agent {
         font-family: inherit;
         font-size: inherit;
         font-style: italic;
@@ -564,7 +593,7 @@
     <div class="tab-panel" id="panel-training" role="tabpanel" aria-labelledby="tab-training" hidden>
         <section>
             <h2>Runs</h2>
-            <div id="runs" class="runs"><p class="empty">Looking for runs in build/nn/runs/...</p></div>
+            <div id="runs"><p class="empty">Looking for runs in build/nn/runs/...</p></div>
         </section>
         <section>
             <h2 id="chartsTitle">Curves</h2>
