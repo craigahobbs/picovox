@@ -58,6 +58,7 @@
             "processes": [],
             "runs": [],
             "steps": [
+                {"title": "Training data pronounced by the G2P network (not the dictionary)", "log": "build/nn/frontend/frontend.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 2},
                 {"title": "Data targets", "file": "build/nn/pipeline/train-data.json", "weight": 1},
                 {"title": "Teacher (stage A and B) with a stopping rule", "file": "build/nn/pipeline/train-teacher.json", "weight": 2},
                 {"title": "Students: targets, train, polish, pick", "file": "build/nn/pipeline/train-students.json", "weight": 2},
