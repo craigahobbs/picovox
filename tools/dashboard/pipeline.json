@@ -91,12 +91,13 @@
             "detail": "voice students distilled from the stage-B teacher - the smallest within tolerance, then the retraining pipeline",
             "weight": 15,
             "processes": ["nn.distill"],
-            "runs": ["distill-"],
+            "runs": ["distill-", "scratch-"],
             "steps": [
                 {"title": "Distillation code (teacher targets, student training, evaluation)", "log": "build/nn/distill/code.log", "weight": 2},
                 {"title": "Teacher targets: training utterances and book sentences", "log": "build/nn/distill/targets.log", "weight": 2},
                 {"title": "Student ladder", "log": "build/nn/distill/students.log", "weight": 5},
                 {"title": "Evaluation and the chosen student", "log": "build/nn/distill/eval.log", "weight": 2},
+                {"title": "From-scratch s64 (no teacher): can a full retrain skip the teacher?", "log": "build/nn/scratch/scratch.log", "doneWhen": "runs done", "failWhen": "FAILED", "weight": 3},
                 {"title": "Merge the worktrees into the main tree", "file": "build/nn/pipeline/merged.json", "weight": 1},
                 {"title": "Retraining pipeline (make targets, configs, gates, docs)", "file": "build/nn/pipeline/pipeline-ready.json", "weight": 2}
             ]

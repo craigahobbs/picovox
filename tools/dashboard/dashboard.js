@@ -242,6 +242,7 @@ async function refreshRuns() {
 const runGroupSpecs = [
     {'title': 'Multi-speaker voice', 'prefixes': ['multi-'], 'open': true},
     {'title': 'G2P', 'prefixes': ['g2p-'], 'open': false},
+    {'title': 'Voice students (distilled and from scratch)', 'prefixes': ['distill-', 'scratch-'], 'open': false},
     {'title': 'Earlier single-speaker voices', 'prefixes': ['slt-', 'bdl-', 'joint-'], 'open': false},
     {'title': 'Other', 'prefixes': [''], 'open': false}
 ];
@@ -713,15 +714,20 @@ function saveAssigned() {
 }
 
 
-// A log step's state from its fetched log - {status: waiting|running|done|failed, fraction, line, timeLeft}
-function logState(path, log) {
+// A log step's state from its fetched log - {status: waiting|running|done|failed, fraction, line, timeLeft}. A step with
+// doneWhen (and failWhen) text is running until a log line contains it, however long the log is quiet (a long stage)
+function logState(path, log, {doneWhen = null, failWhen = null} = {}) {
     if (!log) {
         return {'status': 'waiting', 'fraction': 0, 'line': 'not started'};
     }
     const {result, lines} = log;
     const lastLine = (lines[lines.length - 1] || '').trim();
-    if (lines.some((line) => line.startsWith('Traceback'))) {
+    if (lines.some((line) => line.startsWith('Traceback') || (failWhen !== null && line.includes(failWhen)))) {
         return {'status': 'failed', 'fraction': 0, 'line': lastLine};
+    }
+    if (doneWhen !== null) {
+        const done = lines.some((line) => line.includes(doneWhen));
+        return {'status': done ? 'done' : 'running', 'fraction': done ? 1 : null, 'line': lastLine};
     }
     // Done: quiet for a few minutes, or briefly quiet after a complete count or a summary line following the progress lines
     const quiet = Date.now() - result.modified;
@@ -810,7 +816,7 @@ async function pipelineRows(logs, activity) {
         phase, 'rows': await Promise.all(phase.steps.map(async (step) => {
             let state;
             if (step.log) {
-                state = logState(step.log, logsByPath.get(step.log));
+                state = logState(step.log, logsByPath.get(step.log), step);
             } else if (step.run) {
                 state = newestRun ? runState(newestRun) : notStarted;
                 if (newestRun) {
