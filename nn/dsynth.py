@@ -132,30 +132,42 @@ def shelf_log(frequency, gain_db, trig=None):
     return 0.5 * torch.log(real * real + imag * imag + 1e-30), torch.atan2(imag, real)
 
 
-# The frication bandpass (lib/klatt.js Bandpass, 0 dB peak) - complex response
-def _bandpass(frequency, center, bandwidth, trig=None):
+# The frication bandpass's (lib/klatt.js Bandpass, 0 dB peak) biquad coefficients (b0, b1, b2, a1, a2)
+def _bandpass_coefficients(center, bandwidth):
     center_clamped = torch.clamp(center, max=0.45 * params.REF_RATE)
     w0 = _omega(center_clamped)
     alpha = torch.sin(w0) / (2 * torch.clamp(center / bandwidth, min=0.3))
     a0 = 1 + alpha
     zero = torch.zeros_like(alpha)
-    return _biquad(frequency, alpha / a0, zero, -alpha / a0, -2 * torch.cos(w0) / a0, (1 - alpha) / a0, trig)
+    return alpha / a0, zero, -alpha / a0, -2 * torch.cos(w0) / a0, (1 - alpha) / a0
 
 
-# The frication high-pass (lib/klatt.js HighPass, Butterworth) - squared magnitude
-def _highpass_power(frequency, cutoff, trig=None):
+# The frication bandpass - complex response
+def _bandpass(frequency, center, bandwidth, trig=None):
+    return _biquad(frequency, *_bandpass_coefficients(center, bandwidth), trig)
+
+
+# The frication high-pass's (lib/klatt.js HighPass, Butterworth) biquad coefficients (b0, b1, b2, a1, a2)
+def _highpass_coefficients(cutoff):
     w0 = _omega(torch.clamp(cutoff, max=0.45 * params.REF_RATE))
     alpha = torch.sin(w0) / math.sqrt(2)
     cos = torch.cos(w0)
     a0 = 1 + alpha
-    real, imag = _biquad(frequency, (1 + cos) / 2 / a0, -(1 + cos) / a0, (1 + cos) / 2 / a0, -2 * cos / a0, (1 - alpha) / a0,
-                          trig)
+    return (1 + cos) / 2 / a0, -(1 + cos) / a0, (1 + cos) / 2 / a0, -2 * cos / a0, (1 - alpha) / a0
+
+
+# The frication high-pass - squared magnitude
+def _highpass_power(frequency, cutoff, trig=None):
+    real, imag = _biquad(frequency, *_highpass_coefficients(cutoff), trig)
     return real * real + imag * imag
 
 
 # The frication filter's magnitude (relative to af) - |ab + ap1 BP1^2 + ap2 BP2^2| * |HP|^2
 def frication_magnitude(frequency, values, trig=None):
     trig = frequency_trig(frequency) if trig is None else trig
+    response = _frication_kernel(trig, values)
+    if response is not None:
+        return response
     bp1_re, bp1_im = _bandpass(frequency, values['fp1'], values['bp1'], trig)
     bp2_re, bp2_im = _bandpass(frequency, values['fp2'], values['bp2'], trig)
     real = values['ab'] + values['ap1'] * (bp1_re * bp1_re - bp1_im * bp1_im) + values['ap2'] * (bp2_re * bp2_re - bp2_im * bp2_im)
@@ -589,6 +601,176 @@ def _tract_kernel(trig, poles, zero, phase):
             for value in trig]
     response = _TractResponse.apply(*trig, coef_b.contiguous(), coef_c.contiguous(), log_a.contiguous(), phase)
     return response if phase else (response, None)
+
+
+#
+# The frication filter's magnitude on Apple GPUs (MPS, float32) - a Metal kernel for frication_magnitude's [B, T, M]
+# part (the forward per frequency; the backward per frame, summed over the frequencies), so its dozens of [B, T, M]
+# intermediates are never stored. The filters' per-frame coefficients ([B, T, 18] - ab, ap1, ap2, and the two
+# bandpasses' and the high-pass's b0, b1, b2, a1, a2) are made by PyTorch exactly as frication_magnitude makes them,
+# and differentiated by it.
+#
+
+_FRICATION_SOURCE = '''
+#include <metal_stdlib>
+using namespace metal;
+
+// A biquad's complex response at a frequency's cos w, sin w, cos 2w, sin 2w - (re, im), and its numerator and
+// denominator (nr, ni, dr, di) and the denominator's squared magnitude q
+struct Biquad {
+    float re, im, nr, ni, dr, di, q;
+};
+
+static Biquad biquad(device const float* coef, const float c1, const float s1, const float c2, const float s2) {
+    Biquad out;
+    const float b0 = coef[0], b1 = coef[1], b2 = coef[2], a1 = coef[3], a2 = coef[4];
+    out.nr = b0 + b1 * c1 + b2 * c2;
+    out.ni = -(b1 * s1 + b2 * s2);
+    out.dr = 1.0f + a1 * c1 + a2 * c2;
+    out.di = -(a1 * s1 + a2 * s2);
+    out.q = out.dr * out.dr + out.di * out.di;
+    out.re = (out.nr * out.dr + out.ni * out.di) / out.q;
+    out.im = (out.ni * out.dr - out.nr * out.di) / out.q;
+    return out;
+}
+
+// A biquad's coefficients' gradients (added to grad[0 ... 4]) from its response's gradient (gre, gim)
+static void biquad_backward(thread float* grad, const Biquad f, const float gre, const float gim, const float c1,
+                            const float s1, const float c2, const float s2) {
+    const float g_nr = (gre * f.dr - gim * f.di) / f.q;
+    const float g_ni = (gre * f.di + gim * f.dr) / f.q;
+    const float g_dr = (gre * (f.nr - 2.0f * f.re * f.dr) + gim * (f.ni - 2.0f * f.im * f.dr)) / f.q;
+    const float g_di = (gre * (f.ni - 2.0f * f.re * f.di) - gim * (f.nr + 2.0f * f.im * f.di)) / f.q;
+    grad[0] += g_nr;
+    grad[1] += g_nr * c1 - g_ni * s1;
+    grad[2] += g_nr * c2 - g_ni * s2;
+    grad[3] += g_dr * c1 - g_di * s1;
+    grad[4] += g_dr * c2 - g_di * s2;
+}
+
+// The frication magnitude at [B, T, M]: |ab + ap1 BP1^2 + ap2 BP2^2| |HP|^2 at [M] frequencies' trigonometry
+kernel void frication(device float* out [[buffer(0)]], device const float* cos1 [[buffer(1)]],
+                      device const float* sin1 [[buffer(2)]], device const float* cos2 [[buffer(3)]],
+                      device const float* sin2 [[buffer(4)]], device const float* coef [[buffer(5)]],
+                      constant long2& dims [[buffer(6)]], uint index [[thread_position_in_grid]]) {
+    const long frames = dims.x, bins = dims.y;
+    if ((long)index >= frames * bins) {
+        return;
+    }
+    const long m = index % bins;
+    device const float* k = coef + (index / bins) * 18;
+    const float c1 = cos1[m], s1 = sin1[m], c2 = cos2[m], s2 = sin2[m];
+    const Biquad bp1 = biquad(k + 3, c1, s1, c2, s2);
+    const Biquad bp2 = biquad(k + 8, c1, s1, c2, s2);
+    const Biquad hp = biquad(k + 13, c1, s1, c2, s2);
+    const float real = k[0] + k[1] * (bp1.re * bp1.re - bp1.im * bp1.im) + k[2] * (bp2.re * bp2.re - bp2.im * bp2.im);
+    const float imag = k[1] * (2.0f * bp1.re * bp1.im) + k[2] * (2.0f * bp2.re * bp2.im);
+    float power = hp.re * hp.re + hp.im * hp.im;
+    power = power * power;
+    out[index] = precise::sqrt(real * real + imag * imag + 1e-30f) * precise::sqrt(power + 1e-30f);
+}
+
+// The coefficients' gradients [B, T, 18], summed over the frequencies
+kernel void frication_backward(device float* grad_coef [[buffer(0)]], device const float* grad [[buffer(1)]],
+                               device const float* cos1 [[buffer(2)]], device const float* sin1 [[buffer(3)]],
+                               device const float* cos2 [[buffer(4)]], device const float* sin2 [[buffer(5)]],
+                               device const float* coef [[buffer(6)]], constant long2& dims [[buffer(7)]],
+                               uint index [[thread_position_in_grid]]) {
+    const long frames = dims.x, bins = dims.y;
+    if ((long)index >= frames) {
+        return;
+    }
+    device const float* k = coef + index * 18;
+    float g[18];
+    for (int i = 0; i < 18; i++) {
+        g[i] = 0.0f;
+    }
+    for (long m = 0; m < bins; m++) {
+        const float go = grad[index * bins + m];
+        if (go == 0.0f) {
+            continue;
+        }
+        const float c1 = cos1[m], s1 = sin1[m], c2 = cos2[m], s2 = sin2[m];
+        const Biquad bp1 = biquad(k + 3, c1, s1, c2, s2);
+        const Biquad bp2 = biquad(k + 8, c1, s1, c2, s2);
+        const Biquad hp = biquad(k + 13, c1, s1, c2, s2);
+        const float sq1 = bp1.re * bp1.re - bp1.im * bp1.im, cross1 = 2.0f * bp1.re * bp1.im;
+        const float sq2 = bp2.re * bp2.re - bp2.im * bp2.im, cross2 = 2.0f * bp2.re * bp2.im;
+        const float real = k[0] + k[1] * sq1 + k[2] * sq2;
+        const float imag = k[1] * cross1 + k[2] * cross2;
+        const float p = hp.re * hp.re + hp.im * hp.im;
+        const float amplitude = precise::sqrt(real * real + imag * imag + 1e-30f);
+        const float highpass = precise::sqrt(p * p + 1e-30f);
+        // out = amplitude x highpass
+        const float g_amplitude = go * highpass;
+        const float g_real = g_amplitude * real / amplitude;
+        const float g_imag = g_amplitude * imag / amplitude;
+        const float g_p = go * amplitude * p / highpass;
+        g[0] += g_real;
+        g[1] += g_real * sq1 + g_imag * cross1;
+        g[2] += g_real * sq2 + g_imag * cross2;
+        biquad_backward(g + 3, bp1, 2.0f * k[1] * (g_real * bp1.re + g_imag * bp1.im),
+                        2.0f * k[1] * (g_imag * bp1.re - g_real * bp1.im), c1, s1, c2, s2);
+        biquad_backward(g + 8, bp2, 2.0f * k[2] * (g_real * bp2.re + g_imag * bp2.im),
+                        2.0f * k[2] * (g_imag * bp2.re - g_real * bp2.im), c1, s1, c2, s2);
+        biquad_backward(g + 13, hp, 2.0f * g_p * hp.re, 2.0f * g_p * hp.im, c1, s1, c2, s2);
+    }
+    for (int i = 0; i < 18; i++) {
+        grad_coef[index * 18 + i] = g[i];
+    }
+}
+'''
+_FRICATION_LIBRARY = {}
+
+
+# The frication kernels' Metal library (None where there is none)
+def _frication_library():
+    if 'library' not in _FRICATION_LIBRARY:
+        try:
+            _FRICATION_LIBRARY['library'] = torch.mps.compile_shader(_FRICATION_SOURCE)
+        except Exception:  # pylint: disable=broad-except
+            _FRICATION_LIBRARY['library'] = None
+    return _FRICATION_LIBRARY['library']
+
+
+class _FricationResponse(torch.autograd.Function):
+    """The frication magnitude [B, T, M] from [M] frequencies' trigonometry and the filters' per-frame coefficients
+    [B, T, 18] - differentiable in the coefficients"""
+
+    @staticmethod
+    def forward(ctx, cos1, sin1, cos2, sin2, coef):  # pylint: disable=arguments-differ
+        batch, frames, _ = coef.shape
+        bins = cos1.shape[-1]
+        dims = [batch * frames, bins]
+        out = torch.empty(batch, frames, bins, dtype=coef.dtype, device=coef.device)
+        _frication_library().frication(out, cos1, sin1, cos2, sin2, coef, dims, threads=out.numel())
+        ctx.save_for_backward(cos1, sin1, cos2, sin2, coef)
+        ctx.dims = dims
+        return out
+
+    @staticmethod
+    def backward(ctx, grad):  # pylint: disable=arguments-differ
+        cos1, sin1, cos2, sin2, coef = ctx.saved_tensors
+        grad_coef = torch.empty_like(coef)
+        _frication_library().frication_backward(grad_coef, grad.contiguous(), cos1, sin1, cos2, sin2, coef, ctx.dims,
+                                                threads=ctx.dims[0])
+        return None, None, None, None, grad_coef
+
+
+# The frication magnitude by the Metal kernels, or None where they don't apply (not MPS float32, or frequencies or
+# parameters not shaped [M] and [B, T, 1], or the frequencies differentiated) - the coefficients made as
+# frication_magnitude makes them
+def _frication_kernel(trig, values):
+    center = values['fp1']
+    if center.device.type != 'mps' or center.dtype != torch.float32 or center.dim() != 3 or center.shape[-1] != 1 or \
+            trig[0].dim() != 1 or trig[0].dtype != torch.float32 or any(value.requires_grad for value in trig) or \
+            _frication_library() is None:
+        return None
+    batch, frames = center.shape[:2]
+    columns = [values['ab'], values['ap1'], values['ap2'], *_bandpass_coefficients(values['fp1'], values['bp1']),
+               *_bandpass_coefficients(values['fp2'], values['bp2']), *_highpass_coefficients(values['fhp'])]
+    coef = torch.cat([torch.broadcast_to(column, (batch, frames, 1)) for column in columns], dim=-1).contiguous()
+    return _FricationResponse.apply(*(value.contiguous() for value in trig), coef)
 
 
 # Gaussian draws [B, max count] of a stream for each seed (rows zero-padded past their counts)
