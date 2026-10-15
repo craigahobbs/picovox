@@ -36,7 +36,8 @@
             "processes": ["nn.trainmulti --name prof2"],
             "runs": ["prof2-"],
             "steps": [
-                {"title": "Profile 2", "log": "build/nn/profile2/profile.log", "doneWhen": "done:", "weight": 3}
+                {"title": "Profile 2", "log": "build/nn/profile2/profile.log", "doneWhen": "done:", "weight": 3},
+                {"title": "Profile-guided optimization of small-model training (scratch-s64-a)", "log": "build/nn/pgo/pgo.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 5}
             ]
         },
         {
