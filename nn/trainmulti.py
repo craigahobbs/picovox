@@ -522,6 +522,11 @@ def main(argv=None):
     parser.add_argument('--feature-matching', type=float, default=1.0)
     parser.add_argument('--adversarial-start', type=int, default=500, help='steps of the critic alone first')
     parser.add_argument('--critic-lr', type=float, default=2e-4)
+    parser.add_argument('--critic-every', type=int, default=1, help='update the critic every this many reader steps')
+    parser.add_argument('--critic-precision', choices=['float32', 'bfloat16', 'float16'], default='float32',
+                        help="the critic's convolutions' precision")
+    parser.add_argument('--critic-channels', type=int, default=32)
+    parser.add_argument('--critic-scales', default='1024,512,256', help="the critic's FFT sizes")
     parser.add_argument('--val-every', type=int, default=1000)
     parser.add_argument('--val-count', type=int, default=480, help='reader validation utterances')
     parser.add_argument('--log-every', type=int, default=50)
@@ -580,7 +585,11 @@ def main(argv=None):
         missing, unexpected = model.load_state_dict(state['model'], strict=False)
         print(f'init from {args.init}: missing {missing}, unexpected {unexpected}', file=sys.stderr)
     synth = dsynth.DSynth(args.rate).to(device)
-    critic = discriminator.Critic(args.rate, args.max_hz, eps=1e-9).to(device) if args.adversarial > 0 else None
+    critic = None
+    if args.adversarial > 0:
+        critic_dtype = None if args.critic_precision == 'float32' else getattr(torch, args.critic_precision)
+        critic = discriminator.Critic(args.rate, args.max_hz, eps=1e-9, channels=args.critic_channels,
+                                      scales=[int(size) for size in args.critic_scales.split(',')], dtype=critic_dtype).to(device)
     # (on the GPU the fused AdamW - one kernel, not a loop over the parameters - which also skips a step with a
     # non-finite gradient norm on the device, so the step needn't read the norm)
     fused = device.type in ('mps', 'cuda')
@@ -642,6 +651,7 @@ def main(argv=None):
     # The steps' data, made ahead on a thread - all the draws from rng are its, in the order the steps made them
     jitter = float(model.fixed[params.INDEX['jitter']].cpu())
     prefetcher = Prefetcher(corpora, streams, args, rng, synth, jitter)
+    reader_steps = 0
     while step < args.steps:
         prepared = prefetcher.next()
         corpus = prepared['corpusName']
@@ -658,16 +668,20 @@ def main(argv=None):
             # The critic's step (on the rendering, detached), then the generator's adversarial and feature-matching
             # losses (after --adversarial-start steps of the critic alone). The discriminators' input spectrograms don't
             # depend on their weights, so each signal's are computed once for both passes.
+            # (with --critic-every k, the critic's step is on every k-th reader step only)
             generator_pass = step >= args.adversarial_start
+            critic_pass = reader_steps % args.critic_every == 0
+            reader_steps += 1
             real_spectrograms = critic.spectrograms(target)
             with torch.set_grad_enabled(generator_pass):
                 fake_spectrograms = critic.spectrograms(audio)
-            critic_loss = discriminator.discriminator_loss(critic.score(real_spectrograms),
-                                                           critic.score([value.detach() for value in fake_spectrograms]))
-            critic_optimizer.zero_grad()
-            critic_loss.backward()
-            critic_optimizer.step()
-            losses['critic'] = critic_loss.detach()
+            if critic_pass:
+                critic_loss = discriminator.discriminator_loss(critic.score(real_spectrograms),
+                                                               critic.score([value.detach() for value in fake_spectrograms]))
+                critic_optimizer.zero_grad()
+                critic_loss.backward()
+                critic_optimizer.step()
+                losses['critic'] = critic_loss.detach()
             if generator_pass:
                 # (the real features are targets only - no graph; and the generator's backward needs the gradient
                 # of the rendering's scores and features with respect to the audio only, not to the critic's weights)

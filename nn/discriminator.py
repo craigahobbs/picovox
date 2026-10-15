@@ -58,15 +58,20 @@ class SpectrogramDiscriminator(torch.nn.Module):
         return self.score(self.spectrogram(audio))
 
 
-class Critic(torch.nn.Module):
-    """Spectrogram discriminators at several resolutions"""
+# The critic's resolutions - FFT size: mel bands
+SCALES = {1024: 80, 512: 64, 256: 32}
 
-    def __init__(self, sample_rate, max_hz, eps=0.0):
+
+class Critic(torch.nn.Module):
+    """Spectrogram discriminators at several resolutions (FFT sizes of SCALES); dtype (torch.bfloat16 or torch.float16)
+    runs their convolutions in that precision (autocast - the spectrograms, the weights, and the outputs stay float32)"""
+
+    def __init__(self, sample_rate, max_hz, eps=0.0, channels=32, scales=(1024, 512, 256), dtype=None):
         super().__init__()
+        self.dtype = dtype
         self.discriminators = torch.nn.ModuleList([
-            SpectrogramDiscriminator(sample_rate, 1024, 80, max_hz, eps=eps),
-            SpectrogramDiscriminator(sample_rate, 512, 64, max_hz, eps=eps),
-            SpectrogramDiscriminator(sample_rate, 256, 32, max_hz, eps=eps)
+            SpectrogramDiscriminator(sample_rate, fft_size, SCALES[fft_size], max_hz, channels=channels, eps=eps)
+            for fft_size in scales
         ])
 
     def spectrograms(self, audio):
@@ -75,7 +80,12 @@ class Critic(torch.nn.Module):
 
     def score(self, spectrograms):
         """Each discriminator's (scores, features) of its input spectrogram (spectrograms())"""
-        return [discriminator.score(spectrogram) for discriminator, spectrogram in zip(self.discriminators, spectrograms)]
+        if self.dtype is None:
+            return [discriminator.score(spectrogram) for discriminator, spectrogram in zip(self.discriminators, spectrograms)]
+        device_type = spectrograms[0].device.type
+        with torch.autocast(device_type, dtype=self.dtype):
+            outputs = [discriminator.score(spectrogram) for discriminator, spectrogram in zip(self.discriminators, spectrograms)]
+        return [(scores.float(), [feature.float() for feature in features]) for scores, features in outputs]
 
     def forward(self, audio):
         return self.score(self.spectrograms(audio))
