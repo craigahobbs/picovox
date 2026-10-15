@@ -1,5 +1,6 @@
-// Check that the browser build works - lib/ and web/ modules load with no Node built-ins (any node: import from them
-// fails, and process.getBuiltinModule is hidden, as in a browser), and the worker's synthesis matches tools/say.js
+// Check that the browser build works - the app-time modules (lib/, web/, nn/js/, and the generated model module) load with
+// no Node built-ins (any node: import from them fails, and process.getBuiltinModule is hidden, as in a browser), and the
+// worker's neural speech matches the same pipeline run directly (speakFrames, render, gain, and limiter), sample for sample
 //
 // node tools/browsercheck.js
 
@@ -9,8 +10,8 @@ import {readFileSync} from 'node:fs';
 import {registerHooks} from 'node:module';
 
 
-// Fail any node: import from lib/ or web/
-const browserRoots = ['lib', 'web'].map((dir) => new URL(`../${dir}/`, import.meta.url).href);
+// Fail any node: import (or bare package import) from the app-time code
+const browserRoots = ['lib', 'web', 'nn/js', 'data/nn'].map((dir) => new URL(`../${dir}/`, import.meta.url).href);
 registerHooks({
     resolve(specifier, context, nextResolve) {
         if (context.parentURL && browserRoots.some((root) => context.parentURL.startsWith(root)) &&
@@ -22,17 +23,19 @@ registerHooks({
 });
 
 
-// Load every lib and web module as a browser would - no process.getBuiltinModule
+// Load the app's modules as a browser would - no process.getBuiltinModule
 const dictionaryText = readFileSync(new URL('../data/cmudict.dict', import.meta.url), 'utf8');
 const {getBuiltinModule} = process;
 process.getBuiltinModule = undefined;
-const modules = ['analysis', 'glottal', 'klatt', 'lexicon', 'phonemes', 'room', 'speak', 'wav'];
+const modules = ['catalog', 'epub', 'gutenberg', 'lexicon', 'phonemes', 'wav', 'zip'];
 const lib = {};
 for (const name of modules) {
     lib[name] = await import(`../lib/${name}.js`);
 }
 const worker = await import('../web/worker.js');
-process.stdout.write(`Loaded lib/{${modules.join(',')}}.js and web/worker.js with no node: imports\n`);
+const {speakFrames} = await import('../nn/js/model.js');
+const {render} = await import('../nn/js/render.js');
+process.stdout.write(`Loaded lib/{${modules.join(',')}}.js, web/worker.js, and nn/js/ with no node: imports\n`);
 
 // Without a dictionary, the text front end must ask for one
 let threw = false;
@@ -45,23 +48,35 @@ if (!threw) {
     throw new Error('textToPhrases worked without a dictionary or Node');
 }
 
-// Synthesize with the worker's functions, from the dictionary string
+// Speak with the worker's functions - the generated model module imported as the browser would
 lib.lexicon.setDictionary(dictionaryText);
-const text = 'The birch canoe slid on the smooth planks.\n\nGlue the sheet to the dark blue background!\n\n...';
-const chunks = [];
-const options = {'voice': 'female', 'rate': 1.2, 'seed': 1, 'room': true};
-const count = worker.synthesizeParagraphs(text, options, (index, samples, sampleRate) => chunks.push({index, samples, sampleRate}));
-const wav = lib.wav.encodeWav(chunks[0].samples, chunks[0].sampleRate);
-process.getBuiltinModule = getBuiltinModule;
-const chunkSeconds = chunks.map((chunk) => (chunk.samples.length / chunk.sampleRate).toFixed(2));
-process.stdout.write(`Worker synthesis: ${count} paragraphs, ${chunkSeconds.join(' + ')} s, WAV ${wav.length} bytes\n`);
-
-// The worker's audio must match the Node path (speak, room, normalize) sample for sample
-const {speak} = lib.speak;
-const sha = (samples) => createHash('sha256').update(new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength)).digest('hex');
-const dry = speak('The birch canoe slid on the smooth planks.', 'female', {'seed': 1, 'rate': 1.2}).samples;
-const expected = lib.klatt.normalize(lib.room.convolve(dry, lib.room.roomImpulse(44100)), 0.89);
-if (count !== 2 || sha(chunks[0].samples) !== sha(expected)) {
-    throw new Error('The worker synthesis differs from the Node synthesis');
+const model = await worker.loadNeuralModel();
+const speaker = worker.neuralSpeaker(model, 'neural-female');
+const text = 'The birch canoe slid on the smooth planks.';
+const options = {'rate': 1.2, 'seed': 1, 'paragraphStart': true, speaker};
+const blocks = [];
+worker.streamNeuralUnit(model, text, options, (samples, sampleRate) => blocks.push({samples, sampleRate}));
+const total = blocks.reduce((sum, block) => sum + block.samples.length, 0);
+const samples = new Float32Array(total);
+let offset = 0;
+for (const block of blocks) {
+    samples.set(block.samples, offset);
+    offset += block.samples.length;
 }
-process.stdout.write('Worker synthesis matches the Node synthesis\n');
+const wav = lib.wav.encodeWav(samples, 44100);
+process.getBuiltinModule = getBuiltinModule;
+process.stdout.write(`Worker speech: ${blocks.length} blocks, ${(total / 44100).toFixed(2)} s, WAV ${wav.length} bytes\n`);
+
+// The worker's audio must match the pipeline run directly: the pause, then the rendered frames with the gain and limiter
+const {frames, eq} = speakFrames(model, text, {'rate': 1 / options.rate, speaker});
+const rendered = render(frames, {'sampleRate': 44100, 'seed': options.seed, eq});
+const pause = total - rendered.length;
+const expected = new Float32Array(total);
+rendered.forEach((value, index) => {
+    expected[pause + index] = worker.softLimit(value * worker.neuralGain);
+});
+const sha = (values) => createHash('sha256').update(new Uint8Array(values.buffer, values.byteOffset, values.byteLength)).digest('hex');
+if (pause <= 0 || sha(samples) !== sha(expected)) {
+    throw new Error('The worker speech differs from the pipeline run directly');
+}
+process.stdout.write('Worker speech matches the pipeline run directly\n');

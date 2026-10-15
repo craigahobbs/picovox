@@ -1,7 +1,7 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
 
-import {decodeText, displayAuthor, displayTitle, prepareText} from '../lib/gutenberg.js';
+import {decodeText, displayTitle, prepareText} from '../lib/gutenberg.js';
 import {strict as assert} from 'node:assert';
 import test from 'node:test';
 
@@ -544,19 +544,6 @@ test('displayTitle', () => {
     assert.equal(displayTitle('A Very Long Title Without Any Subtitle Separator At All'),
         'A Very Long Title Without Any Subtitle Separator At All');
     assert.equal(displayTitle('Folk tales from Tibet — with illustrations by a Tibetan artist'), 'Folk tales from Tibet');
-});
-
-
-test('displayAuthor', () => {
-    assert.equal(displayAuthor('Melville, Herman'), 'Herman Melville');
-    assert.equal(displayAuthor('Shelley, Mary Wollstonecraft'), 'Mary Wollstonecraft Shelley');
-    assert.equal(displayAuthor('Doyle, Arthur Conan, Sir'), 'Arthur Conan Doyle');
-    assert.equal(displayAuthor('Homer'), 'Homer');
-    assert.equal(displayAuthor(''), '');
-    assert.equal(displayAuthor('Fitzgerald, F. Scott (Francis Scott)'), 'F. Scott Fitzgerald');
-    assert.equal(displayAuthor('Marcus Aurelius, Emperor of Rome'), 'Marcus Aurelius');
-    assert.equal(displayAuthor('King, Martin Luther, Jr.'), 'Martin Luther King Jr.');
-    assert.equal(displayAuthor('Dumas, Alexandre, 1802-1870, III'), 'Alexandre Dumas III');
 });
 
 

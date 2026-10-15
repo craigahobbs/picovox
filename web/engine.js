@@ -6,10 +6,9 @@
 import {encodeWav} from '../lib/wav.js';
 
 
-// Timing (s) - the playback lead, how far ahead to schedule blocks, and the dropped silence at a mid-paragraph unit's start
+// Timing (s) - the playback lead, and how far ahead to schedule blocks
 const leadSeconds = 0.06;
 const scheduleAheadSeconds = 6;
-const unitTrimSeconds = 0.12;
 
 
 // The synthesis window - synthesize at most this many units (and characters) ahead of the position, keep this many units
@@ -31,8 +30,7 @@ const abbreviations = new Set([
 
 
 // Split text into units (sentences, long sentences at semicolons and colons, and paragraphs at blank lines) - [{index,
-// start, end, text, trim}]. A unit after another in the same paragraph drops its leading silence (trim), so sentences
-// flow at a natural pace.
+// start, end, text, paragraphStart}]. The worker pauses longer before a paragraph's first unit than between sentences.
 export function splitUnits(text) {
     const units = [];
     let start = 0;
@@ -43,7 +41,7 @@ export function splitUnits(text) {
             const leading = unitText.length - unitText.trimStart().length;
             units.push({
                 'index': units.length, 'start': start + leading, 'end': start + unitText.trimEnd().length,
-                'text': unitText.trim().replace(/\s+/g, ' '), 'trim': paragraphStart ? 0 : unitTrimSeconds
+                'text': unitText.trim().replace(/\s+/g, ' '), paragraphStart
             });
             paragraphStart = false;
         }
@@ -158,7 +156,7 @@ export class Engine {
     }
 
     // Load a book's text, paused at a character offset (snapped to its sentence) - with the voice and rate
-    load(text, {voice = 'male', rate = 1} = {}, startChar = 0) {
+    load(text, {voice = 'neural-male', rate = 1} = {}, startChar = 0) {
         this.stopSources();
         this.cancelRun();
         this.playing = false;
@@ -455,10 +453,10 @@ export class Engine {
         session.run = {id, 'order': remaining, 'active': true};
         session.runIds.add(id);
         this.worker.postMessage({
-            'type': 'units', id, 'member': 0, 'voice': session.voice, 'rate': session.rate, 'seed': 1, 'overrides': {},
+            'type': 'units', id, 'voice': session.voice, 'rate': session.rate,
             'units': remaining.map((unit) => {
-                const {index, text, trim} = session.units[unit];
-                return {index, 'text': speechText(text), trim};
+                const {index, text, paragraphStart} = session.units[unit];
+                return {index, 'text': speechText(text), paragraphStart};
             })
         });
     }
