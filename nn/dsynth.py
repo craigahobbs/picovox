@@ -297,12 +297,14 @@ _HARMONIC_SOURCE = '''
 using namespace metal;
 
 // The interval-major sample grid's harmonic sums: out[b, t, h] = (1 - w) (sum_k re[t, k] cos - sum_k im[t, k] sin)
-// + w (sum_k re[t + 1, k] cos - sum_k im[t + 1, k] sin), cos and sin of 2 pi frac(phase[b, t, h] k), k = 1 ... K
+// + w (sum_k re[t + 1, k] cos - sum_k im[t + 1, k] sin), cos and sin of 2 pi frac(phase[b, t, h] k), k = 1 ... K -
+// K the active harmonic count (active[0], at most the amplitudes' harmonics)
 kernel void harmonic_sum(device float* out [[buffer(0)]], device const float* phase [[buffer(1)]],
                          device const float* amp_re [[buffer(2)]], device const float* amp_im [[buffer(3)]],
                          device const float* weight [[buffer(4)]], constant long4& dims [[buffer(5)]],
-                         uint index [[thread_position_in_grid]]) {
-    const long batch = dims.x, frames = dims.y, width = dims.z, harmonics = dims.w;
+                         device const int* active [[buffer(6)]], uint index [[thread_position_in_grid]]) {
+    const long batch = dims.x, frames = dims.y, width = dims.z, stride = dims.w;
+    const long harmonics = min(stride, (long)active[0]);
     if ((long)index >= batch * (frames - 1) * width) {
         return;
     }
@@ -310,10 +312,10 @@ kernel void harmonic_sum(device float* out [[buffer(0)]], device const float* ph
     const long interval = (index / width) % (frames - 1);
     const long b = index / width / (frames - 1);
     const float fraction = phase[index];
-    device const float* re0 = amp_re + (b * frames + interval) * harmonics;
-    device const float* im0 = amp_im + (b * frames + interval) * harmonics;
-    device const float* re1 = re0 + harmonics;
-    device const float* im1 = im0 + harmonics;
+    device const float* re0 = amp_re + (b * frames + interval) * stride;
+    device const float* im0 = amp_im + (b * frames + interval) * stride;
+    device const float* re1 = re0 + stride;
+    device const float* im1 = im0 + stride;
     float cos0 = 0.0f, sin0 = 0.0f, cos1 = 0.0f, sin1 = 0.0f;
     for (long k = 0; k < harmonics; k++) {
         const float cycles = fraction * float(k + 1);
@@ -329,11 +331,11 @@ kernel void harmonic_sum(device float* out [[buffer(0)]], device const float* ph
     out[index] = (cos0 - sin0) * (1.0f - w) + (cos1 - sin1) * w;
 }
 
-// The amplitudes' gradients [B, T, K] from the sums' gradient grad[b, t, h]
+// The amplitudes' gradients [B, T, K] from the sums' gradient grad[b, t, h] (zero past the active harmonic count)
 kernel void harmonic_sum_backward(device float* grad_re [[buffer(0)]], device float* grad_im [[buffer(1)]],
                                   device const float* grad [[buffer(2)]], device const float* phase [[buffer(3)]],
                                   device const float* weight [[buffer(4)]], constant long4& dims [[buffer(5)]],
-                                  uint index [[thread_position_in_grid]]) {
+                                  device const int* active [[buffer(6)]], uint index [[thread_position_in_grid]]) {
     const long batch = dims.x, frames = dims.y, width = dims.z, harmonics = dims.w;
     if ((long)index >= batch * frames * harmonics) {
         return;
@@ -342,6 +344,11 @@ kernel void harmonic_sum_backward(device float* grad_re [[buffer(0)]], device fl
     const long t = (index / harmonics) % frames;
     const long b = index / harmonics / frames;
     float re = 0.0f, im = 0.0f;
+    if (k >= (long)active[0]) {
+        grad_re[index] = re;
+        grad_im[index] = im;
+        return;
+    }
     // The frame starts interval t (weight 1 - w) and ends interval t - 1 (weight w)
     for (int side = 0; side < 2; side++) {
         const long interval = side == 0 ? t : t - 1;
@@ -381,28 +388,32 @@ def _harmonic_library():
 
 class _HarmonicSum(torch.autograd.Function):
     """The harmonic sums [B, T - 1, H] of phases [B, T - 1, H], amplitudes [B, T, K] (real, imaginary), and the
-    interpolation weights [T - 1, H] - differentiable in the amplitudes"""
+    interpolation weights [T - 1, H] - differentiable in the amplitudes; active is the summed harmonic count (an int32
+    device tensor [1], at most K - the harmonics past it are left out), or None for all K"""
 
     @staticmethod
-    def forward(ctx, phase, amp_re, amp_im, weight):  # pylint: disable=arguments-differ
+    def forward(ctx, phase, amp_re, amp_im, weight, active=None):  # pylint: disable=arguments-differ
         batch, frames, harmonics = amp_re.shape
         width = phase.shape[-1]
         dims = [batch, frames, width, harmonics]
+        if active is None:
+            active = _cached(('active', harmonics, str(amp_re.device)),
+                             lambda: torch.tensor([harmonics], dtype=torch.int32, device=amp_re.device))
         out = torch.empty_like(phase)
-        _harmonic_library().harmonic_sum(out, phase, amp_re, amp_im, weight, dims, threads=out.numel())
-        ctx.save_for_backward(phase, weight)
+        _harmonic_library().harmonic_sum(out, phase, amp_re, amp_im, weight, dims, active, threads=out.numel())
+        ctx.save_for_backward(phase, weight, active)
         ctx.dims = dims
         return out
 
     @staticmethod
     def backward(ctx, grad):  # pylint: disable=arguments-differ
-        phase, weight = ctx.saved_tensors
+        phase, weight, active = ctx.saved_tensors
         batch, frames, _, harmonics = ctx.dims
         grad_re = torch.empty(batch, frames, harmonics, dtype=grad.dtype, device=grad.device)
         grad_im = torch.empty_like(grad_re)
-        _harmonic_library().harmonic_sum_backward(grad_re, grad_im, grad.contiguous(), phase, weight, ctx.dims,
+        _harmonic_library().harmonic_sum_backward(grad_re, grad_im, grad.contiguous(), phase, weight, ctx.dims, active,
                                                   threads=grad_re.numel())
-        return None, grad_re, grad_im, None
+        return None, grad_re, grad_im, None, None
 
 
 #
@@ -796,10 +807,12 @@ class DSynth(torch.nn.Module):
         window = 0.5 - 0.5 * numpy.cos(2 * math.pi * numpy.arange(self.noise_fft) / self.noise_fft)
         self.register_buffer('window', torch.tensor(window, dtype=torch.float32), persistent=False)
         # The host tensors of the latest uploads (non-blocking copies read them later) - kept until the next forward's
-        # synchronizing read, by when the copies are done
+        # synchronizing read, by when the copies are done (a deferred plan's are kept by the caller - see forward)
         self._uploads = None
-        # The plans made ahead that didn't match the frames (and were made again)
+        # The plans made ahead that didn't match the frames (and were made again), and the deferred plans' count of
+        # mismatches (a device tensor, read by deferred_plan_mismatches)
         self.plan_mismatches = 0
+        self._deferred_mismatches = None
 
     def plan_cycles(self, f0_frames, jitter_frames, seeds):
         """The glottal cycle plan of a batch (numpy, float64, not differentiated) from its frames' F0 and jitter
@@ -853,8 +866,55 @@ class DSynth(torch.nn.Module):
         noises = [self._noise_host(plan['count'], seed) for seed in plan['seeds']]
         return {
             'fraction': torch.tensor(plan['fraction'][:, grid], dtype=dtype), 'shimmer': torch.tensor(plan['shimmer'], dtype=dtype),
-            'aspiration': torch.stack([noise[0] for noise in noises]), 'frication': torch.stack([noise[1] for noise in noises])
+            'aspiration': torch.stack([noise[0] for noise in noises]), 'frication': torch.stack([noise[1] for noise in noises]),
+            'f0': torch.tensor(plan['f0'], dtype=dtype), 'jitter': torch.tensor(plan['jitter'], dtype=dtype)
         }
+
+    def deferred_plan_mismatches(self):
+        """The plans made ahead and finished on the device that didn't match their frames (counted on the device -
+        reading it synchronizes); such a rendering used the plan's F0 and jitter, not the frames'"""
+        return 0 if self._deferred_mismatches is None else int(self._deferred_mismatches.cpu())
+
+    # Whether forward can finish a plan made ahead on the device, without reading the frames (MPS float32, the
+    # harmonic sum's Metal kernel, and the plan's host tensors in the values' dtype)
+    def _can_defer(self, values, plan):
+        host = plan.get('host')
+        return values.device.type == 'mps' and values.dtype == torch.float32 and _harmonic_library() is not None and \
+            host is not None and host['fraction'].dtype == values.dtype and 'f0' in host
+
+    # A plan made ahead, finished on the device without reading the frames (no synchronization): its tensors (the
+    # open phase from the frames' Rd, and the active harmonic count from their voicing and F0 - nn/dsynth.py
+    # _harmonic_count's, as an int32 device tensor), and the harmonics to make (an upper bound of the active count from
+    # the plan's F0 on the host, rounded up to a multiple of 16, so the shapes repeat). The frames' F0 and jitter are
+    # checked against the plan's on the device (deferred_plan_mismatches). The plan's host tensors must live until the
+    # copies are done - the caller keeps them (plan['host']) until a later synchronization.
+    def _deferred_plan(self, values, plan, grid):
+        device = values.device
+        host = plan['host']
+        self._uploads = host
+        tensors = {key: value.to(device, non_blocking=True) for key, value in host.items()}
+        f0 = values[..., params.INDEX['f0']]
+        jitter = values[..., params.INDEX['jitter']]
+        mismatch = ((f0 != tensors['f0']) | (jitter != tensors['jitter'])).any().int()
+        self._deferred_mismatches = mismatch if self._deferred_mismatches is None else self._deferred_mismatches + mismatch
+
+        # The open phase - the cycle fraction below lf.open_fraction of the per-sample Rd
+        batch = values.shape[0]
+        index, weight = grid['index'], grid['weight']
+        rd = values[:, index, params.INDEX['rd']] * (1 - weight) + values[:, index + 1, params.INDEX['rd']] * weight
+        fraction = tensors['fraction'].reshape(batch, -1).index_select(1, grid['cells'])
+        tensors['open'] = fraction < torch.clamp(0.45 + 0.17 * rd, max=0.95)
+
+        # The active harmonic count (_harmonic_count), and its upper bound (every frame voiced)
+        voiced = values[..., params.INDEX['av']] > params.FLOOR_DB + 30
+        lowest = torch.where(voiced, torch.clamp(f0, min=params.F0_MIN), math.inf).amin()
+        lowest = torch.where(torch.isinf(lowest), 1000.0, lowest)
+        taper_end = params.HARMONIC_TAPER_END * self.sample_rate
+        tensors['harmonics'] = torch.clamp(torch.ceil(taper_end / lowest), max=params.LF_HARMONICS - 1).int().reshape(1)
+        bound = max(self._harmonic_count(plan['f0'], numpy.full(plan['f0'].shape, params.FLOOR_DB + 31)),
+                    self._harmonic_count(plan['f0'], numpy.full(plan['f0'].shape, params.FLOOR_DB)))
+        harmonics = min(params.LF_HARMONICS - 1, 16 * math.ceil(bound / 16))
+        return tensors, harmonics
 
     # Upload a finished plan's tensors to a device - non-blocking (on MPS a blocking copy waits for the whole GPU
     # queue), so the host tensors are kept until the next forward's synchronizing read
@@ -862,7 +922,7 @@ class DSynth(torch.nn.Module):
         host = plan.get('host')
         if host is None or host['fraction'].dtype != dtype:
             host = self.plan_host_tensors(plan, dtype)
-        host = {**host, 'open': torch.from_numpy(plan['open'])}
+        host = {**{key: value for key, value in host.items() if key not in ('f0', 'jitter')}, 'open': torch.from_numpy(plan['open'])}
         self._uploads = host
         return {key: value.to(device, non_blocking=True) for key, value in host.items()}
 
@@ -955,6 +1015,8 @@ class DSynth(torch.nn.Module):
     def _voicing(self, values, linear, tensors, grid, harmonics, count, eq=None, correction=None):
         batch = values.shape[0]
         amp_re, amp_im = self.harmonic_amplitudes(values, harmonics, eq, linear, correction)
+        # (a deferred plan's harmonic count is on the device - the amplitudes are made for its upper bound)
+        active = tensors.get('harmonics')
 
         # Sum the harmonics over the samples grouped by frame interval: Re(sum_k A_k exp(2 pi i k phase)), the
         # amplitudes interpolated between frames - on Apple GPUs in the Metal kernels, else the interval's two frames'
@@ -962,7 +1024,7 @@ class DSynth(torch.nn.Module):
         weight = grid['gridWeight']
         if values.device.type == 'mps' and values.dtype == torch.float32 and _harmonic_library() is not None:
             signal = _HarmonicSum.apply(tensors['fraction'].contiguous(), amp_re.contiguous(), amp_im.contiguous(),
-                                        weight[0].contiguous())
+                                        weight[0].contiguous(), active)
         else:
             k = torch.arange(1, harmonics + 1, device=values.device, dtype=values.dtype)
             angle = tensors['fraction'][..., None] * k
@@ -1077,8 +1139,13 @@ class DSynth(torch.nn.Module):
             return empty[0] if squeeze else empty
 
         # The cycle plan - the one read from the device (it synchronizes); the host tensors of the previous call's
-        # uploads are released after it
-        if plan is None:
+        # uploads are released after it - or a plan made ahead, finished on the device (no synchronization)
+        grid = self._grid_tensors(count, frame_count, values.device, values.dtype)
+        linear = linear_values(values)
+        tensors = None
+        if plan is not None and self._can_defer(values, plan) and plan['seeds'] == seeds:
+            tensors, harmonics = self._deferred_plan(values, plan, grid)
+        elif plan is None:
             frames_cpu = values.detach().cpu().double().numpy()  # (MPS: .to('cpu', float64) in one step gives zeros)
             plan = self.plan_cycles(frames_cpu[..., params.INDEX['f0']], frames_cpu[..., params.INDEX['jitter']], seeds)
             self.finish_plan(plan, frames_cpu[..., params.INDEX['av']], frames_cpu[..., params.INDEX['rd']])
@@ -1092,10 +1159,9 @@ class DSynth(torch.nn.Module):
                 self.plan_mismatches += 1
                 plan = self.plan_cycles(f0, jitter, seeds)
             plan = self.finish_plan(dict(plan), av, rd)
-        tensors = self._plan_tensors(plan, values.device, values.dtype)
-        grid = self._grid_tensors(count, frame_count, values.device, values.dtype)
-        harmonics = plan['harmonics']
-        linear = linear_values(values)
+        if tensors is None:
+            tensors = self._plan_tensors(plan, values.device, values.dtype)
+            harmonics = plan['harmonics']
 
         # The voicing, with shimmer, and the noise
         voicing = self._voicing(values, linear, tensors, grid, harmonics, count, eq, correction)

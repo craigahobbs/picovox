@@ -50,6 +50,7 @@ Architecture options (off by default - with none given, training is unchanged):
 """
 
 import argparse
+import collections
 import contextlib
 import json
 import math
@@ -71,6 +72,9 @@ from .train import F_INDEX, PRIORS, RUNS_DIR, duration_loss, f0_track, render_va
 
 # The data's sample rate
 SOURCE_RATE = 24000
+
+# The most training steps the CPU runs ahead of the GPU (MPS)
+IN_FLIGHT = 2
 
 # The style intensities of CREMA-D's intensity labels
 INTENSITY = {'low': 0.5, 'medium': 0.75, 'high': 1.0, 'unspecified': 0.75}
@@ -663,6 +667,10 @@ def main(argv=None):
     # The steps' data, made ahead on a thread - all the draws from rng are its, in the order the steps made them
     jitter = float(model.fixed[params.INDEX['jitter']].cpu())
     prefetcher = Prefetcher(corpora, streams, args, rng, synth, jitter)
+    # The recent steps' data - their host tensors are the sources of non-blocking uploads, so each is kept until the
+    # GPU is past its step (an event after it): on MPS the steps don't read the device (the synthesizer finishes its
+    # plans made ahead there), so the CPU runs up to IN_FLIGHT steps ahead of the GPU
+    in_flight = collections.deque()
     while step < args.steps:
         prepared = prefetcher.next()
         corpus = prepared['corpusName']
@@ -712,6 +720,12 @@ def main(argv=None):
             optimizer.step()
         scheduler.step()
         step += 1
+        if device.type == 'mps':
+            event = torch.mps.Event()
+            event.record()
+            in_flight.append((event, prepared))
+            while len(in_flight) > IN_FLIGHT:
+                in_flight.popleft()[0].synchronize()
         prefix = '' if corpus == 'multi' else 'cremad.'
         pending.append((prefix, list(losses), list(stats),
                         torch.stack([value.detach().float() for value in losses.values()] + list(stats.values()))))
@@ -729,6 +743,9 @@ def main(argv=None):
                     sums[prefix_keys + key] = sums.get(prefix_keys + key, 0) + value
                     sum_counts[prefix_keys + key] = sum_counts.get(prefix_keys + key, 0) + 1
             pending = []
+            # (a plan made ahead that didn't match its frames - one finished on the device can't be made again)
+            if synth.deferred_plan_mismatches():
+                raise RuntimeError('a synthesis cycle plan made ahead did not match its frames')
         if step % args.log_every == 0:
             elapsed = time.time() - last_time
             last_time = time.time()
