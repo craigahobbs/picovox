@@ -6,11 +6,14 @@
 // - {'type': 'units', 'id', 'units': [{'index', 'text', 'paragraphStart'}], 'voice', 'rate'} speaks the units in order,
 //   posting {'type': 'unitStart', 'id', 'unit'}, {'type': 'unitBlock', 'id', 'unit', 'samples', 'sampleRate'}, and
 //   {'type': 'unitDone', 'id', 'unit'} for each, then {'type': 'runDone', 'id'}. A newer run or a cancel supersedes a run between units.
+// - {'type': 'models', 'g2pModel', 'voiceModel': {'manifest', 'encoding', 'weights'}} - the generated model modules
+//   (lib/models/), imported once by the engine for all of its workers (a worker's own import would download them again).
+//   The worker waits for it before loading either network.
 // - {'type': 'prepare', 'voice'} loads the voice's model ahead of playback.
 // - {'type': 'cancel'} stops the current run.
 // Messages out also include {'type': 'ready'} (the G2P network is loaded) and {'type': 'error', 'id', 'message'}.
 //
-// A voice is a speaker of the multi-speaker neural model (nn/js), a generated module (lib/models/voiceModel.js) imported on first
+// A voice is a speaker of the multi-speaker neural model (nn/js), a generated module (lib/models/voiceModel.js) unpacked on first
 // use.
 
 import {setPronouncer, textToPhrases} from '../lib/lexicon.js';
@@ -105,7 +108,12 @@ if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globa
     const trace = (event) => {
         self.postMessage({'type': 'trace', event, 'ms': Math.round(performance.now() - workerStart)});
     };
-    const loadModel = () => loadNeuralModel(undefined, trace);
+    // The engine's models message
+    let receiveModels;
+    const models = new Promise((resolve) => {
+        receiveModels = resolve;
+    });
+    const loadModel = () => loadNeuralModel(() => models.then(({voiceModel}) => voiceModel), trace);
     trace('started');
 
     // A JavaScript speed check - a fixed arithmetic workload (a few milliseconds with a JIT; far slower without one, as
@@ -122,8 +130,8 @@ if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globa
     trace(`speed check: ${Math.round(performance.now() - speedStart)} ms (checksum ${Math.round(sum) % 1000})`);
 
     // Load the G2P network on startup - every word's pronunciation
-    const ready = import('../lib/models/g2pModel.js').then(({g2pModel}) => {
-        trace('G2P model imported');
+    const ready = models.then(({g2pModel}) => {
+        trace('models received');
         return loadG2p(g2pModel);
     }).then((pronounce) => {
         setPronouncer(pronounce);
@@ -175,7 +183,9 @@ if (typeof globalThis.WorkerGlobalScope !== 'undefined' && self instanceof globa
     };
 
     self.onmessage = (event) => {
-        if (event.data.type === 'units') {
+        if (event.data.type === 'models') {
+            receiveModels(event.data);
+        } else if (event.data.type === 'units') {
             runUnits(event.data).catch((error) => {
                 self.postMessage({'type': 'error', 'id': event.data.id, 'message': `${error.message} (${error.stack})`});
             });

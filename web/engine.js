@@ -119,6 +119,22 @@ function isAppleMobile() {
 }
 
 
+// Import the generated model modules (lib/models/) once for every worker - each worker's own import would download them
+// again - as the workers' models message. A failed import (a dropped request, say) is tried once more.
+function importModels(retry = true) {
+    return Promise.all([import('../lib/models/g2pModel.js'), import('../lib/models/voiceModel.js')]).then(([g2p, voice]) => ({
+        'type': 'models',
+        'g2pModel': g2p.g2pModel,
+        'voiceModel': {'manifest': voice.manifest, 'encoding': voice.encoding, 'weights': voice.weights}
+    }), (error) => {
+        if (retry) {
+            return importModels(false);
+        }
+        throw error;
+    });
+}
+
+
 export class Engine {
     constructor({onChange = () => {
         // No listener
@@ -150,6 +166,7 @@ export class Engine {
         this.measuredChars = 0;
         this.measuredSeconds = 0;
         // (one on iPhones and iPads - Safari gives a page about one core's worth there, so more workers only compete)
+        this.models = importModels();
         const poolSize = isAppleMobile() ? 1 : Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 2) - 1));
         for (let slot = 0; slot < poolSize; slot++) {
             this.startWorker(slot);
@@ -164,6 +181,13 @@ export class Engine {
         const worker = new Worker(new URL('worker.js', import.meta.url), {'type': 'module'});
         this.workers[slot] = {worker, 'ready': false, starts};
         worker.onmessage = (event) => this.onWorkerMessage(event.data, slot);
+        this.models.then((message) => {
+            worker.postMessage(message);
+        }, (error) => {
+            this.mark(`model import error: ${error.message}`);
+            this.error = `The speech synthesizer failed to load its models: ${error.message}`;
+            this.notify();
+        });
         worker.onerror = (event) => {
             event.preventDefault();
             this.mark(`worker ${slot} error: ${event.message || '(no message)'} ${event.filename || ''}:${event.lineno || ''}`);
