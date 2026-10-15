@@ -963,10 +963,13 @@ async function renderCheckpointSamples() {
         return element;
     };
     const checkpoints = [...index.checkpoints].sort((first, second) => second.rendered - first.rendered);
+    checkpointSteps = new Map();
+    for (const checkpoint of checkpoints) {
+        checkpointSteps.set(checkpoint.run, [...checkpointSteps.get(checkpoint.run) || [], checkpoint.step]);
+    }
     if (checkpoints.length !== 0) {
         const [newest] = checkpoints;
         newestCheckpoint = `${newest.run} ${newest.step}`;
-        setTabFact('tabFactListen', `step ${newest.step.toLocaleString()}`);
         if (currentTab === 'listen') {
             markHeard();
         } else {
@@ -988,6 +991,43 @@ async function renderCheckpointSamples() {
     }
     checkpointsElement.replaceChildren(...blocks);
     checkpointSection.hidden = false;
+}
+
+
+// Render the time until the next checkpoint's samples - the live run's next checkpoint (every pipeline.json
+// samples.checkpointEvery steps, or the interval between its rendered checkpoints), estimated from its recent seconds
+// per step, plus about 1.5 minutes for the monitor to notice, render, and score it
+let checkpointSteps = new Map();
+const renderSeconds = 90;
+function renderNextCheckpoint() {
+    const section = document.getElementById('nextSection');
+    const [live] = [...runs.values()].filter((run) => runStatus(run) === 'live').sort((first, second) => second.modified - first.modified);
+    const train = live ? live.entries.train || [] : [];
+    const last = train[train.length - 1];
+    if (!live || !last || !pipeline?.samples) {
+        section.hidden = true;
+        setTabFact('tabFactListen', newestCheckpoint === null ? '' : `step ${Number(newestCheckpoint.split(' ')[1]).toLocaleString()}`);
+        return;
+    }
+    const rendered = (checkpointSteps.get(live.name) || []).sort((first, second) => first - second);
+    const gaps = rendered.slice(1).map((step, index) => step - rendered[index]).filter((gap) => gap > 0);
+    const every = gaps.length !== 0 ? Math.min(...gaps) : pipeline.samples.checkpointEvery || 5000;
+    let next = (Math.floor(last.step / every) + 1) * every;
+    if (live.info.targetSteps) {
+        next = Math.min(next, live.info.targetSteps);
+    }
+    const previous = next - every;
+    const secondsPerStep = median(train.slice(-20).map((entry) => entry.secondsPerStep).filter(Number.isFinite));
+    const seconds = (next - last.step) * secondsPerStep + renderSeconds;
+    const when = new Date(Date.now() + seconds * 1000).toLocaleTimeString([], {'hour': 'numeric', 'minute': '2-digit'});
+    section.hidden = false;
+    const whenText = Number.isFinite(seconds) ? `in about ${formatDuration(seconds)} · around ${when}` : '';
+    document.getElementById('nextWhen').textContent = whenText;
+    const fraction = Math.max(0, Math.min(1, (last.step - previous) / every));
+    document.getElementById('nextBar').style.width = `${(100 * fraction).toFixed(1)}%`;
+    document.getElementById('nextLine').textContent = `${live.name} step ${next.toLocaleString()} - now at step ` +
+        `${last.step.toLocaleString()}, ${secondsPerStep.toFixed(2)} s/step; the samples appear a minute or two after it's saved`;
+    setTabFact('tabFactListen', Number.isFinite(seconds) ? `next ${formatDuration(seconds)}` : '');
 }
 
 
@@ -1124,6 +1164,7 @@ async function refresh() {
         renderLogs(logs);
         renderSamples(files);
         await renderCheckpointSamples();
+        renderNextCheckpoint();
         updatedElement.textContent = `Updated ${new Date().toLocaleTimeString()} · every second`;
     } finally {
         setTimeout(refresh, refreshMs);
