@@ -355,10 +355,26 @@ The current acoustic model's size (966K parameters) was chosen by judgment, not 
 
 ### 9.3 Training throughput
 
-The live training run keeps the GPU 68-80% busy while the trainer uses under one CPU core: each step copies the
-predicted frames back to the CPU to plan glottal cycles in Python. A profiling pass is measuring and removing that
-round trip and other costs, with the requirement that the optimized code compute identical losses and gradients
-and that the JavaScript renderer still match.
+A profiling pass made a training step **1.73 times faster on fresh input shapes (0.430 to 0.249 s) and 2.07 times
+faster once the GPU's shape caches are warm (0.295 to 0.142 s)**, measured in interleaved A/B runs while sharing the
+GPU with a live run. The largest hidden cost was not computation: on Apple's GPU (PyTorch's MPS backend), every
+blocking host-to-device copy waits for the whole GPU queue to drain - we measured 130-190 ms waits - and the baseline
+made about 50 such copies and 25 device reads per step, so the CPU and GPU took turns.
+
+| Change | Step time |
+| --- | --- |
+| Synthesizer: a batch-vectorized glottal cycle plan, non-blocking uploads, cached constants, shared filter trigonometry | (enables the next) |
+| Each step's data, crops, and cycle plans prepared ahead on a thread; losses read only when logged | -14% |
+| A fused AdamW that skips non-finite steps on the GPU (no per-step gradient-norm read) | -9.5% |
+| A Metal kernel for the harmonic sum (no 570 MB phase and sine tensors) | -11% |
+| Metal kernels for the vocal tract's response (14 resonators fused, analytic backward) | -17% |
+
+The optimized code computes the same thing: step-0 losses are bit-identical; over 240-step training runs the curves
+differ from the baseline by less than the baseline differs from its own rerun (MPS backpropagation is
+nondeterministic); the Python synthesizer still matches the browser renderer; and a run with the multi-style
+settings (emotional data, adversarial critic, feature matching) matches to 4-5 significant digits on every loss.
+`torch.compile` was tried first; its backward pass fails on MPS. The optimizations were rolled into the live
+multi-style run (stage B) at step 1,000.
 
 
 ## 10. Limitations
