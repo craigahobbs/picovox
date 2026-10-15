@@ -508,7 +508,8 @@ async function fileExists(path) {
 }
 
 
-// The phase each unplanned log was assigned to - the phase running when it first appeared, remembered per browser
+// The phase each unplanned log in an unknown folder was assigned to - the phase running when it first appeared,
+// remembered per browser
 const assignedKey = 'training-dashboard-assigned-v1';
 let assigned = {};
 try {
@@ -535,7 +536,11 @@ function logState(path, log) {
     if (lines.some((line) => line.startsWith('Traceback'))) {
         return {'status': 'failed', 'fraction': 0, 'line': lastLine};
     }
-    if (Date.now() - result.modified < stalledMs) {
+    // Done: quiet for a few minutes, or briefly quiet after a complete count or a summary line following the progress lines
+    const quiet = Date.now() - result.modified;
+    const lastProgress = parseProgress(lines.slice(-1));
+    const finished = (lastProgress !== null && lastProgress.fraction >= 1) || (lastProgress === null && parseProgress(lines) !== null);
+    if (quiet < stalledMs && !(finished && quiet >= 20000)) {
         const progress = parseProgress(lines);
         if (progress === null) {
             return {'status': 'running', 'fraction': null, 'line': lastLine};
@@ -602,14 +607,24 @@ async function pipelineRows(logs) {
         ...newRuns.filter((run) => run !== newestRun).
             map((run) => ({'id': `run:${run.name}`, 'title': `run ${run.name}`, 'state': runState(run)}))
     ];
+    // Unplanned work joins the phase whose planned logs share its folder - runs join the training phase, and others the
+    // phase running when they appeared
+    const folder = (path) => path.slice(0, path.lastIndexOf('/') + 1);
+    const phaseOfFolder = (path) => pipeline.phases.findIndex((phase) => phase.steps.some((step) => (
+        step.log && folder(step.log) === folder(path)
+    )));
+    const trainPhase = pipeline.phases.findIndex((phase) => phase.steps.some((step) => step.run));
     let changed = false;
     for (const row of unplanned) {
-        if (!(row.id in assigned)) {
-            const trainPhase = pipeline.phases.findIndex((phase) => phase.steps.some((step) => step.run));
-            assigned[row.id] = row.id.startsWith('run:') ? trainPhase : currentPhase;
-            changed = true;
+        let phaseIndex = row.id.startsWith('run:') ? trainPhase : phaseOfFolder(`build/nn/${row.id.slice(4)}`);
+        if (phaseIndex === -1) {
+            if (!(row.id in assigned)) {
+                assigned[row.id] = currentPhase;
+                changed = true;
+            }
+            phaseIndex = assigned[row.id];
         }
-        phases[Math.min(assigned[row.id], phases.length - 1)].rows.push({...row, 'weight': 0, 'unplanned': true});
+        phases[Math.min(phaseIndex, phases.length - 1)].rows.push({...row, 'weight': 0, 'unplanned': true});
     }
     if (changed) {
         saveAssigned();
