@@ -67,7 +67,8 @@
                 {"title": "Integration and parity", "log": "build/nn/g2p/integrate.log", "weight": 1},
                 {"title": "Evaluation and listening samples", "log": "build/nn/g2p/eval.log", "weight": 1},
                 {"title": "Classical baseline (WFST joint-sequence model)", "log": "build/nn/g2p-wfst/wfst.log", "weight": 1},
-                {"title": "Challenger: beat the WFST's 34.4% in at most 200 KB", "log": "build/nn/g2p-challenge/challenge.log", "weight": 3}
+                {"title": "Challenger: beat the WFST's 34.4% in at most 200 KB", "log": "build/nn/g2p-challenge/challenge.log", "weight": 3},
+                {"title": "NN only: reproduce the dictionary (book-token error under 0.5%) and generalize", "log": "build/nn/g2p-nnonly/nnonly.log", "weight": 4}
             ]
         },
         {
