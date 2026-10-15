@@ -581,10 +581,11 @@ def main(argv=None):
         print(f'init from {args.init}: missing {missing}, unexpected {unexpected}', file=sys.stderr)
     synth = dsynth.DSynth(args.rate).to(device)
     critic = discriminator.Critic(args.rate, args.max_hz, eps=1e-9).to(device) if args.adversarial > 0 else None
-    critic_optimizer = torch.optim.AdamW(critic.parameters(), lr=args.critic_lr, betas=(0.8, 0.99)) if critic else None
     # (on the GPU the fused AdamW - one kernel, not a loop over the parameters - which also skips a step with a
     # non-finite gradient norm on the device, so the step needn't read the norm)
     fused = device.type in ('mps', 'cuda')
+    critic_optimizer = torch.optim.AdamW(critic.parameters(), lr=args.critic_lr, betas=(0.8, 0.99),
+                                         fused=fused or None) if critic else None
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, betas=(0.9, 0.98),
                                   fused=fused or None)
 
@@ -610,6 +611,8 @@ def main(argv=None):
         best = state.get('best', math.inf)
         if critic is not None and 'critic' in state:
             critic.load_state_dict(state['critic'])
+            for group in state['criticOptimizer']['param_groups']:
+                group['fused'] = fused or None
             critic_optimizer.load_state_dict(state['criticOptimizer'])
         rng = numpy.random.default_rng(args.seed + step)
     core = parameter_count(model) - model.speaker.weight.numel() - model.eq_free.numel()
