@@ -128,7 +128,8 @@ function parseJsonLog(text) {
 // Parse a run's text log for its header facts - the target steps, the parameter count, and the data size
 function parseTextLog(text) {
     const info = {};
-    const target = text.match(/(\d+) steps from (\d+)/);
+    // The target from the latest launch's header (a resumed run may have changed it)
+    const target = [...text.matchAll(/(\d+) steps from (\d+)/g)].pop();
     if (target) {
         info.targetSteps = Number(target[1]);
         info.startStep = Number(target[2]);
@@ -147,8 +148,11 @@ function parseTextLog(text) {
         info.stoppedStep = Number(stoppedStep);
         info.continuedAs = continuedAs;
     }
-    if (/Traceback|Error:/.test(text)) {
-        info.error = text.split('\n').filter((line) => /Error/.test(line)).pop();
+    // An error counts only in the latest launch (after the last header) - a resumed run's log keeps earlier failures
+    const launches = text.split(/^.*steps from \d+.*$/m);
+    const latest = launches[launches.length - 1];
+    if (/Traceback|Error:/.test(latest)) {
+        info.error = latest.split('\n').filter((line) => /Error/.test(line)).pop();
     }
     return info;
 }
