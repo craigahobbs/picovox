@@ -23,11 +23,9 @@ on two text sets: the held-out ARCTIC test sentences (data/nn/arctic-split.json)
 """
 
 import argparse
-import concurrent.futures
 import json
 import math
 import os
-import re
 import subprocess
 import sys
 
@@ -35,7 +33,7 @@ import numpy
 import parselmouth
 import soundfile
 
-from .bridge import cosine, listen
+from .panel import cosine, edit_distance, listen, transcribe_all, words
 from .data import ArcticData
 from .frontend import tokenize
 from .model import FIRST_PHONE
@@ -45,44 +43,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ARCTIC = os.path.join(ROOT, 'data', 'corpora', 'arctic')
 FIT_DIR = os.path.join(ROOT, 'build', 'nn', 'fit-eq-s005-va')
 SEX = {'slt': 'female', 'bdl': 'male'}
-
-
-#
-# Whisper
-#
-
-# Words for scoring (tools/eval.js words)
-def words(text):
-    return [word for word in re.sub(r'[^a-z0-9\' ]+', ' ', text.lower()).replace("'", '').split() if word]
-
-
-# Word-level edit distance
-def edit_distance(reference, hypothesis):
-    previous = list(range(len(hypothesis) + 1))
-    for ix, ref_word in enumerate(reference, 1):
-        current = [ix] + [0] * len(hypothesis)
-        for jx, hyp_word in enumerate(hypothesis, 1):
-            current[jx] = min(previous[jx] + 1, current[jx - 1] + 1, previous[jx - 1] + (ref_word != hyp_word))
-        previous = current
-    return previous[-1]
-
-
-# Transcribe a WAV file with whisper.cpp (cached beside it as <name>.json) - the text
-def transcribe(path):
-    base = path[:-4]
-    if not os.path.exists(base + '.json') or os.path.getmtime(base + '.json') < os.path.getmtime(path):
-        subprocess.run(['whisper-cli', '-m', os.path.join(ROOT, 'data', 'whisper', 'ggml-base.en.bin'), '-t', '2', '-f', path,
-                        '-np', '-ojf', '-of', base], check=True, capture_output=True, cwd=ROOT)
-    with open(base + '.json', encoding='utf-8') as file:
-        result = json.load(file)
-    return ''.join(segment['text'] for segment in result['transcription']).strip()
-
-
-# Transcripts of WAV files, in parallel - {path: text}
-def transcribe_all(paths, workers=6):
-    with concurrent.futures.ThreadPoolExecutor(workers) as pool:
-        return dict(zip(paths, pool.map(transcribe, paths)))
-
 
 #
 # Prosody
@@ -183,7 +143,7 @@ def evaluate_voice(voice, args, data):
     # Score everything
     paths = [item[key] for item in items for key in ('neural', 'neural-raw', 'rule', 'original') if key in item]
     paths += [item[key] for item in fit_files for key in ('fitted', 'original')]
-    scores = listen(paths)
+    scores = listen(paths, 'auto')
     transcripts = transcribe_all(paths)
 
     def files(group, key):

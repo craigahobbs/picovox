@@ -9,6 +9,7 @@ imitate a big teacher, the way the project shrinks its voice model at each retra
     build/venv-nn/bin/python -B -m nn.distill train --student s64                                 # 2. a student (each one)
     build/venv-nn/bin/python -B -m nn.distill polish --student s64                                # 3. optional - real audio
     build/venv-nn/bin/python -B -m nn.distill eval teacher s96 s64 s48 s32 s64-polish             # 4. the browser path
+    build/venv-nn/bin/python -B -m nn.distill eval NAME=CHECKPOINT [--whisper-workers 3]          #    any checkpoint
     build/venv-nn/bin/python -B -m nn.distill pick                                                # 5. the smallest in tolerance
     build/venv-nn/bin/python -B -m nn.distill ladder                                              # 1-5, all of the ladder
 
@@ -49,7 +50,6 @@ The method:
 """
 
 import argparse
-import concurrent.futures
 import datetime
 import json
 import math
@@ -58,7 +58,6 @@ import os
 import queue
 import re
 import shutil
-import subprocess
 import sys
 import threading
 import time
@@ -71,7 +70,7 @@ from .export import export, load_model, token_remap, training_token_counts
 from .frontend import tokenize, vocabulary
 from .model import BOS, FIRST_PHONE, FIXED_NAMES, PAD, STYLE_NAMES, MultiModel, is_boundary, parameter_count
 from .synthesize import sentences
-from . import params
+from . import panel, params
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -79,8 +78,6 @@ CONFIG_PATH = os.path.join(ROOT, 'data', 'nn', 'distill.json')
 DISTILL_DIR = os.environ.get('NN_DISTILL_DIR', os.path.join(ROOT, 'build', 'nn', 'distill'))
 RUNS_DIR = os.environ.get('NN_RUNS_DIR', os.path.join(ROOT, 'build', 'nn', 'runs'))
 SAMPLES_DIR = os.environ.get('NN_DISTILL_SAMPLES', os.path.join(ROOT, 'build', 'nn', 'distill-samples'))
-LISTENERS_PYTHON = os.path.join(ROOT, 'build', 'venv-listeners', 'bin', 'python')
-WHISPER_MODEL = os.path.join(ROOT, 'data', 'whisper', 'ggml-base.en.bin')
 
 # (NNPACK's depthwise 1-D convolution on the CPU is about 8x slower than PyTorch's own)
 torch.backends.nnpack.set_flags(False)
@@ -788,63 +785,7 @@ def polish(args):
 # Evaluation
 #
 
-# Score WAV files with the listener panel on the CPU (UTMOS and the ECAPA embedding) - {path: {mos, embedding}}
-def listen(paths):
-    process = subprocess.run([LISTENERS_PYTHON, '-I', os.path.join(ROOT, 'tools', 'listeners.py'), '--device', 'cpu', '--no-emotion',
-                              '--files-from', '-'], input='\n'.join(paths), capture_output=True, text=True, check=True)
-    return {item['file']: item for item in (json.loads(line) for line in process.stdout.splitlines() if line.strip())}
-
-
-# Transcribe a WAV file with whisper.cpp base.en (cached beside it as <name>.json) - the text
-def transcribe(path):
-    base = path[:-4]
-    if not os.path.exists(base + '.json') or os.path.getmtime(base + '.json') < os.path.getmtime(path):
-        subprocess.run(['whisper-cli', '-m', WHISPER_MODEL, '-t', '2', '-f', path, '-np', '-ojf', '-of', base], check=True,
-                       capture_output=True, cwd=ROOT)
-    with open(base + '.json', encoding='utf-8') as file:
-        result = json.load(file)
-    return ''.join(segment['text'] for segment in result['transcription']).strip()
-
-
-# Words for scoring (tools/eval.js words)
-def words(text):
-    return [word for word in re.sub(r'[^a-z0-9\' ]+', ' ', text.lower()).replace("'", '').split() if word]
-
-
-# Word-level edit distance
-def edit_distance(reference, hypothesis):
-    previous = list(range(len(hypothesis) + 1))
-    for ix, ref_word in enumerate(reference, 1):
-        current = [ix] + [0] * len(hypothesis)
-        for jx, hyp_word in enumerate(hypothesis, 1):
-            current[jx] = min(previous[jx] + 1, current[jx - 1] + 1, previous[jx - 1] + (ref_word != hyp_word))
-        previous = current
-    return previous[-1]
-
-
-def cosine(first, second):
-    first, second = numpy.asarray(first), numpy.asarray(second)
-    return float(first @ second / (numpy.linalg.norm(first) * numpy.linalg.norm(second)))
-
-
-# The panel texts - [{id, text}]
-def panel_texts():
-    with open(os.path.join(ROOT, 'tools', 'panel-texts.json'), encoding='utf-8') as file:
-        return json.load(file)['texts']
-
-
-# Speak a batch with an export (nn/js/speak.js) - its speed report
-def speak(model_path, batch, batch_path, rate, frames_only=False):
-    with open(batch_path, 'w', encoding='utf-8') as file:
-        json.dump(batch, file)
-    command = ['node', os.path.join(ROOT, 'nn', 'js', 'speak.js'), '-m', model_path, '--batch', batch_path, '-r', str(rate)]
-    if frames_only:
-        command.append('--frames-only')
-    process = subprocess.run(command, check=True, capture_output=True, text=True, cwd=ROOT)
-    return json.loads(process.stdout.strip().splitlines()[-1])
-
-
-# A model's checkpoint by name - teacher (the targets' teacher), a ladder student (its run's best.pt), or a path
+# A model's checkpoint by name - teacher (the targets' teacher), or a ladder student (its run's best.pt)
 def model_checkpoint(name, config):
     if name == 'teacher':
         targets_index = os.path.join(DISTILL_DIR, 'targets', 'index.json')
@@ -852,12 +793,10 @@ def model_checkpoint(name, config):
             with open(targets_index, encoding='utf-8') as file:
                 return json.load(file)['teacher']
         return root_path(config['teacher'])
-    if os.path.exists(name):
-        return name
     return os.path.join(RUNS_DIR, f'distill-{name}', 'best.pt')
 
 
-def evaluate_model(name, checkpoint, config, reference=None, listen_panel=True):
+def evaluate_model(name, checkpoint, config, reference=None, listen_panel=True, whisper_workers=6):
     """Export, package, speak, and score a model - its result (also <eval>/<name>/result.json); reference is the
     teacher's result (the panel renderings' embeddings for the similarity)"""
     from .package import package  # pylint: disable=import-outside-toplevel
@@ -872,50 +811,12 @@ def evaluate_model(name, checkpoint, config, reference=None, listen_panel=True):
               'config': {key: model.config[key] for key in ('dim', 'decoderDim', 'encoderLayers', 'decoderLayers', 'heads', 'ffnMultiple')},
               'parameters': parameter_count(model),
               'parametersCore': parameter_count(model) - model.speaker.weight.numel() - model.eq_free.numel()}
-    manifest = export(model, state, 'model', out_dir, speaker=state['speakers'].index('arctic-bdl'))
+    export(model, state, 'model', out_dir, speaker=state['speakers'].index('arctic-bdl'))
     _, sizes = package(os.path.join(out_dir, 'model'))
     result['size'] = {'binBytes': sizes['binBytes'], 'manifestBytes': sizes['manifestBytes'], 'encoding': sizes['chosen'],
                       'moduleBytes': sizes[sizes['chosen']]['bytes'], 'moduleGzipBytes': sizes[sizes['chosen']]['gzipBytes']}
-    model_path = os.path.join(out_dir, 'model')
-    keys = [speaker['key'] for speaker in manifest['speakers']]
-    texts = panel_texts()
     if listen_panel:
-        items = []
-        for speaker, sex in settings['speakers']:
-            for number, text in enumerate(texts):
-                items.append({'speaker': speaker, 'sex': sex, 'textId': text['id'], 'text': text['text'],
-                              'wav': os.path.join(out_dir, f'{speaker}-{text["id"]}.wav'), 'seed': number + 1})
-        batch = [{'text': item['text'], 'wav': item['wav'], 'seed': item['seed'], 'speaker': keys.index(item['speaker'])} for item in items]
-        result['panelSpeed'] = speak(model_path, batch, os.path.join(out_dir, 'batch.json'), settings['rate'])
-        paths = [item['wav'] for item in items]
-        scores = listen(paths)
-        with concurrent.futures.ThreadPoolExecutor(6) as pool:
-            transcripts = dict(zip(paths, pool.map(transcribe, paths)))
-        speakers = {}
-        for speaker, sex in settings['speakers']:
-            group = [item for item in items if item['speaker'] == speaker]
-            mos = [scores[item['wav']]['mos'] for item in group]
-            errors = sum(edit_distance(words(item['text']), words(transcripts[item['wav']])) for item in group)
-            count = sum(len(words(item['text'])) for item in group)
-            embedding = numpy.mean([scores[item['wav']]['embedding'] for item in group], axis=0)
-            row = {'sex': sex, 'mos': float(numpy.mean(mos)), 'mosMin': float(numpy.min(mos)), 'wer': 100 * errors / max(1, count),
-                   'embedding': embedding.tolist()}
-            if reference is not None:
-                teacher_row = reference['speakers'][speaker]
-                row['similarity'] = cosine(embedding, teacher_row['embedding'])
-                row['pairedSimilarity'] = float(numpy.mean([
-                    cosine(scores[item['wav']]['embedding'], reference['utterances'][os.path.basename(item['wav'])]['embedding'])
-                    for item in group]))
-            speakers[speaker] = row
-        result['speakers'] = speakers
-        result['utterances'] = {os.path.basename(item['wav']): {'mos': scores[item['wav']]['mos'], 'embedding': scores[item['wav']]['embedding'],
-                                                                'transcript': transcripts[item['wav']]} for item in items}
-        result['panel'] = {key: float(numpy.mean([row[key] for row in speakers.values()]))
-                           for key in ('mos', 'wer', 'similarity', 'pairedSimilarity') if all(key in row for row in speakers.values())}
-        if reference is not None:
-            result['panel']['similarityMin'] = float(min(row['similarity'] for row in speakers.values()))
-        for item in items:
-            os.remove(item['wav'])
+        result.update(panel.score_model(os.path.join(out_dir, 'model'), out_dir, settings, reference, whisper_workers))
     result['seconds'] = round(time.time() - start, 1)
     with open(os.path.join(out_dir, 'result.json'), 'w', encoding='utf-8') as file:
         json.dump(result, file, indent=1)
@@ -926,7 +827,7 @@ def measure_speed(names, config, repeats=3):
     """The real-time factors of the exported models (nn/js/speak.js at the samples' rate on the panel texts for the
     app's male voice) - the best of repeats, interleaved - {name: {realTimeNetwork, realTimeTotal, ...}}"""
     rate = config['samples']['rate']
-    texts = panel_texts()
+    texts = panel.panel_texts()
     best = {}
     for _ in range(repeats):
         for name in names:
@@ -935,7 +836,7 @@ def measure_speed(names, config, repeats=3):
                 keys = [speaker['key'] for speaker in json.load(file)['speakers']]
             batch = [{'text': text['text'], 'wav': os.path.join(out_dir, f'speed-{number:02d}.wav'), 'seed': number + 1,
                       'speaker': keys.index('arctic-bdl')} for number, text in enumerate(texts)]
-            report = speak(os.path.join(out_dir, 'model'), batch, os.path.join(out_dir, 'speed-batch.json'), rate)
+            report = panel.speak(os.path.join(out_dir, 'model'), batch, os.path.join(out_dir, 'speed-batch.json'), rate)
             for item in batch:
                 os.remove(item['wav'])
             previous = best.get(name)
@@ -955,11 +856,11 @@ def render_samples(name, config):
     out_dir = os.path.join(DISTILL_DIR, 'eval', name)
     with open(os.path.join(out_dir, 'model.json'), encoding='utf-8') as file:
         keys = [speaker['key'] for speaker in json.load(file)['speakers']]
-    texts = {text['id']: text['text'] for text in panel_texts()}
+    texts = {text['id']: text['text'] for text in panel.panel_texts()}
     os.makedirs(SAMPLES_DIR, exist_ok=True)
     batch = [{'text': texts[text_id], 'wav': os.path.join(SAMPLES_DIR, f'distill-{name}-{speaker}-{text_id}.wav'), 'seed': 1,
               'speaker': keys.index(speaker)} for speaker in settings['speakers'] for text_id in settings['texts']]
-    speak(os.path.join(out_dir, 'model'), batch, os.path.join(out_dir, 'samples-batch.json'), settings['rate'])
+    panel.speak(os.path.join(out_dir, 'model'), batch, os.path.join(out_dir, 'samples-batch.json'), settings['rate'])
     return [item['wav'] for item in batch]
 
 
@@ -979,19 +880,21 @@ def evaluate(args):
     reference = None
     if 'teacher' in names:
         names = ['teacher'] + [name for name in names if name != 'teacher']
-    for number, name in enumerate(names, 1):
+    for number, model in enumerate(names, 1):
+        # (NAME=CHECKPOINT - any checkpoint, its results in <eval>/NAME)
+        name, _, checkpoint = model.partition('=')
+        checkpoint = checkpoint or model_checkpoint(name, config)
         if name != 'teacher' and reference is None:
             with open(reference_path, encoding='utf-8') as file:
                 reference = json.load(file)
-        checkpoint = model_checkpoint(name, config)
         log_line('eval', f'{number}/{len(names)} {name}: evaluating {checkpoint}')
-        result = evaluate_model(name, checkpoint, config, None if name == 'teacher' else reference)
+        result = evaluate_model(name, checkpoint, config, None if name == 'teacher' else reference, whisper_workers=args.whisper_workers)
         if name == 'teacher':
             reference = result
-        panel = result.get('panel', {})
+        measures = result.get('panel', {})
         log_line('eval', f'{number}/{len(names)} {name}: {result["parameters"]} parameters, module {result["size"]["moduleBytes"]} bytes '
-                 f'({result["size"]["moduleGzipBytes"]} gzip); UTMOS {panel.get("mos", 0):.3f}, WER {panel.get("wer", 0):.2f}%, '
-                 f'similarity {panel.get("similarity", 1):.3f} ({result["seconds"]:.0f} s)')
+                 f'({result["size"]["moduleGzipBytes"]} gzip); UTMOS {measures.get("mos", 0):.3f}, WER {measures.get("wer", 0):.2f}%, '
+                 f'similarity {measures.get("similarity", 1):.3f} ({result["seconds"]:.0f} s)')
     return 0
 
 
@@ -1014,15 +917,15 @@ def pick(args):
             results[name]['speed'] = report
     rows = []
     for name, result in results.items():
-        panel = result['panel']
+        measures = result['panel']
         row = {'name': name, 'parameters': result['parameters'], 'moduleBytes': result['size']['moduleBytes'],
-               'moduleGzipBytes': result['size']['moduleGzipBytes'], 'mos': panel['mos'], 'wer': panel['wer'],
-               'similarity': panel.get('similarity', 1.0), 'pairedSimilarity': panel.get('pairedSimilarity', 1.0),
+               'moduleGzipBytes': result['size']['moduleGzipBytes'], 'mos': measures['mos'], 'wer': measures['wer'],
+               'similarity': measures.get('similarity', 1.0), 'pairedSimilarity': measures.get('pairedSimilarity', 1.0),
                'realTimeNetwork': result.get('speed', {}).get('realTimeNetwork'), 'realTimeTotal': result.get('speed', {}).get('realTimeTotal')}
         if name != 'teacher':
-            row['within'] = {'mos': panel['mos'] >= teacher['panel']['mos'] - tolerance['mos'],
-                             'wer': panel['wer'] <= teacher['panel']['wer'] + tolerance['wer'],
-                             'similarity': panel['similarity'] >= tolerance['similarity']}
+            row['within'] = {'mos': measures['mos'] >= teacher['panel']['mos'] - tolerance['mos'],
+                             'wer': measures['wer'] <= teacher['panel']['wer'] + tolerance['wer'],
+                             'similarity': measures['similarity'] >= tolerance['similarity']}
             row['withinTolerance'] = all(row['within'].values())
         rows.append(row)
     rows.sort(key=lambda row: row['parameters'], reverse=True)
@@ -1117,7 +1020,8 @@ def main(argv=None):
 
     sub = subparsers.add_parser('eval', help='evaluate models through the browser path')
     add_common(sub)
-    sub.add_argument('models', nargs='*', help='teacher, ladder students or runs (distill-<name>/best.pt), or checkpoints')
+    sub.add_argument('models', nargs='*', help='teacher, ladder students or runs (distill-<name>/best.pt), or NAME=CHECKPOINT')
+    sub.add_argument('--whisper-workers', type=int, default=6, help='whisper.cpp processes at a time (two threads each)')
     sub.set_defaults(func=evaluate)
 
     sub = subparsers.add_parser('pick', help='speed, samples, and the smallest student within the tolerance')

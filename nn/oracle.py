@@ -27,9 +27,9 @@ import soundfile
 import torch
 
 from . import params
-from .bridge import cosine, listen
 from .data import ArcticData
-from .evaluate import ARCTIC, edit_distance, transcribe_all, words
+from .evaluate import ARCTIC
+from .panel import cosine, edit_distance, listen, transcribe_all, words
 from .synthesize import Voice, render
 from .train import f0_track
 
@@ -80,7 +80,7 @@ def main(argv=None):
             texts[groups[group][-1]] = entry['text']
 
     paths = [path for files in groups.values() for path in files]
-    scores = listen(paths)
+    scores = listen(paths, 'auto')
     transcripts = transcribe_all(paths)
     original_mean = numpy.mean([scores[path]['embedding'] for path in groups['original']], axis=0)
     results = {'checkpoint': args.checkpoint, 'speaker': speaker, 'count': len(entries), 'groups': {}}

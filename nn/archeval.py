@@ -32,16 +32,14 @@ import soundfile
 import torch
 
 from . import dsynth, params
-from .bridge import cosine
 from .data import DATA_DIR, ArcticData
-from .evaluate import edit_distance, transcribe_all, words
+from .panel import cosine, edit_distance, listen, transcribe_all, words
 from .export import export, load_model, quantized_model
 from .package import package
 from .trainmulti import Corpus, sonorant_mask, validate
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LISTENERS_PYTHON = os.path.join(ROOT, 'build', 'venv-listeners', 'bin', 'python')
 # The experiments' directory (the evaluations, and the reference recordings' embeddings) - NN_ARCH_DIR, if set
 ARCH_DIR = os.environ.get('NN_ARCH_DIR', os.path.join(ROOT, 'build', 'nn', 'arch'))
 
@@ -61,13 +59,6 @@ VALIDATION_DEFAULTS = {
     'smooth_weight': 0.05, 'frication_max_hz': 11000, 'sonorant_frication': 1.0, 'sonorant_af_db': 40.0, 'batch': 16,
     'correction_smooth': 1.0, 'correction_l2': 0.01, 'qat_bits': 0, 'qat_group': 0
 }
-
-
-# Score WAV files with the listener panel on the CPU (UTMOS and the ECAPA embedding) - {path: {mos, embedding}}
-def listen(paths, device='cpu'):
-    process = subprocess.run([LISTENERS_PYTHON, '-I', os.path.join(ROOT, 'tools', 'listeners.py'), '--device', device, '--no-emotion',
-                              '--files-from', '-'], input='\n'.join(paths), capture_output=True, text=True, check=True)
-    return {item['file']: item for item in (json.loads(line) for line in process.stdout.splitlines() if line.strip())}
 
 
 # The mean ECAPA embedding of a speaker's recordings (cached) - numpy [192]

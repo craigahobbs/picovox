@@ -38,14 +38,12 @@ import torch
 from parselmouth.praat import call
 
 from . import params
-from .bridge import cosine
 from .data import DATA_DIR, ArcticData
-from .evaluate import edit_distance, transcribe_all, words
+from .panel import cosine, edit_distance, listen, transcribe_all, words
 from .export import load_model
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LISTENERS_PYTHON = os.path.join(ROOT, 'build', 'venv-listeners', 'bin', 'python')
 FIT_DIR = os.path.join(ROOT, 'build', 'nn', 'fit-eq-s005-va')
 
 # The sample speakers - the reader pool's best-rated speakers with at least 0.25 hours (data/nn/speakers.json UTMOS)
@@ -76,13 +74,6 @@ TRANSFORM_TEXTS = STYLE_TEXTS[4:] + ['Come here at once, and bring the lantern!'
 #
 # Measures
 #
-
-# Score WAV files with the listener panel (UTMOS, ECAPA embedding, emotion2vec+) - {path: {mos, embedding, emotion}}
-def listen(paths, device='auto'):
-    process = subprocess.run([LISTENERS_PYTHON, '-I', os.path.join(ROOT, 'tools', 'listeners.py'), '--device', device,
-                              '--files-from', '-'], input='\n'.join(paths), capture_output=True, text=True, check=True)
-    return {item['file']: item for item in (json.loads(line) for line in process.stdout.splitlines() if line.strip())}
-
 
 # Voice quality of a WAV file (Praat) - HNR (dB, voiced frames), CPPS (dB), the 4-8 kHz level relative to 0-4 kHz in
 # voiced frames (dB), and above 8 kHz relative to 0-4 kHz when the file has it
@@ -264,7 +255,7 @@ def main(argv=None):
     paths = [item[key] for item in items for key in ('wav', 'old', 'original') if key in item]
     paths += [item['wav'] for item in style_items + transform_items]
     paths = list(dict.fromkeys(paths))
-    scores = listen(paths, args.device)
+    scores = listen(paths, args.device, emotion=True)
     transcripts = transcribe_all([path for path in paths if '/styles/' not in path])
     print('scored', file=sys.stderr, flush=True)
 

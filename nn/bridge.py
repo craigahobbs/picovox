@@ -32,30 +32,10 @@ import soxr
 import torch
 
 from . import dsynth, params, spectral
+from .panel import cosine, listen
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LISTENERS_PYTHON = os.path.join(ROOT, 'build', 'venv-listeners', 'bin', 'python')
-
-
-# Score WAV files with the listener panel (UTMOS and ECAPA embeddings) - {path: {mos, embedding}}
-def listen(paths, device='auto'):
-    process = subprocess.run(
-        [LISTENERS_PYTHON, '-I', os.path.join(ROOT, 'tools', 'listeners.py'), '--no-emotion', '--device', device, '--files-from', '-'],
-        input='\n'.join(paths), capture_output=True, text=True, check=True
-    )
-    results = {}
-    for line in process.stdout.splitlines():
-        if line.strip():
-            item = json.loads(line)
-            results[item['file']] = item
-    return results
-
-
-# The cosine similarity of two vectors
-def cosine(first, second):
-    first, second = numpy.asarray(first), numpy.asarray(second)
-    return float(first @ second / (numpy.linalg.norm(first) * numpy.linalg.norm(second)))
 
 
 # Group listener scores - mean MOS, and the mean embedding's similarity to a reference group's
@@ -140,7 +120,7 @@ def main(argv=None):
 
     if not args.no_listeners:
         paths = [path for groups in all_groups.values() for group in groups.values() for path in group]
-        scores = listen(paths)
+        scores = listen(paths, 'auto')
         for voice, groups in all_groups.items():
             results['voices'][voice]['listeners'] = summarize_listeners(scores, groups, 'klatt')
 

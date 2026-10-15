@@ -61,5 +61,7 @@ Architecture options and model size (each off by default):
 Shrinking and checking:
 
 - nn/distill.py - knowledge distillation of the multi-speaker model into small students (data/nn/distill.json)
+- nn/panel.py - the listener panel's scoring (UTMOS, Whisper's WER, speaker similarity) of an exported model, shared by
+  every evaluation
 - nn/smoke.py - every training entry point for a few steps on the CPU (the pipeline's smoke test)
 """
