@@ -10,13 +10,15 @@ directory that nn/data.py's ArcticData loads.
     build/venv-listeners/bin/python -B -m nn.accent                 # 1. accents -> build/nn/multi/accent.json
     build/venv-nn/bin/python -B -m nn.multi settings                # 2. per-speaker analysis settings (about 5 minutes)
     build/venv-nn/bin/python -B -m nn.multi pool                    # 3. the accent filter and the pool (a report)
-    build/venv-nn/bin/python -B -m nn.multi build                   # 4. build/nn/data/multi/ (about 30 minutes)
+    build/venv-nn/bin/python -B -m nn.multi build -j 8              # 4. build/nn/data/multi/ (about 6 minutes on 14 cores)
     build/venv-nn/bin/python -B -m nn.multi verify-tokens           # nn/js/tokens.js == nn/frontend.py on the pool texts
     build/venv-nn/bin/python -B -m nn.multi stats                   # the pool's speakers, hours, and match rates
     build/venv-nn/bin/python -B -m nn.multi listen                  # UTMOS per speaker -> data/nn/speakers.json
 
 The corpus (build/nn/data/multi/) has nn/data.py's format (index.json, tokens.npy, durations.npy, seconds.npy,
-audio.npy, frames.npy, alignment.jsonl): load it with ArcticData(os.path.join(DATA_DIR, 'multi')). Its speakers are
+audio.npy, frames.npy, alignment.jsonl): load it with ArcticData(os.path.join(DATA_DIR, 'multi')). build --out DIR
+builds it elsewhere, with its speaker table and split (speakers.json, multi-split.json) beside it instead of in
+data/nn/ (verify-tokens and stats take the same --out). Its speakers are
 keyed "arctic-<name>" and "libritts-<id>"; each speaker's index.json entry has nn/data.py's analysis settings (sex,
 pitchFloor, pitchCeiling, formantCeiling, sourceSampleRate, bandwidth) plus its index, which is its id in
 data/nn/speakers.json.
@@ -33,7 +35,8 @@ The pieces:
   corpus's documentation (and the classifier agrees). The rhoticity measure of nn/data.py's survey (the median F3 of
   stressed ER over the other stressed vowels') is recorded beside it.
 - Text and labels - LibriTTS-R's normalized text (numbers, abbreviations, and symbols already spelled out as words)
-  through our front end; LibriTTSLabel's Montreal Forced Aligner phone labels for the times. The alignment, the edge
+  through our front end (every word pronounced by the app's G2P network); LibriTTSLabel's Montreal Forced Aligner
+  phone labels for the times. The alignment, the edge
   silence trim, and the exclusion rules (phone match below MIN_MATCH, a word below MIN_WORD_MATCH, a phone with no frames)
   are nn/data.py's, except that LibriTTS-R's word rule skips function words and abbreviation expansions
   (WORD_MATCH_EXEMPT - the aligner's dictionary reduces them); utterances with no MFA labels are left out.
@@ -59,7 +62,7 @@ import numpy as np
 from . import data
 from .data import (ARCTIC_DIR, BOUNDARIES, CORPORA_DIR, DATA_DIR, FORMAT_VERSION, HOP, MAX_EDGE_SILENCE, MIN_MATCH,
                    MIN_WORD_MATCH, SAMPLE_RATE, CHANNELS, CHANNEL_NOTES, ArcticData, match_rate, read_mfa)
-from .frontend import ABBREVIATIONS, FUNCTION_WORDS, ROOT, tokenize, vocabulary
+from .frontend import ABBREVIATIONS, FUNCTION_WORDS, ROOT, pronounce_texts, set_pronunciations, tokenize, vocabulary
 
 
 MULTI_DIR = os.path.join(ROOT, 'build', 'nn', 'multi')
@@ -375,9 +378,17 @@ def print_pool_report(rows, kept, hours):
 # Build
 #
 
-# Build build/nn/data/multi/, data/nn/speakers.json, and data/nn/multi-split.json
+# The paths of a corpus directory's speaker table and split - data/nn/'s for the default directory, else beside it
+def table_paths(out_dir):
+    if os.path.abspath(out_dir) == os.path.abspath(OUT_DIR):
+        return SPEAKERS_PATH, SPLIT_PATH
+    return os.path.join(out_dir, 'speakers.json'), os.path.join(out_dir, 'multi-split.json')
+
+
+# Build build/nn/data/multi/ (or --out), data/nn/speakers.json, and data/nn/multi-split.json
 def build_command(args):
     start_time = time.time()
+    out_dir = args.out or OUT_DIR
     speakers = candidate_speakers()
     accents = load_json(ACCENT_PATH, {})
     settings = load_json(SETTINGS_PATH, {})
@@ -403,18 +414,22 @@ def build_command(args):
         tasks.extend((utterance, mean_seconds, analysis) for utterance in utterances)
     print(f'{len(kept)} speakers, {len(tasks)} utterances ({sum(missing_labels.values())} without MFA labels left out)', flush=True)
 
+    # Pronounce the texts' words once (the G2P network), for every worker
+    pronunciations = pronounce_texts([utterance['text'] for utterance, _, _ in tasks], args.jobs)
+    print(f'{len(pronunciations)} distinct words pronounced, {time.time() - start_time:.0f} s', flush=True)
+
     # Process in parallel, streaming the arrays to raw files
-    os.makedirs(OUT_DIR, exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True)
     names = ['tokens', 'durations', 'seconds', 'audio', 'frames']
-    raw_files = {name: open(os.path.join(OUT_DIR, name + '.raw'), 'wb') for name in names}  # pylint: disable=consider-using-with
+    raw_files = {name: open(os.path.join(out_dir, name + '.raw'), 'wb') for name in names}  # pylint: disable=consider-using-with
     dtypes = {'tokens': np.int16, 'durations': np.int16, 'seconds': np.float32, 'audio': np.int16, 'frames': np.float32}
     lengths = collections.Counter()
     entries = []
     token_offset = frame_offset = 0
     edits_by_speaker = collections.defaultdict(collections.Counter)
     failures = []
-    with open(os.path.join(OUT_DIR, 'alignment.jsonl'), 'w', encoding='utf-8') as alignment_file, \
-            multiprocessing.Pool(args.jobs) as pool:
+    with open(os.path.join(out_dir, 'alignment.jsonl'), 'w', encoding='utf-8') as alignment_file, \
+            multiprocessing.Pool(args.jobs, initializer=set_pronunciations, initargs=(pronunciations,)) as pool:
         for count, result in enumerate(pool.imap(safe_process_utterance, tasks, chunksize=8), 1):
             if count % 2000 == 0:
                 print(f'  {count}/{len(tasks)} utterances, {frame_offset / 100 / 3600:.1f} h, {time.time() - start_time:.0f} s', flush=True)
@@ -472,7 +487,7 @@ def build_command(args):
     for name in names:
         raw_files[name].close()
         shape = (lengths[name], len(CHANNELS)) if name == 'frames' else (lengths[name],)
-        raw_to_npy(os.path.join(OUT_DIR, name + '.raw'), os.path.join(OUT_DIR, name + '.npy'), dtypes[name], shape)
+        raw_to_npy(os.path.join(out_dir, name + '.raw'), os.path.join(out_dir, name + '.npy'), dtypes[name], shape)
 
     # The index - nn/data.py's format, the speakers keyed by their pool key with their id as the index
     speaker_index = {}
@@ -498,15 +513,16 @@ def build_command(args):
         'speakers': speaker_index,
         'utterances': entries
     }
-    with open(os.path.join(OUT_DIR, 'index.json'), 'w', encoding='utf-8') as file:
+    with open(os.path.join(out_dir, 'index.json'), 'w', encoding='utf-8') as file:
         json.dump(index, file, indent=1)
         file.write('\n')
-    with open(os.path.join(OUT_DIR, 'failures.json'), 'w', encoding='utf-8') as file:
+    with open(os.path.join(out_dir, 'failures.json'), 'w', encoding='utf-8') as file:
         json.dump(failures, file, indent=1)
     if not args.limit and not args.speakers:
-        write_speakers(ArcticData(OUT_DIR), speakers, row_of, edits_by_speaker, missing_labels)
-        write_split(entries)
-    print(f'Built {OUT_DIR}: {len(entries)} utterances ({sum(1 for entry in entries if entry["include"])} included), '
+        speakers_path, split_path = table_paths(out_dir)
+        write_speakers(ArcticData(out_dir), speakers, row_of, edits_by_speaker, missing_labels, speakers_path)
+        write_split(entries, split_path)
+    print(f'Built {out_dir}: {len(entries)} utterances ({sum(1 for entry in entries if entry["include"])} included), '
           f'{frame_offset / 100 / 3600:.2f} hours, {len(failures)} failures, {time.time() - start_time:.0f} s')
 
 
@@ -552,8 +568,11 @@ def raw_to_npy(raw_path, npy_path, dtype, shape):
     os.remove(raw_path)
 
 
-# Write data/nn/speakers.json - the speaker id table
-def write_speakers(corpus_data, speakers, row_of, edits_by_speaker, missing_labels):
+# Write data/nn/speakers.json - the speaker id table (each speaker's listening score, utmos, kept from the table there,
+# or from data/nn/'s for a new table)
+def write_speakers(corpus_data, speakers, row_of, edits_by_speaker, missing_labels, path=SPEAKERS_PATH):
+    previous = load_json(path if os.path.exists(path) else SPEAKERS_PATH, {'speakers': []})['speakers']
+    utmos = {row['key']: row['utmos'] for row in previous if 'utmos' in row}
     f0_column = CHANNELS.index('f0')
     table = []
     for key, info in corpus_data.index['speakers'].items():
@@ -595,7 +614,8 @@ def write_speakers(corpus_data, speakers, row_of, edits_by_speaker, missing_labe
             'bandwidth': info['bandwidth'],
             'phoneMatch': round((totals['exact'] + totals['near']) / max(1, totals['phones']), 4),
             'exactMatch': round(totals['exact'] / max(1, totals['phones']), 4),
-            'commonestEdits': [f'{edit} {count}' for edit, count in edits_by_speaker[key].most_common(5)]
+            'commonestEdits': [f'{edit} {count}' for edit, count in edits_by_speaker[key].most_common(5)],
+            **({'utmos': utmos[key]} if key in utmos else {})
         })
     table.sort(key=lambda item: item['id'])
     result = {
@@ -607,11 +627,11 @@ def write_speakers(corpus_data, speakers, row_of, edits_by_speaker, missing_labe
         'usThreshold': US_THRESHOLD,
         'speakers': table
     }
-    write_json(SPEAKERS_PATH, result)
+    write_json(path, result)
 
 
 # Write data/nn/multi-split.json - the held-out utterance ids per speaker
-def write_split(entries):
+def write_split(entries, path=SPLIT_PATH):
     split = {'description': 'The multi-speaker split of nn/multi.py - per speaker, the held-out utterances ("val" and "test"); '
                             'ARCTIC speakers by sentence (as data/nn/arctic-split.json), LibriTTS-R by a hash of the utterance id '
                             f'({TEST_PERCENT}% test, {VAL_PERCENT}% validation); the rest is training',
@@ -619,7 +639,7 @@ def write_split(entries):
     for entry in entries:
         if entry['split'] in ('val', 'test') and entry['include']:
             split[entry['split']][entry['speaker']].append(entry['sentence'])
-    write_json(SPLIT_PATH, {'description': split['description'], 'val': dict(split['val']), 'test': dict(split['test'])})
+    write_json(path, {'description': split['description'], 'val': dict(split['val']), 'test': dict(split['test'])})
 
 
 #
@@ -627,9 +647,10 @@ def write_split(entries):
 #
 
 # Verify nn/js/tokens.js and nn/frontend.py agree on every pool text
-def verify_tokens_command(_args):
-    corpus_data = ArcticData(OUT_DIR)
+def verify_tokens_command(args):
+    corpus_data = ArcticData(args.out or OUT_DIR)
     texts = sorted({entry['text'] for entry in corpus_data.index['utterances']})
+    pronounce_texts(texts, args.jobs)
     mismatches = 0
     tokens = 0
     for start in range(0, len(texts), 5000):
@@ -645,9 +666,10 @@ def verify_tokens_command(_args):
 
 
 # Print the pool's statistics - per sex, speakers and hours; match rates; exclusion reasons; utterance lengths
-def stats_command(_args):
-    corpus_data = ArcticData(OUT_DIR)
-    table = load_json(SPEAKERS_PATH, {'speakers': []})['speakers']
+def stats_command(args):
+    out_dir = args.out or OUT_DIR
+    corpus_data = ArcticData(out_dir)
+    table = load_json(table_paths(out_dir)[0], {'speakers': []})['speakers']
     entries = corpus_data.index['utterances']
     sex_of = {key: info['sex'] for key, info in corpus_data.index['speakers'].items()}
     for sex in ('female', 'male'):
@@ -765,8 +787,12 @@ def main(argv=None):
     build_parser.add_argument('--speakers', nargs='+', help='only these pool speakers (a quick test; no speakers.json)')
     build_parser.add_argument('--limit', type=int, help='at most this many utterances per speaker (a quick test)')
     build_parser.add_argument('-j', '--jobs', type=int, default=None, help='worker processes (default: all cores)')
-    commands.add_parser('verify-tokens', help='check nn/js/tokens.js against nn/frontend.py on the pool texts')
-    commands.add_parser('stats', help='the pool\'s statistics')
+    build_parser.add_argument('--out', help='the corpus directory (default: build/nn/data/multi/, its tables in data/nn/)')
+    verify_parser = commands.add_parser('verify-tokens', help='check nn/js/tokens.js against nn/frontend.py on the pool texts')
+    verify_parser.add_argument('--out', help='the corpus directory (default: build/nn/data/multi/)')
+    verify_parser.add_argument('-j', '--jobs', type=int, default=None, help='worker processes (default: all cores)')
+    stats_parser = commands.add_parser('stats', help='the pool\'s statistics')
+    stats_parser.add_argument('--out', help='the corpus directory (default: build/nn/data/multi/)')
     listen_parser = commands.add_parser('listen', help='UTMOS per speaker (data/nn/speakers.json utmos)')
     listen_parser.add_argument('-n', '--count', type=int, default=4, help='utterances per speaker')
     args = parser.parse_args(argv)
