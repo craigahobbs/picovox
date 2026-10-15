@@ -59,6 +59,7 @@
             "processes": [],
             "runs": [],
             "steps": [
+                {"title": "Heteronym review: inventory, training-data readings from the audio, context model design, regression gate", "file": "build/nn/heteronyms/review.md", "weight": 2},
                 {"title": "Training data pronounced by the G2P network (not the dictionary)", "log": "build/nn/frontend/frontend.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 2},
                 {"title": "Data targets", "file": "build/nn/pipeline/train-data.json", "weight": 1},
                 {"title": "Teacher (stage A and B) with a stopping rule", "file": "build/nn/pipeline/train-teacher.json", "weight": 2},
