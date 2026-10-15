@@ -839,9 +839,16 @@ test('speak, intonation parameters', () => {
     const exclamation = speak('We were away a year ago!', 'male', {'overrides': {'exclamationAccent': 1}});
     assert.deepEqual(exclamation.frames.map((frame) => frame.f0), statement.frames.map((frame) => frame.f0));
 
-    // Without pitch drift
+    // Without pitch drift, and without flutter - the F0 wander is aperiodic low-passed noise
+    const statementF0 = statement.frames.map((frame) => frame.f0);
     const steady = speak('We were away a year ago.', 'male', {'overrides': {'pitchDrift': 0}});
-    assert.notDeepEqual(steady.frames.map((frame) => frame.f0), statement.frames.map((frame) => frame.f0));
+    assert.notDeepEqual(steady.frames.map((frame) => frame.f0), statementF0);
+    const unfluttered = speak('We were away a year ago.', 'male', {'overrides': {'flutter': 0}});
+    assert.notDeepEqual(unfluttered.frames.map((frame) => frame.f0), statementF0);
+    const still = speak('We were away a year ago.', 'male', {'overrides': {'pitchDrift': 0, 'flutter': 0}});
+    const wander = statementF0.map((value, ix) => 12 * Math.log2(value / still.frames[ix].f0));
+    const rms = Math.sqrt(wander.reduce((sum, value) => sum + value * value, 0) / wander.length);
+    assert(rms > 0.03 && rms < 0.6);
 });
 
 
@@ -872,6 +879,26 @@ test('speak, source parameters', () => {
     // The aspiration's glottal modulation
     const unmodulated = speak('home', 'male', {'overrides': {'noiseModulation': 0}});
     assert.notDeepEqual(unmodulated.samples, home.samples);
+
+    // Louder accents - the sources rise with the pitch above the baseline (and are untouched at or below it)
+    const flat = speak('We were away a year ago.', 'male', {'overrides': {'f0Loudness': 0}});
+    const loud = speak('We were away a year ago.', 'male', {'overrides': {'f0Loudness': 1.2}});
+    const gains = loud.frames.map((frame, ix) => (flat.frames[ix].av > 0.01 ? frame.av / flat.frames[ix].av : 1));
+    assert(Math.max(...gains) > 1.3);
+    assert(Math.min(...gains) > 0.999);
+    assert(gains.some((gain) => Math.abs(gain - 1) < 1e-9));
+    assert.deepEqual(loud.segments, flat.segments);
+
+    // Micro-dynamics - the rd drift and the formant fluctuations are small, aperiodic, and removable
+    const text = 'We were away a year ago.';
+    const base = speak(text);
+    const still = speak(text, 'male', {'overrides': {'rdDrift': 0, 'formantWobble': 0}});
+    const ratios = (key) => base.frames.map((frame, ix) => frame[key] / still.frames[ix][key] - 1);
+    for (const [key, limit] of [['rd', 0.3], ['f2', 0.03]]) {
+        const values = ratios(key);
+        assert(values.some((value) => Math.abs(value) > 1e-4));
+        assert(values.every((value) => Math.abs(value) < limit));
+    }
 });
 
 

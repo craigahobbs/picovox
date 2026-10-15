@@ -271,6 +271,17 @@ test('synthesize, source shelf', () => {
     };
     assert.ok(highRms(boosted) > 1.5 * highRms(base));
     assert.ok(Math.abs(lowRms(boosted) / lowRms(base) - 1) < 0.05);
+
+    // The breath noise's shelf - it brightens the noise while voicing, and leaves voiceless aspiration alone
+    const breathy = vowelFrames(40, {'ah': 0.5});
+    const noise = synthesize(breathy, options);
+    assert.deepEqual(synthesize(breathy, {...options, 'noiseShelfDb': 0}), noise);
+    const brightNoise = synthesize(breathy, {...options, 'noiseShelfDb': 20});
+    assert.ok(highRms(brightNoise) > 1.5 * highRms(noise));
+    assert.ok(Math.abs(lowRms(brightNoise) / lowRms(noise) - 1) < 0.1);
+    const aspirated = vowelFrames(40, {'av': 0, 'ah': 0.5});
+    assert.deepEqual(synthesize(aspirated, {...options, 'noiseShelfDb': 20}), synthesize(aspirated, options));
+    assert.deepEqual(synthesize(frames, {...options, 'noiseShelfDb': 12}), base);
 });
 
 
