@@ -236,7 +236,9 @@ async function refreshRuns() {
 }
 
 
-// The run groups, each run in the first group whose prefixes match its name, newest first by first-seen order
+// The run groups, each run in the first group whose prefixes match its name - the running runs (live or stalled), then
+// the done ones (finished, stopped, or failed), each newest first by first-seen order (so a run that finishes moves to
+// the done runs, and the others keep their places)
 const runGroupSpecs = [
     {'title': 'Multi-speaker voice', 'prefixes': ['multi-'], 'open': true},
     {'title': 'G2P', 'prefixes': ['g2p-'], 'open': false},
@@ -260,7 +262,9 @@ function groupRuns() {
     }
     for (const group of groups) {
         const seen = (run) => runOrder[run.name] ?? 0;
-        group.runs.sort((first, second) => seen(second) - seen(first) || first.name.localeCompare(second.name));
+        const done = (run) => (['live', 'stalled'].includes(runStatus(run)) ? 0 : 1);
+        group.runs.sort((first, second) => done(first) - done(second) || seen(second) - seen(first) ||
+            first.name.localeCompare(second.name));
     }
     return groups;
 }
