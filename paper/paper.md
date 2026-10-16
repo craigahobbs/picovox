@@ -93,12 +93,13 @@ our own voices as optimistic.
 ### 3.2 Human speech targets
 
 To calibrate voices against real speech, we measure human recordings and our synthesized speech with the same
-Praat-based analysis (`tools/targets.py`): F0 level, range, declination, and final falls; vowel formants F1-F4 at
-20%, 50%, and 80% of each vowel; phone durations, articulation rate, and phrase-final lengthening; pauses per minute
-and per punctuation mark; the long-term average spectrum; voice quality (H1-H2, H1-A3, harmonics-to-noise ratio,
-jitter, shimmer, cepstral peak prominence); intensity dynamics; and fricative spectra. The targets are 43 speakers
-from CMU ARCTIC and LibriTTS-R dev-clean. A voice is compared to one target speaker, or placed among the human
-speakers of its sex as z-scores - which separates "another speaker's voice" from "something no human does".
+Praat-based analysis (`tools/targets.py`, removed with the rule-based synthesizer in commit 33fbfad; see git history):
+F0 level, range, declination, and final falls; vowel formants F1-F4 at 20%, 50%, and 80% of each vowel; phone durations,
+articulation rate, and phrase-final lengthening; pauses per minute and per punctuation mark; the long-term average
+spectrum; voice quality (H1-H2, H1-A3, harmonics-to-noise ratio, jitter, shimmer, cepstral peak prominence); intensity
+dynamics; and fricative spectra. The targets are 43 speakers from CMU ARCTIC and LibriTTS-R dev-clean. A voice is
+compared to one target speaker, or placed among the human speakers of its sex as z-scores - which separates "another
+speaker's voice" from "something no human does".
 
 ### 3.3 Human listening rounds
 
@@ -111,12 +112,15 @@ results are therefore indicative, and the automatic panel carries the quantitati
 
 ## 4. Rule-based formant synthesis
 
+The rule-based synthesizer (`lib/speak.js`, `lib/klatt.js`, `lib/glottal.js`, `lib/voices.js`) and its analysis and
+evaluation tools were removed from the repository in commit 33fbfad once the neural voices replaced it; see git history.
+
 ### 4.1 The synthesizer
 
-The baseline is a from-scratch JavaScript implementation of a Klatt-style cascade formant synthesizer with an LF
-glottal source, driven by rules: Klatt's duration rules, a rule-based intonation model, and per-phoneme formant
-targets with coarticulation. Voices are data (`lib/voices.js`): 80 documented parameters per voice, specs that
-inherit from a base, and style transforms (scale, add, set, blended by intensity). The two voices, male and female,
+The baseline is a from-scratch JavaScript implementation of a Klatt-style cascade formant synthesizer with an LF glottal
+source, driven by rules: Klatt's duration rules, a rule-based intonation model, and per-phoneme formant targets with
+coarticulation. Voices are data (`lib/voices.js`, removed in commit 33fbfad): 80 documented parameters per voice, specs
+that inherit from a base, and style transforms (scale, add, set, blended by intensity). The two voices, male and female,
 started as one speaker's model with a pitch and formant shift - which the speaker-embedding panel saw through
 (similarity 0.66 between them).
 
@@ -167,12 +171,13 @@ sample when given the same noise.
 
 ### 5.2 The network
 
-The model (`nn/model.py`, 748,251 parameters) is a small non-autoregressive network in the FastSpeech family:
-token embeddings, an encoder of convolution and self-attention blocks, a duration predictor (log duration per
-token, plus a pause probability and pause length at boundary tokens), a length regulator, and a convolutional decoder
-whose head outputs two 5 ms parameter frames per 10 ms frame, each parameter squashed into its physical range. A
-static 24-band channel equalizer per speaker models the recording channel. There is no absolute positional encoding,
-so any length works; long texts are spoken a sentence at a time.
+The single-speaker model (`nn/model.py`'s `Model`, 748,251 parameters, trained by `nn/train.py` - both removed in
+commit 7f667db in favor of the multi-speaker model of Section 7; see git history) is a small non-autoregressive
+network in the FastSpeech family: token embeddings, an encoder of convolution and self-attention blocks, a duration
+predictor (log duration per token, plus a pause probability and pause length at boundary tokens), a length regulator,
+and a convolutional decoder whose head outputs two 5 ms parameter frames per 10 ms frame, each parameter squashed
+into its physical range. A static 24-band channel equalizer per speaker models the recording channel. There is no
+absolute positional encoding, so any length works; long texts are spoken a sentence at a time.
 
 ### 5.3 Training
 
@@ -187,11 +192,11 @@ identically by the JavaScript and Python front ends, verified on 6,850 texts.
 
 Two diagnostics located the ceiling:
 
-- **Analysis by synthesis.** Fitting the synthesizer's parameters directly to each recording, frame by frame, with
-  no network (`nn/fit.py`), reaches a UTMOS of about 3.84 - the best this synthesizer can sound under that fitting
-  procedure, given the right parameters.
+- **Analysis by synthesis.** Fitting the synthesizer's parameters directly to each recording, frame by frame, with no
+  network (`nn/fit.py`, removed in commit 6ef55ff; see git history), reaches a UTMOS of about 3.84 - the best this
+  synthesizer can sound under that fitting procedure, given the right parameters.
 - **A prosody oracle.** Rendering the network's spectral parameters with the recording's own durations and pitch
-  (`nn/oracle.py`) barely helps: prosody is not the limit; the spectral envelope is.
+  (`nn/oracle.py`, removed in commit 6ef55ff) barely helps: prosody is not the limit; the spectral envelope is.
 
 The network over-smooths formant bandwidths (and over-produces aspiration noise); narrowing the bandwidths to 0.6 of
 their predicted values at inference raises UTMOS from about 3.6 to about 3.85. That fixed scale is a stopgap; the
@@ -444,12 +449,13 @@ multi-style run (stage B) at step 1,000.
 ```sh
 make commit                                                     # tests, lint, docs, 100% coverage of lib/
 make listeners                                                  # the listener panel's environment
-node tools/panel.js -v male -v female                           # the panel on the rule voices
-build/venv-analysis/bin/python -I tools/corpora.py              # the corpora
-build/venv-analysis/bin/python -I tools/targets.py all          # the human speech targets
-build/venv-nn/bin/python -B -m nn.train --speakers slt --name slt   # a single-speaker neural voice
-node nn/js/speak.js -m data/nn/slt "Call me Ishmael." -o ishmael.wav
+make train                                                      # the corpora, the G2P, the teacher, the distilled student
+build/venv-nn/bin/python -B -m nn.smoke                         # every training entry point, a few steps on the CPU
+node nn/js/speak.js -m data/nn/slt "Call me Ishmael." -o ishmael.wav   # the single-speaker slt voice of Section 5
 ```
+
+The rule-based synthesizer's tools (`tools/panel.js`, `tools/targets.py`, `tools/say.js`) were removed in commit
+33fbfad, and the single-speaker trainer (`nn/train.py`) in commit 7f667db; their versions are in git history.
 
 The training dashboard (`tools/dashboard/`) follows runs live: pipeline progress, loss curves, logs, and samples of
 each checkpoint scored as it is saved.

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Experiments in realistic formant speech synthesis, in JavaScript",
+  "description": "Small neural voices for speech synthesis in the browser, in JavaScript - and a public-domain audiobook player",
   "devDependencies": {
     "@eslint/js": "~10.0",
     "c8": "~12.0",
