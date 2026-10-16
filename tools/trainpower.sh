@@ -31,7 +31,8 @@ describe() {
     if [ "$1" = 0 ]; then echo 'on battery'; else echo "on a $1 W power adapter"; fi
 }
 echo "make train: this Mac is $(describe "$watts") - make train keeps the GPU busy for hours and needs a ${min_watts} W" \
-    "or larger adapter; on less the battery drains and training slows down."
+    "or larger adapter; on less the battery drains and training slows down. (A non-Apple USB-C charger may negotiate only" \
+    "60 W through the MagSafe cable - plug it into a USB-C port with a 100 W/240 W cable instead.)"
 if [ -t 0 ] && [ -t 1 ]; then
     read -r -p "make train: plug in a ${min_watts} W+ adapter, then press Enter (or press Enter to continue as is) "
     watts=$(adapter_watts)
