@@ -70,6 +70,11 @@ TRAIN_DIR ?= build/train
 NN_PYTHON := build/venv-nn/bin/python -B
 LISTENERS_PYTHON := build/venv-listeners/bin/python -B
 TRAIN_ENV := NN_DATA_DIR=$(TRAIN_DIR)/data NN_RUNS_DIR=$(TRAIN_DIR)/runs NN_DISTILL_DIR=$(TRAIN_DIR)/distill
+
+# The CPU stages that run beside a GPU stage (the G2P chain, the heteronym check, the teacher's evaluation, the
+# samples) at the utility QoS: CPU work beside a GPU stage shares the unified memory's bandwidth - three memory-bound
+# jobs at the default QoS slowed teacher B 53%, at utility 15%, at background 1% (but 4.6x slower themselves)
+BESIDE := taskpolicy -c utility
 # (the GPU stages hold the GPU lock and use two CPU threads - more don't speed a step, and the CPU stages beside them
 # would oversubscribe the cores)
 GPU := OMP_NUM_THREADS=2 $(NN_PYTHON) -m nn.gpulock $(TRAIN_DIR)/gpu.lock --
@@ -128,24 +133,24 @@ $(TRAIN_DIR)/g2p-network.done: data/nn/train.json data/nn/g2p-words.json data/nn
 $(TRAIN_DIR)/context-labels.done: $(TRAIN_DIR)/corpora.done data/nn/train.json data/nn/context-labels.json \
 		data/nn/heteronyms-test.json | build/venv-nn.build build/venv-pos.build $(TRAIN_DIR)/data-multi.done
 	@$(STAGE) start
-	$(STAGE) -- $(NN_PYTHON) -m nn.contextlabels books
-	$(STAGE) -- $(NN_PYTHON) -m nn.contextlabels aligned --out $(TRAIN_DIR)/context -j 3
-	$(STAGE) -- build/venv-pos/bin/python -B -m nn.contextlabels tag --out $(TRAIN_DIR)/context -j 3
-	$(STAGE) -- $(NN_PYTHON) -m nn.contextlabels labels --out $(TRAIN_DIR)/context
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m nn.contextlabels books
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m nn.contextlabels aligned --out $(TRAIN_DIR)/context -j 3
+	$(STAGE) -- $(BESIDE) build/venv-pos/bin/python -B -m nn.contextlabels tag --out $(TRAIN_DIR)/context -j 2
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m nn.contextlabels labels --out $(TRAIN_DIR)/context
 	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/g2p.done: $(TRAIN_DIR)/g2p-network.done $(TRAIN_DIR)/context-labels.done
 	@$(STAGE) start
-	$(STAGE) -- $(NN_PYTHON) -m nn.context train-g2p --labels $(TRAIN_DIR)/context/labels.json --init $(TRAIN_DIR)/g2p/focus.pt \
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m nn.context train-g2p --labels $(TRAIN_DIR)/context/labels.json --init $(TRAIN_DIR)/g2p/focus.pt \
 		--out $(TRAIN_DIR)/context/g2p.pt --log $(TRAIN_DIR)/context/train.log
-	$(STAGE) -- $(NN_PYTHON) -m nn.context train-context --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/context.pt \
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m nn.context train-context --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/context.pt \
 		--log $(TRAIN_DIR)/context/train.log
-	$(STAGE) -- $(NN_PYTHON) -m nn.context export --g2p $(TRAIN_DIR)/context/g2p.pt --context $(TRAIN_DIR)/context/context.pt \
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m nn.context export --g2p $(TRAIN_DIR)/context/g2p.pt --context $(TRAIN_DIR)/context/context.pt \
 		--out $(TRAIN_DIR)/g2pModel.js
-	$(STAGE) -- $(NN_PYTHON) -m nn.context cross-validate --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/folds \
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m nn.context cross-validate --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/folds \
 		--log $(TRAIN_DIR)/context/train.log
-	$(STAGE) -- $(NN_PYTHON) -m nn.context check $(TRAIN_DIR)/g2pModel.js
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m nn.context check $(TRAIN_DIR)/g2pModel.js
 	@$(STAGE) end
 	touch $@
 
@@ -153,7 +158,7 @@ $(TRAIN_DIR)/g2p.done: $(TRAIN_DIR)/g2p-network.done $(TRAIN_DIR)/context-labels
 # The heteronym relabeling (CPU) - it must reproduce data/nn/g2p-relabel.json's words
 $(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/corpora.done | $(TRAIN_DIR)/data-multi.done
 	@$(STAGE) start
-	$(STAGE) -- $(NN_PYTHON) -m nn.heteronyms --out $(TRAIN_DIR)/heteronyms -j 4 --check data/nn/g2p-relabel.json
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m nn.heteronyms --out $(TRAIN_DIR)/heteronyms -j 4 --check data/nn/g2p-relabel.json
 	@$(STAGE) end
 	touch $@
 
@@ -194,7 +199,7 @@ $(TRAIN_DIR)/teacher-b.done: $(TRAIN_DIR)/teacher-a.done
 
 $(TRAIN_DIR)/teacher-eval.done: $(TRAIN_DIR)/teacher-b.done
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.distill eval teacher=$(TRAIN_RUNS)/teacher-b/best.pt --whisper-workers 3
+	$(STAGE) -- $(TRAIN_ENV) $(BESIDE) $(NN_PYTHON) -m nn.distill eval teacher=$(TRAIN_RUNS)/teacher-b/best.pt --whisper-workers 3
 	@$(STAGE) end
 	touch $@
 
@@ -244,7 +249,7 @@ $(TRAIN_DIR)/package.done: $(TRAIN_DIR)/student-eval.done | $(TRAIN_DIR)/samples
 # samples texts in its speakers' voices as the app speaks them, scored with UTMOS, in $(TRAIN_DIR)/samples/ (index.json)
 # for the training dashboard's Listen tab - and the reference, the shipped lib/models/voiceModel.js before the package
 # stage replaces it (in the teacher's GPU-bound hours, after the readers' data build)
-SAMPLES := OMP_NUM_THREADS=2 node tools/trainsamples.js --out $(TRAIN_DIR)/samples
+SAMPLES := OMP_NUM_THREADS=2 $(BESIDE) node tools/trainsamples.js --out $(TRAIN_DIR)/samples
 
 $(TRAIN_DIR)/samples-reference.done: | build/venv-listeners.build $(TRAIN_DIR)/data-multi.done
 	@$(STAGE) start
