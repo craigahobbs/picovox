@@ -84,6 +84,32 @@ test('lexicon.setPronouncer', async () => {
 });
 
 
+test('lexicon.setPronouncer, readings from context', async () => {
+    const lexicon = await freshLexicon('set-pronouncer-readings');
+
+    // An ambiguous word takes the reading the pronouncer chooses from the text's items (its words and phrase-end marks)
+    const choices = [];
+    const pronounce = (word, reading = 0) => {
+        if (word === 'read') {
+            return reading === 1 ? ['R', 'IY1', 'D'] : ['R', 'EH1', 'D'];
+        }
+        return ['W', 'ER1', 'D'];
+    };
+    pronounce.ambiguous = (word) => word === 'read';
+    pronounce.chooseReading = (items, index) => {
+        choices.push([items, index]);
+        return items[index - 1] === 'will' ? 1 : 0;
+    };
+    lexicon.setPronouncer(pronounce);
+    const phrases = lexicon.textToPhrases('I will read; I read it. Read!');
+    assert.deepEqual(phrases.map(wordPhones), [['W ER0 D', 'W ER0 D', 'R IY1 D'], ['W ER0 D', 'R EH1 D', 'W ER0 D'], ['R EH1 D']]);
+    assert.deepEqual(phrases.map((phrase) => [phrase.end, phrase.major]), [['comma', true], ['period', false], ['exclamation', false]]);
+    const items = ['i', 'will', 'read', ',', 'i', 'read', 'it', '.', 'read', '!'];
+    assert.deepEqual(choices, [[items, 2], [items, 5], [items, 8]]);
+    lexicon.setPronouncer(null);
+});
+
+
 test('lexicon.textToPhrases, Node dictionary', () => {
     const [phrase] = textToPhrases('Hello world');
     assert.deepEqual(wordTexts(phrase), ['hello', 'world']);

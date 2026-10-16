@@ -5,9 +5,11 @@
 The training pipeline's smoke test - every make-train entry point run for a few steps on the CPU, into a scratch
 directory, each checked to finish and write its outputs:
 
-    build/venv-nn/bin/python -B -m nn.smoke [--out build/nn/smoke] [--only g2p,data,teacher,distill,package]
+    build/venv-nn/bin/python -B -m nn.smoke [--out build/nn/smoke] [--only g2p,context,data,teacher,distill,package]
 
 - g2p - nn.g2p train (each stage 3 steps) and export
+- context - nn.context train-g2p and train-context (3 steps) and export, from the g2p stage (when build/nn/context has the
+  context labels - nn.contextlabels)
 - data - nn.multi build --out on a few utterances of two speakers
 - teacher - nn.trainmulti stage A (3 steps), then stage B from it (the critic, the emotional speech)
 - distill - nn.distill targets (32 items, one short book) from the stage-B teacher, train (3 steps), polish (2 steps)
@@ -29,7 +31,7 @@ from .frontend import ROOT
 
 
 PYTHON = sys.executable
-STAGES = ('g2p', 'data', 'teacher', 'distill', 'package')
+STAGES = ('g2p', 'context', 'data', 'teacher', 'distill', 'package')
 
 # A short public-domain text for the distillation targets' book sentences
 BOOK_TEXT = '''Call me Ishmael. Some years ago, never mind how long precisely, having little or no money in my purse, and
@@ -75,6 +77,17 @@ def main(argv=None):
         if run('g2p-train', ['nn.g2p', 'train', '--out', g2p_dir, '--steps', '3'], [os.path.join(g2p_dir, 'done.json')]):
             run('g2p-export', ['nn.g2p', 'export', g2p_dir, '--out', os.path.join(out, 'g2pModel.js')],
                 [os.path.join(out, 'g2pModel.js')])
+
+            # The heteronym models (nn/context.py) on the context labels, if built (nn.contextlabels - build/nn/context)
+            labels = os.path.join(ROOT, 'build', 'nn', 'context', 'labels.json')
+            if 'context' in stages and os.path.exists(labels):
+                g2p_checkpoint, context_checkpoint = os.path.join(out, 'context-g2p.pt'), os.path.join(out, 'context.pt')
+                if run('context-g2p', ['nn.context', 'train-g2p', '--labels', labels, '--init', os.path.join(g2p_dir, 'focus.pt'),
+                                       '--out', g2p_checkpoint, '--settings', '{"steps": 3}'], [g2p_checkpoint]) and \
+                        run('context-train', ['nn.context', 'train-context', '--labels', labels, '--out', context_checkpoint,
+                                              '--settings', '{"steps": 3, "quantSteps": 2}'], [context_checkpoint]):
+                    run('context-export', ['nn.context', 'export', '--g2p', g2p_checkpoint, '--context', context_checkpoint,
+                                           '--out', os.path.join(out, 'g2pModel-context.js')], [os.path.join(out, 'g2pModel-context.js')])
 
     if 'data' in stages:
         corpus = os.path.join(out, 'multi')

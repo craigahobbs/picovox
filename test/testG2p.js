@@ -154,6 +154,61 @@ test('g2p.loadG2p, readers\' pronunciations', async () => {
 });
 
 
+// Heteronyms - the ambiguity head picks out the words whose reading the context decides, and the context network chooses
+// the reading the G2P pronounces
+test('g2p.loadG2p, heteronym readings', async () => {
+    const pronounce = await loadG2p(g2pModel);
+    assert.equal(pronounce.ambiguous('read'), true);
+    assert.equal(pronounce.ambiguous('lives'), true);
+    assert.equal(pronounce.ambiguous('the'), false);
+    assert.equal(pronounce.ambiguous('book'), false);
+    assert.equal(pronounce.ambiguous('éé'), false);
+
+    // Each reading's pronunciation, cached per reading; a reading the model lacks is the default
+    const readings = [0, 1].map((reading) => pronounce('read', reading).join(' '));
+    assert.deepEqual(readings.toSorted(), ['R EH1 D', 'R IY1 D']);
+    assert.equal(pronounce('read', 1), pronounce('read', 1));
+    assert.equal(pronounce('read', 9), pronounce('read', 0));
+
+    // The reading of the word at an index in a text's items (its words and phrase-end marks), cached per window
+    const reading = (items, index) => pronounce(items[index], pronounce.chooseReading(items, index)).join(' ');
+    assert.equal(reading(['i', 'will', 'read', 'it', 'tomorrow', '.'], 2), 'R IY1 D');
+    assert.equal(reading(['i', 'will', 'read', 'it', 'tomorrow', '.'], 2), 'R IY1 D');
+    assert.equal(reading(['she', 'had', 'read', 'the', 'letter', '.'], 2), 'R EH1 D');
+    assert.equal(reading(['their', 'lives', 'were', 'quiet', '.'], 1), 'L AY1 V Z');
+    assert.equal(reading(['she', 'lives', 'here', '.'], 1), 'L IH1 V Z');
+
+    // At the text's edges, and with characters outside the context network's alphabet
+    assert(pronounce.chooseReading(['read'], 0) < g2pModel.context.slots);
+    assert(pronounce.chooseReading(['éé', 'read', '.'], 1) < g2pModel.context.slots);
+});
+
+
+test('g2p.loadG2p, no context network', async () => {
+    // A model without the context section has no ambiguous words; one without the ambiguity head never finds one
+    const pronounce = await loadG2p({...g2pModel, 'context': undefined});
+    assert.equal(pronounce.ambiguous, undefined);
+    assert.deepEqual(pronounce('read'), (await loadG2p(g2pModel))('read'));
+    const headTensors = new Set(['ambiguity.weight', 'ambiguity_layer.bias']);
+    const rename = (tensor) => (headTensors.has(tensor.name) ? {...tensor, 'name': `unused ${tensor.name}`} : tensor);
+    const tensors = g2pModel.tensors.map(rename);
+    const headless = await loadG2p({...g2pModel, tensors});
+    assert.equal(headless.ambiguous('read'), false);
+    const readingless = await loadG2p({...g2pModel, 'readings': undefined, 'context': undefined});
+    assert.equal(readingless('read', 1), readingless('read', 0));
+});
+
+
+test('g2p.loadG2p, context network not deflated', async () => {
+    const {context} = g2pModel;
+    const bytes = await streamBytes(base64Bytes(context.weights), new DecompressionStream('deflate-raw'));
+    const other = {...g2pModel, 'context': {...context, 'deflate': false, 'weights': bytesBase64(bytes)}};
+    const [pronounce, pronounceOther] = await Promise.all([loadG2p(g2pModel), loadG2p(other)]);
+    const items = ['he', 'touched', 'a', 'live', 'wire', '.'];
+    assert.equal(pronounceOther.chooseReading(items, 3), pronounce.chooseReading(items, 3));
+});
+
+
 // The shipped model's format - per-row scales, a byte per value (6-bit values deflate smaller than bit-packed), deflated
 test('g2p.g2pModel format', () => {
     assert.equal(g2pModel.design, 'ar');

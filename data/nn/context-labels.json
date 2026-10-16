@@ -1,0 +1,1213 @@
+{
+ "description": "The heteronym labels' curated part (nn/heteronyms.py): words with their own part-of-speech tag mappings (a variant of the reading: the spaCy tags; \"Cap\" before a tag - a capitalized token), readings the dictionary lacks (\"missing\"), mappings reviewed by hand (\"reviewed\" - for words without aligned tokens to check them), family words left out (\"exclude\"), collocations (a regular expression over the 40 characters each side, lowercased, and the reading it fixes - reviewed by hand), and hand-labeled seed sentences per reading.",
+ "words": {
+  "read": {
+   "tags": {
+    "R EH1 D": [
+     "VBD<!and|or|^|not|never|to",
+     "VBN"
+    ],
+    "R IY1 D": [
+     "VB<to|will|would|shall|should|can|could|may|might|must|do|does|did|not|let|please|cannot|don't|didn't|won't|can't|couldn't|wouldn't|shouldn't|^"
+    ]
+   }
+  },
+  "lives": {
+   "tags": {
+    "L AY1 V Z": [
+     "NNS"
+    ],
+    "L IH1 V Z": [
+     "VBZ"
+    ]
+   }
+  },
+  "live": {
+   "tags": {
+    "L AY1 V": [
+     "JJ"
+    ],
+    "L IH1 V": [
+     "VB",
+     "VBP"
+    ]
+   }
+  },
+  "use": {
+   "tags": {
+    "Y UW1 S": [
+     "NN"
+    ],
+    "Y UW1 Z": [
+     "VB",
+     "VBP"
+    ]
+   }
+  },
+  "uses": {
+   "tags": {
+    "Y UW1 S AH0 Z": [
+     "NNS"
+    ],
+    "Y UW1 Z AH0 Z": [
+     "VBZ"
+    ]
+   }
+  },
+  "close": {
+   "tags": {
+    "K L OW1 S": [
+     "JJ",
+     "RB",
+     "JJR"
+    ],
+    "K L OW1 Z": [
+     "VB<to|will|would|shall|should|can|could|may|might|must|do|does|did|not|let|please|cannot|don't|didn't|won't|can't|couldn't|wouldn't|shouldn't|^"
+    ]
+   }
+  },
+  "excuse": {
+   "tags": {
+    "IH0 K S K Y UW1 S": [
+     "NN"
+    ],
+    "IH0 K S K Y UW1 Z": [
+     "VB",
+     "VBP"
+    ]
+   }
+  },
+  "excuses": {
+   "tags": {
+    "IH0 K S K Y UW1 S IH0 Z": [
+     "NNS"
+    ],
+    "IH0 K S K Y UW1 Z IH0 Z": [
+     "VBZ"
+    ]
+   }
+  },
+  "abuse": {
+   "tags": {
+    "AH0 B Y UW1 S": [
+     "NN"
+    ],
+    "AH0 B Y UW1 Z": [
+     "VB",
+     "VBP"
+    ]
+   }
+  },
+  "abuses": {
+   "tags": {
+    "AH0 B Y UW1 S IH0 Z": [
+     "NNS"
+    ],
+    "AH0 B Y UW1 Z IH0 Z": [
+     "VBZ"
+    ]
+   }
+  },
+  "house": {
+   "missing": [
+    "HH AW1 Z"
+   ],
+   "tags": {
+    "HH AW1 Z": [
+     "VB"
+    ]
+   }
+  },
+  "wind": {
+   "tags": {
+    "W IH1 N D": [
+     "NN"
+    ],
+    "W AY1 N D": [
+     "VB",
+     "VBP"
+    ]
+   }
+  },
+  "winds": {
+   "tags": {
+    "W IH1 N D Z": [
+     "NNS"
+    ],
+    "W AY1 N D Z": [
+     "VBZ"
+    ]
+   }
+  },
+  "wound": {
+   "tags": {
+    "W UW1 N D": [
+     "NN",
+     "VB",
+     "VBP"
+    ],
+    "W AW1 N D": [
+     "VBD",
+     "VBN"
+    ]
+   }
+  },
+  "tears": {
+   "tags": {
+    "T IH1 R Z": [
+     "NNS"
+    ],
+    "T EH1 R Z": [
+     "VBZ"
+    ]
+   }
+  },
+  "tear": {
+   "tags": {
+    "T EH1 R": [
+     "VB",
+     "VBP"
+    ]
+   }
+  },
+  "lead": {
+   "tags": {
+    "L IY1 D": [
+     "VB",
+     "VBP"
+    ]
+   }
+  },
+  "bow": {
+   "tags": {
+    "B AW1": [
+     "VB",
+     "VBP"
+    ]
+   }
+  },
+  "bows": {
+   "tags": {
+    "B AW1 Z": [
+     "VBZ"
+    ]
+   }
+  },
+  "bowed": {
+   "tags": {
+    "B AW1 D": [
+     "VBD",
+     "VBN"
+    ]
+   }
+  },
+  "bass": {},
+  "dove": {
+   "tags": {
+    "D OW1 V": [
+     "VBD"
+    ],
+    "D AH1 V": [
+     "NN"
+    ]
+   }
+  },
+  "sow": {
+   "tags": {
+    "S OW1": [
+     "VB",
+     "VBP"
+    ],
+    "S AW1": [
+     "NN"
+    ]
+   }
+  },
+  "row": {
+   "missing": [
+    "R AW1"
+   ]
+  },
+  "does": {
+   "missing": [
+    "D OW1 Z"
+   ]
+  },
+  "minute": {
+   "tags": {
+    "M AY0 N UW1 T": [
+     "JJ"
+    ],
+    "M IH1 N AH0 T": [
+     "NN"
+    ]
+   }
+  },
+  "polish": {
+   "tags": {
+    "P OW1 L IH0 SH": [
+     "CapJJ",
+     "CapNNP",
+     "CapNNPS",
+     "CapNN"
+    ],
+    "P AA1 L IH0 SH": [
+     "VB",
+     "VBP",
+     "NN"
+    ]
+   }
+  },
+  "present": {
+   "family": "stress",
+   "tags": {
+    "P R EH1 Z AH0 N T": [
+     "JJ"
+    ]
+   }
+  },
+  "perfect": {
+   "family": "stress",
+   "tags": {
+    "P ER1 F IH2 K T": [
+     "JJ"
+    ]
+   }
+  },
+  "content": {
+   "family": "stress",
+   "tags": {
+    "K AH0 N T EH1 N T": [
+     "JJ"
+    ]
+   }
+  },
+  "subject": {
+   "family": "stress",
+   "tags": {
+    "S AH1 B JH IH0 K T": [
+     "JJ"
+    ]
+   }
+  },
+  "desert": {
+   "family": "stress",
+   "tags": {
+    "D EH1 Z ER0 T": [
+     "JJ"
+    ]
+   }
+  },
+  "invalid": {
+   "family": "stress",
+   "tags": {
+    "IH2 N V AE1 L AH0 D": [
+     "JJ"
+    ]
+   }
+  },
+  "upset": {
+   "family": "stress",
+   "tags": {
+    "AH0 P S EH1 T": [
+     "JJ"
+    ]
+   }
+  }
+ },
+ "exclude": [],
+ "collocations": {
+  "lead": [
+   [
+    "\\blead (pipes?|pencils?|weights?|bullets?|shot|mines?|poisoning|roofs?|coffin|soldiers?|sinkers?|plummet|line)\\b",
+    "L EH1 D"
+   ],
+   [
+    "\\b(made|lump|sheets?|pounds?|ounces?|pieces?|weight|heavy as|cast) (of |in )?lead\\b",
+    "L EH1 D"
+   ],
+   [
+    "\\b(red|white|black|molten|melted|sheet) lead\\b",
+    "L EH1 D"
+   ],
+   [
+    "\\blead and (tin|iron|copper|zinc|silver|powder)\\b",
+    "L EH1 D"
+   ],
+   [
+    "\\b(tin|iron|copper|zinc|silver|powder) and lead\\b",
+    "L EH1 D"
+   ]
+  ],
+  "bow": [
+   [
+    "\\bbow and (arrows?|quiver)\\b",
+    "B OW1"
+   ],
+   [
+    "\\b(bent|drew|strung|unstrung|draw|bend|string) (his|her|the|a|their) bow\\b",
+    "B OW1"
+   ],
+   [
+    "\\b(ribbon|silk|velvet|satin|crimson|blue|pink|scarlet) bow\\b",
+    "B OW1"
+   ],
+   [
+    "\\b(low|deep|slight|profound|stiff|polite|graceful|courtly|formal|ceremonious|respectful) bow\\b",
+    "B AW1"
+   ],
+   [
+    "\\b(made|make|makes|making) (a |his |her |their )bow\\b",
+    "B AW1"
+   ]
+  ],
+  "bows": [
+   [
+    "\\bbows and arrows\\b",
+    "B OW1 Z"
+   ],
+   [
+    "\\b(low|deep|slight|profound) bows\\b",
+    "B AW1 Z"
+   ]
+  ],
+  "tear": [
+   [
+    "\\b(a|one|single) tear (rolled|fell|ran|trickled|stood|glistened|dropped|came|started|stole)\\b",
+    "T IH1 R"
+   ],
+   [
+    "\\bwiped (away )?a tear\\b",
+    "T IH1 R"
+   ],
+   [
+    "\\bwear and tear\\b",
+    "T EH1 R"
+   ]
+  ],
+  "bass": [
+   [
+    "\\bbass (voice|viol|drum|notes?|part|singer|clef|strings?|fiddle|tones?)\\b",
+    "B EY1 S"
+   ],
+   [
+    "\\b(double|deep|rich|thunderous|profound) bass\\b",
+    "B EY1 S"
+   ],
+   [
+    "\\b(tenor|treble|alto|soprano|baritone),? and bass\\b",
+    "B EY1 S"
+   ],
+   [
+    "\\b(sea|striped|black|rock) bass\\b",
+    "B AE1 S"
+   ]
+  ],
+  "row": [
+   [
+    "\\b(had|kick(ed)? up|making|make|made|having) (a |such a |an awful |a dreadful |a terrible |a fearful |a great )?row\\b(?! of)",
+    "R AW1"
+   ],
+   [
+    "\\b(a|the|what a|such a|great|dreadful|terrible|fearful|awful|tremendous) row (with|about|over|between)\\b",
+    "R AW1"
+   ]
+  ],
+  "does": [
+   [
+    "\\b(bucks?|stags?|harts?) and (the )?does\\b",
+    "D OW1 Z"
+   ],
+   [
+    "\\bdoes and (the )?(bucks?|stags?|fawns?|harts?)\\b",
+    "D OW1 Z"
+   ]
+  ],
+  "minute": [
+   [
+    "\\bminute (details?|particles?|examination|description|account|inquiry|investigation|accuracy|attention|observation|portion|quantity|fraction|differences?|care|study|specks?|grains?)\\b",
+    "M AY0 N UW1 T"
+   ],
+   [
+    "\\b(most|so|very|too|more) minute\\b",
+    "M AY0 N UW1 T"
+   ]
+  ]
+ },
+ "seeds": [
+  {
+   "word": "lead",
+   "phones": "L EH1 D",
+   "texts": [
+    "The roof was covered with sheets of lead.",
+    "His boots felt as heavy as lead.",
+    "They melted the lead and poured it into moulds.",
+    "A bullet of lead struck the wall beside him.",
+    "The old pipes were made of lead and had to be replaced.",
+    "He sharpened the lead of his pencil.",
+    "The fishing line was weighted with a lump of lead.",
+    "Her limbs were like lead after the long march.",
+    "The coffin was lined with lead.",
+    "The sky was the colour of lead.",
+    "They stripped the lead from the church roof.",
+    "He cast the lead into bullets by the fire.",
+    "A lead weight hung from the end of the cord.",
+    "The windows were set in frames of lead.",
+    "My heart sank like a lump of lead.",
+    "The miners dug for lead and silver in the hills.",
+    "The sailor heaved the lead and called out the depth.",
+    "The paint contained white lead.",
+    "They found traces of lead in the water.",
+    "The soldiers were short of powder and lead.",
+    "He was poisoned by the lead in the old pipes."
+   ]
+  },
+  {
+   "word": "lead",
+   "phones": "L IY1 D",
+   "texts": [
+    "The road will lead us to the village.",
+    "He took the lead and the others followed.",
+    "Who will lead the expedition?",
+    "These steps lead down to the cellar.",
+    "She held the dog on a lead.",
+    "The captain was the first to lead his men into battle.",
+    "A narrow path seemed to lead nowhere.",
+    "Let me lead you to your room.",
+    "The detective followed every lead he could find.",
+    "Our horse was in the lead at the last turn.",
+    "This will lead to trouble.",
+    "He was born to lead."
+   ]
+  },
+  {
+   "word": "tear",
+   "phones": "T IH1 R",
+   "texts": [
+    "A single tear ran down his face.",
+    "She wiped a tear from her eye.",
+    "Not a tear was shed for him.",
+    "He saw a tear glisten on her lashes.",
+    "Every tear she wept was for her son.",
+    "The old man brushed away a tear.",
+    "A tear fell upon the letter and blotted the ink.",
+    "She could not keep back a tear.",
+    "I have not a tear left to shed.",
+    "A tear stood in each of her eyes.",
+    "With a tear in his eye he bade them farewell.",
+    "Her cheek was wet with a tear.",
+    "He kissed away the tear on her cheek.",
+    "She answered without a tear.",
+    "One tear after another rolled down.",
+    "The child looked up, a tear on its cheek.",
+    "A tear trembled on her eyelash."
+   ]
+  },
+  {
+   "word": "tear",
+   "phones": "T EH1 R",
+   "texts": [
+    "He began to tear the letter into pieces.",
+    "The thorns will tear your dress.",
+    "There was a long tear in the canvas.",
+    "The wolves would tear him to pieces.",
+    "I could not tear myself away from the window.",
+    "She mended the tear in the sail.",
+    "They tear up the road every summer.",
+    "He tried to tear the chain from the wall.",
+    "Wear and tear had ruined the carpet.",
+    "She saw him tear open the envelope.",
+    "The wind will tear the tent from its pegs."
+   ]
+  },
+  {
+   "word": "tears",
+   "phones": "T EH1 R Z",
+   "texts": [
+    "She tears the letter in two.",
+    "The dog tears at the rope.",
+    "He tears off his coat and plunges in.",
+    "The storm tears the leaves from the trees.",
+    "The cat tears the curtains every morning."
+   ]
+  },
+  {
+   "word": "bow",
+   "phones": "B OW1",
+   "texts": [
+    "He fitted an arrow to his bow.",
+    "The archer bent his bow and let fly.",
+    "She wore a blue bow in her hair.",
+    "He tied the ribbon in a neat bow.",
+    "The violinist drew his bow across the strings.",
+    "A bow and a quiver of arrows hung on the wall.",
+    "The hunter strung his bow.",
+    "The parcel was tied with a silk bow.",
+    "He was a fine shot with the bow.",
+    "Her bonnet was trimmed with a large bow.",
+    "The boy made a bow out of a willow branch.",
+    "Robin Hood drew his long bow.",
+    "She untied the bow of her apron.",
+    "He lifted his bow and played a slow air.",
+    "The savages hunted with bow and arrow.",
+    "The Indian laid down his bow.",
+    "He shot with a bow of yew."
+   ]
+  },
+  {
+   "word": "bow",
+   "phones": "B AW1",
+   "texts": [
+    "He made a deep bow to the company.",
+    "They stood at the bow of the boat.",
+    "The servants bow as she passes.",
+    "The waves broke over the bow.",
+    "She acknowledged him with a slight bow.",
+    "We must bow to the will of the people.",
+    "Every head will bow before the king.",
+    "A sailor stood watch in the bow.",
+    "He returned her bow with grave politeness."
+   ]
+  },
+  {
+   "word": "bows",
+   "phones": "B OW1 Z",
+   "texts": [
+    "The archers carried bows and arrows.",
+    "Her dress was covered with little bows.",
+    "They made bows from the branches of the yew.",
+    "The violinists raised their bows together.",
+    "The warriors were armed with bows and spears."
+   ]
+  },
+  {
+   "word": "bows",
+   "phones": "B AW1 Z",
+   "texts": [
+    "He bows to the lady and leaves.",
+    "The ship's bows cut through the waves.",
+    "She bows her head in prayer."
+   ]
+  },
+  {
+   "word": "bass",
+   "phones": "B EY1 S",
+   "texts": [
+    "He sang bass in the church choir.",
+    "The deep bass of the organ shook the floor.",
+    "His voice was a rich bass.",
+    "She played the bass notes with her left hand.",
+    "The bass drum boomed in the street.",
+    "He had a fine bass voice.",
+    "The tenor and the bass sang together.",
+    "A bass viol stood in the corner.",
+    "The bass part was too low for him.",
+    "He played the double bass in the orchestra.",
+    "The singer's bass rolled through the hall.",
+    "We heard the thump of the bass through the wall.",
+    "She tuned the bass string of her guitar.",
+    "The choir needs another bass.",
+    "He has a deep bass voice like his father."
+   ]
+  },
+  {
+   "word": "bass",
+   "phones": "B AE1 S",
+   "texts": [
+    "He went fishing for bass in the river.",
+    "They caught three large bass before noon.",
+    "The striped bass were running in the bay.",
+    "We had fried bass for supper.",
+    "A bass leaped out of the water.",
+    "The lake is full of bass and perch.",
+    "He landed a fine sea bass.",
+    "The fishermen sold their bass at the market."
+   ]
+  },
+  {
+   "word": "dove",
+   "phones": "D OW1 V",
+   "texts": [
+    "She dove into the cold water.",
+    "The boy dove off the rock.",
+    "The hawk dove at the rabbit.",
+    "He dove under the table when the shot rang out.",
+    "The seal dove beneath the waves.",
+    "They dove for pearls in the bay.",
+    "The swimmer dove from the high cliff.",
+    "He dove headfirst into the river.",
+    "The gull dove for a fish.",
+    "She dove after the drowning child.",
+    "The otter dove and came up with a fish."
+   ]
+  },
+  {
+   "word": "dove",
+   "phones": "D AH1 V",
+   "texts": [
+    "A dove cooed in the branches.",
+    "The dove is a symbol of peace.",
+    "She was as gentle as a dove.",
+    "Noah sent forth a dove from the ark.",
+    "The white dove flew over the town.",
+    "A mourning dove sat on the fence.",
+    "He kept a dove in a little cage."
+   ]
+  },
+  {
+   "word": "sow",
+   "phones": "S OW1",
+   "texts": [
+    "The farmers sow their wheat in autumn.",
+    "You reap what you sow.",
+    "He went out to sow his seed.",
+    "They began to sow the barley in the north field.",
+    "It is time to sow the turnips.",
+    "Do not sow discord among the brethren.",
+    "They that sow in tears shall reap in joy.",
+    "We sow in the spring and reap in the fall.",
+    "He would sow the field with oats.",
+    "She helped her father sow the garden.",
+    "The enemy came to sow tares among the wheat.",
+    "The wind will sow the thistles far and wide."
+   ]
+  },
+  {
+   "word": "sow",
+   "phones": "S AW1",
+   "texts": [
+    "The old sow had ten piglets.",
+    "A fat sow wallowed in the mud.",
+    "The farmer sold his sow at the fair.",
+    "The sow and her litter slept in the straw.",
+    "A wild sow charged out of the bushes.",
+    "They fed the sow on acorns."
+   ]
+  },
+  {
+   "word": "row",
+   "phones": "R AW1",
+   "texts": [
+    "They had a terrible row over the money.",
+    "There was a row in the tavern last night.",
+    "I heard a dreadful row next door.",
+    "He got into a row with his landlord.",
+    "Do not make such a row about it.",
+    "The neighbours complained of the row.",
+    "What is all this row about?",
+    "There will be a row when father hears of it.",
+    "She had a row with her sister and left the house.",
+    "They kicked up a row in the street.",
+    "After the row they did not speak for a week.",
+    "A great row broke out among the sailors.",
+    "He was always ready for a row.",
+    "The row went on until midnight.",
+    "There was a fearful row in the House of Commons.",
+    "Let us not have a row about trifles.",
+    "I won't have any row in my house.",
+    "He made a row because his dinner was cold."
+   ]
+  },
+  {
+   "word": "row",
+   "phones": "R OW1",
+   "texts": [
+    "They sat in the front row.",
+    "A row of houses stood along the street.",
+    "The men began to row toward the shore.",
+    "He planted a row of beans.",
+    "We had to row against the current.",
+    "Three times in a row he missed.",
+    "The trees stood in a long row.",
+    "Can you row a boat?",
+    "They sat in a row on the bench.",
+    "He could row for hours without tiring.",
+    "The soldiers stood in a row."
+   ]
+  },
+  {
+   "word": "does",
+   "phones": "D OW1 Z",
+   "texts": [
+    "The does and their fawns fed at the edge of the wood.",
+    "Two does came down to the river to drink.",
+    "The hunters shot three bucks and two does.",
+    "The does fled into the forest.",
+    "We saw a herd of does in the meadow.",
+    "The bucks and does were grazing together.",
+    "In winter the does gather in the valleys.",
+    "The does lifted their heads and listened.",
+    "A pair of does crossed the road ahead of us.",
+    "The park keeper fed the does every morning.",
+    "Several does were feeding among the trees.",
+    "The stags and the does run through the glen.",
+    "The young does stayed close to the herd.",
+    "Wolves had killed two of the does.",
+    "Like does the girls ran across the field."
+   ]
+  },
+  {
+   "word": "does",
+   "phones": "D AH1 Z",
+   "texts": [
+    "She does her work well.",
+    "What does he want?",
+    "He does not know the way.",
+    "Does it matter?",
+    "The rain does not stop.",
+    "So does everyone else.",
+    "It does seem strange.",
+    "The dog does as it is told."
+   ]
+  },
+  {
+   "word": "house",
+   "phones": "HH AW1 Z",
+   "texts": [
+    "The barn will house the cattle in winter.",
+    "We can house twenty guests.",
+    "The museum was built to house his collection.",
+    "They had nowhere to house the refugees.",
+    "The city must house its poor.",
+    "These buildings house the library.",
+    "The fort could house a thousand men.",
+    "He offered to house them until spring.",
+    "The old mill was used to house the soldiers.",
+    "Where shall we house the horses?",
+    "The college will house the new students.",
+    "The great hall could house the whole village.",
+    "The vault was made to house the treasure.",
+    "They agreed to house and feed the prisoners.",
+    "The shed will house the tools."
+   ]
+  },
+  {
+   "word": "house",
+   "phones": "HH AW1 S",
+   "texts": [
+    "The house stood on a hill.",
+    "He went into the house.",
+    "They bought a house in town.",
+    "The whole house was asleep.",
+    "She kept house for her brother.",
+    "The House of Commons met at noon."
+   ]
+  },
+  {
+   "word": "minute",
+   "phones": "M AY0 N UW1 T",
+   "texts": [
+    "He examined every minute detail.",
+    "The insects were so minute that we could hardly see them.",
+    "She gave a minute account of the journey.",
+    "The changes were minute but important.",
+    "A minute particle of gold glittered in the sand.",
+    "He made a minute examination of the room.",
+    "The writing was minute and hard to read.",
+    "They studied the minute differences between the leaves.",
+    "In minute detail he described the crime.",
+    "The doctor found a minute wound on the neck.",
+    "The minute hairs on the leaf caught the light.",
+    "His instructions were minute and exact."
+   ]
+  },
+  {
+   "word": "minute",
+   "phones": "M IH1 N AH0 T",
+   "texts": [
+    "He will be here in a minute.",
+    "Every minute seemed an hour.",
+    "Just a minute, sir.",
+    "The train left a minute ago.",
+    "She paused for a minute.",
+    "At that minute the door opened."
+   ]
+  },
+  {
+   "word": "polish",
+   "phones": "P OW1 L IH0 SH",
+   "texts": [
+    "He spoke Polish and German.",
+    "The Polish army retreated.",
+    "She was a Polish countess.",
+    "They sang an old Polish song.",
+    "The Polish exiles met in Paris.",
+    "He had a strong Polish accent.",
+    "Many Polish families settled there.",
+    "The book was translated from the Polish.",
+    "A Polish officer came to the door.",
+    "He was of Polish descent."
+   ]
+  },
+  {
+   "word": "polish",
+   "phones": "P AA1 L IH0 SH",
+   "texts": [
+    "He gave his boots a polish.",
+    "The furniture shone with polish.",
+    "She learned to polish the brass.",
+    "His manners lacked polish.",
+    "Polish your shoes before church.",
+    "The maid will polish the floors."
+   ]
+  },
+  {
+   "word": "wound",
+   "phones": "W AW1 N D",
+   "texts": [
+    "The road wound through the valley.",
+    "She wound the yarn into a ball.",
+    "He wound up the old clock.",
+    "The river wound slowly to the sea.",
+    "The path wound up the hill."
+   ]
+  },
+  {
+   "word": "separate",
+   "phones": "S EH1 P ER0 EY2 T",
+   "texts": [
+    "We must separate the two boys.",
+    "The river will separate the armies.",
+    "She tried to separate the yolk from the white.",
+    "Nothing could separate them now.",
+    "They decided to separate after the war.",
+    "He began to separate the wheat from the chaff.",
+    "The police had to separate the crowd.",
+    "It is hard to separate truth from fiction."
+   ]
+  },
+  {
+   "word": "separate",
+   "phones": "S EH1 P ER0 IH0 T",
+   "texts": [
+    "They slept in separate rooms.",
+    "Each child had a separate bed.",
+    "The two questions are quite separate.",
+    "He kept a separate account for the farm.",
+    "They sailed in separate ships.",
+    "The letters came by separate posts.",
+    "She wrote a separate note to each of them.",
+    "The house had a separate entrance for servants."
+   ]
+  },
+  {
+   "word": "desert",
+   "phones": "D IH0 Z ER1 T",
+   "texts": [
+    "The soldiers began to desert in large numbers.",
+    "I will never desert you.",
+    "His courage did not desert him.",
+    "Would you desert your own brother?",
+    "The sailors threatened to desert the ship.",
+    "His friends began to desert him one by one.",
+    "She would not desert her post.",
+    "Luck seemed to desert them at last."
+   ]
+  },
+  {
+   "word": "desert",
+   "phones": "D EH1 Z ER0 T",
+   "texts": [
+    "They crossed the desert on camels.",
+    "The sands of the desert stretched away.",
+    "A desert island lay to the south.",
+    "The caravan was lost in the desert.",
+    "Nothing grows in that desert.",
+    "He wandered for days in the burning desert.",
+    "The desert wind blew all night.",
+    "They pitched their tents in the desert."
+   ]
+  },
+  {
+   "word": "increase",
+   "phones": "IH2 N K R IY1 S",
+   "texts": [
+    "The heat began to increase.",
+    "They hoped to increase their trade.",
+    "His fear seemed to increase with every step.",
+    "The king wished to increase his power.",
+    "This will only increase the danger.",
+    "The pain would increase at night.",
+    "We must increase our efforts.",
+    "The population continued to increase."
+   ]
+  },
+  {
+   "word": "increase",
+   "phones": "IH1 N K R IY2 S",
+   "texts": [
+    "There was a great increase in the number of visitors.",
+    "The increase of his fortune surprised them.",
+    "He noticed an increase in her fever.",
+    "The increase was very slow.",
+    "They spoke of a sudden increase of wealth.",
+    "Any increase in the tax was resisted.",
+    "The increase of the flock pleased the shepherd.",
+    "The new law caused an increase in prices."
+   ]
+  },
+  {
+   "word": "progress",
+   "phones": "P R AH0 G R EH1 S",
+   "texts": [
+    "As the work began to progress, he grew cheerful.",
+    "The disease continued to progress.",
+    "The building will progress slowly in winter.",
+    "As the evening began to progress, the guests grew merry.",
+    "The story will progress from there.",
+    "The army could not progress through the snow."
+   ]
+  },
+  {
+   "word": "progress",
+   "phones": "P R AA1 G R EH2 S",
+   "texts": [
+    "He made rapid progress in his studies.",
+    "The progress of the war alarmed them.",
+    "They watched the slow progress of the boat.",
+    "The queen's progress through the country lasted a month.",
+    "There was little progress that day.",
+    "Nothing could stop the progress of the fire."
+   ]
+  },
+  {
+   "word": "permit",
+   "phones": "P ER0 M IH1 T",
+   "texts": [
+    "Permit me to introduce my friend.",
+    "The weather would not permit us to sail.",
+    "He would not permit any delay.",
+    "If you will permit me, I will explain.",
+    "Her father would never permit such a marriage.",
+    "The rules do not permit smoking here."
+   ]
+  },
+  {
+   "word": "permit",
+   "phones": "P ER1 M IH2 T",
+   "texts": [
+    "He applied for a permit to build.",
+    "The guard asked to see his permit.",
+    "Without a permit they could not enter the city.",
+    "She showed her travel permit at the gate.",
+    "The permit was signed by the governor.",
+    "He lost his hunting permit."
+   ]
+  },
+  {
+   "word": "moderate",
+   "phones": "M AA1 D ER0 EY2 T",
+   "texts": [
+    "Try to moderate your anger.",
+    "The sea air will moderate the heat.",
+    "He was asked to moderate the discussion.",
+    "She tried to moderate his demands.",
+    "The wind began to moderate toward evening.",
+    "You must moderate your language."
+   ]
+  },
+  {
+   "word": "moderate",
+   "phones": "M AA1 D ER0 AH0 T",
+   "texts": [
+    "He lived on a moderate income.",
+    "The price was moderate.",
+    "She walked at a moderate pace.",
+    "He was a man of moderate views.",
+    "They had a moderate supper and went to bed.",
+    "The house was of moderate size."
+   ]
+  },
+  {
+   "word": "project",
+   "phones": "P R AH0 JH EH1 K T",
+   "texts": [
+    "The rocks project over the water.",
+    "The beams project from the wall.",
+    "He tried to project his voice to the back of the hall.",
+    "A balcony seemed to project above the street.",
+    "The lamp will project an image on the wall.",
+    "Long spikes project from its back."
+   ]
+  },
+  {
+   "word": "contract",
+   "phones": "K AH0 N T R AE1 K T",
+   "texts": [
+    "Metals contract in the cold.",
+    "His brows began to contract with anger.",
+    "The pupils of her eyes seemed to contract.",
+    "The muscles of his face would contract with pain.",
+    "The circle began to contract around them.",
+    "He was afraid he might contract the fever."
+   ]
+  },
+  {
+   "word": "protest",
+   "phones": "P R AH0 T EH1 S T",
+   "texts": [
+    "I must protest against this injustice.",
+    "They began to protest loudly.",
+    "She did not protest when he left.",
+    "I protest that I am innocent.",
+    "The men will protest if their pay is cut.",
+    "He rose to protest, but sat down again."
+   ]
+  },
+  {
+   "word": "insult",
+   "phones": "IH2 N S AH1 L T",
+   "texts": [
+    "How dare you insult my mother!",
+    "He did not mean to insult you.",
+    "They would insult anyone who passed.",
+    "You insult me by such an offer.",
+    "I will not stay here to be insulted, nor to insult others.",
+    "Do you mean to insult the king?"
+   ]
+  },
+  {
+   "word": "rebel",
+   "phones": "R IH0 B EH1 L",
+   "texts": [
+    "The people began to rebel against the tax.",
+    "His whole nature seemed to rebel at the thought.",
+    "The slaves would rebel if they were pressed.",
+    "Her pride began to rebel.",
+    "The northern tribes threatened to rebel.",
+    "His stomach began to rebel against the food."
+   ]
+  },
+  {
+   "word": "rebel",
+   "phones": "R EH1 B AH0 L",
+   "texts": [
+    "The rebel army marched on the capital.",
+    "The young rebel refused to kneel.",
+    "He was hanged as a rebel.",
+    "The rebel leaders met at night.",
+    "A rebel flag flew over the fort.",
+    "She had always been a rebel at heart."
+   ]
+  },
+  {
+   "word": "estimate",
+   "phones": "EH1 S T AH0 M EY2 T",
+   "texts": [
+    "It is hard to estimate the distance.",
+    "He tried to estimate the value of the land.",
+    "We cannot estimate the loss.",
+    "She began to estimate how much money they would need.",
+    "Can you estimate the number of men?",
+    "I would estimate his age at forty."
+   ]
+  },
+  {
+   "word": "invalid",
+   "phones": "IH1 N V AH0 L AH0 D",
+   "texts": [
+    "The poor invalid could not leave her bed.",
+    "He had been an invalid for many years.",
+    "She brought soup to the invalid.",
+    "The old invalid sat by the window.",
+    "His mother was a confirmed invalid.",
+    "The invalid was carried out into the sun."
+   ]
+  },
+  {
+   "word": "invalid",
+   "phones": "IH2 N V AE1 L AH0 D",
+   "texts": [
+    "The will was declared invalid.",
+    "The marriage was held to be invalid.",
+    "His argument is invalid.",
+    "The court found the contract invalid.",
+    "The old passport was now invalid.",
+    "Such a promise is invalid in law."
+   ]
+  },
+  {
+   "word": "use",
+   "phones": "Y UW1 Z",
+   "texts": [
+    "May I use your pen?",
+    "They use the old mill for storing grain.",
+    "You may use my horse.",
+    "He knew how to use a sword.",
+    "We use the back door in winter.",
+    "Use your eyes, boy!"
+   ]
+  },
+  {
+   "word": "use",
+   "phones": "Y UW1 S",
+   "texts": [
+    "There is no use in crying.",
+    "The tool was of great use to him.",
+    "He had lost the use of his arm.",
+    "What is the use of talking?",
+    "The room was kept for the use of guests.",
+    "It is of no further use."
+   ]
+  },
+  {
+   "word": "close",
+   "phones": "K L OW1 Z",
+   "texts": [
+    "Please close the window.",
+    "They were about to close the gates.",
+    "He asked her to close her eyes.",
+    "The shop will close at noon.",
+    "At the close of the day they went home.",
+    "Let us close the meeting with a song."
+   ]
+  },
+  {
+   "word": "close",
+   "phones": "K L OW1 S",
+   "texts": [
+    "The village was close to the sea.",
+    "They were close friends.",
+    "The air in the room was hot and close.",
+    "He kept a close watch on the prisoner.",
+    "She sat close beside him.",
+    "It was a close race."
+   ]
+  },
+  {
+   "word": "excuse",
+   "phones": "IH0 K S K Y UW1 Z",
+   "texts": [
+    "Please excuse my rudeness.",
+    "You must excuse him, he is tired.",
+    "I cannot excuse such conduct.",
+    "Will you excuse me for a moment?",
+    "Nothing can excuse cruelty.",
+    "Kindly excuse the delay."
+   ]
+  },
+  {
+   "word": "excuse",
+   "phones": "IH0 K S K Y UW1 S",
+   "texts": [
+    "He made some excuse and left.",
+    "She had a good excuse for being late.",
+    "It was a poor excuse.",
+    "There is no excuse for such behaviour.",
+    "He was always ready with an excuse.",
+    "That was only an excuse to see her."
+   ]
+  },
+  {
+   "word": "tears",
+   "phones": "T EH1 R Z",
+   "texts": [
+    "The wind tears at the sails.",
+    "She tears open every letter at once.",
+    "He tears the bread into pieces.",
+    "The machine tears the cloth.",
+    "The child tears pages from the book."
+   ]
+  }
+ ]
+}

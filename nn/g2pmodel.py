@@ -37,14 +37,17 @@ BATCH_SIZE = 128
 FUSED = platform.machine().lower() in ('arm64', 'aarch64')
 
 
-# Parse a generated model module's g2pModel object - a dict (the weights as base64 text)
+# Parse a generated model module's g2pModel object - a dict (the weights as base64 text - the G2P's, and its context
+# section's)
 def parse_module(text):
     body = text[text.index('export const g2pModel = ') + len('export const g2pModel = '):].strip().rstrip(';')
-    weights = re.search(r'`([^`]*)`', body).group(1)
-    body = re.sub(r'`[^`]*`', '\'\'', body)
+    blocks = re.findall(r'`([^`]*)`', body)
+    body = re.sub(r'`[^`]*`', lambda match, counter=iter(range(len(blocks))): f'\'`{next(counter)}\'', body)
     body = re.sub(r'\btrue\b', 'True', re.sub(r'\bfalse\b', 'False', body))
     model = ast.literal_eval(body)
-    model['weights'] = weights
+    for section in (model, model.get('context')):
+        if section is not None:
+            section['weights'] = blocks[int(section['weights'][1:])]
     return model
 
 
@@ -289,8 +292,74 @@ def _gru_step(gru, gates, state):
     return candidate + update * (state - candidate)
 
 
+class Context:
+    """A loaded context network (a G2P model's "context" section) - the reading slots of words in their windows
+    (lib/g2p.js loadContext), cached per window"""
+
+    def __init__(self, context):
+        tensors = unpack_tensors(context)
+        self.context = context
+        self.hidden, self.window, self.max_chars = context['hidden'], context['window'], context['maxChars']
+        self.char_gru = _gru_weights(tensors, 'char_gru', '', self.hidden)
+        self.char_table = _input_table(self.char_gru, tensors['char_embed.weight'])
+        self.forward = _gru_weights(tensors, 'window_gru', '', self.hidden)
+        self.backward = _gru_weights(tensors, 'window_gru', '_reverse', self.hidden)
+        self.layer_columns = np.ascontiguousarray(tensors['layer.weight'].T)
+        self.layer_bias = tensors['layer.bias']
+        self.word_columns = np.ascontiguousarray(tensors['word_layer.weight'].T)
+        self.word_bias = tensors['word_layer.bias']
+        self.output_columns = np.ascontiguousarray(tensors['output.weight'].T)
+        self.output_bias = tensors['output.bias']
+        self.char_ids = {char: index + 1 for index, char in enumerate(context['chars'])}
+        self.vectors = {}
+        self.choices = {}
+
+    # The window of the word at index in a text's items (its words, and its phrase ends as marks) - a tuple
+    def window_of(self, items, index):
+        return tuple(items[position] if 0 <= position < len(items) else ''
+                     for position in range(index - self.window, index + self.window + 1))
+
+    # Compute the vectors of items not yet cached - the character GRU's final state (zero for no characters)
+    def item_vectors(self, items):
+        missing = sorted({item for item in items if item not in self.vectors})
+        id_lists = [[self.char_ids[char] for char in item if char in self.char_ids][-self.max_chars:] for item in missing]
+        if missing:
+            lengths = np.array([len(ids) for ids in id_lists])
+            ids = np.zeros((len(missing), max(1, int(lengths.max()))), dtype=np.int64)
+            for index, item_ids in enumerate(id_lists):
+                ids[index, :len(item_ids)] = item_ids
+            state = np.zeros((len(missing), self.hidden))
+            for step in range(int(lengths.max())):
+                valid = (step < lengths)[:, None]
+                state = np.where(valid, _gru_step(self.char_gru, self.char_table[ids[:, step]], state), state)
+            for item, vector in zip(missing, state):
+                self.vectors[item] = vector
+
+    # The reading slots of windows (tuples), filling the cache
+    def choose_windows(self, windows):
+        missing = sorted({window for window in windows if window not in self.choices})
+        if missing:
+            self.item_vectors([item for window in missing for item in window if item != ''])
+            zero = np.zeros(self.hidden)
+            vectors = np.array([[zero if item == '' else self.vectors[item] for item in window] for window in missing])
+            joined = []
+            for gru, positions in ((self.forward, range(self.window + 1)), (self.backward, range(2 * self.window, self.window - 1, -1))):
+                state = np.zeros((len(missing), self.hidden))
+                for position in positions:
+                    state = _gru_step(gru, _matrix_vectors(gru['inputColumns'], vectors[:, position], gru['inputBias']), state)
+                joined.append(state)
+            hidden = js_tanh(_matrix_vectors(self.layer_columns, np.concatenate(joined, axis=1), self.layer_bias)) * \
+                js_tanh(_matrix_vectors(self.word_columns, vectors[:, self.window], self.word_bias))
+            logits = _matrix_vectors(self.output_columns, hidden, self.output_bias)
+            for window, slot in zip(missing, np.argmax(logits, axis=1)):
+                self.choices[window] = int(slot)
+        return [self.choices[window] for window in windows]
+
+
 class G2p:
-    """A loaded G2P model - pronounce(word) gives the word's ARPAbet phones with stress, cached per word (lib/g2p.js loadG2p)"""
+    """A loaded G2P model - pronounce(word, reading=0) gives the word's ARPAbet phones with stress in a reading, cached per
+    word and reading; with a context network, ambiguous(word) (the ambiguity head) and choose_reading(items, index) (the
+    context network's reading) - lib/g2p.js loadG2p"""
 
     def __init__(self, model):
         if model['design'] != 'ar':
@@ -315,14 +384,26 @@ class G2p:
         self.bridge_columns = np.ascontiguousarray(tensors['bridge.weight'].T)
         self.bridge_bias = tensors['bridge.bias']
         self.letter_ids = {letter: index + 1 for index, letter in enumerate(model['letters'])}
-        self.cache = {}
+        self.readings = model.get('readings', 1)
+        self.reading_weights = tensors.get('reading.weight')
+        ambiguity = tensors.get('ambiguity.weight')
+        self.ambiguity_columns = None if ambiguity is None else np.ascontiguousarray(ambiguity.T)
+        self.ambiguity_bias = tensors.get('ambiguity.bias')
+        self.ambiguity_layer_columns = None if ambiguity is None else np.ascontiguousarray(tensors['ambiguity_layer.weight'].T)
+        self.ambiguity_layer_bias = tensors.get('ambiguity_layer.bias')
+        self.caches = [{} for _ in range(self.readings)]
+        self.cache = self.caches[0]
+        self.ambiguous_words = {}
+        self.last_ambiguous = []
+        self.context = Context(model['context']) if 'context' in model else None
 
     # The letter ids of a word - its known letters, at most maxLetters
     def word_ids(self, word):
         return [self.letter_ids[letter] for letter in word if letter in self.letter_ids][:self.model['maxLetters']]
 
-    # Pronounce letter-id lists (each non-empty) - phone-id lists
-    def pronounce_ids(self, id_lists):
+    # Pronounce letter-id lists (each non-empty) in a reading - phone-id lists (and the ambiguity head's decisions into
+    # last_ambiguous)
+    def pronounce_ids(self, id_lists, reading=0):
         hidden, decoder = self.hidden, self.decoder
         count = len(id_lists)
         lengths = np.array([len(ids) for ids in id_lists])
@@ -347,6 +428,12 @@ class G2p:
             encoded[:, step, hidden:] = np.where(valid, state, 0.0)
         ends[:, hidden:] = state
         state = js_tanh(_matrix_vectors(self.bridge_columns, ends, self.bridge_bias))
+        self.last_ambiguous = [False] * count
+        if self.ambiguity_columns is not None:
+            ambiguity_hidden = js_tanh(_matrix_vectors(self.ambiguity_layer_columns, ends, self.ambiguity_layer_bias))
+            self.last_ambiguous = (_matrix_vectors(self.ambiguity_columns, ambiguity_hidden, self.ambiguity_bias)[:, 0] > 0).tolist()
+        if reading > 0:
+            state = state + self.reading_weights[reading - 1]
 
         # Each letter's attention key (attention^T @ encoded) and context value (combine's context half @ encoded)
         flat = encoded.reshape(count * steps, 2 * hidden)
@@ -385,27 +472,64 @@ class G2p:
             previous = np.where(best > 1, best, previous)
         return phones
 
-    # Pronounce words, filling the cache - the words' phones (the new words in batches of similar length)
-    def pronounce_many(self, words):
-        missing = sorted({word for word in words if word not in self.cache}, key=lambda word: (len(self.word_ids(word)), word))
+    # Pronounce words in a reading (a reading the model lacks is the default), filling the caches - the words' phones (the
+    # new words in batches of similar length; in the default reading, also the ambiguity head's decisions)
+    def pronounce_many(self, words, reading=0):
+        reading = reading if reading < self.readings else 0
+        cache = self.caches[reading]
+        missing = sorted({word for word in words if word not in cache or (reading == 0 and word not in self.ambiguous_words)},
+                         key=lambda word: (len(self.word_ids(word)), word))
         nonempty = []
         for word in missing:
             if self.word_ids(word):
                 nonempty.append(word)
             else:
-                self.cache[word] = []
+                cache[word] = []
+                self.ambiguous_words[word] = False
         for start in range(0, len(nonempty), BATCH_SIZE):
             batch = nonempty[start:start + BATCH_SIZE]
-            for word, phone_ids in zip(batch, self.pronounce_ids([self.word_ids(word) for word in batch])):
-                self.cache[word] = [self.model['phones'][index] for index in phone_ids]
-        return [self.cache[word] for word in words]
+            for word, phone_ids in zip(batch, self.pronounce_ids([self.word_ids(word) for word in batch], reading)):
+                cache[word] = [self.model['phones'][index] for index in phone_ids]
+            if reading == 0:
+                self.ambiguous_words.update(zip(batch, self.last_ambiguous))
+        return [cache[word] for word in words]
 
-    # The ARPAbet phones (with stress) of a word
-    def pronounce(self, word):
-        phones = self.cache.get(word)
+    # The ARPAbet phones (with stress) of a word in a reading
+    def pronounce(self, word, reading=0):
+        phones = self.caches[reading if reading < self.readings else 0].get(word)
         if phones is None:
-            phones = self.pronounce_many([word])[0]
+            phones = self.pronounce_many([word], reading)[0]
         return phones
+
+    # Whether a word's reading depends on its neighbors (the ambiguity head; never without a context network)
+    def ambiguous(self, word):
+        if self.context is None:
+            return False
+        if word not in self.ambiguous_words:
+            self.pronounce_many([word])
+        return self.ambiguous_words[word]
+
+    # The reading of the word at index in a text's items (the context network)
+    def choose_reading(self, items, index):
+        return self.context.choose_windows([self.context.window_of(items, index)])[0]
+
+    # The reading slots of windows (each 2 * window + 1 items)
+    def choose_slots(self, windows):
+        return self.context.choose_windows([tuple(window) for window in windows])
+
+    # The caches' state - {readings: [{word: phones}], ambiguous: {word: decision}, choices: {window: slot}} (for
+    # worker processes - set_state)
+    def state(self):
+        return {'readings': self.caches, 'ambiguous': self.ambiguous_words,
+                'choices': self.context.choices if self.context else {}}
+
+    # Add a state's caches
+    def set_state(self, state):
+        for cache, pronunciations in zip(self.caches, state['readings']):
+            cache.update(pronunciations)
+        self.ambiguous_words.update(state['ambiguous'])
+        if self.context is not None:
+            self.context.choices.update(state['choices'])
 
 
 # The command line - pronounce words

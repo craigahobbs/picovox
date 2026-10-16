@@ -99,30 +99,42 @@ def get_g2p():
 
 
 # The pronunciations of words - {word: phones}, pronounced in batches, by up to jobs worker processes (default: all
-# cores; worth it for thousands of new words), and kept in the G2P network's cache
+# cores; worth it for thousands of new words), and kept in the G2P network's cache (with its ambiguity decisions)
 def pronounce_words(words, jobs=None):
     g2p = get_g2p()
-    missing = sorted({word for word in words if word not in g2p.cache})
+    missing = sorted({word for word in words if word not in g2p.cache or word not in g2p.ambiguous_words})
     jobs = min(jobs or os.cpu_count(), max(1, len(missing) // 1000))
     if jobs > 1:
         chunks = [missing[index::jobs] for index in range(jobs)]
         with multiprocessing.Pool(jobs) as pool:
-            for chunk, phones in zip(chunks, pool.map(_pronounce_chunk, chunks)):
+            for chunk, (phones, ambiguous) in zip(chunks, pool.map(_pronounce_chunk, chunks)):
                 g2p.cache.update(zip(chunk, phones))
+                g2p.ambiguous_words.update(zip(chunk, ambiguous))
     else:
         g2p.pronounce_many(missing)
     return {word: g2p.cache[word] for word in words}
 
 
-# Pronounce words with the G2P network (a worker task)
+# Pronounce words with the G2P network (a worker task) - (their phones, the ambiguity head's decisions)
 def _pronounce_chunk(words):
-    return get_g2p().pronounce_many(words)
+    g2p = get_g2p()
+    return g2p.pronounce_many(words), [g2p.ambiguous_words[word] for word in words]
 
 
-# Add pronunciations to the G2P network's cache - {word: phones} (a worker process's initializer, so its texts'
-# words are pronounced once, before the work is shared out)
+class Pronunciations(dict):
+    """Words' pronunciations - {word: phones} - and the G2P network's caches after pronouncing texts (state: the
+    alternate readings, the ambiguity decisions, and the context network's choices), for set_pronunciations"""
+
+    state = None
+
+
+# Add pronunciations to the G2P network's cache - {word: phones}, or a Pronunciations with its state (a worker
+# process's initializer, so its texts' words are pronounced once, before the work is shared out)
 def set_pronunciations(pronunciations):
-    get_g2p().cache.update(pronunciations)
+    g2p = get_g2p()
+    g2p.cache.update(pronunciations)
+    if getattr(pronunciations, 'state', None) is not None:
+        g2p.set_state(pronunciations.state)
 
 
 # The words of texts as the front end pronounces them (after numbers and abbreviations are spelled out) - distinct, in
@@ -140,9 +152,23 @@ def text_words(texts):
     return list(words)
 
 
-# Pronounce every word of texts (pronounce_words) - {word: phones}, for set_pronunciations
+# Pronounce every word of texts (pronounce_words), and, with a context network, choose the readings of their ambiguous
+# words and pronounce those - a Pronunciations, for set_pronunciations
 def pronounce_texts(texts, jobs=None):
-    return pronounce_words(text_words(texts), jobs)
+    pronunciations = Pronunciations(pronounce_words(text_words(texts), jobs))
+    g2p = get_g2p()
+    if g2p.context is not None:
+        windows = []
+        for text in texts:
+            sequence = context_sequence(text_items(text))
+            windows.extend(g2p.context.window_of(sequence, index) for index, item in enumerate(sequence) if g2p.ambiguous_words.get(item))
+        by_reading = {}
+        for window, slot in zip(windows, g2p.context.choose_windows(windows)):
+            by_reading.setdefault(slot, set()).add(window[len(window) // 2])
+        for reading, words in sorted(by_reading.items()):
+            g2p.pronounce_many(sorted(words), reading)
+    pronunciations.state = g2p.state()
+    return pronunciations
 
 
 # Load the CMU Pronouncing Dictionary - word to its first pronunciation; comments stripped (the G2P network's training
@@ -200,62 +226,92 @@ def number_words(value):
     return []
 
 
+# The context marks of the phrase ends - a phrase end's item in the context sequence (the context network's input)
+PHRASE_MARKS = {'comma': ',', 'period': '.', 'question': '?', 'exclamation': '!'}
+
+
+# The front end's items of a text, in order (textToPhrases' first pass) - [(item, offset)]: a word (its text after
+# numbers and abbreviations are spelled out) or a phrase end ({'end': name}, only after a word), and the offset of its
+# source token in the text. The context sequence is the items with the phrase ends as PHRASE_MARKS.
+def text_items(text):
+    items = []
+
+    def end_phrase(end, offset):
+        if items and isinstance(items[-1][0], str):
+            items.append(({'end': end}, offset))
+
+    for match in TOKEN_REGEX.finditer(text.lower().replace('‘', '\'').replace('’', '\'')):
+        token, offset = match.group(0), match.start()
+        if '0' <= token[0] <= '9':
+            whole, _, fraction = token.partition('.')
+            items.extend((word, offset) for word in number_words(int(whole)))
+            if '.' in token:
+                items.append(('point', offset))
+                items.extend((ONES[int(digit)], offset) for digit in fraction)
+        elif 'a' <= token[0] <= 'z':
+            bare = token[:-1] if token.endswith('.') else token
+            if bare in ABBREVIATIONS:
+                items.append((ABBREVIATIONS[bare], offset))
+            else:
+                items.append((bare.strip('\''), offset))
+                if token.endswith('.'):
+                    end_phrase('period', offset)
+        elif token == '?':
+            end_phrase('question', offset)
+        elif token == '!':
+            end_phrase('exclamation', offset)
+        elif token == '.':
+            end_phrase('period', offset)
+        else:
+            end_phrase('comma', offset)
+    end_phrase('period', len(text))
+    return items
+
+
+# The context sequence of a text's items - the words, and the phrase ends as their marks
+def context_sequence(items):
+    return [item if isinstance(item, str) else PHRASE_MARKS[item['end']] for item, _ in items]
+
+
 # Tokenize text into phrases (textToPhrases) - [{words: [{text, phones: [{ph, stress}], isFunction, syllables}], end}];
 # pronounce_word(word) gives a word's ARPAbet phones (default: the G2P network's - lib/lexicon.js setPronouncer with
-# lib/g2p.js loadG2p, as the app does)
-def text_to_phrases(text, pronounce_word=None):
+# lib/g2p.js loadG2p, as the app does: a word the network finds ambiguous takes the reading its context network chooses
+# from the neighboring words); readings ({position: phones}, a word's index in the text's words) replaces words' phones
+# (the voice training data's aligned readings - nn/readings.py)
+def text_to_phrases(text, pronounce_word=None, readings=None):
+    items = text_items(text)
     if pronounce_word is None:
-        pronounce_word = get_g2p().pronounce
-    tokens = TOKEN_REGEX.findall(text.lower().replace('‘', '\'').replace('’', '\''))
+        g2p = get_g2p()
+        sequence = context_sequence(items)
+
+        # A word's phones - the reading the context network chooses for an ambiguous word, else the default reading
+        def pronounce_item(word, index):
+            return g2p.pronounce(word, g2p.choose_reading(sequence, index) if g2p.ambiguous(word) else 0)
+    else:
+        def pronounce_item(word, _index):
+            return pronounce_word(word)
     phrases = []
     words = []
-
-    def end_phrase(end):
-        nonlocal words
-        if words:
+    position = 0
+    for index, (item, _) in enumerate(items):
+        if not isinstance(item, str):
+            end = item['end']
             phrases.append({'words': words, 'end': 'wh' if end == 'question' and words[0]['text'] in WH_WORDS else end})
             words = []
-
-    def add_word(word_text):
-        word = word_text.strip('\'')
+            continue
         phones = []
-        for phone in pronounce_word(word):
+        word_phones = readings[position] if readings and position in readings else pronounce_item(item, index)
+        for phone in word_phones:
             match = PHONE_REGEX.match(phone)
             phones.append({'ph': match.group(1), 'stress': None if match.group(2) is None else int(match.group(2))})
-        is_function = word in FUNCTION_WORDS
+        is_function = item in FUNCTION_WORDS
         if is_function:
             for phone in phones:
                 if phone['stress'] is not None:
                     phone['stress'] = 0
-        words.append({'text': word, 'phones': phones, 'isFunction': is_function,
+        words.append({'text': item, 'phones': phones, 'isFunction': is_function,
                       'syllables': sum(1 for phone in phones if phone['ph'] in VOWELS)})
-
-    for token in tokens:
-        if '0' <= token[0] <= '9':
-            whole, _, fraction = token.partition('.')
-            for word in number_words(int(whole)):
-                add_word(word)
-            if '.' in token:
-                add_word('point')
-                for digit in fraction:
-                    add_word(ONES[int(digit)])
-        elif 'a' <= token[0] <= 'z':
-            bare = token[:-1] if token.endswith('.') else token
-            if bare in ABBREVIATIONS:
-                add_word(ABBREVIATIONS[bare])
-            else:
-                add_word(bare)
-                if token.endswith('.'):
-                    end_phrase('period')
-        elif token == '?':
-            end_phrase('question')
-        elif token == '!':
-            end_phrase('exclamation')
-        elif token == '.':
-            end_phrase('period')
-        else:
-            end_phrase('comma')
-    end_phrase('period')
+        position += 1
     return phrases
 
 
@@ -265,11 +321,11 @@ def phone_token(phone):
 
 
 # Tokenize text - {'tokens': [name], 'ids': [id], 'words': [{text, start, end}]} (each word's token index range, and
-# the phrase-end tokens have no word); pronounce_word as text_to_phrases
-def tokenize(text, pronounce_word=None):
+# the phrase-end tokens have no word); pronounce_word and readings as text_to_phrases
+def tokenize(text, pronounce_word=None, readings=None):
     tokens = [BOS]
     words = []
-    for phrase in text_to_phrases(text, pronounce_word):
+    for phrase in text_to_phrases(text, pronounce_word, readings):
         for index, word in enumerate(phrase['words']):
             if index > 0:
                 tokens.append(WORD)

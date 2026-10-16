@@ -358,6 +358,34 @@ dictionary pronunciations, the variant the readers used by the forced alignments
 readers' majority isn't the first (significant, 3+ speakers), the difference is lexical (not vowel reduction or stress
 alone, not a function word), and the vowel's formants (or the fricative's voicing) agree where measured.
 
+### Heteronyms
+
+Some words have readings their neighbors decide - "I read it yesterday" and "I will read it", "their lives" and "she
+lives", "a lead pipe", the noun/verb stress pairs. The G2P module also holds two small pieces for them (no word list or
+rule at runtime): the G2P takes a reading index (a learned vector added to its decoder's first state; reading 0 is the
+default) and has an ambiguity head (whether the word's reading depends on its context); for an ambiguous word, a context
+network (`nn/context.py`: a character GRU over the three words and phrase-end marks each side, a bidirectional GRU, and a
+layer gated by the word itself - 47,779 parameters at 6 bits) chooses the reading.
+
+```sh
+build/venv-nn/bin/python -B -m nn.contextlabels aligned --out build/nn/context      # readers' readings (MFA alignments)
+build/venv-pos/bin/python -B -m nn.contextlabels tag --out build/nn/context         # part-of-speech tags (spaCy)
+build/venv-nn/bin/python -B -m nn.contextlabels labels --out build/nn/context       # the ambiguous words and examples
+build/venv-nn/bin/python -B -m nn.context train-g2p --labels build/nn/context/labels.json --init build/nn/g2p-train/focus.pt \
+    --out build/nn/context/g2p.pt                                                   # the reading input and ambiguity head
+build/venv-nn/bin/python -B -m nn.context train-context --labels build/nn/context/labels.json --out build/nn/context/context.pt
+build/venv-nn/bin/python -B -m nn.context export --g2p build/nn/context/g2p.pt --context build/nn/context/context.pt
+node tools/heteronyms.js                                                            # the regression set (exit 1 below the gate)
+```
+
+The labels (`nn/contextlabels.py`, with the curated part in `data/nn/context-labels.json`) come from three sources: the
+LibriTTS-R readers' readings by the forced alignments; part-of-speech tags over the Project Gutenberg books (spaCy,
+training time only - `requirements/pos.txt`), mapped to readings only for words whose mapping agrees with the aligned
+audio on 95% of 10 or more tokens; and hand-written seed sentences and reviewed collocations for the readings the tags
+can't separate (lead the metal, bass, bow, row, does the deer, house the verb) and the pairs the audio doesn't
+validate. The voice training data (`nn.multi build`) takes a heteronym token's reading from the alignment where the
+aligner chose another dictionary reading than the front end's (`nn/readings.py`; `python -m nn.readings check`).
+
 
 ## The library
 

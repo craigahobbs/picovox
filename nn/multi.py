@@ -61,6 +61,7 @@ import time
 import numpy as np
 
 from . import data
+from . import readings
 from .data import (ARCTIC_DIR, BOUNDARIES, CORPORA_DIR, DATA_DIR, FORMAT_VERSION, HOP, MAX_EDGE_SILENCE, MIN_MATCH,
                    MIN_WORD_MATCH, SAMPLE_RATE, CHANNELS, CHANNEL_NOTES, ArcticData, match_rate, read_mfa)
 from .frontend import ABBREVIATIONS, FUNCTION_WORDS, ROOT, pronounce_texts, set_pronunciations, tokenize, vocabulary
@@ -438,6 +439,12 @@ def build_command(args):
     pronunciations = pronounce_texts([utterance['text'] for utterance, _, _ in tasks], args.jobs)
     print(f'{len(pronunciations)} distinct words pronounced, {time.time() - start_time:.0f} s', flush=True)
 
+    # Heteronym readings - the aligner's reading where it differs from the front end's (nn/readings.py)
+    reading_counts = readings.attach_readings(tasks)
+    reading_check = {'tokens': 0, 'disagree': 0}
+    print(f'heteronym readings: {reading_counts["tokens"]} aligned tokens in {reading_counts["utterances"]} LibriTTS-R utterances, '
+          f'{reading_counts["overrides"]} overrides, {time.time() - start_time:.0f} s', flush=True)
+
     # Process in parallel, streaming the arrays to raw files
     os.makedirs(out_dir, exist_ok=True)
     names = ['tokens', 'durations', 'seconds', 'audio', 'frames']
@@ -464,7 +471,7 @@ def build_command(args):
             corpus = speakers[utterance['speaker']]['corpus']
             worst_word, worst_word_match = report['worstWord'], report['worstWordMatch']
             if corpus != 'arctic':
-                worst_word, worst_word_match = worst_content_word(utterance['text'], report['status'])
+                worst_word, worst_word_match = worst_content_word(utterance['text'], report['status'], utterance.get('readings'))
             if worst_word_match < MIN_WORD_MATCH:
                 reasons.append(f'word "{worst_word}" match {worst_word_match:.2f} < {MIN_WORD_MATCH}')
             if any(frames == 0 for token, frames in zip(result['tokens'], result['frames']) if token not in BOUNDARIES):
@@ -503,7 +510,11 @@ def build_command(args):
             token_offset += len(result['tokens'])
             frame_offset += frame_count
             alignment_file.write(json.dumps({'id': entry['id'], 'tokens': ' '.join(result['tokens']), 'frames': result['frames'],
-                                             'edits': report['edits'], 'cost': report['cost']}) + '\n')
+                                             'edits': report['edits'], 'cost': report['cost'],
+                                             'readings': {str(position): ' '.join(phones) for position, phones in
+                                                          utterance.get('readings', {}).items()}}) + '\n')
+            if entry['include']:
+                readings.check_built(utterance, result['tokens'], reading_check)
     for name in names:
         raw_files[name].close()
         shape = (lengths[name], len(CHANNELS)) if name == 'frames' else (lengths[name],)
@@ -531,6 +542,7 @@ def build_command(args):
         'wordMatchExempt': 'LibriTTS-R utterances: function words and abbreviation expansions (nn/multi.py WORD_MATCH_EXEMPT); '
                            'worstAnyWord is nn/data.py\'s worst word over all words',
         'speakers': speaker_index,
+        'readings': {**reading_counts, 'checkedTokens': reading_check['tokens'], 'disagree': reading_check['disagree']},
         'utterances': entries
     }
     with open(os.path.join(out_dir, 'index.json'), 'w', encoding='utf-8') as file:
@@ -542,14 +554,18 @@ def build_command(args):
         speakers_path, split_path = table_paths(out_dir)
         write_speakers(ArcticData(out_dir), speakers, row_of, edits_by_speaker, missing_labels, speakers_path)
         write_split(entries, split_path)
+    share = reading_check['disagree'] / max(1, reading_check['tokens'])
+    print(f'heteronym readings: {reading_counts["overrides"]} overrides; included utterances\' heteronym tokens {reading_check["tokens"]}, '
+          f'{reading_check["disagree"]} ({100 * share:.2f}%) disagree with the aligner'
+          f'{" - over the 1% limit (nn/readings.py MAX_DISAGREE)" if share > readings.MAX_DISAGREE else ""}')
     print(f'Built {out_dir}: {len(entries)} utterances ({sum(1 for entry in entries if entry["include"])} included), '
           f'{frame_offset / 100 / 3600:.2f} hours, {len(failures)} failures, {time.time() - start_time:.0f} s')
 
 
 # The worst word of an utterance (nn/data.py's word agreement) over the words not in WORD_MATCH_EXEMPT - (word, match)
-def worst_content_word(text, status):
+def worst_content_word(text, status, word_readings=None):
     worst, worst_match = None, 1.0
-    for word in tokenize(text)['words']:
+    for word in tokenize(text, readings=word_readings)['words']:
         if word['text'] in WORD_MATCH_EXEMPT:
             continue
         statuses = status[word['start']:word['end']]

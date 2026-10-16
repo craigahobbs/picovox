@@ -194,7 +194,7 @@ def silent_runs(samples, rate):
 
 # Align an utterance's tokens with its labels - (tokens, seconds per token, cut start, cut end, report)
 def align_utterance(utterance, mean_seconds, samples, rate):
-    tokenized = tokenize(utterance['text'])
+    tokenized = tokenize(utterance['text'], readings=utterance.get('readings'))   # heteronym readings (nn/readings.py)
     tokens = tokenized['tokens']
     labels = read_labels(utterance)
     wav_seconds = len(samples) / rate

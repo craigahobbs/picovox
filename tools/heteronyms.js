@@ -2,9 +2,10 @@
 // textToPhrases with the G2P network as the pronouncer), each expected reading scored: right when the word's phones are
 // one of the reading's variants (or match one without stress and no other reading's). Kinds: "default" (the reading a
 // context-free G2P should give), "context" (another reading - needs the neighboring words), "missing" (no dictionary
-// variant). Exits 1 when a kind's score is below its minimum.
+// variant). Prints one line and exits 1 when a kind's score is below its minimum (the make train gate): default 0.9, context
+// 0.85 when the module has a context network (else 0), missing 0.
 //
-// node tools/heteronyms.js [-m modulePath] [--min-default 0.9] [--min-context 0] [--show]
+// node tools/heteronyms.js [-m modulePath] [--min-default 0.9] [--min-context 0.85] [--min-missing 0] [--show]
 
 import {setPronouncer, textToPhrases} from '../lib/lexicon.js';
 import {loadG2p} from '../lib/g2p.js';
@@ -56,7 +57,29 @@ export function scoreHeteronyms(items) {
 }
 
 
-// Main - load the G2P module, score, print - returns true when a kind is below its minimum
+// The gate's minimums - the default reading, and the context-dependent readings (when the module has a context network;
+// a context-free G2P gives one reading per word)
+export const minimums = {'default': 0.9, 'context': 0.85, 'missing': 0};
+
+
+// The one-line result - kinds' scores against their minimums, and whether any is below
+export function resultLine(kinds, kindMinimums) {
+    const parts = [];
+    const below = [];
+    for (const [kind, {right, total}] of Object.entries(kinds)) {
+        const share = right / total;
+        if (share < kindMinimums[kind]) {
+            below.push(kind);
+        }
+        parts.push(`${kind} ${right}/${total} (${(100 * share).toFixed(1)}%, min ${kindMinimums[kind]})`);
+    }
+    const status = below.length ? ` - FAILED (${below.join(', ')})` : ' - ok';
+    return {'line': `heteronyms: ${parts.join(', ')}${status}`, 'failed': below.length !== 0};
+}
+
+
+// Main - load the G2P module, score, print one line (and the misses with --show) - returns true when a kind is below its
+// minimum
 async function main() {
     const args = process.argv.slice(2);
     const option = (name, fallback) => (args.includes(name) ? args[args.indexOf(name) + 1] : fallback);
@@ -65,15 +88,13 @@ async function main() {
     setPronouncer(await loadG2p(g2pModel));
     const items = JSON.parse(readFileSync(new URL('../data/nn/heteronyms-test.json', import.meta.url), 'utf8'));
     const {kinds, misses} = scoreHeteronyms(items);
-    const minimums = {'default': Number(option('--min-default', '0.9')), 'context': Number(option('--min-context', '0')), 'missing': 0};
-    let failed = false;
-    for (const [kind, {right, total}] of Object.entries(kinds)) {
-        const share = right / total;
-        const below = share < minimums[kind];
-        failed ||= below;
-        const note = below ? ` - below the minimum ${minimums[kind]}` : '';
-        process.stdout.write(`${kind.padEnd(8)} ${right}/${total} (${(100 * share).toFixed(1)}%)${note}\n`);
-    }
+    const kindMinimums = {
+        'default': Number(option('--min-default', minimums.default)),
+        'context': Number(option('--min-context', g2pModel.context ? minimums.context : 0)),
+        'missing': Number(option('--min-missing', minimums.missing))
+    };
+    const {line, failed} = resultLine(kinds, kindMinimums);
+    process.stdout.write(`${line}\n`);
     if (args.includes('--show')) {
         for (const miss of misses) {
             const got = String(miss.phones).padEnd(22);
