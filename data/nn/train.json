@@ -27,7 +27,8 @@
         "description": "Knowledge distillation of the teacher (nn/distill.py) - its distillation set, the student ladder, the polish fine-tune, the evaluation (nn/panel.py), and the tolerance (fixed before any student is measured)",
         "teacher": "build/nn/runs/multi-b/best.pt",
         "targets": {
-            "books": "build/nn/g2p/books",
+            "books": "build/nn/books",
+            "bookIds": [2701, 1342, 84, 64317, 11, 98, 1661, 345, 1400, 174, 76, 74, 768, 1260, 158, 161, 120, 43, 219, 2554, 36, 35],
             "bookCopies": 2,
             "actorShare": 0.08,
             "blendShare": 0.1,
@@ -49,6 +50,7 @@
             "weightDecay": 0.0001,
             "valEvery": 1000
         },
+        "student": "s80",
         "students": [
             {"name": "s96", "config": {"dim": 96, "decoderDim": 96, "encoderLayers": 3, "decoderLayers": 6}},
             {"name": "s80", "config": {"dim": 80, "decoderDim": 80, "encoderLayers": 3, "decoderLayers": 4}},

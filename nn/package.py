@@ -25,13 +25,19 @@ Deflate barely shrinks quantized weights (about 5% at 8 bits - they look random)
 under the HTTP compression static hosts apply to JavaScript, so --compress auto (the default) deflates only when it
 makes the gzip-served module at least --min-saving smaller. The sizes - the module's bytes and gzip bytes, raw and
 deflated - are printed (JSON), and are the size search's measure of a model's size (nn/sizesearch.py).
+
+Provenance (make train's package step): --provenance adds the manifest's "provenance" - the git commit (and whether
+the tree had changes), the recipe's SHA-256 (--recipe, data/nn/train.json), each training data directory's index
+SHA-256 (--data DIR ...), and the gate's scores (--scores, the evaluation's result.json: UTMOS, WER, similarity).
 """
 
 import argparse
 import base64
 import gzip
+import hashlib
 import json
 import os
+import subprocess
 import sys
 import zlib
 
@@ -127,11 +133,38 @@ def module_text(manifest, payload, encoding, raw_size):
     ])
 
 
+# A file's SHA-256 (hex)
+def file_sha256(path):
+    with open(path, 'rb') as file:
+        return hashlib.sha256(file.read()).hexdigest()
+
+
+# The provenance of a packaged model - {commit, dirty, recipe, data, scores}
+def provenance(recipe=None, data_dirs=(), scores=None):
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    git = ['git', '-C', root]
+    result = {'commit': subprocess.run(git + ['rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip(),
+              'dirty': bool(subprocess.run(git + ['status', '--porcelain', '--untracked-files=no'], capture_output=True, text=True,
+                                           check=True).stdout.strip())}
+    if recipe:
+        result['recipe'] = {'path': os.path.relpath(os.path.abspath(recipe), root), 'sha256': file_sha256(recipe)}
+    if data_dirs:
+        result['data'] = {os.path.basename(os.path.normpath(directory)): file_sha256(os.path.join(directory, 'index.json'))
+                          for directory in data_dirs}
+    if scores:
+        with open(scores, encoding='utf-8') as file:
+            panel = json.load(file)['panel']
+        result['scores'] = {key: round(value, 4) for key, value in panel.items()}
+    return result
+
+
 # Package an export (its path without extension) - (the chosen module's text, sizes {raw, deflated: {bytes, gzipBytes,
 # payloadBytes}, chosen})
-def package(model_path, compress='auto', min_saving=0.02):
+def package(model_path, compress='auto', min_saving=0.02, provenance_info=None):
     with open(f'{model_path}.json', encoding='utf-8') as file:
         manifest = json.load(file)
+    if provenance_info:
+        manifest['provenance'] = provenance_info
     with open(f'{model_path}.bin', 'rb') as file:
         data = file.read()
     candidates = {}
@@ -160,8 +193,13 @@ def main(argv=None):
     parser.add_argument('--compress', choices=('auto', 'never', 'always'), default='auto')
     parser.add_argument('--min-saving', type=float, default=0.02,
                         help='auto: deflate when the gzip-served module is at least this much smaller')
+    parser.add_argument('--provenance', action='store_true', help='add the manifest\'s provenance (the commit and the below)')
+    parser.add_argument('--recipe', help='the recipe (data/nn/train.json) - its hash in the provenance')
+    parser.add_argument('--data', nargs='*', default=[], help='training data directories - their index hashes')
+    parser.add_argument('--scores', help='the evaluation\'s result.json - its panel scores')
     args = parser.parse_args(argv)
-    text, sizes = package(args.model, args.compress, args.min_saving)
+    info = provenance(args.recipe, args.data, args.scores) if args.provenance else None
+    text, sizes = package(args.model, args.compress, args.min_saving, info)
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, 'w', encoding='utf-8') as file:
         file.write(text)

@@ -6,6 +6,7 @@ The G2P's relabeled words (data/nn/g2p-relabel.json, nn/g2p.py's focus stage) - 
 pronunciation isn't what readers say, from the LibriTTS-R readers' usage of the dictionary's variants:
 
     build/venv-nn/bin/python -B -m nn.heteronyms --out build/nn/heteronyms [-j 6]     # every step (resumable)
+    build/venv-nn/bin/python -B -m nn.heteronyms --out DIR --check data/nn/g2p-relabel.json   # and the same words?
 
 1. readers - for every word with 2+ pronunciations, which variant the readers used, by the MFA word and phone alignments
    (data/corpora/libritts_label/lab/{word,phone}/{train-clean-100,dev-clean}): each aligned token's phones are matched
@@ -507,6 +508,7 @@ def main(argv=None):
     parser.add_argument('-j', '--jobs', type=int, default=6)
     parser.add_argument('--per-word', type=int, default=240, help='the acoustic check\'s tokens a word')
     parser.add_argument('--share', type=float, default=0.5, help='the least majority share, aligner and acoustic (0.5: a majority)')
+    parser.add_argument('--check', help='a relabel file (data/nn/g2p-relabel.json) the result must equal (exit 1 if not)')
     args = parser.parse_args(argv)
     os.makedirs(args.out, exist_ok=True)
     steps = [('readers', 'readers.json', lambda: readers(args.out, args.jobs)),
@@ -518,6 +520,17 @@ def main(argv=None):
             print(f'{name}: done before', file=sys.stderr, flush=True)
         else:
             print(f'{name}: {step()}', file=sys.stderr, flush=True)
+    if args.check:
+        with open(os.path.join(args.out, 'relabel.json'), encoding='utf-8') as file:
+            relabel = json.load(file)['relabel']
+        with open(args.check, encoding='utf-8') as file:
+            expected = json.load(file)['relabel']
+        if relabel != expected:
+            print(f'check: the relabeled words differ from {args.check}: ' +
+                  ', '.join(f'{word} {relabel.get(word)} (was {expected.get(word)})' for word in sorted(set(relabel) | set(expected))
+                            if relabel.get(word) != expected.get(word)), file=sys.stderr)
+            return 1
+        print(f'check: the {len(relabel)} relabeled words equal {args.check}\'s', file=sys.stderr)
     return 0
 
 

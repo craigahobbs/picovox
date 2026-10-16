@@ -237,6 +237,33 @@ Fred 0.57 (a shared formant-synthesis signature), every human pair 0.0-0.48, and
 (F0 alone does not change the perceived speaker).
 
 
+## make train
+
+`make train` recreates the generated models - `lib/models/g2pModel.js` and `lib/models/voiceModel.js` - from a clean
+checkout, by one recipe, `data/nn/train.json` (every stage's settings and seeds). Each stage is a stamp in
+`build/train/` (`TRAIN_DIR`), so `make -j train` runs independent stages at once; the GPU stages run one at a time
+(`nn/gpulock.py` - two at once each run at about half speed) while the CPU stages run beside them:
+
+| Stage | Runs on | Needs |
+| --- | --- | --- |
+| corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D | network | |
+| g2p - the G2P retrain, checked to reproduce `lib/models/g2pModel.js` | 1 CPU core, ~30 min | |
+| heteronyms - the relabeled words, checked to reproduce `data/nn/g2p-relabel.json` | CPU, ~6 min | corpora |
+| pool - the readers' accents and analysis settings | CPU | corpora |
+| data-multi - the readers' training data | CPU (every core) | pool, `lib/models/g2pModel.js` |
+| cremad-align, data-cremad - the emotional speech | GPU 2 min, CPU 1 min | corpora |
+| teacher-a, teacher-b - the teacher (`nn.trainmulti --recipe teacher.a`, `teacher.b`) | GPU | the data |
+| teacher-eval - the teacher through the listener panel | CPU | teacher-b |
+| targets, student, polish - the distilled student (`nn.distill`) | GPU | teacher-b |
+| student-eval - the panel and the gate (`nn.distill pick`: within the tolerance) | CPU | polish, teacher-eval |
+| package - `lib/models/voiceModel.js`, with its provenance | CPU | student-eval |
+
+The voice data is built with the committed G2P, so the G2P retrain is off the critical path; if the retrained G2P
+differs, its stage updates `lib/models/g2pModel.js` and fails, and `make train` again rebuilds the data with it. The
+package's manifest records its provenance: the commit, the recipe's and the training data's hashes, and the gate's
+scores. `python -m nn.smoke` runs every stage's entry point for a few steps on the CPU.
+
+
 ## Distilling the voice model
 
 Each retrain of the multi-speaker acoustic model ends the same way: train a big teacher, then distill small students

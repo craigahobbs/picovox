@@ -61,6 +61,7 @@ import shutil
 import sys
 import threading
 import time
+import urllib.request
 
 import numpy
 import torch
@@ -131,6 +132,28 @@ def default_device():
 
 GUTENBERG_START = re.compile(r'^\*\*\* ?START OF (THE|THIS) PROJECT GUTENBERG.*$', re.MULTILINE)
 GUTENBERG_END = re.compile(r'^\*\*\* ?END OF (THE|THIS) PROJECT GUTENBERG.*$', re.MULTILINE)
+
+
+# The books' text files - the settings' bookIds (Project Gutenberg books, downloaded to the books directory if
+# missing), or every .txt file of the books directory
+def book_paths(settings):
+    books_dir = root_path(settings['books'])
+    if 'bookIds' not in settings:
+        return sorted(os.path.join(books_dir, name) for name in os.listdir(books_dir) if name.endswith('.txt'))
+    os.makedirs(books_dir, exist_ok=True)
+    paths = []
+    for book_id in settings['bookIds']:
+        path = os.path.join(books_dir, f'pg{book_id}.txt')
+        if not os.path.exists(path):
+            request = urllib.request.Request(f'https://www.gutenberg.org/cache/epub/{book_id}/pg{book_id}.txt',
+                                             headers={'User-Agent': 'voice-synth-train/1.0 (+https://github.com/craigahobbs/voice-synth)'})
+            with urllib.request.urlopen(request, timeout=60) as response:
+                data = response.read()
+            with open(path + '.tmp', 'wb') as file:
+                file.write(data)
+            os.replace(path + '.tmp', path)
+        paths.append(path)
+    return sorted(paths)
 
 
 # A Gutenberg book's paragraphs (the text between the license header and footer, line-wrapped paragraphs joined)
@@ -206,8 +229,7 @@ def target_inputs(state, settings, remap, log):
         f'{sum(1 for record in records if record[9] == 1)} actors)')
 
     # (b) the books' sentences, each with a random speaker and style
-    books_dir = root_path(settings['books'])
-    paths = sorted(os.path.join(books_dir, name) for name in os.listdir(books_dir) if name.endswith('.txt'))
+    paths = book_paths(settings)
     book_report = {}
     seen = set()
     sentence_list = []
@@ -601,6 +623,7 @@ def checkpoint_state(model, teacher_state, step, args_dict, val=None, extra=None
 def train_student(args):
     """The train subcommand - a student distilled from the teacher's targets"""
     config = load_config(args.config)
+    args.student = args.student or config['student']
     settings = {**config['train']}
     for key in ('steps', 'batch', 'lr', 'warmup'):
         if getattr(args, key) is not None:
@@ -745,6 +768,7 @@ def polish(args):
     """The polish subcommand - nn/trainmulti.py from a distilled student, its critic from the teacher's"""
     from . import trainmulti  # pylint: disable=import-outside-toplevel
     config = load_config(args.config)
+    args.student = args.student or config['student']
     settings = {**config['polish'], **({'steps': args.steps} if args.steps else {})}
     init = args.init or os.path.join(RUNS_DIR, f'distill-{args.student}', 'best.pt')
     state = torch.load(init, map_location='cpu', weights_only=False)
@@ -953,7 +977,8 @@ def pick(args):
         f' - {chosen["parameters"]} parameters, {chosen["moduleBytes"]} bytes ({chosen["moduleGzipBytes"]} gzip), UTMOS {chosen["mos"]:.3f} '
         f'(teacher {teacher["panel"]["mos"]:.3f}), WER {chosen["wer"]:.2f}% (teacher {teacher["panel"]["wer"]:.2f}%), similarity '
         f'{chosen["similarity"]:.3f}' if chosen else ' - no student is within the tolerance'))
-    return 0
+    # (the gate - no student within the tolerance fails)
+    return 0 if chosen else 1
 
 
 def ladder(args):
@@ -994,7 +1019,7 @@ def main(argv=None):
 
     sub = subparsers.add_parser('train', help='a student')
     add_common(sub)
-    sub.add_argument('--student', required=True, help='the ladder student (the recipe\'s distill students)')
+    sub.add_argument('--student', help='the ladder student (default: the recipe\'s distill student - the shipped one)')
     sub.add_argument('--student-config', default=None, help='a model config instead of the ladder\'s (JSON)')
     sub.add_argument('--name', default=None, help='the run name (distill-<name>; default the student)')
     sub.add_argument('--targets', default=None)
@@ -1012,7 +1037,7 @@ def main(argv=None):
 
     sub = subparsers.add_parser('polish', help='a short fine-tune of a student with the real-audio losses')
     add_common(sub)
-    sub.add_argument('--student', required=True)
+    sub.add_argument('--student', help='the student (default: the recipe\'s)')
     sub.add_argument('--init', default=None, help='the student checkpoint (default its run\'s best.pt)')
     sub.add_argument('--teacher', default=None, help='the critic\'s source (default the targets\' teacher)')
     sub.add_argument('--name', default=None, help='the run name (distill-<name>; default <student>-polish)')

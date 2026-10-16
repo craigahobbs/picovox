@@ -99,6 +99,7 @@ def main(argv=None):
         with open(os.path.join(ROOT, 'data', 'nn', 'train.json'), encoding='utf-8') as file:
             recipe = json.load(file)
         recipe['distill']['targets'].update({'books': books, 'valItems': 4})
+        del recipe['distill']['targets']['bookIds']
         recipe['distill']['train'].update({'batch': 8, 'valEvery': 3})
         recipe['distill']['polish'].update({'valEvery': 2})
         config_path = os.path.join(out, 'train.json')
