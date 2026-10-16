@@ -85,7 +85,7 @@
         top: 0;
         z-index: 2;
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(5, 1fr);
         gap: 4px;
         margin: 0 -4px;
         padding: 6px 4px;
@@ -563,6 +563,47 @@
         width: 100%;
         height: 32px;
     }
+    .train-path {
+        margin-top: -4px;
+        white-space: normal;
+    }
+    .util-chart {
+        width: 100%;
+        height: 360px;
+        display: block;
+        margin: 8px 0 6px;
+    }
+    .stage-name {
+        font-family: var(--mono);
+        font-weight: 600;
+    }
+    .step.queued .icon,
+    .step.stopped .icon {
+        color: var(--warn);
+    }
+    .step.skipped {
+        color: var(--muted);
+        opacity: 0.7;
+    }
+    .train-charts-title {
+        margin: 16px 0 10px;
+    }
+    #trainGates .step {
+        min-height: 2.4rem;
+    }
+    .archive-select {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 8px;
+        font-weight: 600;
+    }
+    .archive-select select {
+        min-width: 0;
+        max-width: 100%;
+        font: inherit;
+        font-weight: 400;
+    }
     .empty {
         color: var(--muted);
         margin: 0;
@@ -577,20 +618,62 @@
         <span id="updated" class="updated"></span>
     </header>
     <nav class="tabs" role="tablist" aria-label="Dashboard pages">
-        <button type="button" role="tab" id="tab-progress" data-tab="progress" aria-controls="panel-progress">
-            Progress <span class="tab-fact" id="tabFactProgress"></span>
+        <button type="button" role="tab" id="tab-train" data-tab="train" aria-controls="panel-train">
+            Train <span class="tab-fact" id="tabFactTrain"></span>
         </button>
         <button type="button" role="tab" id="tab-listen" data-tab="listen" aria-controls="panel-listen">
             Listen <span class="tab-fact" id="tabFactListen"></span><span class="tab-dot" id="tabDotListen" hidden></span>
         </button>
-        <button type="button" role="tab" id="tab-training" data-tab="training" aria-controls="panel-training">
-            Training <span class="tab-fact" id="tabFactTraining"></span>
+        <button type="button" role="tab" id="tab-runs" data-tab="runs" aria-controls="panel-runs">
+            Runs <span class="tab-fact" id="tabFactTraining"></span>
         </button>
         <button type="button" role="tab" id="tab-logs" data-tab="logs" aria-controls="panel-logs">
             Logs <span class="tab-fact" id="tabFactLogs"></span>
         </button>
+        <button type="button" role="tab" id="tab-archive" data-tab="archive" aria-controls="panel-archive">
+            Archive <span class="tab-fact" id="tabFactArchive"></span>
+        </button>
     </nav>
-    <div class="tab-panel" id="panel-progress" role="tabpanel" aria-labelledby="tab-progress">
+    <div class="tab-panel" id="panel-train" role="tabpanel" aria-labelledby="tab-train">
+        <section id="trainSection">
+            <div class="pipeline-head">
+                <h2 id="trainTitle">make train</h2>
+                <span id="trainFacts" class="facts">loading...</span>
+            </div>
+            <div class="bar overall"><div id="trainBar"></div></div>
+            <div id="trainPath" class="progress-line train-path"></div>
+        </section>
+        <section>
+            <div class="pipeline-head">
+                <h2 id="utilTitle">Utilization</h2>
+                <span id="utilFacts" class="facts"></span>
+            </div>
+            <canvas id="utilChart" class="util-chart"></canvas>
+            <div id="utilLegend" class="legend"></div>
+        </section>
+        <section>
+            <h2 id="stagesTitle">Stages</h2>
+            <div id="trainStages" class="phases"></div>
+        </section>
+        <section>
+            <h2 id="trainRunsTitle">Training runs</h2>
+            <div id="trainRuns" class="runs"></div>
+            <h3 id="trainChartsTitle" class="train-charts-title">Curves</h3>
+            <div id="trainCharts" class="charts"></div>
+        </section>
+        <section>
+            <h2 id="gatesTitle">Gates</h2>
+            <ul id="trainGates" class="steps"></ul>
+        </section>
+    </div>
+    <div class="tab-panel" id="panel-archive" role="tabpanel" aria-labelledby="tab-archive" hidden>
+        <section>
+            <label class="archive-select">Archived pipeline
+                <select id="archiveSelect"></select>
+            </label>
+            <p class="muted checkpoint-note">The earlier experiment pipelines (tools/dashboard/pipelines/), each as its steps
+                and the work that appeared during it. Their runs moved to build/archive/runs/ (build/archive/MOVED.md).</p>
+        </section>
         <section id="pipelineSection" hidden>
             <div class="pipeline-head">
                 <h2 id="pipelineTitle">Pipeline</h2>
@@ -620,7 +703,7 @@
             <div id="samples" class="samples"><p class="empty">No samples yet.</p></div>
         </section>
     </div>
-    <div class="tab-panel" id="panel-training" role="tabpanel" aria-labelledby="tab-training" hidden>
+    <div class="tab-panel" id="panel-runs" role="tabpanel" aria-labelledby="tab-runs" hidden>
         <section>
             <h2 id="runsTitle">Runs</h2>
             <div id="runs"><p class="empty">Looking for runs in build/nn/runs/...</p></div>
@@ -632,7 +715,10 @@
     </div>
     <div class="tab-panel" id="panel-logs" role="tabpanel" aria-labelledby="tab-logs" hidden>
         <section>
-            <h2>Activity logs</h2>
+            <div class="pipeline-head">
+                <h2>Activity logs</h2>
+                <label class="facts"><input type="checkbox" id="olderLogs"> Show older logs <span id="olderCount"></span></label>
+            </div>
             <div id="logs" class="logs"><p class="empty">Looking for logs in build/nn/...</p></div>
         </section>
     </div>

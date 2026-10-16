@@ -1,117 +1,14 @@
 {
-    "title": "Small voices: one voice, one G2P, make train, and the library",
+    "title": "make train",
     "since": "2026-10-15T11:00:00-07:00",
-    "stopAt": {"scratch-s64-a": 15000, "train-teacher-a": 15000},
-    "compare": {"train-teacher-a": "multi-a", "train-teacher-b": "multi-b", "pgo-q-": "scratch-s64-a"},
+    "stopAt": {"train-teacher-a": 15000},
+    "compare": {"train-teacher-a": "multi-a", "train-teacher-b": "multi-b"},
     "samples": {"checkpointEvery": 5000, "runs": "multi-", "text": "Call me Ishmael. Some years ago, never mind how long precisely, having little or no money in my purse, and nothing particular to interest me on shore, I thought I would sail about a little and see the watery part of the world.", "speakers": [{"key": "arctic-slt", "label": "ARCTIC slt", "sex": "female"}, {"key": "libritts-5895", "label": "reader 5895", "sex": "female"}, {"key": "libritts-6345", "label": "reader 6345", "sex": "female"}, {"key": "arctic-bdl", "label": "ARCTIC bdl", "sex": "male"}, {"key": "libritts-5750", "label": "reader 5750", "sex": "male"}, {"key": "libritts-2843", "label": "reader 2843", "sex": "male"}], "reference": [{"model": "data/nn/slt", "label": "app female (slt)", "sex": "female"}, {"model": "data/nn/bdl", "label": "app male (bdl)", "sex": "male"}]},
-    "phases": [
-        {
-            "title": "Choose the voice model",
-            "detail": "one distilled student that balances quality and phone compute (the iPhone at 1.2x real time or better)",
-            "weight": 20,
-            "processes": ["nn.distill", "nn.trainmulti"],
-            "runs": ["distill-", "scratch-"],
-            "steps": [
-                {"title": "Student ladder (s32-s96)", "log": "build/nn/distill/students.log", "weight": 3},
-                {"title": "Polish and evaluation", "log": "build/nn/distill/eval.log", "weight": 3},
-                {"title": "From-scratch s64 (no teacher): can a full retrain skip the teacher?", "log": "build/nn/scratch/scratch.log", "doneWhen": "runs done", "failWhen": "FAILED", "weight": 3},
-                {"title": "iPhone timing of the finalists", "file": "build/nn/pipeline/iphone-timing.json", "weight": 1},
-                {"title": "The chosen voice model in the app", "file": "build/nn/pipeline/voice-chosen.json", "weight": 1}
-            ]
-        },
-        {
-            "title": "Choose the G2P model",
-            "detail": "one NN-only G2P - the smallest that holds book accuracy",
-            "weight": 10,
-            "processes": ["nnonly.py", "chtrain.py"],
-            "runs": ["g2p-"],
-            "steps": [
-                {"title": "NN-only G2P runs", "log": "build/nn/g2p-nnonly/nnonly.log", "weight": 3},
-                {"title": "Small ladder (the challenger's recipe on every dictionary word)", "file": "build/nn/pipeline/g2p-ladder.json", "weight": 3},
-                {"title": "Heteronyms and variants: train on what readers actually say (lead, read, live...)", "log": "build/nn/heteronyms/heteronyms.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 3},
-                {"title": "The chosen G2P in the app", "file": "build/nn/pipeline/g2p-chosen.json", "weight": 1}
-            ]
-        },
-        {
-            "title": "Training speed",
-            "detail": "the last profiling pass - the critic path and fixed-shape batches",
-            "weight": 5,
-            "processes": ["nn.trainmulti --name prof2"],
-            "runs": ["prof2-"],
-            "steps": [
-                {"title": "Profile 2", "log": "build/nn/profile2/profile.log", "doneWhen": "done:", "weight": 3},
-                {"title": "Profile-guided optimization of small-model training (scratch-s64-a)", "log": "build/nn/pgo/pgo.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 5},
-                {"title": "M3 review of the PyTorch trainer: GPU configurations, then simplify (the optimize/simplify loop)", "log": "build/nn/loop/loop.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 8}
-            ]
-        },
-        {
-            "title": "Merge the worktrees",
-            "detail": "distillation, profile 2, the G2P tooling, and the challenger's recipe into main",
-            "weight": 10,
-            "processes": [],
-            "runs": [],
-            "steps": [
-                {"title": "Integration branch: distillation, G2P-network data, G2P training tooling", "log": "build/nn/loop/merge.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 2},
-                {"title": "Alternating loop on the training code: optimize, simplify, repeat", "log": "build/nn/loop/loop.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 6},
-                {"title": "Merged into main", "file": "build/nn/pipeline/merged.json", "weight": 1},
-                {"title": "Remove code not in use or planned (inventory, then removal, every check kept green)", "log": "build/nn/cleanup/cleanup.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 4}
-            ]
-        },
-        {
-            "title": "make train",
-            "detail": "one command that recreates lib/models/*.js from a clean checkout",
-            "weight": 20,
-            "processes": [],
-            "runs": [],
-            "steps": [
-                {"title": "Heteronym review: inventory, training-data readings from the audio, context model design, regression gate", "file": "build/nn/heteronyms/review.md", "weight": 2},
-                {"title": "Heteronyms built: readings from the audio in the training data, the context model, the gates", "log": "build/nn/hetimpl/hetimpl.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 4},
-                {"title": "Training data pronounced by the G2P network (not the dictionary)", "log": "build/nn/frontend/frontend.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 2},
-                {"title": "One config, pinned inputs (packages, data checksums), provenance in every model", "file": "build/nn/pipeline/train-reproducible.json", "weight": 2},
-                {"title": "Stages as resumable Make targets with a GPU lock and loud failures", "file": "build/nn/pipeline/train-targets.json", "weight": 2},
-                {"title": "Data targets", "file": "build/nn/pipeline/train-data.json", "weight": 1},
-                {"title": "Teacher (stage A and B) with a stopping rule", "file": "build/nn/pipeline/train-teacher.json", "weight": 2},
-                {"title": "Students: targets, train, polish, pick", "file": "build/nn/pipeline/train-students.json", "weight": 2},
-                {"title": "G2P: train, quantize, pick", "file": "build/nn/pipeline/train-g2p.json", "weight": 1},
-                {"title": "Package and gates (quality, size, phone speed)", "file": "build/nn/pipeline/train-gates.json", "weight": 1},
-                {"title": "First full make train run (clean worktree at 0bf501e)", "log": "build/train-run/make.log", "doneWhen": "make train exit 0", "failWhen": "make train exit 2", "weight": 6}
-            ]
-        },
-        {
-            "title": "The library (small-voices)",
-            "detail": "a voice library for the browser and Node - speak, synthesize, stream, a player, a script-tag global",
-            "weight": 20,
-            "processes": [],
-            "runs": [],
-            "steps": [
-                {"title": "Interface agreed", "file": "build/nn/pipeline/library-interface.json", "weight": 1},
-                {"title": "Runtime moved into lib/ (network, renderer, worker, player) at 100% coverage", "file": "build/nn/pipeline/library-lib.json", "weight": 3},
-                {"title": "Public API, script-tag loader, and Node CLI", "file": "build/nn/pipeline/library-api.json", "weight": 2},
-                {"title": "The audiobook app on the library", "file": "build/nn/pipeline/library-app.json", "weight": 1},
-                {"title": "package.json, README, and docs", "file": "build/nn/pipeline/library-docs.json", "weight": 1}
-            ]
-        },
-        {
-            "title": "Publish",
-            "detail": "the site on GitHub Pages, the package on npm",
-            "weight": 5,
-            "processes": [],
-            "runs": [],
-            "steps": [
-                {"title": "Site on gh-pages", "file": "build/nn/pipeline/published-site.json", "weight": 1},
-                {"title": "Package on npm", "file": "build/nn/pipeline/published-npm.json", "weight": 1}
-            ]
-        },
-        {
-            "title": "Voices and paper",
-            "detail": "the 10 designed voices on the chosen model, and the paper brought up to date",
-            "weight": 10,
-            "processes": [],
-            "runs": [],
-            "steps": [
-                {"title": "The 10 designed voices on the chosen student", "file": "build/nn/pipeline/voices-student.json", "weight": 2},
-                {"title": "Paper: NN-only G2P, distillation, the phone, the library", "file": "build/nn/pipeline/paper-updated.json", "weight": 2}
-            ]
-        }
-    ]
+    "train": {
+        "dir": "build/train-run/worktree/build/train",
+        "log": "build/train-run/make.log",
+        "logs": ["build/train-run/g2p.log"],
+        "util": "build/train-run/util.log",
+        "compare": {"teacher-a": "multi-a", "teacher-b": "multi-b"}
+    }
 }

@@ -75,13 +75,32 @@ TRAIN_ENV := NN_DATA_DIR=$(TRAIN_DIR)/data NN_RUNS_DIR=$(TRAIN_DIR)/runs NN_DIST
 GPU := OMP_NUM_THREADS=2 $(NN_PYTHON) -m nn.gpulock $(TRAIN_DIR)/gpu.lock --
 TRAIN_RUNS := $(TRAIN_DIR)/runs
 
-.PHONY: train
-train: $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.done $(TRAIN_DIR)/package.done
+# The bookkeeping, for the training dashboard (tools/dashboard/): each stage's start, end, and failure in
+# $(TRAIN_DIR)/stages.jsonl and each command's output also in $(TRAIN_DIR)/logs/<stage>.log (tools/trainstage.sh - the
+# teacher's output also in its run's train.log), and the CPU, GPU, and memory use with the running stages every 20 seconds
+# in $(TRAIN_DIR)/util.log (tools/trainutil.sh, for the life of make train). The stages, their dependencies, and their
+# expected times are data/nn/train-stages.json's (test/testTrainStages.js checks it against these targets).
+STAGE = tools/trainstage.sh $(TRAIN_DIR) $(basename $(@F))
+
+.PHONY: train train-util train-clean
+train: train-util $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.done $(TRAIN_DIR)/package.done
+
+# The utilization sampler - it exits when make does (finished, failed, or interrupted)
+train-util:
+	@mkdir -p $(TRAIN_DIR) && nohup tools/trainutil.sh $(TRAIN_DIR) $$PPID >/dev/null 2>&1 &
+
+# A from-scratch make train: remove TRAIN_DIR (make train itself never removes anything)
+train-clean:
+	@case '$(TRAIN_DIR)' in ''|/|.|..) echo 'make train-clean: TRAIN_DIR is "$(TRAIN_DIR)" - not removed'; exit 1;; esac
+	@echo 'make train-clean: removing $(TRAIN_DIR) - every make train stage stamp, its data, runs, evaluations, and logs'
+	rm -rf $(TRAIN_DIR)
 
 # The corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D (downloads, once)
 $(TRAIN_DIR)/corpora.done: | build/venv-analysis.build build/venv-nn.build
-	build/venv-analysis/bin/python -I tools/corpora.py
-	$(NN_PYTHON) -m nn.cremad fetch
+	@$(STAGE) start
+	$(STAGE) -- build/venv-analysis/bin/python -I tools/corpora.py
+	$(STAGE) -- $(NN_PYTHON) -m nn.cremad fetch
+	@$(STAGE) end
 	@mkdir -p $(@D) && touch $@
 
 # The CPU-only checks (the G2P chain, the heteronym relabeling) are scheduled after the readers' data build (order-only
@@ -95,87 +114,119 @@ $(TRAIN_DIR)/corpora.done: | build/venv-analysis.build build/venv-nn.build
 # to the committed module, else within the recipe's tolerances (the committed module is kept either way - make train
 # never replaces it)
 $(TRAIN_DIR)/g2p-network.done: data/nn/train.json data/nn/g2p-words.json data/nn/g2p-relabel.json data/cmudict.dict | build/venv-nn.build
-	$(NN_PYTHON) -m nn.g2p train --out $(TRAIN_DIR)/g2p
+	@$(STAGE) start
+	$(STAGE) -- $(NN_PYTHON) -m nn.g2p train --out $(TRAIN_DIR)/g2p
+	@$(STAGE) end
 	@mkdir -p $(@D) && touch $@
 
 $(TRAIN_DIR)/context-labels.done: $(TRAIN_DIR)/corpora.done data/nn/train.json data/nn/context-labels.json \
 		data/nn/heteronyms-test.json | build/venv-nn.build build/venv-pos.build $(TRAIN_DIR)/data-multi.done
-	$(NN_PYTHON) -m nn.contextlabels books
-	$(NN_PYTHON) -m nn.contextlabels aligned --out $(TRAIN_DIR)/context -j 3
-	build/venv-pos/bin/python -B -m nn.contextlabels tag --out $(TRAIN_DIR)/context -j 3
-	$(NN_PYTHON) -m nn.contextlabels labels --out $(TRAIN_DIR)/context
+	@$(STAGE) start
+	$(STAGE) -- $(NN_PYTHON) -m nn.contextlabels books
+	$(STAGE) -- $(NN_PYTHON) -m nn.contextlabels aligned --out $(TRAIN_DIR)/context -j 3
+	$(STAGE) -- build/venv-pos/bin/python -B -m nn.contextlabels tag --out $(TRAIN_DIR)/context -j 3
+	$(STAGE) -- $(NN_PYTHON) -m nn.contextlabels labels --out $(TRAIN_DIR)/context
+	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/g2p.done: $(TRAIN_DIR)/g2p-network.done $(TRAIN_DIR)/context-labels.done
-	$(NN_PYTHON) -m nn.context train-g2p --labels $(TRAIN_DIR)/context/labels.json --init $(TRAIN_DIR)/g2p/focus.pt \
+	@$(STAGE) start
+	$(STAGE) -- $(NN_PYTHON) -m nn.context train-g2p --labels $(TRAIN_DIR)/context/labels.json --init $(TRAIN_DIR)/g2p/focus.pt \
 		--out $(TRAIN_DIR)/context/g2p.pt --log $(TRAIN_DIR)/context/train.log
-	$(NN_PYTHON) -m nn.context train-context --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/context.pt \
+	$(STAGE) -- $(NN_PYTHON) -m nn.context train-context --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/context.pt \
 		--log $(TRAIN_DIR)/context/train.log
-	$(NN_PYTHON) -m nn.context export --g2p $(TRAIN_DIR)/context/g2p.pt --context $(TRAIN_DIR)/context/context.pt \
+	$(STAGE) -- $(NN_PYTHON) -m nn.context export --g2p $(TRAIN_DIR)/context/g2p.pt --context $(TRAIN_DIR)/context/context.pt \
 		--out $(TRAIN_DIR)/g2pModel.js
-	$(NN_PYTHON) -m nn.context cross-validate --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/folds \
+	$(STAGE) -- $(NN_PYTHON) -m nn.context cross-validate --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/folds \
 		--log $(TRAIN_DIR)/context/train.log
-	$(NN_PYTHON) -m nn.context check $(TRAIN_DIR)/g2pModel.js
+	$(STAGE) -- $(NN_PYTHON) -m nn.context check $(TRAIN_DIR)/g2pModel.js
+	@$(STAGE) end
 	touch $@
 
 
 # The heteronym relabeling (CPU) - it must reproduce data/nn/g2p-relabel.json's words
 $(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/corpora.done | $(TRAIN_DIR)/data-multi.done
-	$(NN_PYTHON) -m nn.heteronyms --out $(TRAIN_DIR)/heteronyms -j 4 --check data/nn/g2p-relabel.json
+	@$(STAGE) start
+	$(STAGE) -- $(NN_PYTHON) -m nn.heteronyms --out $(TRAIN_DIR)/heteronyms -j 4 --check data/nn/g2p-relabel.json
+	@$(STAGE) end
 	touch $@
 
 # The training data - the readers (CPU, every core; the pool and its analysis settings are data/nn/speakers.json's) and
 # the emotional speech (its alignment on the GPU)
 $(TRAIN_DIR)/data-multi.done: $(TRAIN_DIR)/corpora.done lib/models/g2pModel.js data/nn/speakers.json
-	$(TRAIN_ENV) $(NN_PYTHON) -m nn.multi build --out $(TRAIN_DIR)/data/multi --pool data/nn/speakers.json
+	@$(STAGE) start
+	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.multi build --out $(TRAIN_DIR)/data/multi --pool data/nn/speakers.json
+	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/cremad-align.done: $(TRAIN_DIR)/corpora.done | build/venv-listeners.build
-	$(GPU) $(LISTENERS_PYTHON) -m nn.cremad align
+	@$(STAGE) start
+	$(STAGE) -- $(GPU) $(LISTENERS_PYTHON) -m nn.cremad align
+	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/data-cremad.done: $(TRAIN_DIR)/cremad-align.done lib/models/g2pModel.js
-	$(TRAIN_ENV) $(NN_PYTHON) -m nn.cremad build --out $(TRAIN_DIR)/data/cremad
+	@$(STAGE) start
+	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.cremad build --out $(TRAIN_DIR)/data/cremad
+	@$(STAGE) end
 	touch $@
 
 # The teacher - stage A, then stage B with the critic (GPU; resumable), and its evaluation (CPU)
 $(TRAIN_DIR)/teacher-a.done: $(TRAIN_DIR)/data-multi.done $(TRAIN_DIR)/data-cremad.done data/nn/train.json
-	$(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m nn.trainmulti --name teacher-a --recipe teacher.a --resume
+	@$(STAGE) start
+	$(STAGE) --log $(TRAIN_RUNS)/teacher-a/train.log -- \
+		$(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m nn.trainmulti --name teacher-a --recipe teacher.a --resume
+	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/teacher-b.done: $(TRAIN_DIR)/teacher-a.done
-	$(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m nn.trainmulti --name teacher-b --recipe teacher.b --init $(TRAIN_RUNS)/teacher-a/last.pt --resume
+	@$(STAGE) start
+	$(STAGE) --log $(TRAIN_RUNS)/teacher-b/train.log -- \
+		$(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m nn.trainmulti --name teacher-b --recipe teacher.b --init $(TRAIN_RUNS)/teacher-a/last.pt --resume
+	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/teacher-eval.done: $(TRAIN_DIR)/teacher-b.done
-	$(TRAIN_ENV) $(NN_PYTHON) -m nn.distill eval teacher=$(TRAIN_RUNS)/teacher-b/best.pt --whisper-workers 3
+	@$(STAGE) start
+	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.distill eval teacher=$(TRAIN_RUNS)/teacher-b/best.pt --whisper-workers 3
+	@$(STAGE) end
 	touch $@
 
 # The student - the distillation targets, the student, its polish (GPU), and the gate (CPU: within the tolerance of
 # the teacher)
 $(TRAIN_DIR)/targets.done: $(TRAIN_DIR)/teacher-b.done
-	$(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m nn.distill targets --teacher $(TRAIN_RUNS)/teacher-b/best.pt
+	@$(STAGE) start
+	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m nn.distill targets --teacher $(TRAIN_RUNS)/teacher-b/best.pt
+	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/student.done: $(TRAIN_DIR)/targets.done
-	$(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m nn.distill train --name student
+	@$(STAGE) start
+	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m nn.distill train --name student
+	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/polish.done: $(TRAIN_DIR)/student.done
-	$(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m nn.distill polish --init $(TRAIN_RUNS)/distill-student/best.pt --name student-polish \
+	@$(STAGE) start
+	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m nn.distill polish --init $(TRAIN_RUNS)/distill-student/best.pt --name student-polish \
 		--teacher $(TRAIN_RUNS)/teacher-b/best.pt
+	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/student-eval.done: $(TRAIN_DIR)/polish.done $(TRAIN_DIR)/teacher-eval.done
-	$(TRAIN_ENV) $(NN_PYTHON) -m nn.distill eval student=$(TRAIN_RUNS)/distill-student-polish/best.pt --whisper-workers 3
-	$(TRAIN_ENV) $(NN_PYTHON) -m nn.distill pick --no-samples
+	@$(STAGE) start
+	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.distill eval student=$(TRAIN_RUNS)/distill-student-polish/best.pt --whisper-workers 3
+	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.distill pick --no-samples
+	@$(STAGE) end
 	touch $@
 
 # The voice model module, with its provenance (the commit, the recipe's and the data's hashes, the gate's scores)
 $(TRAIN_DIR)/package.done: $(TRAIN_DIR)/student-eval.done
-	$(NN_PYTHON) -m nn.export $(TRAIN_RUNS)/distill-student-polish/best.pt --voice multi --out $(TRAIN_DIR)/export
-	$(NN_PYTHON) -m nn.package $(TRAIN_DIR)/export/multi -o lib/models/voiceModel.js --provenance --recipe data/nn/train.json \
+	@$(STAGE) start
+	$(STAGE) -- $(NN_PYTHON) -m nn.export $(TRAIN_RUNS)/distill-student-polish/best.pt --voice multi --out $(TRAIN_DIR)/export
+	$(STAGE) -- $(NN_PYTHON) -m nn.package $(TRAIN_DIR)/export/multi -o lib/models/voiceModel.js --provenance --recipe data/nn/train.json \
 		--data $(TRAIN_DIR)/data/multi $(TRAIN_DIR)/data/cremad --scores $(TRAIN_DIR)/distill/eval/student/result.json
+	@$(STAGE) end
 	touch $@
 
 

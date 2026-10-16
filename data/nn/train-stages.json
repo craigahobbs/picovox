@@ -1,0 +1,22 @@
+{
+    "description": "make train's stages (the Makefile's $(TRAIN_DIR)/<stage>.done targets) for the training dashboard: each stage's group, what it runs on (cpu, gpu - one at a time under the GPU lock - or network), the stages it needs (data dependencies), the stages it runs after (ordering only - Make's order-only prerequisites: the CPU checks scheduled into the teacher's GPU-bound hours), its expected minutes (quiet M3 Max, the corpora downloaded once), and the training run it writes ($(TRAIN_DIR)/runs/<run>/ - its data/nn/train.json section, whose stop ends it early); test/testTrainStages.js keeps it in sync with the Makefile",
+    "target": "train",
+    "stages": [
+        {"stage": "corpora", "group": "Data", "title": "The corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D (downloads, once)", "on": "network", "minutes": 1, "needs": []},
+        {"stage": "heteronyms", "group": "Data", "title": "The heteronym relabeling, checked to reproduce data/nn/g2p-relabel.json", "on": "cpu", "minutes": 6, "needs": ["corpora"], "after": ["data-multi"]},
+        {"stage": "data-multi", "group": "Data", "title": "The readers' training data (nn.multi build - every core)", "on": "cpu", "minutes": 6, "needs": ["corpora"]},
+        {"stage": "cremad-align", "group": "Data", "title": "The emotional speech's alignment (nn.cremad align)", "on": "gpu", "minutes": 2, "needs": ["corpora"]},
+        {"stage": "data-cremad", "group": "Data", "title": "The emotional speech's training data (nn.cremad build)", "on": "cpu", "minutes": 1, "needs": ["cremad-align"]},
+        {"stage": "g2p-network", "group": "G2P (a check beside the voice)", "title": "The G2P network's four stages (nn.g2p train - one core, deterministic)", "on": "cpu", "minutes": 27, "needs": []},
+        {"stage": "context-labels", "group": "G2P (a check beside the voice)", "title": "The heteronym context labels (books, aligned readings, part-of-speech tags)", "on": "cpu", "minutes": 10, "needs": ["corpora"], "after": ["data-multi"]},
+        {"stage": "g2p", "group": "G2P (a check beside the voice)", "title": "The context G2P - reading stage, context network, export, cross-validation, and nn.context check against the committed module", "on": "cpu", "minutes": 32, "needs": ["g2p-network", "context-labels"]},
+        {"stage": "teacher-a", "group": "Teacher", "title": "Teacher stage A (nn.trainmulti --recipe teacher.a - 15,000 steps)", "on": "gpu", "minutes": 22, "needs": ["data-multi", "data-cremad"], "run": "teacher-a", "recipe": "teacher.a"},
+        {"stage": "teacher-b", "group": "Teacher", "title": "Teacher stage B with the critic (nn.trainmulti --recipe teacher.b - 20,000 steps)", "on": "gpu", "minutes": 60, "needs": ["teacher-a"], "run": "teacher-b", "recipe": "teacher.b"},
+        {"stage": "teacher-eval", "group": "Teacher", "title": "The teacher through the listener panel (nn.distill eval)", "on": "cpu", "minutes": 3, "needs": ["teacher-b"]},
+        {"stage": "targets", "group": "Student", "title": "The distillation targets (nn.distill targets)", "on": "gpu", "minutes": 9, "needs": ["teacher-b"]},
+        {"stage": "student", "group": "Student", "title": "The distilled student (nn.distill train)", "on": "gpu", "minutes": 11, "needs": ["targets"], "run": "distill-student"},
+        {"stage": "polish", "group": "Student", "title": "The student's polish on real audio (nn.distill polish)", "on": "gpu", "minutes": 9, "needs": ["student"], "run": "distill-student-polish"},
+        {"stage": "student-eval", "group": "Student", "title": "The student through the panel, and the gate (nn.distill pick: within the teacher's tolerance)", "on": "cpu", "minutes": 3, "needs": ["polish", "teacher-eval"]},
+        {"stage": "package", "group": "Package", "title": "lib/models/voiceModel.js with its provenance (nn.export, nn.package)", "on": "cpu", "minutes": 1, "needs": ["student-eval"]}
+    ]
+}
