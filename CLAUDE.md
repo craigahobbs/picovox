@@ -30,8 +30,8 @@ and its tools were removed in commit 33fbfad - see git history.)
 - `tools/` - the training dashboard (`dashboard/`), the corpus download (`corpora.py`), the listener models
   (`listeners.py`, `build/venv-listeners`), the catalog build (`catalog.js`), the source checks
   (`gutenbergcheck.mjs`, `standardebookscheck.mjs`), `browsercheck.js`, `heteronyms.js`, `serve.js`, `devlog.js`,
-  make train's bookkeeping (`trainstage.sh`, `trainutil.sh` - the stage events and logs, the utilization samples), and
-  the panel's texts (`panel-texts.json`).
+  make train's bookkeeping (`trainstage.sh`, `trainutil.sh` - the stage events and logs, the utilization samples) and
+  listening samples (`trainsamples.js`), and the panel's texts (`panel-texts.json`).
 - `test/` - unit tests (`node:test`), one `test<Module>.js` per `lib/` module.
 - `data/` - the catalog, the CMU Pronouncing Dictionary (G2P training), `data/nn/` (the recipe `train.json`, the
   speaker pool, the G2P and heteronym data, the designed voices, the single-speaker exports `slt`/`bdl`), and

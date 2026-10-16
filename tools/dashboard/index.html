@@ -475,6 +475,9 @@
         display: grid;
         gap: 8px;
     }
+    .next-checkpoint[hidden] {
+        display: none;
+    }
     .next-checkpoint h2 {
         margin: 0;
     }
@@ -514,6 +517,39 @@
         border-radius: 8px;
         background: var(--bg);
         min-width: 0;
+    }
+    .sample-text {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 2px 8px;
+        margin-top: 4px;
+        font-size: 0.85rem;
+    }
+    .sample-text .muted {
+        font-size: 0.8rem;
+        overflow-wrap: anywhere;
+    }
+    .voices.speakers {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+    @media (max-width: 720px) {
+        .voices.speakers {
+            grid-template-columns: minmax(0, 1fr);
+        }
+    }
+    .voice-take {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 0.78rem;
+        color: var(--muted);
+    }
+    .mos.better {
+        color: var(--good);
+    }
+    .mos.worse {
+        color: var(--bad);
     }
     .voice-head {
         display: flex;
@@ -684,6 +720,15 @@
         </section>
     </div>
     <div class="tab-panel" id="panel-listen" role="tabpanel" aria-labelledby="tab-listen" hidden>
+        <section id="trainSamplesSection" hidden>
+            <div class="pipeline-head">
+                <h2 id="trainSamplesTitle">make train samples</h2>
+                <span id="trainSamplesFacts" class="facts"></span>
+            </div>
+            <p class="muted checkpoint-note">Each training stage's final model as the app would speak it, beside the shipped
+                model - the newest first; UTMOS, 1-5 (real recordings score about 4.1-4.3).</p>
+            <div id="trainSamples" class="checkpoints"></div>
+        </section>
         <section id="nextSection" class="next-checkpoint" hidden>
             <div class="pipeline-head">
                 <h2>Next checkpoint</h2>
@@ -693,9 +738,10 @@
             <div id="nextLine" class="progress-line"></div>
         </section>
         <section id="checkpointSection" hidden>
-            <h2>Checkpoint samples</h2>
-            <p class="muted checkpoint-note">Each new checkpoint, rendered and scored (UTMOS, 1-5; real recordings score about
-                4.1-4.3) as it's saved. Newest first.</p>
+            <h2>Checkpoint samples (the monitor)</h2>
+            <p class="muted checkpoint-note">The experiment runs' checkpoints (tools/dashboard/monitor.js, build/nn/runs/ -
+                build/nn/samples-progress/), each rendered and scored (UTMOS, 1-5; real recordings score about 4.1-4.3) as
+                it's saved. Newest first.</p>
             <div id="checkpoints" class="checkpoints"></div>
         </section>
         <section>

@@ -143,8 +143,10 @@ over the run with each stage as a band (the GPU's idle time shaded, the forecast
 stopped, or not in the run's make target), its start, end, and time against the expected time, and its mean CPU and
 GPU use; the training runs' curves (the teacher's compared with the earlier teacher runs); and the gates (the
 heteronym and G2P checks, the listener panel's scores, and the pick). A run without the stage events (from before the
-bookkeeping) is inferred from its stamps and make's log (`pipeline.json`'s `train.log`). Listen plays the checkpoint
-samples (below) and other samples in `build/nn/`, and marks a new checkpoint until it's heard. Runs has the runs in
+bookkeeping) is inferred from its stamps and make's log (`pipeline.json`'s `train.log`). Listen plays the `make train` run's
+listening samples (each training stage's final model beside the shipped model - see make train, below; the stages not
+rendered yet listed as waiting), the monitor's checkpoint samples (below), and other samples in `build/nn/`, and marks
+new samples until they're heard. Runs has the runs in
 `build/nn/runs/` (their `log.jsonl` and `train.log`) with charts of their losses, validation, pitch error, and step
 times. Logs has the tails
 of `make train`'s logs and the logs in `build/nn/` updated in the last hour (all of them with "Show older logs").
@@ -235,7 +237,8 @@ checkout, by one recipe, `data/nn/train.json` (every stage's settings and seeds)
 | teacher-eval - the teacher through the listener panel | CPU | teacher-b |
 | targets, student, polish - the distilled student (`nn.distill`) | GPU | teacher-b |
 | student-eval - the panel and the gate (`nn.distill pick --against baseline`: no worse than the shipped model) | CPU | polish, teacher-eval |
-| package - `lib/models/voiceModel.js`, with its provenance | CPU | student-eval |
+| package - `lib/models/voiceModel.js`, with its provenance | CPU | student-eval (after samples-reference) |
+| samples-reference, samples-teacher-a, -teacher-b, -student, -polish - the listening samples | CPU, under a minute each | the shipped model (after data-multi); each stage's model |
 
 The critical path - the readers' data, teacher A (~22 minutes) and B (~60), the targets (~9), the student (~11) and
 its polish (~9), the gate, the package - takes about 2 hours on an M3 Max (the corpora downloaded once before). The
@@ -243,6 +246,16 @@ voice data is built with the committed G2P, so the G2P retrain is off the critic
 differs, its stage updates `lib/models/g2pModel.js` and fails, and `make train` again rebuilds the data with it. The
 package's manifest records its provenance: the commit, the recipe's and the training data's hashes, and the gate's
 scores. `python -m nn.smoke` runs every stage's entry point for a few steps on the CPU.
+
+Each training stage's final model - teacher A's last checkpoint (which teacher B starts from), teacher B's best (the
+distillation's teacher), the student's best, and its polish's best (the model the package stage ships) - is rendered
+for listening as the stage finishes, in its own CPU stage beside the next GPU stage (`tools/trainsamples.js`): exported
+as the package stage exports it, it speaks `data/nn/train.json`'s `samples` texts (Moby-Dick's opening, a dialogue,
+and heteronyms) in six of the training speakers' voices (three female, three male) exactly as the app speaks
+(`static/audiobook/worker.js`, every word pronounced by its G2P network), and each sample is scored with UTMOS on the
+CPU. The shipped `lib/models/voiceModel.js` is rendered the same way, as the reference, before the package stage
+replaces it. The WAV files are `TRAIN_DIR/samples/STAGE-SPEAKER-TEXT.wav`, listed in `TRAIN_DIR/samples/index.json`;
+the dashboard's Listen tab plays them, each beside the shipped model's.
 
 `make train` keeps a record for the training dashboard (`tools/dashboard/`): each stage's start, end, and failure in
 `TRAIN_DIR/stages.jsonl` and each command's output also in `TRAIN_DIR/logs/STAGE.log` (`tools/trainstage.sh` - the

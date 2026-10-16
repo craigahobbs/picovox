@@ -1,5 +1,5 @@
 // The training dashboard - reads make train's bookkeeping (the TRAIN_DIR of pipeline.json's train: stages.jsonl, the
-// stamps, util.log, logs/, runs/; tools/dashboard/train.js models it), the neural training runs' logs
+// stamps, util.log, logs/, runs/, samples/; tools/dashboard/train.js models it), the neural training runs' logs
 // (build/nn/runs/<run>/log.jsonl and train.log), the data pipelines' logs (build/nn/**/*.log), and samples
 // (build/nn/**/*.wav) through python3 -m http.server's directory listings, and refreshes every second. Read-only: it
 // never touches the training.
@@ -1409,11 +1409,7 @@ async function renderCheckpointSamples() {
     if (checkpoints.length !== 0) {
         const [newest] = checkpoints;
         newestCheckpoint = `${newest.run} ${newest.step}`;
-        if (currentTab === 'listen') {
-            markHeard();
-        } else {
-            document.getElementById('tabDotListen').hidden = storageGet(heardKey) === newestCheckpoint;
-        }
+        updateListenDot();
     }
     const blocks = checkpoints.map((checkpoint) => block(
         `${checkpoint.run} · step ${checkpoint.step.toLocaleString()}`,
@@ -1433,6 +1429,152 @@ async function renderCheckpointSamples() {
 }
 
 
+// make train's listening samples (TRAIN_DIR/samples/index.json, tools/trainsamples.js) - each model's samples, newest
+// model first, every speaker's sample beside the shipped model's (the reference); a model not rendered yet is listed as
+// waiting, so nothing moves when it arrives. Rebuilt when the index or the models' states change, reusing each sample's
+// player so playback continues.
+const listenTitles = {'teacher-a': 'Teacher A', 'teacher-b': 'Teacher B', 'student': 'The student', 'polish': 'The polished student',
+    'reference': 'The shipped model'};
+const listenNotes = {'teacher-a': 'its final checkpoint, which teacher B starts from', 'teacher-b': 'the distillation\'s teacher',
+    'student': 'distilled from teacher B, before its polish',
+    'polish': 'the model make train packages, if it passes the gate',
+    'reference': 'lib/models/voiceModel.js, before make train replaces it'};
+const trainSamplesHelp = 'make train renders listening samples of each training stage\'s final model as the stage finishes ' +
+    '(its own CPU stage, beside the next GPU stage): teacher A (its last checkpoint, which teacher B starts from), teacher B ' +
+    '(its best - the distillation\'s teacher), the student (its best, before the polish), and the polished student (its ' +
+    'best - the model the package stage packages, if it passes the gate). Each speaks the recipe\'s texts ' +
+    '(data/nn/train.json samples) in six of the training speakers\' voices, three female and three male, exactly as the ' +
+    'app speaks (exported and quantized as the package stage exports it, its G2P network, 24 kHz, its gain). Beside each ' +
+    'is the shipped model, ' +
+    'lib/models/voiceModel.js, rendered the same way before make train replaces it - so the new model can be judged by ' +
+    'ear. The numbers are UTMOS (1-5, a neural predictor of naturalness; real recordings score about 4.1-4.3), scored on ' +
+    'the CPU - green when above the shipped model\'s, red when below by 0.1 or more. A model not rendered yet is listed as ' +
+    'waiting. The files are TRAIN_DIR/samples/ (index.json lists them).';
+document.getElementById('trainSamplesTitle').append(' ', helpTip('trainSamples', trainSamplesHelp));
+let trainSamplesKey = null;
+const trainSampleTiles = new Map();
+let newestTrainSamples = null;
+async function renderTrainSamples() {
+    const section = document.getElementById('trainSamplesSection');
+    if (!trainData) {
+        section.hidden = true;
+        return;
+    }
+    const samplesUrl = new URL(`${trainData.config.dir.replace(/\/$/, '')}/samples/`, rootUrl);
+    const [result, recipeResult] = await Promise.all([fetchText(new URL('index.json', samplesUrl)),
+        fetchText(new URL('data/nn/train.json', rootUrl))]);
+    let index;
+    let texts;
+    try {
+        index = result === null ? null : JSON.parse(result.text);
+        texts = JSON.parse(recipeResult?.text ?? '{}').samples?.texts ?? [];
+    } catch {
+        // Being written - the last rendering stays
+        return;
+    }
+    const models = trainModel.listenModels(trainData.manifest, trainData.states, index);
+    const key = JSON.stringify([samplesUrl.href, result?.text ?? null, recipeResult?.text ?? null,
+        models.map((model) => [model.key, model.status])]);
+    if (key === trainSamplesKey) {
+        return;
+    }
+    trainSamplesKey = key;
+
+    // A sample's player in a model's block (reused across rebuilds - the shipped model's samples have one in each block)
+    const player = (sample, block) => {
+        const id = `${block} ${samplesUrl.href}${sample.file}`;
+        if (!trainSampleTiles.has(id)) {
+            const audio = make('audio');
+            audio.controls = true;
+            audio.preload = 'none';
+            audio.src = new URL(encodeURIComponent(sample.file), samplesUrl);
+            trainSampleTiles.set(id, audio);
+        }
+        return trainSampleTiles.get(id);
+    };
+    const mosText = (sample) => (Number.isFinite(sample?.mos) ? sample.mos.toFixed(2) : '-');
+
+    // A model's samples by text, each speaker's tile with the shipped model's sample of the same text below it
+    const reference = models.find((model) => model.key === 'reference');
+    const referenceOf = (sample) => reference?.samples.find((item) => item.speaker === sample.speaker && item.text === sample.text);
+    const textKeys = (samples) => [...new Set([...texts.map((text) => text.key), ...samples.map((sample) => sample.text)])].
+        filter((textKey) => samples.some((sample) => sample.text === textKey));
+    const modelBlock = (model) => {
+        const element = make('div', 'checkpoint');
+        const head = make('div', 'checkpoint-head');
+        const title = make('h3', '', listenTitles[model.key] ?? model.key);
+        head.append(title);
+        element.append(head);
+        if (model.samples.length === 0) {
+            const stageName = model.stage ?? model.key;
+            const status = {
+                'waiting': `waiting - rendered when the ${model.key === 'reference' ? 'readers\' data' : model.key} stage finishes`,
+                'queued': 'rendering...', 'running': 'rendering...', 'stopped': 'stopped - make train isn\'t running',
+                'failed': `failed - see logs/${stageName}.log`, 'skipped': 'not in this run\'s make target'
+            }[model.status] ?? model.status;
+            head.append(make('span', 'facts', `${listenNotes[model.key] ?? ''} · ${status}`));
+            element.classList.add('waiting');
+            return element;
+        }
+        const [first] = model.samples;
+        const facts = [listenNotes[model.key], first.run, first.step === null ? null : `step ${first.step.toLocaleString()}`,
+            `UTMOS female ${meanScore(model.samples, 'female')} · male ${meanScore(model.samples, 'male')}`];
+        if (model.key !== 'reference' && reference && reference.samples.length !== 0) {
+            facts.push(`shipped ${meanScore(reference.samples, 'female')} · ${meanScore(reference.samples, 'male')}`);
+        }
+        head.append(make('span', 'facts', facts.filter((fact) => fact).join(' · ')));
+        for (const textKey of textKeys(model.samples)) {
+            const text = texts.find((item) => item.key === textKey);
+            const line = make('div', 'sample-text');
+            line.append(make('strong', '', text?.label ?? textKey), make('span', 'muted', text?.text ?? ''));
+            // (three across - the recipe's three female speakers, then its three male)
+            const voices = make('div', 'voices speakers');
+            for (const sample of model.samples.filter((item) => item.text === textKey)) {
+                const tile = make('div', 'voice');
+                const voiceHead = make('div', 'voice-head');
+                voiceHead.append(make('span', '', sample.label), make('span', 'muted', sample.sex));
+                tile.append(voiceHead);
+                const shipped = model.key === 'reference' ? null : referenceOf(sample);
+                const take = make('div', 'voice-take');
+                const mos = make('span', 'mos', mosText(sample));
+                if (shipped && Number.isFinite(sample.mos) && Number.isFinite(shipped.mos)) {
+                    mos.classList.toggle('better', sample.mos > shipped.mos);
+                    mos.classList.toggle('worse', sample.mos <= shipped.mos - 0.1);
+                }
+                take.append(make('span', '', model.key === 'reference' ? 'shipped' : 'new'), mos);
+                tile.append(take, player(sample, model.key));
+                if (shipped) {
+                    const shippedTake = make('div', 'voice-take');
+                    shippedTake.append(make('span', '', 'shipped'), make('span', 'mos', mosText(shipped)));
+                    tile.append(shippedTake, player(shipped, model.key));
+                }
+                voices.append(tile);
+            }
+            element.append(line, voices);
+        }
+        return element;
+    };
+
+    // The models, newest first, then the shipped model's own samples
+    const trained = models.filter((model) => model.key !== 'reference').reverse();
+    const blocks = [...trained, ...reference ? [reference] : []].map(modelBlock);
+    if (blocks.length === 0) {
+        blocks.push(make('p', 'empty', 'This make train run renders no listening samples.'));
+    }
+    document.getElementById('trainSamples').replaceChildren(...blocks);
+    const rendered = models.filter((model) => model.samples.length !== 0);
+    document.getElementById('trainSamplesFacts').textContent =
+        `${rendered.length} of ${models.length} rendered · ${trainData.config.dir.replace(/\/$/, '')}/samples/`;
+    section.hidden = false;
+
+    // The newest model rendered (the Listen tab's dot and fact)
+    const newest = trained.find((model) => model.samples.length !== 0) ?? null;
+    newestTrainSamples = newest === null ? null :
+        {'key': `${samplesUrl.href} ${newest.key}`, 'title': listenTitles[newest.key] ?? newest.key};
+    updateListenDot();
+}
+
+
 // Render the time until the next checkpoint's samples - the live run's next checkpoint (every pipeline.json
 // samples.checkpointEvery steps, or the interval between its rendered checkpoints), estimated from its recent seconds
 // per step, plus about 1.5 minutes for the monitor to notice, render, and score it
@@ -1448,7 +1590,8 @@ function renderNextCheckpoint() {
     const last = train[train.length - 1];
     if (!live || !last || !pipeline?.samples) {
         section.hidden = true;
-        setTabFact('tabFactListen', newestCheckpoint === null ? '' : `step ${Number(newestCheckpoint.split(' ')[1]).toLocaleString()}`);
+        const checkpointFact = newestCheckpoint === null ? '' : `step ${Number(newestCheckpoint.split(' ')[1]).toLocaleString()}`;
+        setTabFact('tabFactListen', newestTrainSamples?.title.toLowerCase() ?? checkpointFact);
         return;
     }
     const rendered = (checkpointSteps.get(live.name) || []).sort((first, second) => first - second);
@@ -2242,13 +2385,26 @@ for (const tab of tabNames) {
 window.addEventListener('hashchange', () => selectTab(window.location.hash.slice(1), {'updateHash': false}));
 
 
-// The newest checkpoint's key, and marking it heard (the Listen tab's dot)
+// The newest checkpoint's key, and marking it and the newest make train samples heard (the Listen tab's dot)
 let newestCheckpoint = null;
+function listenKey() {
+    if (newestTrainSamples === null && newestCheckpoint === null) {
+        return null;
+    }
+    return `${newestTrainSamples?.key ?? ''} | ${newestCheckpoint ?? ''}`;
+}
 function markHeard() {
-    if (newestCheckpoint !== null) {
-        storageSet(heardKey, newestCheckpoint);
+    if (listenKey() !== null) {
+        storageSet(heardKey, listenKey());
     }
     document.getElementById('tabDotListen').hidden = true;
+}
+function updateListenDot() {
+    if (currentTab === 'listen') {
+        markHeard();
+    } else {
+        document.getElementById('tabDotListen').hidden = listenKey() === null || storageGet(heardKey) === listenKey();
+    }
 }
 
 
@@ -2307,6 +2463,7 @@ async function refresh() {
         renderLogs(logs);
         renderSamples(files);
         await renderCheckpointSamples();
+        await renderTrainSamples();
         renderNextCheckpoint();
         updatedElement.textContent = `Updated ${new Date().toLocaleTimeString()} · every second`;
     } finally {

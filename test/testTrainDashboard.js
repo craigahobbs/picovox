@@ -199,3 +199,38 @@ test('train.forecast', () => {
     const skipped = new Map([...states].map(([name]) => [name, {'status': 'skipped', 'start': null, 'end': null}]));
     assert.deepEqual(train.forecast(manifest, skipped, remaining, now), {'finishes': new Map(), 'eta': now, 'path': []});
 });
+
+
+test('train.listenModels', () => {
+    // The manifest's samples stages, each waiting until its samples are in the index (the reference first, then the
+    // models in the order of the training stages they follow)
+    const listenManifest = {'stages': [
+        ...manifest.stages,
+        {'stage': 'samples-student', 'on': 'cpu', 'minutes': 1, 'needs': ['student'], 'samples': 'student'},
+        {'stage': 'samples-teacher', 'on': 'cpu', 'minutes': 1, 'needs': ['teacher'], 'samples': 'teacher'},
+        {'stage': 'samples-reference', 'on': 'cpu', 'minutes': 1, 'needs': [], 'samples': 'reference'}
+    ]};
+    const states = new Map([['samples-teacher', {'status': 'running'}], ['samples-student', {'status': 'waiting'}]]);
+    const teacher = {'stage': 'teacher', 'file': 'teacher-a-ishmael.wav', 'mos': 3.9};
+    const reference = {'stage': 'reference', 'file': 'reference-a-ishmael.wav', 'mos': 4.0};
+    assert.deepEqual(train.listenModels(listenManifest, states, [teacher, reference]), [
+        {'key': 'reference', 'stage': 'samples-reference', 'status': 'done', 'samples': [reference]},
+        {'key': 'teacher', 'stage': 'samples-teacher', 'status': 'done', 'samples': [teacher]},
+        {'key': 'student', 'stage': 'samples-student', 'status': 'waiting', 'samples': []}
+    ]);
+    assert.deepEqual(train.listenModels(listenManifest, states, null).map((model) => [model.key, model.status]),
+        [['reference', 'waiting'], ['teacher', 'running'], ['student', 'waiting']]);
+
+    // A samples stage not in the run's make target isn't listed, unless it has samples
+    states.set('samples-student', {'status': 'skipped'});
+    states.set('samples-teacher', {'status': 'skipped'});
+    assert.deepEqual(train.listenModels(listenManifest, states, [teacher]).map((model) => [model.key, model.status]),
+        [['reference', 'waiting'], ['teacher', 'done']]);
+
+    // A run before the samples stages - only the index's models (an unknown one last)
+    const other = {'stage': 'other', 'file': 'other.wav', 'mos': null};
+    assert.deepEqual(train.listenModels(manifest, new Map(), [other, teacher]), [
+        {'key': 'teacher', 'stage': null, 'status': 'done', 'samples': [teacher]},
+        {'key': 'other', 'stage': null, 'status': 'done', 'samples': [other]}
+    ]);
+});

@@ -1,6 +1,6 @@
 // The training dashboard's make train model (no DOM) - the stage graph (data/nn/train-stages.json) and a run's
 // bookkeeping ($(TRAIN_DIR)/stages.jsonl, the stamps, make's log, util.log) to each stage's state, the forecast (the
-// critical path and the ETA), and the utilization samples
+// critical path and the ETA), the utilization samples, and the listening samples by model
 
 
 // A local time from "YYYY-MM-DD HH:MM:SS" (or with a T) - ms
@@ -256,4 +256,27 @@ export function forecast(manifest, states, remaining, now) {
         path.unshift(name);
     }
     return {finishes, 'eta': last === null ? now : finishes.get(last), path};
+}
+
+
+// The listening samples by model - [{key, stage, status, samples}] for each model with a samples stage in the manifest
+// (data/nn/train-stages.json's samples - teacher-a, teacher-b, student, polish) or samples in the index
+// ($(TRAIN_DIR)/samples/index.json, tools/trainsamples.js), in the order of the training stages they follow (the samples
+// key is the training stage's name), the reference (the shipped model - key reference) first. stage is the samples stage
+// (null for an index-only model - a run before the samples stages), status its state (done when its samples are in the
+// index), and samples its index entries ([] until rendered). A model whose samples stage isn't in the run's make target
+// (skipped) and has no samples isn't listed.
+export function listenModels(manifest, states, index) {
+    const entries = Array.isArray(index) ? index : [];
+    const stageOf = new Map(manifest.stages.filter((stage) => stage.samples).map((stage) => [stage.samples, stage.stage]));
+    const keys = [...new Set([...stageOf.keys(), ...entries.map((entry) => entry.stage)])];
+    const order = stageOrder(manifest).map((stage) => stage.stage);
+    const rank = (key) => (key === 'reference' ? -1 : order.indexOf(key) === -1 ? order.length : order.indexOf(key));
+    keys.sort((first, second) => rank(first) - rank(second));
+    return keys.map((key) => {
+        const samples = entries.filter((entry) => entry.stage === key);
+        const stage = stageOf.get(key) ?? null;
+        const status = samples.length !== 0 ? 'done' : (states.get(stage)?.status ?? 'waiting');
+        return {key, stage, status, samples};
+    }).filter((model) => model.status !== 'skipped');
 }

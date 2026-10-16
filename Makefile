@@ -88,7 +88,8 @@ train:
 	@$(MAKE) --no-print-directory train-stages
 
 # (the power check first, alone - its prompt has the terminal - then the stages, in parallel with make -j)
-train-stages: train-util $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.done $(TRAIN_DIR)/package.done
+train-stages: train-util $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.done $(TRAIN_DIR)/package.done $(TRAIN_DIR)/samples-reference.done \
+	$(TRAIN_DIR)/samples-teacher-a.done $(TRAIN_DIR)/samples-teacher-b.done $(TRAIN_DIR)/samples-student.done $(TRAIN_DIR)/samples-polish.done
 
 # The utilization sampler - it exits when make does (finished, failed, or interrupted)
 train-util:
@@ -227,12 +228,51 @@ $(TRAIN_DIR)/student-eval.done: $(TRAIN_DIR)/polish.done $(TRAIN_DIR)/teacher-ev
 	@$(STAGE) end
 	touch $@
 
-# The voice model module, with its provenance (the commit, the recipe's and the data's hashes, the gate's scores)
-$(TRAIN_DIR)/package.done: $(TRAIN_DIR)/student-eval.done
+# The voice model module, with its provenance (the commit, the recipe's and the data's hashes, the gate's scores) - after
+# the reference samples, which hear the module it replaces
+$(TRAIN_DIR)/package.done: $(TRAIN_DIR)/student-eval.done | $(TRAIN_DIR)/samples-reference.done
 	@$(STAGE) start
 	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.export $(TRAIN_RUNS)/distill-student-polish/best.pt --voice multi --out $(TRAIN_DIR)/export
 	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.package $(TRAIN_DIR)/export/multi -o lib/models/voiceModel.js --provenance --recipe data/nn/train.json \
 		--data $(TRAIN_DIR)/data/multi $(TRAIN_DIR)/data/cremad --scores $(TRAIN_DIR)/distill/eval/student/result.json
+	@$(STAGE) end
+	touch $@
+
+
+# The listening samples (CPU, each beside the next GPU stage - tools/trainsamples.js): each training stage's final model
+# (the checkpoint the next stage starts from, exported as the package stage exports it) speaking data/nn/train.json's
+# samples texts in its speakers' voices as the app speaks them, scored with UTMOS, in $(TRAIN_DIR)/samples/ (index.json)
+# for the training dashboard's Listen tab - and the reference, the shipped lib/models/voiceModel.js before the package
+# stage replaces it (in the teacher's GPU-bound hours, after the readers' data build)
+SAMPLES := OMP_NUM_THREADS=2 node tools/trainsamples.js --out $(TRAIN_DIR)/samples
+
+$(TRAIN_DIR)/samples-reference.done: | build/venv-listeners.build $(TRAIN_DIR)/data-multi.done
+	@$(STAGE) start
+	$(STAGE) -- $(SAMPLES) --stage reference --model lib/models/voiceModel.js
+	@$(STAGE) end
+	touch $@
+
+$(TRAIN_DIR)/samples-teacher-a.done: $(TRAIN_DIR)/teacher-a.done | build/venv-listeners.build
+	@$(STAGE) start
+	$(STAGE) -- $(TRAIN_ENV) $(SAMPLES) --stage teacher-a --checkpoint $(TRAIN_RUNS)/teacher-a/last.pt
+	@$(STAGE) end
+	touch $@
+
+$(TRAIN_DIR)/samples-teacher-b.done: $(TRAIN_DIR)/teacher-b.done | build/venv-listeners.build
+	@$(STAGE) start
+	$(STAGE) -- $(TRAIN_ENV) $(SAMPLES) --stage teacher-b --checkpoint $(TRAIN_RUNS)/teacher-b/best.pt
+	@$(STAGE) end
+	touch $@
+
+$(TRAIN_DIR)/samples-student.done: $(TRAIN_DIR)/student.done | build/venv-listeners.build
+	@$(STAGE) start
+	$(STAGE) -- $(TRAIN_ENV) $(SAMPLES) --stage student --checkpoint $(TRAIN_RUNS)/distill-student/best.pt
+	@$(STAGE) end
+	touch $@
+
+$(TRAIN_DIR)/samples-polish.done: $(TRAIN_DIR)/polish.done | build/venv-listeners.build
+	@$(STAGE) start
+	$(STAGE) -- $(TRAIN_ENV) $(SAMPLES) --stage polish --checkpoint $(TRAIN_RUNS)/distill-student-polish/best.pt
 	@$(STAGE) end
 	touch $@
 

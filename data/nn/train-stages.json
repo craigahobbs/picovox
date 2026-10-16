@@ -1,5 +1,5 @@
 {
-    "description": "make train's stages (the Makefile's $(TRAIN_DIR)/<stage>.done targets) for the training dashboard: each stage's group, what it runs on (cpu, gpu - one at a time under the GPU lock - or network), the stages it needs (data dependencies), the stages it runs after (ordering only - Make's order-only prerequisites: the CPU checks scheduled into the teacher's GPU-bound hours), its expected minutes (quiet M3 Max, the corpora downloaded once), and the training run it writes ($(TRAIN_DIR)/runs/<run>/ - its data/nn/train.json section, whose stop ends it early); test/testTrainStages.js keeps it in sync with the Makefile",
+    "description": "make train's stages (the Makefile's $(TRAIN_DIR)/<stage>.done targets) for the training dashboard: each stage's group, what it runs on (cpu, gpu - one at a time under the GPU lock - or network), the stages it needs (data dependencies), the stages it runs after (ordering only - Make's order-only prerequisites: the CPU checks scheduled into the teacher's GPU-bound hours), its expected minutes (quiet M3 Max, the corpora downloaded once), the training run it writes ($(TRAIN_DIR)/runs/<run>/ - its data/nn/train.json section, whose stop ends it early), and for a listening samples stage, the stage whose model it renders (samples - $(TRAIN_DIR)/samples/index.json's stage; reference: the shipped model); test/testTrainStages.js keeps it in sync with the Makefile",
     "target": "train",
     "stages": [
         {"stage": "corpora", "group": "Data", "title": "The corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D (downloads, once)", "on": "network", "minutes": 1, "needs": []},
@@ -17,6 +17,11 @@
         {"stage": "student", "group": "Student", "title": "The distilled student (nn.distill train)", "on": "gpu", "minutes": 11, "needs": ["targets"], "run": "distill-student"},
         {"stage": "polish", "group": "Student", "title": "The student's polish on real audio (nn.distill polish)", "on": "gpu", "minutes": 9, "needs": ["student"], "run": "distill-student-polish"},
         {"stage": "student-eval", "group": "Student", "title": "The student through the panel, and the gate (nn.distill pick: within the teacher's tolerance)", "on": "cpu", "minutes": 3, "needs": ["polish", "teacher-eval"]},
-        {"stage": "package", "group": "Package", "title": "lib/models/voiceModel.js with its provenance (nn.export, nn.package)", "on": "cpu", "minutes": 1, "needs": ["student-eval"]}
+        {"stage": "package", "group": "Package", "title": "lib/models/voiceModel.js with its provenance (nn.export, nn.package)", "on": "cpu", "minutes": 1, "needs": ["student-eval"], "after": ["samples-reference"]},
+        {"stage": "samples-reference", "group": "Listening samples", "title": "The shipped model's samples - lib/models/voiceModel.js before the package stage replaces it (tools/trainsamples.js)", "on": "cpu", "minutes": 1, "needs": [], "after": ["data-multi"], "samples": "reference"},
+        {"stage": "samples-teacher-a", "group": "Listening samples", "title": "Teacher A's samples - its final checkpoint (tools/trainsamples.js)", "on": "cpu", "minutes": 1, "needs": ["teacher-a"], "samples": "teacher-a"},
+        {"stage": "samples-teacher-b", "group": "Listening samples", "title": "Teacher B's samples - its best checkpoint (tools/trainsamples.js)", "on": "cpu", "minutes": 1, "needs": ["teacher-b"], "samples": "teacher-b"},
+        {"stage": "samples-student", "group": "Listening samples", "title": "The student's samples - its best checkpoint, before the polish (tools/trainsamples.js)", "on": "cpu", "minutes": 1, "needs": ["student"], "samples": "student"},
+        {"stage": "samples-polish", "group": "Listening samples", "title": "The polished student's samples - the model the package stage ships (tools/trainsamples.js)", "on": "cpu", "minutes": 1, "needs": ["polish"], "samples": "polish"}
     ]
 }

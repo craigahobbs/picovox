@@ -1,0 +1,121 @@
+// Licensed under the MIT License
+// https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+
+// make train's listening samples - a training stage's final model (a checkpoint, exported by nn.export as the package
+// stage exports the student) or a packaged model (the shipped lib/models/voiceModel.js, the reference) speaking
+// data/nn/train.json's samples texts in its speakers' voices exactly as the app speaks them (static/audiobook/worker.js's
+// streamNeuralUnit, every word pronounced by the app's G2P network), each scored with UTMOS on the CPU
+// (tools/listeners.py - the GPU is left to training). The WAV files are OUT/<stage>-<speaker>-<text>.wav, and
+// OUT/index.json lists every stage's samples - [{stage, run, checkpoint, step, label, sex, speaker, text, file, seconds,
+// mos}] - updated under a lock and replaced atomically, so sample stages finishing at once keep each other's entries.
+//
+//     node tools/trainsamples.js --stage teacher-a --checkpoint build/train/runs/teacher-a/last.pt --out build/train/samples
+//     node tools/trainsamples.js --stage reference --model lib/models/voiceModel.js --out build/train/samples
+//
+// --run names the checkpoint's training run (default: its directory's name); --settings another recipe (default
+// data/nn/train.json). The export reads the training data (NN_DATA_DIR - make train's TRAIN_ENV) for its token remap.
+
+import {copyFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync} from 'node:fs';
+import {dirname, join, relative, resolve} from 'node:path';
+import {fileURLToPath, pathToFileURL} from 'node:url';
+import {parseArgs, parseScores, sampleFile, updateIndex} from './trainsamplesindex.js';
+import {encodeWav} from '../lib/wav.js';
+import {execFileSync} from 'node:child_process';
+import {g2pModel} from '../lib/models/g2pModel.js';
+import {loadG2p} from '../lib/g2p.js';
+import {loadModel} from '../nn/js/model.js';
+import {loadPackagedModel} from '../nn/js/package.js';
+import process from 'node:process';
+import {setPronouncer} from '../lib/lexicon.js';
+import {streamNeuralUnit} from '../static/audiobook/worker.js';
+
+
+// The repository
+const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+
+// Render the samples
+async function main() {
+    const args = parseArgs(process.argv.slice(2));
+    const settings = JSON.parse(readFileSync(resolve(repository, args.settings), 'utf8')).samples;
+    const out = resolve(args.out);
+    const work = join(out, `.work-${args.stage}`);
+    rmSync(work, {'recursive': true, 'force': true});
+    mkdirSync(work, {'recursive': true});
+    const log = (message) => process.stdout.write(`trainsamples: ${message}\n`);
+
+    // The app's pronouncer
+    setPronouncer(await loadG2p(g2pModel));
+
+    // The model - a checkpoint (copied first, so its trainer may replace it meanwhile) exported to the browser's format,
+    // or a packaged module
+    let model;
+    let checkpoint;
+    if (args.checkpoint !== null) {
+        // (its path relative to the samples' parent - TRAIN_DIR)
+        checkpoint = relative(dirname(out), resolve(args.checkpoint));
+        const copy = join(work, 'checkpoint.pt');
+        copyFileSync(args.checkpoint, copy);
+        const python = join(repository, 'build/venv-nn/bin/python');
+        execFileSync(python, ['-B', '-m', 'nn.export', copy, '--voice', 'model', '--out', work],
+            {'cwd': repository, 'stdio': ['ignore', 'ignore', 'inherit']});
+        const bytes = readFileSync(join(work, 'model.bin'));
+        model = loadModel(JSON.parse(readFileSync(join(work, 'model.json'), 'utf8')),
+            bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    } else {
+        checkpoint = relative(repository, resolve(args.model));
+        model = await loadPackagedModel(await import(pathToFileURL(resolve(args.model))));
+    }
+    const step = model.manifest.training?.step ?? null;
+    log(`${args.stage}: ${checkpoint}${step === null ? '' : ` (step ${step})`}`);
+
+    // Each speaker's texts, rendered as the app renders a unit (seed 1, normal speed)
+    const samples = [];
+    for (const speaker of settings.speakers) {
+        const entry = model.manifest.speakers.find((item) => item.key === speaker.key);
+        if (!entry) {
+            throw new Error(`the speaker ${speaker.key} isn't in the model`);
+        }
+        for (const text of settings.texts) {
+            const blocks = [];
+            let sampleRate = 0;
+            streamNeuralUnit(model, text.text, {'speaker': entry.id, 'seed': 1}, (block, rate) => {
+                blocks.push(block);
+                sampleRate = rate;
+            });
+            const audio = new Float32Array(blocks.reduce((sum, block) => sum + block.length, 0));
+            blocks.reduce((offset, block) => {
+                audio.set(block, offset);
+                return offset + block.length;
+            }, 0);
+            const file = sampleFile(args.stage, speaker.key, text.key);
+            writeFileSync(join(work, file), encodeWav(audio, sampleRate));
+            samples.push({'stage': args.stage, 'run': args.run, checkpoint, step, 'label': speaker.label, 'sex': speaker.sex,
+                'speaker': speaker.key, 'text': text.key, file, 'seconds': Math.round(audio.length / sampleRate * 100) / 100});
+        }
+    }
+    log(`${samples.length} samples rendered`);
+
+    // UTMOS on the CPU
+    const listeners = join(repository, 'build/venv-listeners/bin/python');
+    const output = execFileSync(listeners, ['-I', 'tools/listeners.py', '--device', 'cpu', '--no-embedding', '--no-emotion',
+        ...samples.map((sample) => join(work, sample.file))], {'cwd': repository, 'encoding': 'utf8', 'maxBuffer': 16 * 1024 * 1024,
+        'stdio': ['ignore', 'pipe', 'inherit']});
+    const scores = parseScores(output);
+    for (const sample of samples) {
+        sample.mos = Number.isFinite(scores[sample.file]) ? Math.round(scores[sample.file] * 1000) / 1000 : null;
+    }
+
+    // The samples in place, then the index
+    for (const sample of samples) {
+        renameSync(join(work, sample.file), join(out, sample.file));
+    }
+    rmSync(work, {'recursive': true, 'force': true});
+    updateIndex(out, args.stage, samples);
+    const mean = (sex) => {
+        const values = samples.filter((sample) => sample.sex === sex && sample.mos !== null).map((sample) => sample.mos);
+        return values.length === 0 ? '-' : (values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(3);
+    };
+    log(`${args.stage}: UTMOS female ${mean('female')}, male ${mean('male')} - ${join(args.out, 'index.json')}`);
+}
+await main();

@@ -42,8 +42,18 @@ test('trainStages', () => {
     assert.deepEqual(manifest.stages.filter((stage) => stage.run).map((stage) => stage.run),
         ['teacher-a', 'teacher-b', 'distill-student', 'distill-student-polish']);
 
+    // The listening samples stages each render their stage's model (tools/trainsamples.js --stage), the reference the
+    // shipped model before the package stage replaces it
+    const samplesStages = manifest.stages.filter((stage) => stage.samples);
+    assert.deepEqual(samplesStages.map((stage) => stage.samples), ['reference', 'teacher-a', 'teacher-b', 'student', 'polish']);
+    for (const stage of samplesStages) {
+        assert(stages[stage.stage].recipe.some((line) => line.includes(`--stage ${stage.samples} `)), stage.stage);
+        assert(stage.samples === 'reference' || stage.needs.includes(stage.samples), stage.stage);
+    }
+    assert(stages.package.after.includes('samples-reference'));
+
     // make train's targets reach every stage
-    const [, trainTargets] = makefile.match(/^train-stages: ([^\n]*)$/m);
+    const [, trainTargets] = makefile.replace(/\\\n/g, ' ').match(/^train-stages: ([^\n]*)$/m);
     const reached = new Set();
     const visit = (stage) => {
         reached.add(stage);
