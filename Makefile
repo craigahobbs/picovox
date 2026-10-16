@@ -197,8 +197,9 @@ $(TRAIN_DIR)/teacher-eval.done: $(TRAIN_DIR)/teacher-b.done
 	@$(STAGE) end
 	touch $@
 
-# The student - the distillation targets, the student, its polish (GPU), and the gate (CPU: within the tolerance of
-# the teacher)
+# The student - the distillation targets, the student, its polish (GPU), and the gate (CPU: no worse than the shipped
+# lib/models/voiceModel.js - evaluated as packaged, the baseline - within the recipe's tolerance, and its voice similar
+# to the teacher's; a better teacher never fails it)
 $(TRAIN_DIR)/targets.done: $(TRAIN_DIR)/teacher-b.done
 	@$(STAGE) start
 	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m nn.distill targets --teacher $(TRAIN_RUNS)/teacher-b/best.pt
@@ -220,8 +221,9 @@ $(TRAIN_DIR)/polish.done: $(TRAIN_DIR)/student.done
 
 $(TRAIN_DIR)/student-eval.done: $(TRAIN_DIR)/polish.done $(TRAIN_DIR)/teacher-eval.done
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.distill eval student=$(TRAIN_RUNS)/distill-student-polish/best.pt --whisper-workers 3
-	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.distill pick --no-samples
+	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.distill eval student=$(TRAIN_RUNS)/distill-student-polish/best.pt \
+		baseline=lib/models/voiceModel.js --whisper-workers 3
+	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.distill pick --no-samples --against baseline
 	@$(STAGE) end
 	touch $@
 

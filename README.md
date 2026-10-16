@@ -234,7 +234,7 @@ checkout, by one recipe, `data/nn/train.json` (every stage's settings and seeds)
 | teacher-a, teacher-b - the teacher (`nn.trainmulti --recipe teacher.a`, `teacher.b`) | GPU | the data |
 | teacher-eval - the teacher through the listener panel | CPU | teacher-b |
 | targets, student, polish - the distilled student (`nn.distill`) | GPU | teacher-b |
-| student-eval - the panel and the gate (`nn.distill pick`: within the tolerance) | CPU | polish, teacher-eval |
+| student-eval - the panel and the gate (`nn.distill pick --against baseline`: no worse than the shipped model) | CPU | polish, teacher-eval |
 | package - `lib/models/voiceModel.js`, with its provenance | CPU | student-eval |
 
 The critical path - the readers' data, teacher A (~22 minutes) and B (~60), the targets (~9), the student (~11) and
@@ -293,7 +293,10 @@ build/venv-nn/bin/python -B -m nn.distill pick                    # 5. speed, sa
    scored with UTMOS, Whisper's WER, and the ECAPA speaker similarity to the teacher's rendering of the same speaker.
    `pick` measures `nn/js/speak.js`'s real-time factor, renders listening samples to `build/nn/distill-samples/`, and
    chooses the smallest student within the tolerance - mean UTMOS within 0.05 of the teacher's, WER at most 1 point
-   worse, and speaker similarity at least 0.85 - writing `build/nn/distill/summary.json`.
+   worse, and speaker similarity at least 0.85 - writing `build/nn/distill/summary.json`. With `--against baseline`
+   (make train's gate) the basis is instead the shipped model - `eval baseline=lib/models/voiceModel.js` speaks the
+   packaged module as the app does (`nn/js/unpack.js`) - so a new student must be no worse than what ships, and a
+   better teacher never fails it.
 
 Progress lines go to `build/nn/distill/` (`targets.log`, `students.log`, `eval.log`), which the training dashboard
 follows.

@@ -51,6 +51,7 @@ The method:
 
 import argparse
 import datetime
+import gzip
 import json
 import math
 import multiprocessing
@@ -58,6 +59,7 @@ import os
 import queue
 import re
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -854,6 +856,8 @@ def evaluate_model(name, checkpoint, config, reference=None, listen_panel=True, 
         shutil.rmtree(out_dir)
     os.makedirs(out_dir)
     start = time.time()
+    if checkpoint.endswith('.js'):
+        return evaluate_module(name, checkpoint, config, reference, listen_panel, whisper_workers, out_dir, start)
     model, state = load_model(checkpoint)
     result = {'name': name, 'checkpoint': checkpoint, 'step': state.get('step'),
               'config': {key: model.config[key] for key in ('dim', 'decoderDim', 'encoderLayers', 'decoderLayers', 'heads', 'ffnMultiple')},
@@ -865,6 +869,30 @@ def evaluate_model(name, checkpoint, config, reference=None, listen_panel=True, 
                       'moduleBytes': sizes[sizes['chosen']]['bytes'], 'moduleGzipBytes': sizes[sizes['chosen']]['gzipBytes']}
     if listen_panel:
         result.update(panel.score_model(os.path.join(out_dir, 'model'), out_dir, settings, reference, whisper_workers))
+    result['seconds'] = round(time.time() - start, 1)
+    with open(os.path.join(out_dir, 'result.json'), 'w', encoding='utf-8') as file:
+        json.dump(result, file, indent=1)
+    return result
+
+
+def evaluate_module(name, module_path, config, reference, listen_panel, whisper_workers, out_dir, start):
+    """Speak and score a packaged model module (e.g. the shipped lib/models/voiceModel.js) as packaged - unpacked to
+    its export (nn/js/unpack.js) - its result, as evaluate_model's"""
+    model_path = os.path.join(out_dir, 'model')
+    subprocess.run(['node', os.path.join(ROOT, 'nn', 'js', 'unpack.js'), root_path(module_path), model_path], check=True)
+    with open(model_path + '.json', encoding='utf-8') as file:
+        manifest = json.load(file)
+    with open(root_path(module_path), 'rb') as file:
+        module = file.read()
+    with open(model_path + '.bin', 'rb') as file:
+        bin_bytes = len(file.read())
+    # (the parameter count - nn/package.py's header comment)
+    parameters = int(re.search(rb'\((\d+) parameters', module).group(1))
+    result = {'name': name, 'checkpoint': module_path, 'step': None, 'config': manifest['config'], 'parameters': parameters,
+              'size': {'binBytes': bin_bytes, 'manifestBytes': len(json.dumps(manifest, separators=(',', ':')).encode('utf-8')),
+                       'encoding': 'module', 'moduleBytes': len(module), 'moduleGzipBytes': len(gzip.compress(module, 9))}}
+    if listen_panel:
+        result.update(panel.score_model(model_path, out_dir, config['eval'], reference, whisper_workers))
     result['seconds'] = round(time.time() - start, 1)
     with open(os.path.join(out_dir, 'result.json'), 'w', encoding='utf-8') as file:
         json.dump(result, file, indent=1)
@@ -959,6 +987,8 @@ def pick(args):
             with open(path, encoding='utf-8') as file:
                 results[name] = json.load(file)
     teacher = results['teacher']
+    # (the gate's basis - the teacher, or the shipped model evaluated as baseline: no student worse than it)
+    basis = results[args.against] if args.against != 'teacher' else teacher
     if not args.no_speed:
         log_line('eval', f'speed: {len(results)} models, best of {args.speed_repeats}')
         for name, report in measure_speed(list(results), config, args.speed_repeats).items():
@@ -970,9 +1000,9 @@ def pick(args):
                'moduleGzipBytes': result['size']['moduleGzipBytes'], 'mos': measures['mos'], 'wer': measures['wer'],
                'similarity': measures.get('similarity', 1.0), 'pairedSimilarity': measures.get('pairedSimilarity', 1.0),
                'realTimeNetwork': result.get('speed', {}).get('realTimeNetwork'), 'realTimeTotal': result.get('speed', {}).get('realTimeTotal')}
-        if name != 'teacher':
-            row['within'] = {'mos': measures['mos'] >= teacher['panel']['mos'] - tolerance['mos'],
-                             'wer': measures['wer'] <= teacher['panel']['wer'] + tolerance['wer'],
+        if name not in ('teacher', args.against):
+            row['within'] = {'mos': measures['mos'] >= basis['panel']['mos'] - tolerance['mos'],
+                             'wer': measures['wer'] <= basis['panel']['wer'] + tolerance['wer'],
                              'similarity': measures['similarity'] >= tolerance['similarity']}
             row['withinTolerance'] = all(row['within'].values())
         rows.append(row)
@@ -980,7 +1010,7 @@ def pick(args):
     passing = [row for row in rows if row.get('withinTolerance')]
     # (the fewest parameters; of one size - a student and its polish - the higher UTMOS)
     chosen = min(passing, key=lambda row: (row['parameters'], -row['mos'])) if passing else None
-    summary = {'teacher': teacher['checkpoint'], 'tolerance': tolerance, 'rows': rows, 'chosen': chosen and chosen['name'],
+    summary = {'teacher': teacher['checkpoint'], 'against': args.against, 'tolerance': tolerance, 'rows': rows, 'chosen': chosen and chosen['name'],
                'results': {name: brief(result) for name, result in results.items()}}
     samples = []
     if not args.no_samples:
@@ -995,10 +1025,10 @@ def pick(args):
         log_line('eval', f'{row["name"]}: {row["parameters"]} parameters, {row["moduleBytes"]} bytes ({row["moduleGzipBytes"]} gzip), '
                  f'UTMOS {row["mos"]:.3f}, WER {row["wer"]:.2f}%, similarity {row["similarity"]:.3f}, real time '
                  f'{row["realTimeNetwork"] or 0:.0f}x network / {row["realTimeTotal"] or 0:.1f}x total'
-                 + ('' if row['name'] == 'teacher' else f', within tolerance: {"yes" if row["withinTolerance"] else "no"}'))
+                 + ('' if 'withinTolerance' not in row else f', within tolerance: {"yes" if row["withinTolerance"] else "no"}'))
     log_line('eval', f'done: chosen {chosen["name"] if chosen else "none"}' + (
         f' - {chosen["parameters"]} parameters, {chosen["moduleBytes"]} bytes ({chosen["moduleGzipBytes"]} gzip), UTMOS {chosen["mos"]:.3f} '
-        f'(teacher {teacher["panel"]["mos"]:.3f}), WER {chosen["wer"]:.2f}% (teacher {teacher["panel"]["wer"]:.2f}%), similarity '
+        f'({args.against} {basis["panel"]["mos"]:.3f}), WER {chosen["wer"]:.2f}% ({args.against} {basis["panel"]["wer"]:.2f}%), similarity '
         f'{chosen["similarity"]:.3f}' if chosen else ' - no student is within the tolerance'))
     # (the gate - no student within the tolerance fails)
     return 0 if chosen else 1
@@ -1079,6 +1109,8 @@ def main(argv=None):
     sub.add_argument('--speed-repeats', type=int, default=3)
     sub.add_argument('--no-samples', action='store_true')
     sub.add_argument('--samples', nargs='*', default=None, help='the students to render samples of (default the best three)')
+    sub.add_argument('--against', default='teacher',
+                     help="the tolerance's basis - teacher, or an evaluated model's name (e.g. baseline - the shipped module)")
     sub.set_defaults(func=pick)
 
     sub = subparsers.add_parser('ladder', help='targets, the students, the evaluation, and the pick')
