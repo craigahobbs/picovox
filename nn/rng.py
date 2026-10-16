@@ -6,7 +6,7 @@ A counter-based random number generator - mulberry32's output function applied t
 computed directly (vectorized here, sequentially in nn/js/rng.js) and the Python and JavaScript synthesizers can use
 identical noise. Draw i of a stream with seed s is mulberry32's (i + 1)th output for the initial state s.
 
-A Gaussian draw i is lib/klatt.js's approximation - the sum of the uniform draws 6i ... 6i + 5, centered and scaled to
+A Gaussian draw i is the former lib/klatt.js's approximation - the sum of the uniform draws 6i ... 6i + 5, centered and scaled to
 unit variance.
 """
 

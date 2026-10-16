@@ -1,6 +1,6 @@
 // A counter-based random number generator - mulberry32's output function applied to a counter (nn/rng.py), so any
 // draw can be computed directly and the Python and JavaScript synthesizers use identical noise. Draw ix of a stream
-// with seed s is mulberry32's (ix + 1)th output for the initial state s; a Gaussian draw ix is lib/klatt.js's
+// with seed s is mulberry32's (ix + 1)th output for the initial state s; a Gaussian draw ix is the former rule synthesizer's
 // approximation from the uniform draws 6 ix ... 6 ix + 5.
 
 

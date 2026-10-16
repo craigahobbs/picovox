@@ -14,7 +14,7 @@ The design (DDSP-style - no recursive filters, so nothing backpropagates through
 - Voicing is harmonic (additive) synthesis. Each frame's complex harmonic amplitudes are the product of the voicing
   amplitude, the LF pulse's Fourier coefficients for the frame's Rd (nn/lf.py's table, interpolated in Rd), the source
   shelf's response, and the vocal tract's response (formants, nasal pole and zero, higher poles) - each the analytic
-  frequency response of lib/klatt.js's filter at k * F0 - with a taper near the Nyquist frequency. The amplitudes are
+  frequency response of the former lib/klatt.js's filter at k * F0 - with a taper near the Nyquist frequency. The amplitudes are
   interpolated linearly between frames per sample, and summed against the harmonics' phases, so the result is a pulse
   train filtered by the tract, with the tract's phase.
 - The glottal phase, cycle by cycle, is computed in float64 on the CPU (it's not differentiated - F0's gradient comes
@@ -22,7 +22,7 @@ The design (DDSP-style - no recursive filters, so nothing backpropagates through
   jitter (each cycle's period perturbed by a Gaussian draw times the jitter) and shimmer (each cycle's amplitude, the
   draws interpolated across the cycle).
 - Noise (aspiration and frication) is white noise scaled per sample by its level (ah, af interpolated - so onsets
-  and bursts are as sharp as the frames, as in lib/klatt.js), the aspiration also modulated by the glottal cycle
+  and bursts are as sharp as the frames, as in the former lib/klatt.js), the aspiration also modulated by the glottal cycle
   (NOISE_MODULATION), then filtered in the frequency domain - a short-time Fourier transform (Hann windows of
   noise_fft_size() samples, 16-23 ms, hop a quarter of that), each frame's spectrum multiplied by the filters'
   magnitude responses (the spectral shapes) at the frame's interpolated parameters, and overlap-added.
@@ -50,7 +50,7 @@ def sample_count(frame_count, sample_rate):
 
 
 #
-# Filter frequency responses - lib/klatt.js's digital filters designed at params.REF_RATE, evaluated at frequencies in
+# Filter frequency responses - the former lib/klatt.js's digital filters designed at params.REF_RATE, evaluated at frequencies in
 # Hz (w = 2 pi f / REF_RATE). Arguments broadcast; responses are (real, imaginary) pairs or log magnitudes and phases.
 #
 
@@ -115,7 +115,7 @@ def _biquad(frequency, b0, b1, b2, a1, a2, trig=None):
     return (num_re * den_re + num_im * den_im) / den, (num_im * den_re - num_re * den_im) / den
 
 
-# The voicing's high shelf (lib/klatt.js HighShelf at SHELF_HZ) - log magnitude and phase
+# The voicing's high shelf (the former lib/klatt.js HighShelf at SHELF_HZ) - log magnitude and phase
 def shelf_log(frequency, gain_db, trig=None):
     real, imag = _biquad(frequency, *_shelf_coefficients(gain_db), trig)
     return 0.5 * torch.log(real * real + imag * imag + 1e-30), torch.atan2(imag, real)
@@ -137,7 +137,7 @@ def _shelf_coefficients(gain_db):
     return b0, b1, b2, a1, a2
 
 
-# The frication bandpass's (lib/klatt.js Bandpass, 0 dB peak) biquad coefficients (b0, b1, b2, a1, a2)
+# The frication bandpass's (the former lib/klatt.js Bandpass, 0 dB peak) biquad coefficients (b0, b1, b2, a1, a2)
 def _bandpass_coefficients(center, bandwidth):
     center_clamped = torch.clamp(center, max=0.45 * params.REF_RATE)
     w0 = _omega(center_clamped)
@@ -152,7 +152,7 @@ def _bandpass(frequency, center, bandwidth, trig=None):
     return _biquad(frequency, *_bandpass_coefficients(center, bandwidth), trig)
 
 
-# The frication high-pass's (lib/klatt.js HighPass, Butterworth) biquad coefficients (b0, b1, b2, a1, a2)
+# The frication high-pass's (the former lib/klatt.js HighPass, Butterworth) biquad coefficients (b0, b1, b2, a1, a2)
 def _highpass_coefficients(cutoff):
     w0 = _omega(torch.clamp(cutoff, max=0.45 * params.REF_RATE))
     alpha = torch.sin(w0) / math.sqrt(2)
@@ -182,7 +182,7 @@ def frication_magnitude(frequency, values, trig=None):
     return torch.sqrt(real * real + imag * imag + 1e-30) * torch.sqrt(power + 1e-30)
 
 
-# The aspiration noise's lowpass (lib/klatt.js's one-pole 0.5 / (1 - 0.5 z^-1) at 44.1 kHz) - magnitude
+# The aspiration noise's lowpass (the former lib/klatt.js's one-pole 0.5 / (1 - 0.5 z^-1) at 44.1 kHz) - magnitude
 def aspiration_magnitude(frequency):
     return 0.5 / torch.sqrt(1.25 - torch.cos(_omega(frequency)))
 

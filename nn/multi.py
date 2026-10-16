@@ -27,10 +27,10 @@ data/nn/speakers.json.
 The pieces:
 
 - Speakers - a LibriTTS-R speaker's sex is from the corpus's speakers.tsv; its pitch range is Hirst's two-pass range
-  (0.75 x the first quartile to 1.5 x the third quartile of a 60-600 Hz first pass, as tools/targets.py), and its formant
-  ceiling Escudero's (the ceiling with the least within-vowel variance of log F1 and log F2 over the stressed vowels'
-  midpoints, from the MFA labels), both over up to 60 utterances. The ARCTIC speakers keep their data/targets/ settings
-  (so slt and bdl are featurized exactly as in build/nn/data/arctic/).
+  (0.75 x the first quartile to 1.5 x the third quartile of a 60-600 Hz first pass), and its formant ceiling Escudero's
+  (the ceiling with the least within-vowel variance of log F1 and log F2 over the stressed vowels' midpoints, from the
+  MFA labels), both over up to 60 utterances. The ARCTIC speakers keep their data/targets/ settings (measured by the
+  former tools/targets.py - see git history).
 - The accent filter - a LibriTTS-R speaker is kept when the CommonAccent classifier's top accent is "us" with a mean
   posterior of at least US_THRESHOLD over its utterances (nn/accent.py); the ARCTIC speakers are US English by the
   corpus's documentation (and the classifier agrees). The rhoticity measure of nn/data.py's survey (the median F3 of
@@ -62,7 +62,7 @@ import numpy as np
 
 from . import data
 from . import readings
-from .data import (ARCTIC_DIR, BOUNDARIES, CORPORA_DIR, DATA_DIR, FORMAT_VERSION, HOP, MAX_EDGE_SILENCE, MIN_MATCH,
+from .data import (BOUNDARIES, CORPORA_DIR, DATA_DIR, FORMAT_VERSION, HOP, MAX_EDGE_SILENCE, MIN_MATCH,
                    MIN_WORD_MATCH, SAMPLE_RATE, CHANNELS, CHANNEL_NOTES, ArcticData, match_rate, read_mfa)
 from .frontend import ABBREVIATIONS, FUNCTION_WORDS, ROOT, pronounce_texts, set_pronunciations, tokenize, vocabulary
 
@@ -106,7 +106,7 @@ WORD_MATCH_EXEMPT = FUNCTION_WORDS | set(ABBREVIATIONS.values())
 TEST_PERCENT = 2
 VAL_PERCENT = 3
 
-# Speaker analysis - utterances sampled, the candidate formant ceilings (tools/targets.py's), and the stressed
+# Speaker analysis - utterances sampled, the candidate formant ceilings (the former tools/targets.py's), and the stressed
 # monophthongs used for the ceiling choice
 SETTINGS_UTTERANCES = 60
 FORMANT_CEILINGS = {'male': [4000, 4250, 4500, 4750, 5000, 5250, 5500], 'female': [4500, 4750, 5000, 5250, 5500, 5750, 6000, 6250]}
@@ -251,7 +251,7 @@ def speaker_settings_task(task):
     return key, settings
 
 
-# Evenly spaced utterances (tools/targets.py's subset)
+# Evenly spaced utterances (the former tools/targets.py's subset)
 def data_subset(utterances, limit):
     if not limit or len(utterances) <= limit:
         return utterances
@@ -283,20 +283,6 @@ def settings_command(args):
                 write_json(SETTINGS_PATH, results)
     write_json(SETTINGS_PATH, results)
 
-    # Compare with tools/targets.py's settings where it measured the speaker (dev-clean)
-    differences = []
-    for key, settings in results.items():
-        target_path = os.path.join(ROOT, 'data', 'targets', f'{key}.json')
-        if settings and os.path.exists(target_path):
-            with open(target_path, encoding='utf-8') as file:
-                analysis = json.load(file)['analysis']
-            differences.append((key, settings['pitchFloor'] - analysis['pitchFloor'], settings['pitchCeiling'] - analysis['pitchCeiling'],
-                                settings['formantCeiling'] - analysis['formantCeiling']))
-    if differences:
-        print(f'Against data/targets/ ({len(differences)} speakers): pitch floor median difference '
-              f'{np.median([item[1] for item in differences]):+.1f} Hz, ceiling {np.median([item[2] for item in differences]):+.1f} Hz; '
-              f'formant ceiling equal for {sum(1 for item in differences if item[3] == 0)}, within 250 Hz for '
-              f'{sum(1 for item in differences if abs(item[3]) <= 250)}')
 
 
 #

@@ -1,5 +1,5 @@
 {
-    "description": "The listener-panel evaluation set (tools/panel.js) - Harvard sentences (phonetically balanced, none from tools/eval.js's tuning set), narrative passages from public-domain books with dialogue, questions, and exclamations. Keep it fixed: scores are only comparable over the same set.",
+    "description": "The listener-panel evaluation set (nn/panel.py) - Harvard sentences (phonetically balanced, none from the former rule synthesizer's tuning set), narrative passages from public-domain books with dialogue, questions, and exclamations. Keep it fixed: scores are only comparable over the same set.",
     "texts": [
         {"id": "harvard-1", "kind": "harvard", "text": "The stale smell of old beer lingers."},
         {"id": "harvard-2", "kind": "harvard", "text": "It takes heat to bring out the odor."},

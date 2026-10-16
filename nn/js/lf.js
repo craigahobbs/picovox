@@ -1,5 +1,5 @@
 // The Liljencrants-Fant (LF) glottal flow derivative pulse, parameterized by Rd, and its harmonic table - the same as
-// nn/lf.py (a port of lib/glottal.js, kept separate so the renderer doesn't change when lib/ is recalibrated). The
+// nn/lf.py (a port of the former lib/glottal.js, kept separate so the renderer doesn't change when lib/ is recalibrated). The
 // pulse's shape in normalized time depends only on Rd, normalized so its negative peak (Ee) is -1, so its Fourier
 // coefficients are independent of F0. The table rows (one per Rd grid point) are computed on first use.
 
@@ -110,7 +110,7 @@ export function lfHarmonics(gridIndex) {
 }
 
 
-// The glottis's open fraction of the period (lib/klatt.js's openFraction)
+// The glottis's open fraction of the period (the former rule synthesizer's openFraction)
 export function openFraction(rd) {
     return Math.min(0.95, 0.45 + 0.17 * rd);
 }

@@ -2,7 +2,7 @@
 # https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
 
 """
-The Liljencrants-Fant (LF) glottal flow derivative pulse, parameterized by Rd - a port of lib/glottal.js (kept here
+The Liljencrants-Fant (LF) glottal flow derivative pulse, parameterized by Rd - a port of the former lib/glottal.js (kept here
 so nn/ doesn't change when lib/ is recalibrated) - and its harmonic table.
 
 The pulse's shape in normalized time (a fraction of the period) depends only on Rd, and it's normalized so its
@@ -98,6 +98,6 @@ def harmonic_table():
     return numpy.array(rows)
 
 
-# The glottis's open fraction of the period, for the aspiration's modulation (lib/klatt.js's openFraction)
+# The glottis's open fraction of the period, for the aspiration's modulation (the former lib/klatt.js's openFraction)
 def open_fraction(rd):
     return numpy.minimum(0.95, 0.45 + 0.17 * rd)

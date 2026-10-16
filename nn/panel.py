@@ -8,7 +8,7 @@ spoken by the browser path, nn/js/speak.js):
 - listen - UTMOS, the ECAPA speaker embedding, and optionally the emotion2vec+ probabilities (tools/listeners.py in the
   listener-model environment, build/venv-listeners)
 - transcribe - whisper.cpp base.en (data/whisper/ggml-base.en.bin), cached beside each WAV; words and edit_distance give
-  the word error rate as tools/eval.js counts it
+  the word error rate as the former tools/eval.js counted it
 - cosine - the speaker similarity of two embeddings
 - speak - a batch of texts with an exported model (its speed report)
 - score_model - the voice model's evaluation (make train's gate measure): six speakers (data/nn/train.json distill eval) by the
@@ -63,7 +63,7 @@ def transcribe_all(paths, workers=6):
         return dict(zip(paths, pool.map(transcribe, paths)))
 
 
-# Words for scoring (tools/eval.js words)
+# Words for scoring (the former tools/eval.js's words)
 def words(text):
     return [word for word in re.sub(r'[^a-z0-9\' ]+', ' ', text.lower()).replace("'", '').split() if word]
 

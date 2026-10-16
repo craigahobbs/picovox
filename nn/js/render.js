@@ -12,7 +12,7 @@
 //
 // - Voicing - harmonic synthesis: each frame's complex harmonic amplitudes are the voicing amplitude times the LF
 //   pulse's Fourier coefficients (nn/js/lf.js, interpolated in Rd), the source shelf, and the vocal tract's response
-//   at k * F0 (lib/klatt.js's filters at the 44.1 kHz reference rate, as analytic frequency responses), tapered near
+//   at k * F0 (the Klatt cascade's filters at the 44.1 kHz reference rate, as analytic frequency responses), tapered near
 //   the Nyquist frequency; they're interpolated linearly between frames and summed against the glottal phase, which
 //   carries the jitter (a Gaussian per cycle) and the shimmer (Gaussians interpolated across each cycle).
 // - Noise - white noise scaled per sample by its level (ah, af interpolated; the aspiration also modulated by the
@@ -93,7 +93,7 @@ function linearValues(values) {
 }
 
 
-// A resonator's coefficients (lib/klatt.js, at the reference rate) - [A, B, C]
+// A resonator's coefficients (the former lib/klatt.js, at the reference rate) - [A, B, C]
 function resonator(center, bandwidth) {
     const radius = Math.exp(-Math.PI * bandwidth / REF_RATE);
     const coefC = -radius * radius;
@@ -121,7 +121,7 @@ function biquad(coefs, cos1, sin1, cos2, sin2) {
 }
 
 
-// The source shelf's biquad coefficients (lib/klatt.js HighShelf at SHELF_HZ)
+// The source shelf's biquad coefficients (the former lib/klatt.js HighShelf at SHELF_HZ)
 function shelfCoefficients(gainDb) {
     const amp = 10 ** (gainDb / 40);
     const w0 = 2 * Math.PI * SHELF_HZ / REF_RATE;
@@ -137,7 +137,7 @@ function shelfCoefficients(gainDb) {
 }
 
 
-// The frication bandpass's coefficients (lib/klatt.js Bandpass)
+// The frication bandpass's coefficients (the former lib/klatt.js Bandpass)
 function bandpassCoefficients(center, bandwidth) {
     const w0 = 2 * Math.PI * Math.min(center, 0.45 * REF_RATE) / REF_RATE;
     const alpha = Math.sin(w0) / (2 * Math.max(0.3, center / bandwidth));
@@ -146,7 +146,7 @@ function bandpassCoefficients(center, bandwidth) {
 }
 
 
-// The frication high-pass's coefficients (lib/klatt.js HighPass)
+// The frication high-pass's coefficients (the former lib/klatt.js HighPass)
 function highpassCoefficients(cutoff) {
     const w0 = 2 * Math.PI * Math.min(cutoff, 0.45 * REF_RATE) / REF_RATE;
     const alpha = Math.sin(w0) / Math.sqrt(2);

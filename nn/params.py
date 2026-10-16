@@ -9,19 +9,19 @@ from it (python -m nn.params --write-js; --check verifies it is current).
 
 Frames are FRAME_RATE (200) per second - one every 5 ms, frame t at time t / FRAME_RATE - and the synthesizers
 interpolate them linearly between frames (amplitudes as linear amplitudes, so a dB value is converted first). A
-sequence of T frames renders floor((T - 1) * sample_rate / FRAME_RATE) samples, as lib/klatt.js does.
+sequence of T frames renders floor((T - 1) * sample_rate / FRAME_RATE) samples, as the former lib/klatt.js did.
 
 Every parameter is in physical units, independent of the sample rate:
 
 - Frequencies and bandwidths in Hz.
 - Levels in dB. A level's linear amplitude is 10 ** (dB / 20); FLOOR_DB (-90 dB) and below is silence.
   - av - the voicing: 0 dB is an LF glottal flow derivative pulse train with a negative peak (Ee) of 1 - the same
-    scale as lib/klatt.js's av of 1.
+    scale as the former lib/klatt.js's av of 1.
   - ah, af - the aspiration and frication noise: 0 dB is white Gaussian noise of unit variance at the reference rate
     (REF_RATE, 44.1 kHz) - so a power spectral density of 1 / 44100 per Hz, which the synthesizers keep at any rate.
   - ap1, ap2, ab - the frication spectrum's two resonance gains and flat bypass gain (relative to af).
-- The filters are defined by their frequency responses: each is lib/klatt.js's digital filter designed at REF_RATE,
-  evaluated at the frequency in Hz. At 44.1 kHz they are exactly lib/klatt.js's filters; at another rate the
+- The filters are defined by their frequency responses: each is the former lib/klatt.js's digital filter designed at REF_RATE,
+  evaluated at the frequency in Hz. At 44.1 kHz they are exactly the former lib/klatt.js's filters; at another rate the
   synthesizers apply the same responses (band-limited to the rate's Nyquist frequency).
 
 The signal model:
@@ -33,7 +33,7 @@ The signal model:
     output      = (voicing + aspiration + frication) * channel EQ   (optional, static - see EQ_BAND_COUNT)
 
 The higher poles above F6 (a real tract keeps resonating every ~1 kHz, so the spectrum doesn't fall away) are
-HIGHER_POLES poles at f6 + k * f6 / 5.5 (k = 1 ... HIGHER_POLES) with bandwidths 500 + 100 * (k - 1) Hz - lib/voices.js's
+HIGHER_POLES poles at f6 + k * f6 / 5.5 (k = 1 ... HIGHER_POLES) with bandwidths 500 + 100 * (k - 1) Hz - the former lib/voices.js's
 male higherFormants exactly - so they follow F6 and scale with the tract length.
 """
 
@@ -44,7 +44,7 @@ import os
 import sys
 
 
-# The frame rate (frames per second) - lib/speak.js's 5 ms frames
+# The frame rate (frames per second) - the former lib/speak.js's 5 ms frames
 FRAME_RATE = 200
 
 # The reference sample rate - the filters' design rate and the noise level reference
@@ -53,10 +53,10 @@ REF_RATE = 44100
 # Levels at or below this (dB) are silence
 FLOOR_DB = -90.0
 
-# The voicing's high-shelf corner frequency (Hz) - lib/voices.js's default shelfHz
+# The voicing's high-shelf corner frequency (Hz) - the former lib/voices.js's default shelfHz
 SHELF_HZ = 2000.0
 
-# The aspiration's glottal-cycle modulation depth (at full voicing) - lib/voices.js's default noiseModulation
+# The aspiration's glottal-cycle modulation depth (at full voicing) - the former lib/voices.js's default noiseModulation
 NOISE_MODULATION = 0.7
 
 # The number of fixed-spacing poles above F6, their spacing (a fraction of F6), and bandwidths (Hz)
@@ -70,7 +70,7 @@ HIGHER_POLE_BANDWIDTH_STEP = 100.0
 HARMONIC_TAPER_START = 0.44
 HARMONIC_TAPER_END = 0.475
 
-# The F0 floor (Hz) - lower values are clamped, as lib/klatt.js does
+# The F0 floor (Hz) - lower values are clamped, as the former lib/klatt.js did
 F0_MIN = 40.0
 
 # The LF pulse harmonic table - Rd from LF_RD_MIN to LF_RD_MAX in steps of LF_RD_STEP, LF_HARMONICS harmonics, from
@@ -174,7 +174,7 @@ DEFAULTS = {parameter[0]: parameter[6] for parameter in PARAMETERS}
 # The level parameters (dB) - converted to linear amplitudes before interpolation
 DB_NAMES = [parameter[0] for parameter in PARAMETERS if parameter[2] == 'dB' and parameter[0] != 'shelf']
 
-# The frequency parameters that the vocal tract length scales (lib/speak.js's tractScale list)
+# The frequency parameters that the vocal tract length scales (the former lib/speak.js's tractScale list)
 TRACT_FREQUENCIES = ['f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'fnp', 'fnz', 'fp1', 'fp2', 'fhp']
 
 

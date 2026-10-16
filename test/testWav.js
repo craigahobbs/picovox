@@ -1,5 +1,5 @@
-import {encodeWav, readWav, writeWav} from '../lib/wav.js';
-import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import {encodeWav, writeWav} from '../lib/wav.js';
+import {mkdtempSync, readFileSync, rmSync} from 'node:fs';
 import {Buffer} from 'node:buffer';
 import {strict as assert} from 'node:assert';
 import {join} from 'node:path';
@@ -16,50 +16,6 @@ function withTempDir(callback) {
     } finally {
         rmSync(dir, {'recursive': true, 'force': true});
     }
-}
-
-
-// Build WAV file bytes from chunks - [[id, Uint8Array], ...]
-function buildWav(chunks) {
-    const parts = [];
-    for (const [id, body] of chunks) {
-        const header = Buffer.alloc(8);
-        header.write(id, 0, 'ascii');
-        header.writeUInt32LE(body.length, 4);
-        parts.push(header, Buffer.from(body));
-        if (body.length % 2) {
-            parts.push(Buffer.alloc(1));
-        }
-    }
-    const content = Buffer.concat(parts);
-    const riff = Buffer.alloc(12);
-    riff.write('RIFF', 0, 'ascii');
-    riff.writeUInt32LE(4 + content.length, 4);
-    riff.write('WAVE', 8, 'ascii');
-    return Buffer.concat([riff, content]);
-}
-
-
-// A PCM fmt chunk body
-function fmtChunk(channels, sampleRate, bits) {
-    const body = Buffer.alloc(16);
-    body.writeUInt16LE(1, 0);
-    body.writeUInt16LE(channels, 2);
-    body.writeUInt32LE(sampleRate, 4);
-    body.writeUInt32LE(sampleRate * channels * bits / 8, 8);
-    body.writeUInt16LE(channels * bits / 8, 12);
-    body.writeUInt16LE(bits, 14);
-    return body;
-}
-
-
-// A 16-bit data chunk body
-function dataChunk(values) {
-    const body = Buffer.alloc(values.length * 2);
-    values.forEach((value, ix) => {
-        body.writeInt16LE(value, ix * 2);
-    });
-    return body;
 }
 
 
@@ -96,88 +52,22 @@ test('encodeWav, samples and clipping', () => {
 });
 
 
-test('writeWav and readWav, round trip', () => {
+test('writeWav', () => {
     withTempDir((dir) => {
+        // The file is the encoded bytes
         const path = join(dir, 'test.wav');
         const samples = new Float32Array(1001).map((_value, ix) => 0.8 * Math.sin(ix / 10));
         writeWav(path, samples, 16000);
-        const result = readWav(path);
-        assert.equal(result.sampleRate, 16000);
-        assert.equal(result.samples.length, samples.length);
-        for (let ix = 0; ix < samples.length; ix++) {
-            // 16-bit quantization, and the 32767 / 32768 scale difference
-            assert.ok(Math.abs(result.samples[ix] - samples[ix]) < 1e-4, `sample ${ix}`);
-        }
-
-        // Writing what was read is the same file content
-        const again = join(dir, 'again.wav');
-        writeWav(again, result.samples, result.sampleRate);
-        const reread = readWav(again);
-        for (let ix = 0; ix < samples.length; ix++) {
-            assert.ok(Math.abs(reread.samples[ix] - result.samples[ix]) <= 1 / 32768);
-        }
+        assert.deepEqual(new Uint8Array(readFileSync(path)), encodeWav(samples, 16000));
     });
 });
 
-
-test('readWav, stereo and extra chunks', () => {
-    withTempDir((dir) => {
-        // A stereo file with an odd-sized (padded) LIST chunk before the data - the first channel is read
-        const path = join(dir, 'stereo.wav');
-        writeFileSync(path, buildWav([
-            ['fmt ', fmtChunk(2, 48000, 16)],
-            ['LIST', Buffer.from('abc')],
-            ['data', dataChunk([16384, -1, -32768, 2, 8192, 3])]
-        ]));
-        const result = readWav(path);
-        assert.equal(result.sampleRate, 48000);
-        assert.deepEqual(Array.from(result.samples), [0.5, -1, 0.25]);
-    });
-});
-
-
-test('readWav, data chunk without a fmt chunk', () => {
-    withTempDir((dir) => {
-        // The defaults - mono 16-bit, with an unknown (0) sample rate
-        const path = join(dir, 'nofmt.wav');
-        writeFileSync(path, buildWav([['data', dataChunk([-16384, 4096])]]));
-        const result = readWav(path);
-        assert.equal(result.sampleRate, 0);
-        assert.deepEqual(Array.from(result.samples), [-0.5, 0.125]);
-    });
-});
-
-
-test('readWav, unsupported bit depth', () => {
-    withTempDir((dir) => {
-        const path = join(dir, 'bits8.wav');
-        writeFileSync(path, buildWav([['fmt ', fmtChunk(1, 8000, 8)], ['data', Buffer.from([128, 129])]]));
-        assert.throws(() => readWav(path), {'message': 'Unsupported WAV bits per sample: 8'});
-    });
-});
-
-
-test('readWav, missing data chunk', () => {
-    withTempDir((dir) => {
-        const path = join(dir, 'nodata.wav');
-        writeFileSync(path, buildWav([['fmt ', fmtChunk(1, 8000, 16)], ['LIST', Buffer.from('info')]]));
-        assert.throws(() => readWav(path), {'message': `No WAV data in ${path}`});
-
-        // A truncated file
-        const truncated = join(dir, 'truncated.wav');
-        writeFileSync(truncated, buildWav([]).subarray(0, 10));
-        assert.throws(() => readWav(truncated), {'message': `No WAV data in ${truncated}`});
-    });
-});
-
-
-test('readWav and writeWav, require Node', () => {
-    // Without Node's getBuiltinModule (as in a browser), file reading and writing throw
+test('writeWav, requires Node', () => {
+    // Without Node's getBuiltinModule (as in a browser), file writing throws
     const {getBuiltinModule} = process;
     process.getBuiltinModule = undefined;
     try {
-        assert.throws(() => readWav('test.wav'), {'message': 'WAV file reading and writing requires Node'});
-        assert.throws(() => writeWav('test.wav', new Float32Array(1), 8000), {'message': 'WAV file reading and writing requires Node'});
+        assert.throws(() => writeWav('test.wav', new Float32Array(1), 8000), {'message': 'WAV file writing requires Node'});
     } finally {
         process.getBuiltinModule = getBuiltinModule;
     }
