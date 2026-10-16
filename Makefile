@@ -82,8 +82,13 @@ TRAIN_RUNS := $(TRAIN_DIR)/runs
 # expected times are data/nn/train-stages.json's (test/testTrainStages.js checks it against these targets).
 STAGE = tools/trainstage.sh $(TRAIN_DIR) $(basename $(@F))
 
-.PHONY: train train-util train-clean
-train: train-util $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.done $(TRAIN_DIR)/package.done
+.PHONY: train train-stages train-util train-clean
+train:
+	@tools/trainpower.sh
+	@$(MAKE) --no-print-directory train-stages
+
+# (the power check first, alone - its prompt has the terminal - then the stages, in parallel with make -j)
+train-stages: train-util $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.done $(TRAIN_DIR)/package.done
 
 # The utilization sampler - it exits when make does (finished, failed, or interrupted)
 train-util:

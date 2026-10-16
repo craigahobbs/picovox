@@ -43,7 +43,7 @@ test('trainStages', () => {
         ['teacher-a', 'teacher-b', 'distill-student', 'distill-student-polish']);
 
     // make train's targets reach every stage
-    const [, trainTargets] = makefile.match(/^train: ([^\n]*)$/m);
+    const [, trainTargets] = makefile.match(/^train-stages: ([^\n]*)$/m);
     const reached = new Set();
     const visit = (stage) => {
         reached.add(stage);

@@ -252,6 +252,10 @@ their dependencies, and their expected times are `data/nn/train-stages.json` (`t
 step with the Makefile). `make train` never removes anything; `make train-clean` removes `TRAIN_DIR` for a run from
 scratch.
 
+`make train` first checks the power (`tools/trainpower.sh`, macOS laptops): the run keeps the GPU busy for hours, and
+an M3 Max under it draws about 85 W, so on battery or an adapter under 96 W (`TRAIN_MIN_WATTS`) it says so and, at a
+terminal, waits for Enter - plug in a bigger adapter first (Apple's 96 W or 140 W). `TRAIN_POWER_CHECK=0` skips it.
+
 
 ## Distilling the voice model
 
