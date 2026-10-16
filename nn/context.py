@@ -10,7 +10,12 @@ chooses, and the G2P pronounces the word in that reading.
     build/venv-nn/bin/python -B -m nn.context train-g2p --labels DIR/labels.json --init G2P.pt --out DIR/g2p.pt
     build/venv-nn/bin/python -B -m nn.context train-context --labels DIR/labels.json --out DIR/context.pt
     build/venv-nn/bin/python -B -m nn.context export --g2p DIR/g2p.pt --context DIR/context.pt [--out lib/models/g2pModel.js]
-    build/venv-nn/bin/python -B -m nn.context gate --labels DIR/labels.json [MODULE]    # held-out accuracy (exit 1 below)
+    build/venv-nn/bin/python -B -m nn.context gate --labels DIR/labels.json [MODULE]    # held-out accuracy (one split)
+    build/venv-nn/bin/python -B -m nn.context cross-validate --labels DIR/labels.json --out DIR/folds  # the gate, 10 folds
+    build/venv-nn/bin/python -B -m nn.context check NEW.js     # make train: identical to lib/models/g2pModel.js, else the
+                                                                # quality gate (it never replaces the committed module)
+
+The settings are data/nn/train.json's "context" section (g2p, network, export, gate).
 
 The G2P additions (nn/g2p.py's model):
 
@@ -52,27 +57,33 @@ from .g2p import (EOS, LETTERS, MAX_WORD, MODULE_LINE_LENGTH, PHONES, UPSAMPLE, 
                   model_config, quantize_array, quantize_state, weight_bytes)
 
 
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'nn', 'train.json')
+
+
+# The recipe's settings - data/nn/train.json's "context" (labels, g2p, network, export, gate)
+def load_settings(path=CONFIG_PATH):
+    with open(path, encoding='utf-8') as file:
+        return json.load(file)['context']
+
+
+RECIPE = load_settings()
+
 # The reading slots (the default and two alternates), and the ambiguity head's hidden layer
-READINGS = 3
-AMBIGUITY_HIDDEN = 16
+READINGS = RECIPE['g2p']['readings']
+AMBIGUITY_HIDDEN = RECIPE['g2p']['ambiguityHidden']
 
 # The context network's input - its characters (id 0 is padding), the characters of an item it reads, and the window
 CONTEXT_CHARS = '\'abcdefghijklmnopqrstuvwxyz,.?!'
 CONTEXT_CHAR_IDS = {char: index + 1 for index, char in enumerate(CONTEXT_CHARS)}
-MAX_CHARS = 12
-WINDOW = 3
+MAX_CHARS = RECIPE['network']['maxChars']
+WINDOW = RECIPE['network']['window']
 
 # The export - each model's matrices' bits (per-row bfloat16 scales) and its vectors' bits
-EXPORT = {'bits': 6, 'biasBits': 8, 'groupSize': 0}
+EXPORT = RECIPE['export']
 
-# The context network's settings
-CONTEXT_SETTINGS = {'embed': 16, 'hidden': 48, 'layer': 64, 'dropout': 0.1, 'steps': 8000, 'batch': 256, 'lr': 0.003, 'warmup': 300,
-                    'weightDecay': 0.01, 'quantSteps': 2000, 'quantLr': 0.0005, 'seed': 1, 'threads': 2, 'seedRepeat': 4, 'balance': 0.3, 'prior': None}
-
-# The G2P reading training's settings
-G2P_SETTINGS = {'steps': 3000, 'batch': 512, 'lr': 0.0003, 'warmup': 100, 'readingShare': 0.04, 'invariantShare': 0.02,
-                'ambiguityWeight': 1.0, 'seed': 7, 'threads': 2,
-                'train': 'reading,ambiguity_layer,ambiguity,decoder', 'headRate': 15.0}
+# The context network's settings, and the G2P reading stage's
+CONTEXT_SETTINGS = {key: value for key, value in RECIPE['network'].items() if key not in ('window', 'maxChars')}
+G2P_SETTINGS = {key: value for key, value in RECIPE['g2p'].items() if key not in ('readings', 'ambiguityHidden')}
 
 # The reading stage's new tensors (their learning rate is the stage's times headRate)
 HEADS = ('reading', 'ambiguity_layer', 'ambiguity')
@@ -411,7 +422,7 @@ class WeightQuantizer:
 
 
 # The cross-validation folds of the aligned speakers (fold 0 is the labels' held-out tenth - nn/contextlabels.py)
-FOLDS = 10
+FOLDS = RECIPE['gate']['folds']
 
 
 def fold_labels(labels, fold):
@@ -650,11 +661,22 @@ def command_export(args):
 # The gate - the held-out aligned accuracy against the majority baseline
 #
 
-# The gate's words (the review's: read, use, close, lives) less the words whose readings differ only by S against Z - the
+# The gate's words (the recipe's: read, use, close, lives) less the words whose readings differ only by S against Z - the
 # aligner can't judge those (word-final voicing), so the regression set covers them - and its margin over the majority
 # baseline
-GATE_WORDS = ['read', 'use', 'close', 'lives']
-GATE_MARGIN = 0.20
+GATE_WORDS = RECIPE['gate']['words']
+GATE_MARGIN = RECIPE['gate']['margin']
+
+
+def describe_heldout(result):
+    """The held-out examples' accuracy - over all, and the mean of the words' (all sources pooled per word)"""
+    words = collections.defaultdict(lambda: [0, 0])
+    for key, counts in result['words'].items():
+        words[key.split('/', 1)[1]][0] += counts['right']
+        words[key.split('/', 1)[1]][1] += counts['total']
+    right, total = sum(right for right, _ in words.values()), sum(total for _, total in words.values())
+    macro = sum(right / total for right, total in words.values()) / max(1, len(words))
+    return f'held-out {right}/{total} ({100 * right / max(1, total):.1f}%), word mean {100 * macro:.1f}% ({len(words)} words)'
 
 
 def gate_words(labels):
@@ -726,6 +748,72 @@ def test_wer(pronounce, data):
 
 
 #
+# make train's check - a retrained module against the committed one: identical, else within the recipe's tolerances
+#
+
+def js_pronouncer(module_path):
+    """A pronouncer of word lists by a module as the app runs it (lib/g2p.js - nn/js/pronounceLines.js)"""
+    import subprocess  # pylint: disable=import-outside-toplevel
+
+    def pronounce(words):
+        process = subprocess.run(['node', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'js', 'pronounceLines.js'),
+                                  os.path.abspath(module_path)], input=''.join(word + '\n' for word in words),
+                                 capture_output=True, text=True, check=True)
+        lines = process.stdout.split('\n')
+        return [line.split() for line in lines[:len(words)]]
+    return pronounce
+
+
+def heteronym_scores(module_path):
+    """The regression set's scores of a module (tools/heteronyms.js) - ({kind: (right, total)}, its exit status)"""
+    import re  # pylint: disable=import-outside-toplevel
+    import subprocess  # pylint: disable=import-outside-toplevel
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    process = subprocess.run(['node', os.path.join(root, 'tools', 'heteronyms.js'), '-m', os.path.abspath(module_path)],
+                             capture_output=True, text=True, check=False)
+    kinds = {kind: (int(right), int(total)) for kind, right, total in re.findall(r'(\w+) (\d+)/(\d+)', process.stdout)}
+    return kinds, process.returncode
+
+
+def command_check(args):
+    """make train's G2P check - the retrained module against the committed one: identical (below the comment header),
+    else the quality gate
+    (the regression set - tools/heteronyms.js's minimums, and no kind more than heteronymKindDrop below the committed
+    module's - and nn/g2p.py's book measures within the recipe's tolerances). It never replaces the committed module."""
+    from . import g2p  # pylint: disable=import-outside-toplevel
+    # Identical below the comment header (its provenance - the checkpoints' digests - differs run to run)
+    def body(path):
+        with open(path, encoding='utf-8') as file:
+            return [line for line in file.read().split('\n') if not line.startswith('//')]
+    if body(args.model) == body(args.committed):
+        print(f'check: {args.model} is identical to {args.committed} (below the comment header)')
+        return 0
+    gate = RECIPE['gate']
+    failures = []
+    new_kinds, status = heteronym_scores(args.model)
+    old_kinds, _ = heteronym_scores(args.committed)
+    if status != 0:
+        failures.append('the regression set is below its minimums')
+    for kind, (right, total) in new_kinds.items():
+        if right < old_kinds.get(kind, (0, total))[0] - gate['heteronymKindDrop']:
+            failures.append(f'{kind} {right}/{total} (committed {old_kinds[kind][0]})')
+    config = g2p.load_config()
+    relabel = config['stages'][-1].get('relabel')
+    data = g2p.load_data(relabel and os.path.join(g2p.ROOT, relabel))
+    new_measures = g2p.evaluate(js_pronouncer(args.model), data)
+    old_measures = g2p.evaluate(js_pronouncer(args.committed), data)
+    for name, tolerance in (('book', gate['bookError']), ('bookWrongDistinct', gate['bookDistinct']),
+                            ('top10kWrong', gate['top10kWrong']), ('monitorWer', gate['monitorWer'])):
+        if new_measures[name] > old_measures[name] + tolerance:
+            failures.append(f'{name} {new_measures[name]} (committed {old_measures[name]}, tolerance {tolerance})')
+    kinds = ', '.join(f'{kind} {right}/{total} (committed {old_kinds.get(kind, (0, 0))[0]})' for kind, (right, total) in new_kinds.items())
+    print(f'check: {args.model} differs from {args.committed}; regression set {kinds}; {g2p.describe(new_measures)} '
+          f'(committed: {g2p.describe(old_measures)}) - ' +
+          (f'FAILED: {"; ".join(failures)}' if failures else f'within the tolerances - {args.committed} kept'))
+    return 1 if failures else 0
+
+
+#
 # The commands
 #
 
@@ -771,6 +859,26 @@ def command_train_context(args):
     return 0
 
 
+def command_cross_validate(args):
+    """Train the context network once per fold of the aligned speakers (one after another) - each fold's held-out
+    results to <out>/fold-<k>.json - then the cross-validated gate (command_folds)"""
+    labels = load_labels(args.labels)
+    os.makedirs(args.out, exist_ok=True)
+    paths = []
+    for fold in range(FOLDS):
+        path = os.path.join(args.out, f'fold-{fold}.json')
+        if not os.path.exists(path):
+            fold_set = fold_labels(labels, fold)
+            model = train_context(fold_set, {}, lambda text, fold=fold: log_line(args.log, f'fold {fold}: {text}'))
+            WeightQuantizer(model, EXPORT).quantize()
+            result = evaluate_context(lambda windows, model=model: context_predict(model, windows), fold_set)
+            with open(path + '.tmp', 'w', encoding='utf-8') as file:
+                json.dump(result, file, indent=1)
+            os.replace(path + '.tmp', path)
+        paths.append(path)
+    return command_folds(argparse.Namespace(results=paths, labels=args.labels))
+
+
 def command_folds(args):
     """The cross-validated gate - the held-out results of every fold's context network (train-context --fold, the
     .json beside each checkpoint) pooled"""
@@ -808,6 +916,11 @@ def main(argv=None):
     context_parser.add_argument('--fold', type=int, help='hold out this fold of the aligned speakers (0 to FOLDS - 1)')
     context_parser.add_argument('--log')
     context_parser.set_defaults(func=command_train_context)
+    cross_parser = commands.add_parser('cross-validate', help='train every fold, then the cross-validated gate (resumable)')
+    cross_parser.add_argument('--labels', required=True)
+    cross_parser.add_argument('--out', required=True, help='the folds\' results directory')
+    cross_parser.add_argument('--log')
+    cross_parser.set_defaults(func=command_cross_validate)
     folds_parser = commands.add_parser('folds', help='the cross-validated gate over the folds\' held-out results')
     folds_parser.add_argument('results', nargs='+')
     folds_parser.add_argument('--labels', required=True)
@@ -819,6 +932,10 @@ def main(argv=None):
     export_parser.add_argument('--bits', type=int)
     export_parser.add_argument('--comment', action='append', default=[])
     export_parser.set_defaults(func=command_export)
+    check_parser = commands.add_parser('check', help='make train\'s check - a retrained module against the committed one')
+    check_parser.add_argument('model')
+    check_parser.add_argument('--committed', default=g2pmodel.MODULE_PATH)
+    check_parser.set_defaults(func=command_check)
     gate_parser = commands.add_parser('gate', help='the held-out accuracy of a module\'s context network (exit 1 below the gate)')
     gate_parser.add_argument('model', nargs='?', default=g2pmodel.MODULE_PATH)
     gate_parser.add_argument('--labels', required=True)

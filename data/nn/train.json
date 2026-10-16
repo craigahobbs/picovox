@@ -1,5 +1,5 @@
 {
-    "description": "make train's recipe - every stage's settings and seeds: the G2P network (nn/g2p.py), the teacher (nn/trainmulti.py --recipe), and the distilled student with its evaluation and gate (nn/distill.py, nn/panel.py)",
+    "description": "make train's recipe - every stage's settings and seeds: the G2P network (nn/g2p.py) and its heteronym models (nn/context.py), the teacher (nn/trainmulti.py --recipe), and the distilled student with its evaluation and gate (nn/distill.py, nn/panel.py)",
     "g2p": {
         "description": "The G2P network (nn/g2p.py): the AR encoder-decoder trained on every dictionary word, frequency-weighted, with teacher-labeled unknown words, in four stages (base, two polishes over the most frequent words, then the readers' pronunciations of the relabeled words - focus), exported at 6 bits",
         "model": {"embed": 32, "hidden": 96},
@@ -16,6 +16,38 @@
              "relabel": "data/nn/g2p-relabel.json", "focusBoost": {"share": 0.02}}
         ],
         "export": {"bits": 6, "groupSize": 0, "biasBits": 8}
+    },
+    "context": {
+        "description": "The heteronym models (nn/contextlabels.py, nn/context.py): the context labels (the readers' aligned readings; part-of-speech tags over the Project Gutenberg books bookIds, fetched to books, where the tag mapping agrees with the audio; the hand-written seeds of data/nn/context-labels.json), the G2P's reading stage from the g2p recipe's last stage (the reading vectors, the ambiguity head, and the decoder), the context network, the export to lib/models/g2pModel.js, and the gates - the held-out aligned accuracy over the gate's words (less the S/Z-only pairs), and make train's comparison with the committed module (identical, else within these tolerances)",
+        "labels": {
+            "books": "build/nn/books",
+            "bookIds": [11, 23, 35, 36, 42, 43, 72, 74, 76, 84, 98, 100, 103, 108, 120, 145, 158, 161, 174, 175, 204,
+                209, 219, 221, 223, 224, 244, 245, 345, 393, 468, 564, 589, 601, 768, 831, 834, 863, 921,
+                1063, 1112, 1184, 1212, 1259, 1260, 1342, 1400, 1513, 1523, 1608, 1661, 1695, 1727, 2002,
+                2097, 2147, 2148, 2465, 2554, 2620, 2641, 2680, 2701, 2825, 2852, 2868, 3011, 3268, 3296,
+                3922, 4499, 5197, 6133, 7326, 7889, 8492, 14244, 17460, 18143, 18459, 19476, 20203, 21839,
+                22541, 23784, 24739, 24793, 27827, 28203, 31100, 31472, 31635, 32155, 34413, 35312, 35548,
+                36223, 36462, 36725, 37106, 38177, 38311, 40284, 42389, 42671, 42681, 45839, 46276, 47530,
+                48296, 49987, 51252, 51428, 53154, 53416, 53874, 55179, 57641, 59828, 61851, 62215, 64317,
+                65238, 67979, 68283, 69087, 70854, 71046, 75201, 76178, 76639, 76668],
+            "heldOutBooks": [1342, 2701], "heldOutPercent": 10,
+            "minAgreement": 0.95, "minValidate": 10, "minAlternate": 5, "minAlternateShare": 0.02, "maxSilver": 3000
+        },
+        "g2p": {
+            "readings": 3, "ambiguityHidden": 16, "steps": 3000, "batch": 512, "lr": 0.0003, "warmup": 100, "readingShare": 0.04,
+            "invariantShare": 0.02, "ambiguityWeight": 1.0, "seed": 7, "threads": 2, "train": "reading,ambiguity_layer,ambiguity,decoder",
+            "headRate": 15.0
+        },
+        "network": {
+            "window": 3, "maxChars": 12, "embed": 16, "hidden": 48, "layer": 64, "dropout": 0.1, "steps": 8000, "batch": 256,
+            "lr": 0.003, "warmup": 300, "weightDecay": 0.01, "quantSteps": 2000, "quantLr": 0.0005, "seed": 1, "threads": 2,
+            "seedRepeat": 4, "balance": 0.3, "prior": null
+        },
+        "export": {"bits": 6, "groupSize": 0, "biasBits": 8},
+        "gate": {
+            "words": ["read", "use", "close", "lives"], "margin": 0.2, "folds": 10,
+            "heteronymKindDrop": 2, "bookError": 0.0001, "bookDistinct": 25, "top10kWrong": 2, "monitorWer": 0.005
+        }
     },
     "teacher": {
         "description": "The teacher (nn/trainmulti.py --recipe teacher.a, then teacher.b): stage A on the readers (the 30,000-step schedule, stopped at 15,000), then stage B from A's weights with the emotional speech and the adversarial critic - B's best validation checkpoint is the teacher; the keys are nn/trainmulti.py's flags, defaults every training setting's default",

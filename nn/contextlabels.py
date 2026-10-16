@@ -7,6 +7,7 @@ which words have more than one reading the neighboring words decide, their readi
 examples of each reading in context. Training-time only: the app has no word list - the G2P's ambiguity head says when
 to ask the context network.
 
+    build/venv-nn/bin/python -B -m nn.contextlabels books                  # 0. the recipe's books (Project Gutenberg)
     build/venv-nn/bin/python -B -m nn.contextlabels aligned --out DIR      # 1. the aligned readings (LibriTTS-R MFA labels)
     build/venv-pos/bin/python -B -m nn.contextlabels tag --out DIR         # 2. part-of-speech tags (spaCy, requirements/pos.txt)
     build/venv-nn/bin/python -B -m nn.contextlabels labels --out DIR       # 3. the words, readings, and examples -> labels.json
@@ -25,7 +26,7 @@ The label sources (data/nn/context-labels.json is the curated part):
    ("collocations": a neighboring word that fixes the reading, reviewed by hand) over the books.
 
 Held out: the regression set's sentences (data/nn/heteronyms-test.json), 10% of the aligned speakers (by a hash), and
-HELD_OUT_BOOKS.
+two books. The settings are data/nn/train.json's context.labels.
 """
 
 import argparse
@@ -45,28 +46,38 @@ SPEC_PATH = os.path.join(ROOT, 'data', 'nn', 'context-labels.json')
 TEST_PATH = os.path.join(ROOT, 'data', 'nn', 'heteronyms-test.json')
 LIBRITTS_DIR = os.path.join(ROOT, 'data', 'corpora', 'libritts_r', 'LibriTTS_R')
 LABEL_DIR = os.path.join(ROOT, 'data', 'corpora', 'libritts_label', 'lab', 'phone')
-BOOK_DIRS = [os.path.join(ROOT, 'build', 'nn', 'g2p', 'books'), os.path.join(ROOT, 'build', 'nn', 'g2p-challenge', 'books', 'raw')]
+CONFIG_PATH = os.path.join(ROOT, 'data', 'nn', 'train.json')
+
+
+# The recipe's label settings - data/nn/train.json's context.labels (and the context network's window)
+def load_settings(path=CONFIG_PATH):
+    with open(path, encoding='utf-8') as file:
+        context = json.load(file)['context']
+    return {**context['labels'], 'window': context['network']['window']}
+
+
+SETTINGS = load_settings()
 
 # The context window - WINDOW items each side of the word (words, and phrase ends as marks)
-WINDOW = 3
+WINDOW = SETTINGS['window']
 
 # The mapping validation - the least agreement with the aligned readings, and the least aligned tokens for a word's own check
-MIN_AGREEMENT = 0.95
-MIN_VALIDATE = 10
-
-
+MIN_AGREEMENT = SETTINGS['minAgreement']
+MIN_VALIDATE = SETTINGS['minValidate']
 
 # A candidate word is ambiguous (trained with readings) when its alternate readings have at least MIN_ALTERNATE examples
 # and MIN_ALTERNATE_SHARE of its examples
-MIN_ALTERNATE = 5
-MIN_ALTERNATE_SHARE = 0.02
+MIN_ALTERNATE = SETTINGS['minAlternate']
+MIN_ALTERNATE_SHARE = SETTINGS['minAlternateShare']
 
-# The held-out books (two of the 22 evaluation books) and the held-out share of the aligned speakers (percent)
-HELD_OUT_BOOKS = {'pg1342', 'pg2701'}
-HELD_OUT_PERCENT = 10
+# The books (Project Gutenberg ids, fetched to the books directory as nn/distill.py fetches its books), the held-out
+# books, and the held-out share of the aligned speakers (percent)
+BOOKS_DIR = os.path.join(ROOT, SETTINGS['books'])
+HELD_OUT_BOOKS = {f'pg{book_id}' for book_id in SETTINGS['heldOutBooks']}
+HELD_OUT_PERCENT = SETTINGS['heldOutPercent']
 
 # The most silver examples of a word kept (the most frequent words have thousands)
-MAX_SILVER = 3000
+MAX_SILVER = SETTINGS['maxSilver']
 
 # The part-of-speech tag groups of the families' mappings
 NOUN_TAGS = {'NN', 'NNS'}
@@ -276,20 +287,25 @@ def aligned_command(args):
 # 2. Part-of-speech tags (spaCy - training time only)
 #
 
-# The book texts - [(book id, text)], the Project Gutenberg header and footer removed
-def book_texts(book_dirs):
-    books = {}
-    for directory in book_dirs:
-        if not os.path.isdir(directory):
-            continue
-        for name in sorted(os.listdir(directory)):
-            if re.match(r'^pg\d+\.txt$', name) and name[:-4] not in books:
-                with open(os.path.join(directory, name), encoding='utf-8-sig', errors='replace') as file:
-                    text = file.read()
-                start = re.search(r'\*\*\* ?START OF.*?\*\*\*', text)
-                end = re.search(r'\*\*\* ?END OF', text)
-                books[name[:-4]] = text[start.end() if start else 0:end.start() if end else len(text)]
-    return sorted(books.items())
+# The book texts - [(book id, text)] for the recipe's books (in the books directory), the Project Gutenberg header and
+# footer removed
+def book_texts(books_dir=BOOKS_DIR):
+    books = []
+    for book_id in sorted(f'pg{book_id}' for book_id in SETTINGS['bookIds']):
+        with open(os.path.join(books_dir, f'{book_id}.txt'), encoding='utf-8-sig', errors='replace') as file:
+            text = file.read()
+        start = re.search(r'\*\*\* ?START OF.*?\*\*\*', text)
+        end = re.search(r'\*\*\* ?END OF', text)
+        books.append((book_id, text[start.end() if start else 0:end.start() if end else len(text)]))
+    return books
+
+
+def books_command(args):
+    """Fetch the recipe's books (Project Gutenberg, by id - nn/distill.py's book_paths) into the books directory"""
+    from .distill import book_paths  # pylint: disable=import-outside-toplevel
+    paths = book_paths({'books': args.books or BOOKS_DIR, 'bookIds': SETTINGS['bookIds']})
+    print(f'books: {len(paths)} in {args.books or BOOKS_DIR}')
+    return 0
 
 
 # A book's paragraphs - blank-line separated, each joined to one line
@@ -321,7 +337,7 @@ def tag_command(args):
     print(f'tag: {len(records)} aligned utterances', flush=True)
     count = 0
     with open(os.path.join(args.out, 'books.jsonl'), 'w', encoding='utf-8') as file:
-        for book, text in book_texts(args.books or BOOK_DIRS):
+        for book, text in book_texts(args.books or BOOKS_DIR):
             chosen = [paragraph for paragraph in paragraphs(text) if len(paragraph) < 5000 and
                       any(isinstance(item, str) and item in words for item, _ in text_items(paragraph))]
             for paragraph, paragraph_tags in zip(chosen, tag_texts(chosen, words, args.jobs)):
@@ -510,9 +526,12 @@ def main(argv=None):
     aligned_parser.add_argument('--out', required=True)
     aligned_parser.add_argument('-j', '--jobs', type=int, default=6)
     aligned_parser.set_defaults(func=aligned_command)
+    books_parser = commands.add_parser('books', help='fetch the recipe\'s Project Gutenberg books')
+    books_parser.add_argument('--books', help='the books directory (default: the recipe\'s)')
+    books_parser.set_defaults(func=books_command)
     tag_parser = commands.add_parser('tag', help='part-of-speech tags (spaCy en_core_web_sm)')
     tag_parser.add_argument('--out', required=True)
-    tag_parser.add_argument('--books', nargs='*', help='the book directories (pg<id>.txt)')
+    tag_parser.add_argument('--books', help='the books directory (default: the recipe\'s - nn.contextlabels books)')
     tag_parser.add_argument('-j', '--jobs', type=int, default=5)
     tag_parser.set_defaults(func=tag_command)
     labels_parser = commands.add_parser('labels', help='the ambiguous words, readings, and examples')

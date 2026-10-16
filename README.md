@@ -342,6 +342,7 @@ network (`nn/context.py`: a character GRU over the three words and phrase-end ma
 layer gated by the word itself - 47,779 parameters at 6 bits) chooses the reading.
 
 ```sh
+build/venv-nn/bin/python -B -m nn.contextlabels books                                # the recipe's books (by Gutenberg id)
 build/venv-nn/bin/python -B -m nn.contextlabels aligned --out build/nn/context      # readers' readings (MFA alignments)
 build/venv-pos/bin/python -B -m nn.contextlabels tag --out build/nn/context         # part-of-speech tags (spaCy)
 build/venv-nn/bin/python -B -m nn.contextlabels labels --out build/nn/context       # the ambiguous words and examples
@@ -350,7 +351,14 @@ build/venv-nn/bin/python -B -m nn.context train-g2p --labels build/nn/context/la
 build/venv-nn/bin/python -B -m nn.context train-context --labels build/nn/context/labels.json --out build/nn/context/context.pt
 build/venv-nn/bin/python -B -m nn.context export --g2p build/nn/context/g2p.pt --context build/nn/context/context.pt
 node tools/heteronyms.js                                                            # the regression set (exit 1 below the gate)
+build/venv-nn/bin/python -B -m nn.context cross-validate --labels build/nn/context/labels.json --out build/nn/context/folds
 ```
+
+The settings are `data/nn/train.json`'s `context` section. `make train` runs all of it beside the voice stages (which
+use the committed `lib/models/g2pModel.js`) and checks its module with `nn.context check`: identical to the committed
+module below the comment header (the stages are deterministic on the same inputs), else within the recipe's tolerances
+(the regression set, the book error, the top-10K, the monitoring WER) - it never replaces the committed module. A clean
+run reproduces the committed module only while the books are unchanged (Project Gutenberg revises its files).
 
 The labels (`nn/contextlabels.py`, with the curated part in `data/nn/context-labels.json`) come from three sources: the
 LibriTTS-R readers' readings by the forced alignments; part-of-speech tags over the Project Gutenberg books (spaCy,
