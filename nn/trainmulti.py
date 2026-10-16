@@ -382,7 +382,7 @@ def quality_stats(values, frame_mask):
 
 # The loss terms of a batch - ({name: tensor}, the rendered crops, the recorded crops), both band-limited; prepared is
 # the step's data made ahead (Prefetcher) - the crops, the recordings', and the cycle plan - else they're made here
-def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, prepared=None):
+def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, prepared=None, with_values=False):
     outputs = model(batch['tokens'], batch['durations'], batch['speaker'], batch['emotion'], batch['intensity'],
                     speaker_vector=batch.get('speakerVector'), frame_count=batch.get('frameCount'))
     unit = outputs['unit']
@@ -469,6 +469,8 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
     if correction is not None:
         total = total + args.correction_smooth * losses['corrSmooth'] + args.correction_l2 * losses['corrL2']
     losses['total'] = total
+    if with_values:
+        return losses, audio, target, quality_stats(values.detach(), frame_mask), values
     return losses, audio, target, quality_stats(values.detach(), frame_mask)
 
 
@@ -492,6 +494,8 @@ def qat_context(model, args):
 
 # Validation of one corpus - mean losses and quality statistics (fixed crops and seeds), and the F0 error
 @torch.no_grad()
+# The validation losses and statistics of a corpus (no gradients; the model in eval mode)
+@torch.no_grad()
 def validate(model, synth, corpus, args, device, sonorants):
     model.eval()
     rng = numpy.random.default_rng(1234)
@@ -503,14 +507,11 @@ def validate(model, synth, corpus, args, device, sonorants):
         indices = order[start:start + args.batch]
         batch = collate(corpus, indices, device)
         with qat_context(model, args):
-            losses, _, _, stats = batch_losses(model, synth, batch, args, rng, 99, 1.0, sonorants)
+            losses, _, _, stats, values = batch_losses(model, synth, batch, args, rng, 99, 1.0, sonorants, with_values=True)
         stats = {key: value for key, value in ((key, float(value)) for key, value in stats.items()) if not math.isnan(value)}
         for key, value in {**losses, **stats}.items():
             sums[key] = sums.get(key, 0) + float(value) * len(indices)
         count += len(indices)
-        with qat_context(model, args):
-            outputs = model(batch['tokens'], batch['durations'], batch['speaker'], batch['emotion'], batch['intensity'])
-        values = model.parameters_from_unit(outputs['unit'])
         frames = values.shape[1]
         cents = 1200 * torch.log2(values[..., params.INDEX['f0']] / batch['f0'][:, :frames])
         voiced = batch['voiced'][:, :frames] > 0.5
