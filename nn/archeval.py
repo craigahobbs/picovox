@@ -31,12 +31,12 @@ import numpy
 import soundfile
 import torch
 
-from . import dsynth, params
+from . import dsynth
 from .data import DATA_DIR, ArcticData
 from .panel import cosine, edit_distance, listen, transcribe_all, words
 from .export import export, load_model, quantized_model
 from .package import package
-from .trainmulti import Corpus, sonorant_mask, validate
+from .trainmulti import Corpus, default_settings, sonorant_mask, validate
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -52,13 +52,6 @@ RATE = 16000
 
 # The listening samples' texts (tools/panel-texts.json ids) - the Moby-Dick opening, and a dialogue passage
 SAMPLE_TEXTS = ('melville-moby', 'austen-pride')
-
-# nn/trainmulti.py's default settings that validate reads (the fine-tunes' and proxies' - no critic, readers only)
-VALIDATION_DEFAULTS = {
-    'crop': 2.0, 'rate': 24000, 'max_hz': 10500, 'duration_weight': 1.0, 'f0_weight': 2.0, 'formant_weight': 1.0,
-    'smooth_weight': 0.05, 'frication_max_hz': 11000, 'sonorant_frication': 1.0, 'sonorant_af_db': 40.0, 'batch': 16,
-    'correction_smooth': 1.0, 'correction_l2': 0.01, 'qat_bits': 0, 'qat_group': 0
-}
 
 
 # The mean ECAPA embedding of a speaker's recordings (cached) - numpy [192]
@@ -85,8 +78,7 @@ def reference_embedding(speaker, count=8):
 
 # The validation losses of a model on the first count reader validation utterances (the export's weights)
 def validation(model, device, count, corpus=None):
-    settings = argparse.Namespace(**VALIDATION_DEFAULTS, val_count=count)
-    settings.crop_frames = int(round(settings.crop * params.FRAME_RATE))
+    settings = default_settings(val_count=count)
     corpus = corpus or Corpus('multi', 'val', max_items=count)
     sonorants = torch.tensor(sonorant_mask(corpus.data.index['vocab']), device=device)
     synth = dsynth.DSynth(settings.rate).to(device)

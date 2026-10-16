@@ -25,17 +25,10 @@ sys.path.insert(0, os.getcwd())
 import numpy  # noqa: E402
 import torch  # noqa: E402
 
-from nn import dsynth, params  # noqa: E402
-from nn.trainmulti import MULTI_PRIORS, Corpus, batch_losses, collate, sonorant_mask  # noqa: E402
+from nn import dsynth  # noqa: E402
+from nn.trainmulti import MULTI_PRIORS, Corpus, batch_losses, collate, default_settings, sonorant_mask  # noqa: E402
 from nn.model import MultiModel  # noqa: E402
 
-
-# nn/trainmulti.py's default settings that batch_losses reads
-DEFAULTS = {
-    'crop': 2.0, 'rate': 24000, 'max_hz': 10500, 'duration_weight': 1.0, 'f0_weight': 2.0, 'formant_weight': 1.0,
-    'smooth_weight': 0.05, 'frication_max_hz': 11000, 'sonorant_frication': 1.0, 'sonorant_af_db': 40.0,
-    'correction_smooth': 1.0, 'correction_l2': 0.01
-}
 
 
 def main(argv=None):
@@ -47,8 +40,7 @@ def main(argv=None):
     parser.add_argument('--batch', type=int, default=3)
     parser.add_argument('--config', default='{}', help='model config overrides (JSON) - for checking an option on')
     args = parser.parse_args(argv)
-    settings = argparse.Namespace(**DEFAULTS)
-    settings.crop_frames = int(round(settings.crop * params.FRAME_RATE))
+    settings = default_settings()
     device = torch.device(args.device)
     state = torch.load(args.init, map_location='cpu', weights_only=False)
     config = {**state['config'], **json.loads(args.config)}

@@ -527,7 +527,8 @@ def recipe_defaults(section, path=RECIPE_PATH):
     return {key.replace('-', '_'): value for key, value in settings.items() if key != 'description'}
 
 
-def main(argv=None):
+# The command line's parser
+def argument_parser():
     parser = argparse.ArgumentParser(prog='python -m nn.trainmulti', description='Train the multi-speaker, multi-style model')
     parser.add_argument('--name', required=True)
     parser.add_argument('--recipe', help='the settings of a section of data/nn/train.json (teacher.a), flags overriding them')
@@ -579,6 +580,20 @@ def main(argv=None):
                         help='the encoder - self-attention, or all-convolution (LightSpeech-style)')
     parser.add_argument('--qat-bits', type=int, default=0, help='quantization-aware training at this bit width (0: none)')
     parser.add_argument('--qat-group', type=int, default=0, help='QAT per-group scales of this many weights (0: per row)')
+    return parser
+
+
+# The default settings (the flags' defaults) with overrides - an argparse namespace, as main's args
+def default_settings(**overrides):
+    settings = argument_parser().parse_args(['--name', 'defaults'])
+    for key, value in overrides.items():
+        setattr(settings, key, value)
+    settings.crop_frames = int(round(settings.crop * params.FRAME_RATE))
+    return settings
+
+
+def main(argv=None):
+    parser = argument_parser()
     recipe = parser.parse_known_args(argv)[0].recipe
     if recipe:
         parser.set_defaults(**recipe_defaults(recipe))
