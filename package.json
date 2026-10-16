@@ -1,9 +1,9 @@
 {
-  "name": "voice-synth",
+  "name": "picovox",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Small neural voices for speech synthesis in the browser, in JavaScript - and a public-domain audiobook player",
+  "description": "PicoVox - realistic speech synthesis in pure JavaScript, under 1 MB",
   "devDependencies": {
     "@eslint/js": "~10.0",
     "c8": "~12.0",

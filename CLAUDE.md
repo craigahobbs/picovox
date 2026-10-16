@@ -4,7 +4,7 @@ Notes for coding agents working in this repository.
 
 ## Project overview
 
-voice-synth is a from-scratch speech synthesizer in JavaScript - a small neural network that speaks interpretable
+PicoVox (the npm package `picovox`; this repository is voice-synth) - realistic speech synthesis in pure JavaScript, under 1 MB - is a from-scratch speech synthesizer in JavaScript - a small neural network that speaks interpretable
 source-filter synthesizer parameters, rendered by a JavaScript synthesizer (no recorded speech, no runtime
 dependencies) - and a public-domain audiobook player web app built on it. (The first, rule-based formant synthesizer
 and its tools were removed in commit 33fbfad - see git history.)

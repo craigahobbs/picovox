@@ -1,4 +1,6 @@
-# voice-synth
+# PicoVox
+
+**PicoVox** (npm `picovox`) - realistic speech synthesis in pure JavaScript, under 1 MB.
 
 A from-scratch speech synthesizer in JavaScript, aiming for realistic male and female voices - no recorded speech at
 runtime. Text goes through a front end (normalization, and a small grapheme-to-phoneme network for every word) to
