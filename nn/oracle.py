@@ -31,7 +31,7 @@ from .data import ArcticData
 from .evaluate import ARCTIC
 from .panel import cosine, edit_distance, listen, transcribe_all, words
 from .synthesize import Voice, render
-from .train import f0_track
+from .losses import f0_track
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

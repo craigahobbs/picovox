@@ -69,14 +69,18 @@ import torch
 from . import discriminator, dsynth, params, quant
 from .data import DATA_DIR, ArcticData
 from .model import FIRST_PHONE, STYLE_NAMES, MultiModel, parameter_count
-from .train import F_INDEX, PRIORS, RUNS_DIR, duration_loss, f0_track, render_values, spectral_loss
+from .losses import F_INDEX, PRIORS, duration_loss, f0_track, render_values, spectral_loss
 
 
 # The data's sample rate
 SOURCE_RATE = 24000
 
+# The runs' directory (checkpoints and logs)
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+RUNS_DIR = os.environ.get('NN_RUNS_DIR', os.path.join(ROOT, 'build', 'nn', 'runs'))
+
 # make train's recipe
-RECIPE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'nn', 'train.json')
+RECIPE_PATH = os.path.join(ROOT, 'data', 'nn', 'train.json')
 
 # The most training steps the CPU runs ahead of the GPU (MPS)
 IN_FLIGHT = 2
