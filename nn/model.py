@@ -32,18 +32,8 @@ No absolute positional encoding - order comes from the convolutions - so any len
 nn/js/model.js speak long texts a sentence at a time, like the training data.
 
 Every layer is one nn/js/model.js implements: embedding, linear, depthwise 1-D convolution ('same' padding), layer
-norm, SiLU, tanh, and multi-head self-attention with a key padding mask.
-
-Architecture options (config keys, absent by default - so a default model, its checkpoints, and its exports are
-unchanged):
-
-- 'correctionBands': K (16-24) - the spectral correction head: the decoder also predicts K band gains (dB) per 5 ms
-  frame, bounded by 'correctionRangeDb' (default CORRECTION_RANGE_DB) with a tanh, from a zero-initialized linear head
-  (so a model starts at 0 dB - its behavior without the head - and a checkpoint without it loads with strict=False). The
-  synthesizers (nn/dsynth.py, nn/js/render.js) apply them as a smooth multiplicative envelope to the harmonics and the
-  noise - nn/params.py CORRECTION_*.
-- 'encoder': 'conv' - an all-convolution (LightSpeech-style) encoder: each self-attention block replaced by a
-  depthwise-separable convolution block (SepConv) of kernel 'convKernels'[layer] (default CONV_KERNELS).
+norm, SiLU, tanh, and multi-head self-attention with a key padding mask. (The spectral correction head and the
+all-convolution encoder, architecture options that weren't adopted, are in git history.)
 """
 
 import math
@@ -76,12 +66,6 @@ MULTI_CONFIG = {
     'speakerDim': 16,          # the speaker embedding's width
     'styles': 5                # the emotions with a style row (neutral is the zero vector) - STYLE_NAMES
 }
-
-# The spectral correction head's default bound (dB)
-CORRECTION_RANGE_DB = 12.0
-
-# The all-convolution encoder's default depthwise kernels, one per encoder layer (repeated if there are more layers)
-CONV_KERNELS = (17, 25, 13)
 
 
 # Token classes (nn/vocab.json): 0 <pad>, 1 <unk>, 2 <bos>, 3 "_" (word boundary), 4-8 phrase ends, 9+ phones
@@ -151,63 +135,6 @@ class SelfAttention(torch.nn.Module):
         return x + self.dropout(self.out(attended)) * mask
 
 
-class SepConv(torch.nn.Module):
-    """A LightSpeech-style depthwise-separable convolution block, the all-convolution encoder's replacement for
-    self-attention - x + PW(SiLU(DW(LN(x)))), the depthwise convolution wide (CONV_KERNELS) for the attention's context"""
-
-    def __init__(self, dim, kernel, dropout):
-        super().__init__()
-        self.norm = LayerNorm(dim)
-        self.depthwise = DepthwiseConv(dim, kernel)
-        self.pointwise = torch.nn.Linear(dim, dim)
-        self.dropout = torch.nn.Dropout(dropout)
-
-    def forward(self, x, mask):
-        hidden = torch.nn.functional.silu(self.depthwise(self.norm(x) * mask))
-        return x + self.dropout(self.pointwise(hidden)) * mask
-
-
-# The encoder's context block of a layer - self-attention, or the all-convolution encoder's SepConv (config 'encoder')
-def context_block(cfg, layer, dim, dropout):
-    if cfg.get('encoder', 'attention') == 'conv':
-        kernels = cfg.get('convKernels', CONV_KERNELS)
-        return SepConv(dim, kernels[layer % len(kernels)], dropout)
-    return SelfAttention(dim, cfg['heads'], dropout)
-
-
-# The spectral correction head of a config (a zero-initialized linear layer - 0 dB), or None
-def correction_head(cfg, decoder_dim):
-    bands = cfg.get('correctionBands', 0)
-    if not bands:
-        return None
-    # (made with the random state forked - its initialization is overwritten, so it draws nothing: the rest of training
-    # - dropout, the data - is as without the head)
-    with torch.random.fork_rng(devices=[]):
-        head = torch.nn.Linear(decoder_dim, cfg['subframes'] * bands)
-    torch.nn.init.zeros_(head.weight)
-    torch.nn.init.zeros_(head.bias)
-    return head
-
-
-# The spectral correction's band gains (dB) [B, F * subframes, K] of the decoder's normalized features [B, F, D]
-def correction_gains(model, hidden):
-    logits = model.correction_head(hidden)
-    batch, frames, _ = logits.shape
-    gains = torch.tanh(logits.reshape(batch, frames * model.config['subframes'], model.config['correctionBands']))
-    return model.config.get('correctionRangeDb', CORRECTION_RANGE_DB) * gains
-
-
-# Inference's result - {durations [B, N] (10 ms frames), values (parameter frames [B, 2F + 1, COUNT], the end frame
-# appended), frames (2F + 1 per item), and with the spectral correction head correction (its gains (dB) [B, 2F + 1, K])}
-def _inferred(model, durations, unit, correction):
-    values = model.parameters_from_unit(unit)
-    values = torch.cat([values, values[:, -1:]], dim=1)
-    result = {'durations': durations, 'values': values, 'frames': durations.sum(dim=1) * model.config['subframes'] + 1}
-    if correction is not None:
-        result['correction'] = torch.cat([correction, correction[:, -1:]], dim=1)
-    return result
-
-
 # The number of trainable parameters of a model
 def parameter_count(model):
     return sum(parameter.numel() for parameter in model.parameters())
@@ -263,7 +190,7 @@ class MultiModel(torch.nn.Module):
         layers = []
         for layer in range(cfg['encoderLayers']):
             layers.append(FiLMConvFFN(dim, dim * cfg['ffnMultiple'], cfg['encoderKernel'], dropout, condition_dim))
-            layers.append(context_block(cfg, layer, dim, dropout))
+            layers.append(SelfAttention(dim, cfg['heads'], dropout))
         self.encoder = torch.nn.ModuleList(layers)
         self.encoder_norm = LayerNorm(dim)
 
@@ -303,9 +230,6 @@ class MultiModel(torch.nn.Module):
             fixed_mask[params.INDEX[name]] = 1
         self.register_buffer('fixed', fixed, persistent=False)
         self.register_buffer('fixed_mask', fixed_mask, persistent=False)
-
-        # The optional spectral correction head (created last, so the other layers' initialization is unchanged)
-        self.correction_head = correction_head(cfg, decoder_dim)
 
     def speaker_vector(self, speaker):
         """Speaker embeddings [B, speakerDim] of speaker ids [B], or of blends - weights [B, speakers] (rows summing to
@@ -393,19 +317,15 @@ class MultiModel(torch.nn.Module):
         values = params.denormalize(unit)
         return values * (1 - self.fixed_mask) + self.fixed * self.fixed_mask
 
-    def decode(self, regulated, positions, mask, condition, return_correction=False):
-        """Decoder frames [B, F, D] (10 ms) to normalized parameter frames [B, F * subframes, COUNT]; with
-        return_correction, (frames, the spectral correction's band gains (dB) [B, F * subframes, K] or None)"""
+    def decode(self, regulated, positions, mask, condition):
+        """Decoder frames [B, F, D] (10 ms) to normalized parameter frames [B, F * subframes, COUNT]"""
         x = (self.decoder_in(regulated) + self.position_in(positions) + self.condition_decoder(condition)) * mask
         for layer in self.decoder:
             x = layer(x, mask, condition)
         hidden = self.decoder_norm(x)
         logits = self.head(hidden)
         batch, frames, _ = logits.shape
-        unit = torch.sigmoid(logits.reshape(batch, frames * self.config['subframes'], params.COUNT))
-        if return_correction:
-            return unit, (correction_gains(self, hidden) if self.correction_head is not None else None)
-        return unit
+        return torch.sigmoid(logits.reshape(batch, frames * self.config['subframes'], params.COUNT))
 
     def eq(self, speaker):
         """The channel equalizer gains (dB) [B, EQ_BAND_COUNT] of speaker ids [B] or blend weights [B, speakers]"""
@@ -424,11 +344,8 @@ class MultiModel(torch.nn.Module):
         features, mask = self.encode(tokens, condition)
         duration_outputs = self.durations(features, mask, condition)
         regulated, positions, frame_mask = self.regulate(features, durations, frame_count)
-        unit, correction = self.decode(regulated, positions, frame_mask, condition, return_correction=True)
-        outputs = {'duration': duration_outputs, 'unit': unit, 'frameMask': frame_mask}
-        if correction is not None:
-            outputs['correction'] = correction
-        return outputs
+        unit = self.decode(regulated, positions, frame_mask, condition)
+        return {'duration': duration_outputs, 'unit': unit, 'frameMask': frame_mask}
 
     @torch.no_grad()
     def infer(self, tokens, speaker=None, emotion=None, intensity=None, speaker_vector=None, pause_threshold=0.5, rate=1.0):
@@ -439,8 +356,9 @@ class MultiModel(torch.nn.Module):
         features, mask = self.encode(tokens, condition)
         durations = self.predicted_durations(self.durations(features, mask, condition), tokens, pause_threshold, rate)
         regulated, positions, frame_mask = self.regulate(features, durations)
-        unit, correction = self.decode(regulated, positions, frame_mask, condition, return_correction=True)
-        return _inferred(self, durations, unit, correction)
+        values = self.parameters_from_unit(self.decode(regulated, positions, frame_mask, condition))
+        values = torch.cat([values, values[:, -1:]], dim=1)
+        return {'durations': durations, 'values': values, 'frames': durations.sum(dim=1) * self.config['subframes'] + 1}
 
 
 # A model of a config - the multi-speaker model (config 'kind': 'multi'; the single-speaker model and its trainer,

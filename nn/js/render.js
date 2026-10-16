@@ -19,13 +19,9 @@
 //   glottal cycle), filtered in the frequency domain: Hann frames of noiseFftSize samples, hop a quarter of that,
 //   each spectrum multiplied by the filters' magnitudes (the spectral shapes) at the frame's interpolated
 //   parameters, overlap-added and normalized by the windows' squared sum.
-// - The spectral correction (optional - a model's correction head, nn/params.py CORRECTION_*): a frame given as an array
-//   longer than the parameters carries K band gains (dB) after them (an object frame, as its 'correction' array) - a
-//   smooth envelope (linear in dB over log frequency) multiplying the frame's harmonic amplitudes and, interpolated in
-//   dB to each noise frame, the noise spectra.
 
 import {
-    CORRECTION_HIGH_HZ, CORRECTION_LOW_HZ, DB_NAMES, EQ_BAND_COUNT, EQ_HIGH_HZ, EQ_LOW_HZ, F0_MIN, FLOOR_DB, FRAME_RATE, HARMONIC_TAPER_END,
+    DB_NAMES, EQ_BAND_COUNT, EQ_HIGH_HZ, EQ_LOW_HZ, F0_MIN, FLOOR_DB, FRAME_RATE, HARMONIC_TAPER_END,
     HARMONIC_TAPER_START, HIGHER_POLES, HIGHER_POLE_BANDWIDTH, HIGHER_POLE_BANDWIDTH_STEP, HIGHER_POLE_SPACING,
     LF_HARMONICS, LF_RD_MAX, LF_RD_MIN, LF_RD_STEP, NAMES, NOISE_MODULATION, PARAMETERS, REF_RATE, SHELF_HZ
 } from './params.js';
@@ -70,16 +66,6 @@ export function frameValues(frame) {
         values[ix] = value === undefined || value === null ? PARAMETERS[ix].default : value;
     }
     return values;
-}
-
-
-// A frame's spectral correction gains (dB) - the values after the parameters of an array frame, or an object frame's
-// 'correction' - as a Float64Array, or null if it has none
-export function frameCorrection(frame) {
-    if (Array.isArray(frame) || ArrayBuffer.isView(frame)) {
-        return frame.length > NAMES.length ? Float64Array.from(frame.slice(NAMES.length)) : null;
-    }
-    return frame.correction === undefined || frame.correction === null ? null : Float64Array.from(frame.correction);
 }
 
 
@@ -245,20 +231,8 @@ function eqGain(eq, frequency) {
 }
 
 
-// The spectral correction's linear gain at a frequency, for band gains (dB) - interpolated linearly in dB over log frequency
-function correctionGain(correction, frequency) {
-    const bands = correction.length;
-    const step = Math.log(CORRECTION_HIGH_HZ / CORRECTION_LOW_HZ) / (bands - 1);
-    const position = Math.max(0, Math.min(bands - 1, Math.log(Math.max(1, frequency) / CORRECTION_LOW_HZ) / step));
-    const low = Math.min(bands - 2, Math.floor(position));
-    const weight = position - low;
-    return 10 ** ((correction[low] * (1 - weight) + correction[low + 1] * weight) / 20);
-}
-
-
-// A frame's complex harmonic amplitudes - {re, im} Float64Arrays indexed by harmonic number (1 ... count); correction is
-// the frame's spectral correction (dB), or null
-function harmonicAmplitudes(linear, filters, sampleRate, eq, correction = null) {
+// A frame's complex harmonic amplitudes - {re, im} Float64Arrays indexed by harmonic number (1 ... count)
+function harmonicAmplitudes(linear, filters, sampleRate, eq) {
     const av = linear[IX.av];
     const f0 = Math.max(F0_MIN, linear[IX.f0]);
     const count = av <= VOICING_MIN ? 0 : Math.min(LF_HARMONICS - 1, Math.floor(HARMONIC_TAPER_END * sampleRate / f0));
@@ -283,10 +257,7 @@ function harmonicAmplitudes(linear, filters, sampleRate, eq, correction = null) 
         const tractImag = tractIm;
         const shelfRe = biquad(filters.shelf, cos1, sin1, 2 * cos1 * cos1 - 1, 2 * sin1 * cos1);
         const shelfIm = biquadIm;
-        let scale = 2 * av * harmonicTaper(frequency, sampleRate) * eqGain(eq, frequency);
-        if (correction !== null) {
-            scale *= correctionGain(correction, frequency);
-        }
+        const scale = 2 * av * harmonicTaper(frequency, sampleRate) * eqGain(eq, frequency);
         const filterRe = scale * (tractRe * shelfRe - tractImag * shelfIm);
         const filterIm = scale * (tractRe * shelfIm + tractImag * shelfRe);
         const sourceRe = rowLow.re[kx] * (1 - weight) + rowHigh.re[kx] * weight;
@@ -370,17 +341,15 @@ export function createRenderer({sampleRate = 44100, seed = 1, onBlock = null, bl
         binEq[bin] = eqGain(eq, bin * sampleRate / fftSize);
     }
 
-    // The frames (values, linear values, and spectral corrections), and per-frame harmonic amplitudes, by absolute frame
-    // index
+    // The frames (values and linear values), and per-frame harmonic amplitudes, by absolute frame index
     const frames = [];
     const linears = [];
-    const corrections = [];
     let frameBase = 0;
     const amplitudes = new Map();
     const frameAmplitudes = (index) => {
         if (!amplitudes.has(index)) {
             const linear = linears[index - frameBase];
-            amplitudes.set(index, harmonicAmplitudes(linear, frameFilters(linear), sampleRate, eq, corrections[index - frameBase]));
+            amplitudes.set(index, harmonicAmplitudes(linear, frameFilters(linear), sampleRate, eq));
         }
         return amplitudes.get(index);
     };
@@ -518,18 +487,6 @@ export function createRenderer({sampleRate = 44100, seed = 1, onBlock = null, bl
         }
         const filters = frameFilters(linear);
 
-        // The spectral correction at the frame's center (interpolated in dB; a frame without one is 0 dB)
-        const correctionA = corrections[frameIndex - frameBase];
-        const correctionB = corrections[Math.min(frameIndex + 1, frameCount - 1) - frameBase];
-        let correction = null;
-        if (correctionA !== null || correctionB !== null) {
-            const bands = (correctionA ?? correctionB).length;
-            correction = new Float64Array(bands);
-            for (let band = 0; band < bands; band++) {
-                correction[band] = (correctionA?.[band] ?? 0) * (1 - weight) + (correctionB?.[band] ?? 0) * weight;
-            }
-        }
-
         // The windowed noise - aspiration (real) and frication (imaginary) in one transform
         const start = frameNumber * hop - half;
         let energyAspiration = 0;
@@ -575,11 +532,6 @@ export function createRenderer({sampleRate = 44100, seed = 1, onBlock = null, bl
                 gainFrication[bin] = binEq[bin] * Math.sqrt(sumRe * sumRe + sumIm * sumIm) * highpass;
             } else {
                 gainFrication[bin] = 0;
-            }
-            if (correction !== null) {
-                const gain = correctionGain(correction, bin * sampleRate / fftSize);
-                gainAspiration[bin] *= gain;
-                gainFrication[bin] *= gain;
             }
         }
 
@@ -636,7 +588,6 @@ export function createRenderer({sampleRate = 44100, seed = 1, onBlock = null, bl
         if (keepFrame - frameBase > 1024) {
             frames.splice(0, keepFrame - frameBase);
             linears.splice(0, keepFrame - frameBase);
-            corrections.splice(0, keepFrame - frameBase);
             for (const key of amplitudes.keys()) {
                 if (key < keepFrame) {
                     amplitudes.delete(key);
@@ -673,7 +624,6 @@ export function createRenderer({sampleRate = 44100, seed = 1, onBlock = null, bl
                 const values = frameValues(frame);
                 frames.push(values);
                 linears.push(linearValues(values));
-                corrections.push(frameCorrection(frame));
             }
             if (total === null) {
                 advance();

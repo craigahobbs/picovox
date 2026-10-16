@@ -39,14 +39,8 @@ formant order, smoothness, frication band) plus:
 Checkpoints and the log go to build/nn/runs/<name>/ (last.pt, best.pt - the lowest reader validation score,
 step-<n>.pt every --keep-every steps, log.jsonl).
 
-Architecture options (off by default - with none given, training is unchanged):
+Quantization-aware training (off by default - without it, training is unchanged):
 
-- --correction-bands K - the spectral correction head (nn/model.py correctionBands; --correction-range-db its bound): the
-  rendering applies its per-frame band gains (nn/dsynth.py), and two small penalties keep it smooth (--correction-smooth
-  - its first differences over time and second differences over bands, in units of the bound) and near 0 dB unless it
-  helps (--correction-l2). From a checkpoint without the head (--init), the head starts at 0 dB.
-- --encoder conv - the all-convolution encoder (nn/model.py encoder 'conv'); a model from scratch (an attention
-  checkpoint's encoder doesn't carry over)
 - --qat-bits B [--qat-group G] - quantization-aware training: the forward pass sees the weights fake-quantized as the
   export at B bits will quantize them (nn/quant.py; per row, or per group of G), with the straight-through estimator
 """
@@ -429,38 +423,18 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
     eq = model.eq(batch['speaker'])
     losses['eqSmooth'] = ((eq[:, 2:] - 2 * eq[:, 1:-1] + eq[:, :-2]) ** 2).mean() / 100
 
-    # The spectral correction's penalties - its first differences over time, second over bands (in units of its
-    # bound), and its mean square
-    correction = outputs.get('correction')
-    if correction is not None:
-        scaled = correction / model.config.get('correctionRangeDb', 12.0)
-        time_smooth = (((scaled[:, 1:] - scaled[:, :-1]) ** 2).mean(-1) * smooth_mask).sum() / smooth_mask.sum()
-        band_smooth = (((scaled[..., 2:] - 2 * scaled[..., 1:-1] + scaled[..., :-2]) ** 2).mean(-1) * frame_mask).sum() / frame_mask.sum()
-        losses['corrSmooth'] = time_smooth + band_smooth
-        losses['corrL2'] = ((scaled ** 2).mean(-1) * frame_mask).sum() / frame_mask.sum()
-
     # The spectral loss of the rendered crops, both band-limited to the recording's band
     render = render_values(model, unit, batch, teacher_f0=True)
-    crop_correction = None
-    if prepared is None and correction is None:
+    if prepared is None:
         crop_values, target = crop(render, batch, args.crop_frames, args.rate, rng)
         plan = None
     else:
-        if prepared is None:
-            starts, length = crop_starts(batch['items'], render.shape[1], args.crop_frames, rng)
-            target = torch.tensor(crop_audio(batch['corpus'], batch['items'], starts, length, args.rate), device=render.device)
-            plan = None
-        else:
-            starts, length = prepared['starts'], prepared['length']
-            target = batch['target']
-            plan = prepared['plan']
+        starts, length = prepared['starts'], prepared['length']
+        target = batch['target']
+        plan = prepared['plan']
         crop_values = torch.stack([render[ix, start:start + length + 1] for ix, start in enumerate(starts)])
-        if correction is not None:
-            render_correction = torch.cat([correction, correction[:, -1:]], dim=1)
-            crop_correction = torch.stack([render_correction[ix, start:start + length + 1] for ix, start in enumerate(starts)])
     # (the rendered F0 is the recording's - render_values's teacher F0 - so the synthesizer needn't differentiate in it)
-    audio = synth(crop_values, seed=[seed + ix for ix in range(len(batch['items']))], eq=eq, plan=plan, correction=crop_correction,
-                  constant_f0=True)
+    audio = synth(crop_values, seed=[seed + ix for ix in range(len(batch['items']))], eq=eq, plan=plan, constant_f0=True)
     target = target[:, :audio.shape[1]]
     cutoffs = [0.95 * item['bandwidth'] for item in batch['items']]
     audio = band_limit(audio, cutoffs, args.rate, batch.get('cutoffs'))
@@ -477,8 +451,6 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
              args.f0_weight * losses['f0'] + guide_weight * args.formant_weight * losses['formant'] + losses['order'] +
              args.smooth_weight * losses['smooth'] + losses['band'] + args.sonorant_frication * losses['sonorantAf'] +
              losses['eqSmooth'])
-    if correction is not None:
-        total = total + args.correction_smooth * losses['corrSmooth'] + args.correction_l2 * losses['corrL2']
     losses['total'] = total
     if with_values:
         return losses, audio, target, quality_stats(values.detach(), frame_mask), values
@@ -590,12 +562,6 @@ def argument_parser():
     parser.add_argument('--init', default=None, help='initialize the weights from a checkpoint')
     parser.add_argument('--init-critic', default=None, help='initialize the critic from a checkpoint\'s (with --adversarial)')
     parser.add_argument('--seed', type=int)
-    parser.add_argument('--correction-bands', type=int, default=0, help='the spectral correction head\'s bands (0: none)')
-    parser.add_argument('--correction-range-db', type=float, default=None, help='the spectral correction\'s bound (dB)')
-    parser.add_argument('--correction-smooth', type=float, default=1.0, help='the spectral correction\'s smoothness weight')
-    parser.add_argument('--correction-l2', type=float, default=0.01, help='the spectral correction\'s size penalty weight')
-    parser.add_argument('--encoder', choices=('attention', 'conv'), default='attention',
-                        help='the encoder - self-attention, or all-convolution (LightSpeech-style)')
     parser.add_argument('--qat-bits', type=int, default=0, help='quantization-aware training at this bit width (0: none)')
     parser.add_argument('--qat-group', type=int, default=0, help='QAT per-group scales of this many weights (0: per row)')
     parser.set_defaults(**recipe_defaults('teacher.defaults'))
@@ -648,12 +614,6 @@ def main(argv=None):
 
     # The model, the critic, and the optimizers
     config = {'speakers': len(speaker_keys), 'vocab': len(readers.data.index['vocab']), **json.loads(args.config)}
-    if args.correction_bands:
-        config['correctionBands'] = args.correction_bands
-        if args.correction_range_db is not None:
-            config['correctionRangeDb'] = args.correction_range_db
-    if args.encoder != 'attention':
-        config['encoder'] = args.encoder
     model = MultiModel(config, priors=MULTI_PRIORS, dropout=args.dropout).to(device)
     if args.init:
         state = torch.load(args.init, map_location=device, weights_only=False)

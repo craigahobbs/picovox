@@ -22,8 +22,6 @@ export const EQ_BAND_COUNT = 24;
 export const EQ_LOW_HZ = 60.0;
 export const EQ_HIGH_HZ = 16000.0;
 export const EQ_RANGE_DB = 30.0;
-export const CORRECTION_LOW_HZ = 100.0;
-export const CORRECTION_HIGH_HZ = 12000.0;
 
 // The parameters - {name, group, units, scale, low, high, default, doc}
 export const PARAMETERS = [

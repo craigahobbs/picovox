@@ -13,9 +13,6 @@
 // per-group) values with float16 scales per row or per group (nn/quant.py) - dequantized on load; the arithmetic is
 // float64.
 //
-// Architecture options (nn/model.py, in the manifest's config): correctionBands (the spectral correction head - each
-// frame gains correctionBands band gains (dB) after its parameters, which nn/js/render.js applies) and encoder 'conv'
-// (the all-convolution encoder - depthwise-separable convolution blocks in place of self-attention).
 // Long texts are spoken a sentence at a time (as the training data is - one or two sentences), each with its own <bos>.
 //
 // The multi-speaker, multi-style model (data/nn/multi - manifest kind 'multi', nn/model.py's MultiModel) takes a voice
@@ -41,9 +38,6 @@ const WORD = 3;
 const FIRST_PHONE = 9;
 const SENTENCE_ENDS = new Set(['<period>', '<question>', '<wh>', '<exclamation>']);
 const LAYER_NORM_EPS = 1e-5;
-
-// The spectral correction head's default bound (dB) - nn/model.py CORRECTION_RANGE_DB
-const CORRECTION_RANGE_DB = 12;
 
 
 // A float16 value (its bits) as a number
@@ -345,20 +339,6 @@ function selfAttention(model, prefix, input) {
 }
 
 
-// A depthwise-separable convolution block (the all-convolution encoder's) - x + PW(SiLU(DW(LN(x))))
-function sepConv(model, prefix, input) {
-    const normed = layerNorm(model, `${prefix}.norm`, input);
-    const convolved = silu(depthwiseConv(model, `${prefix}.depthwise`, normed));
-    return addRows(input, linear(model, `${prefix}.pointwise`, convolved));
-}
-
-
-// The encoder's context block - self-attention, or the all-convolution encoder's separable convolution
-function contextBlock(model, prefix, input) {
-    return model.config.encoder === 'conv' ? sepConv(model, prefix, input) : selfAttention(model, prefix, input);
-}
-
-
 // Round half to even (as torch.round)
 function roundHalfEven(value) {
     const rounded = Math.round(value);
@@ -507,7 +487,7 @@ function encode(model, ids, projections) {
         }
         for (let layer = 0; layer < 2 * model.config.encoderLayers; layer++) {
             const prefix = `encoder.${layer}`;
-            rows = layer % 2 === 0 ? convFFN(model, prefix, rows, projections.films[prefix]) : contextBlock(model, prefix, rows);
+            rows = layer % 2 === 0 ? convFFN(model, prefix, rows, projections.films[prefix]) : selfAttention(model, prefix, rows);
         }
         return layerNorm(model, 'encoder_norm', rows);
     }
@@ -520,7 +500,7 @@ function encode(model, ids, projections) {
         }
     }
     for (let layer = 0; layer < 2 * model.config.encoderLayers; layer++) {
-        rows = layer % 2 === 0 ? convFFN(model, `encoder.${layer}`, rows) : contextBlock(model, `encoder.${layer}`, rows);
+        rows = layer % 2 === 0 ? convFFN(model, `encoder.${layer}`, rows) : selfAttention(model, `encoder.${layer}`, rows);
     }
     return layerNorm(model, 'encoder_norm', rows);
 }
@@ -635,19 +615,15 @@ function* decodeChunks(model, features, durations, projections = null, chunkFram
     const count = NAMES.length;
     const jitterIx = NAMES.indexOf('jitter');
     const shimmerIx = NAMES.indexOf('shimmer');
-    // The spectral correction head's band gains (dB, after the parameters), if the model has one
-    const bands = config.correctionBands ?? 0;
-    const rangeDb = config.correctionRangeDb ?? CORRECTION_RANGE_DB;
     for (let start = 0; start < frameCount; start += chunkFrames) {
         const end = Math.min(frameCount, start + chunkFrames);
         ensureStream(layers, end);
         const normed = layerNorm(model, 'decoder_norm', rowRange(streams[layers].matrix, start, end));
         const logits = linear(model, 'head', normed);
-        const correction = bands > 0 ? linear(model, 'correction_head', normed) : null;
         const frames = [];
         for (let row = 0; row < logits.rows; row++) {
             for (let sub = 0; sub < config.subframes; sub++) {
-                const out = new Float64Array(count + bands);
+                const out = new Float64Array(count);
                 const base = row * logits.cols + sub * count;
                 for (let ix = 0; ix < count; ix++) {
                     const unit = 1 / (1 + Math.exp(-logits.data[base + ix]));
@@ -656,9 +632,6 @@ function* decodeChunks(model, features, durations, projections = null, chunkFram
                 }
                 out[jitterIx] = config.jitter;
                 out[shimmerIx] = config.shimmer;
-                for (let band = 0; band < bands; band++) {
-                    out[count + band] = rangeDb * Math.tanh(correction.data[row * correction.cols + sub * bands + band]);
-                }
                 frames.push(out);
             }
         }

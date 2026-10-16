@@ -147,10 +147,6 @@ function main() {
             const round = (value) => Math.round(value * 10000) / 10000;
             const rows = frames.map((frame) => Array.from(frame.subarray(0, NAMES.length), round));
             const data = {'frameRate': 200, 'names': NAMES, 'frames': rows, 'eq': spoken.eq, 'sentences': spoken.sentences};
-            // (a model with the spectral correction head - its band gains, dB, after each frame's parameters)
-            if (frames.length > 0 && frames[0].length > NAMES.length) {
-                data.correction = frames.map((frame) => Array.from(frame.subarray(NAMES.length), round));
-            }
             writeFileSync(item.params, JSON.stringify(data));
         }
         audioSeconds += Math.max(0, frames.length - 1) / 200;

@@ -46,8 +46,7 @@ def texts(count=None):
     return out[:count] if count else out
 
 
-# A voice's parameter frames for sentences with given durations (teacher-forced) - [T, COUNT] (or [T, COUNT + K] with the
-# spectral correction head) with the end frame
+# A voice's parameter frames for sentences with given durations (teacher-forced) - [T, COUNT] with the end frame
 def forced_values(voice, parts):
     chunks = []
     for part in parts:
@@ -55,8 +54,6 @@ def forced_values(voice, parts):
         with torch.no_grad():
             outputs = voice.model(tokens, torch.tensor([part['durations']]), **voice.condition())
             values = voice.model.parameters_from_unit(outputs['unit'])[0].numpy()
-            if 'correction' in outputs:
-                values = numpy.concatenate([values, outputs['correction'][0].numpy()], axis=-1)
             chunks.append(values)
     values = numpy.concatenate(chunks)
     return params.bandwidth_scale(numpy.concatenate([values, values[-1:]]), voice.bandwidth_scale)
@@ -101,10 +98,7 @@ def main(argv=None):
         for item in batch:
             with open(item['params'], encoding='utf-8') as file:
                 data = json.load(file)
-            frames = numpy.array(data['frames'], dtype=numpy.float64)
-            if 'correction' in data:
-                frames = numpy.concatenate([frames, numpy.array(data['correction'], dtype=numpy.float64)], axis=1)
-            js_frames.append(frames)
+            js_frames.append(numpy.array(data['frames'], dtype=numpy.float64))
             js_durations.append([duration for sentence in data['sentences'] for duration in sentence['durations']])
 
         # Speed - the panel texts rendered at 44.1 kHz
@@ -118,7 +112,6 @@ def main(argv=None):
     same_tokens = 0
     total_tokens = 0
     differences = []
-    correction_differences = []
     quant_same_tokens = 0
     quant_frame_ratio = []
     quant_differences = []
@@ -131,8 +124,6 @@ def main(argv=None):
         total_tokens += len(durations)
         if durations == js_durations[ix] and len(values) == len(js_frames[ix]):
             differences.append(numpy.abs(params.normalize(values) - params.normalize(js_frames[ix])))
-            if values.shape[1] > params.COUNT:
-                correction_differences.append(numpy.abs(values[:, params.COUNT:] - js_frames[ix][:, params.COUNT:]))
 
         # The quantization - durations, and the frames with the float model's durations (teacher-forced)
         float_values, float_parts = floating.frames(text)
@@ -155,9 +146,7 @@ def main(argv=None):
         'jsVsTorch': {
             'durationsSame': round(same_tokens / max(1, total_tokens), 5), 'utterancesCompared': len(differences),
             'maxAbsNormalized': float(stacked.max()), 'meanAbsNormalized': float(stacked.mean()),
-            'worstParameter': params.NAMES[int(stacked.max(axis=0).argmax())],
-            **({'correctionMaxAbsDb': float(numpy.concatenate(correction_differences).max()),
-                'correctionMeanAbsDb': float(numpy.concatenate(correction_differences).mean())} if correction_differences else {})
+            'worstParameter': params.NAMES[int(stacked.max(axis=0).argmax())]
         },
         'quantizedVsFloat': {
             'durationsSame': round(quant_same_tokens / max(1, total_tokens), 5),
