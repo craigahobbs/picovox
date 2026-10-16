@@ -68,7 +68,7 @@ import torch
 
 from .data import DATA_DIR, ArcticData
 from .export import export, load_model, token_remap, training_token_counts
-from .frontend import tokenize, vocabulary
+from .frontend import pronounce_texts, set_pronunciations, tokenize, vocabulary
 from .model import BOS, FIRST_PHONE, FIXED_NAMES, PAD, STYLE_NAMES, MultiModel, is_boundary, parameter_count
 from .synthesize import sentences
 from . import panel, params
@@ -233,7 +233,12 @@ def target_inputs(state, settings, remap, log):
     book_report = {}
     seen = set()
     sentence_list = []
-    with multiprocessing.Pool(min(8, os.cpu_count() or 1)) as pool:
+    # (the books' words pronounced once, in batches, for every worker - a worker pronouncing its own one at a time
+    # took minutes)
+    jobs = min(8, os.cpu_count() or 1)
+    pronunciations = pronounce_texts([paragraph for path in paths for paragraph in book_paragraphs(path)], jobs)
+    log(f'books: {len(paths)} books, {len(pronunciations)} distinct words pronounced')
+    with multiprocessing.Pool(jobs, initializer=set_pronunciations, initargs=(pronunciations,)) as pool:
         for number, (path, book) in enumerate(pool.imap(book_sentences, paths), 1):
             kept = 0
             for sentence in book:
@@ -316,6 +321,33 @@ def make_targets(args):
         batches.append(current)
     table = model.speaker.weight.detach()
     generate_start = time.time()
+    totals = {'tokens': 0, 'frames': 0}
+
+    # Write a batch's outputs (host copies made without blocking, ready after its event) - a batch behind the GPU, so
+    # the conversions and writes overlap the next batch's work on the device
+    def write_batch(number, batch, copies, event):
+        if event is not None:
+            event.synchronize()
+        duration_outputs, durations, unit = (copy.numpy() for copy in copies)
+        duration_outputs = duration_outputs.astype(numpy.float16)
+        unit = unit.astype(numpy.float16)
+        for row, index in enumerate(batch):
+            count = int(items['tokenCount'][index])
+            frame_count = int(durations[row, :count].sum())
+            items['tokenOffset'][index] = totals['tokens']
+            items['frameOffset'][index] = totals['frames']
+            items['frameCount'][index] = frame_count
+            files['tokens'].write(token_lists[index].astype('<i2').tobytes())
+            files['durations'].write(durations[row, :count].astype('<i2').tobytes())
+            files['durationOutputs'].write(duration_outputs[row, :count].astype('<f2').tobytes())
+            files['frames'].write(unit[row, :2 * frame_count].astype('<f2').tobytes())
+            totals['tokens'] += count
+            totals['frames'] += 2 * frame_count
+        if number % 200 == 0 or number == len(batches):
+            elapsed = time.time() - generate_start
+            log(f'teacher: {number}/{len(batches)} batches, {totals["frames"] / 2 / 100 / 3600:.1f} hours of speech, {elapsed:.0f} s')
+
+    previous = None
     with torch.no_grad():
         for number, batch in enumerate(batches, 1):
             length = int(items['tokenCount'][batch].max())
@@ -326,27 +358,21 @@ def make_targets(args):
             speaker_vector = blend_vectors(table, torch.tensor(record['speakerA'].astype(numpy.int64), device=device),
                                            torch.tensor(record['speakerB'].astype(numpy.int64), device=device),
                                            torch.tensor(record['blend'].astype(numpy.float32), device=device))
-            duration_outputs, durations, unit = teacher_outputs(
+            outputs = teacher_outputs(
                 model, torch.tensor(tokens, device=device), speaker_vector, torch.tensor(record['emotion'].astype(numpy.int64), device=device),
                 torch.tensor(record['intensity'].astype(numpy.float32), device=device))
-            duration_outputs = duration_outputs.float().cpu().numpy().astype(numpy.float16)
-            durations = durations.cpu().numpy()
-            unit = unit.float().cpu().numpy().astype(numpy.float16)
-            for row, index in enumerate(batch):
-                count = int(items['tokenCount'][index])
-                frame_count = int(durations[row, :count].sum())
-                items['tokenOffset'][index] = token_total
-                items['frameOffset'][index] = frame_total
-                items['frameCount'][index] = frame_count
-                files['tokens'].write(token_lists[index].astype('<i2').tobytes())
-                files['durations'].write(durations[row, :count].astype('<i2').tobytes())
-                files['durationOutputs'].write(duration_outputs[row, :count].astype('<f2').tobytes())
-                files['frames'].write(unit[row, :2 * frame_count].astype('<f2').tobytes())
-                token_total += count
-                frame_total += 2 * frame_count
-            if number % 200 == 0 or number == len(batches):
-                elapsed = time.time() - generate_start
-                log(f'teacher: {number}/{len(batches)} batches, {frame_total / 2 / 100 / 3600:.1f} hours of speech, {elapsed:.0f} s')
+            copies = [output.float().to('cpu', non_blocking=True) if output.is_floating_point() else output.to('cpu', non_blocking=True)
+                      for output in outputs]
+            event = None
+            if device.type == 'mps':
+                event = torch.mps.Event()
+                event.record()
+            if previous is not None:
+                write_batch(*previous)
+            previous = (number, batch, copies, event)
+        if previous is not None:
+            write_batch(*previous)
+    token_total, frame_total = totals['tokens'], totals['frames']
     for file in files.values():
         file.close()
     generate_seconds = time.time() - generate_start
@@ -780,11 +806,8 @@ def polish(args):
     directory = os.path.join(RUNS_DIR, f'distill-{name}')
     os.makedirs(directory, exist_ok=True)
     student_cfg = {key: value for key, value in state['config'].items() if key != 'kind'}
-    argv = ['--name', f'distill-{name}', '--init', init, '--init-critic', teacher, '--config', json.dumps(student_cfg),
-            '--steps', str(settings['steps']), '--lr', str(settings['lr']), '--warmup', str(settings['warmup']),
-            '--cremad', str(settings['cremad']), '--adversarial', str(settings['adversarial']),
-            '--feature-matching', str(settings['featureMatching']), '--adversarial-start', str(settings['adversarialStart']),
-            '--guide-steps', str(settings['guideSteps']), '--val-every', str(settings['valEvery']), '--keep-every', '0']
+    argv = ['--name', f'distill-{name}', '--recipe-file', args.config, '--recipe', 'distill.polish', '--init', init, '--init-critic', teacher,
+            '--config', json.dumps(student_cfg), '--steps', str(settings['steps'])]
     if args.device:
         argv += ['--device', args.device]
     log_line('students', f'{name}: polishing {init} - {settings["steps"]} steps of the real-audio losses')

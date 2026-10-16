@@ -70,7 +70,9 @@ TRAIN_DIR ?= build/train
 NN_PYTHON := build/venv-nn/bin/python -B
 LISTENERS_PYTHON := build/venv-listeners/bin/python -B
 TRAIN_ENV := NN_DATA_DIR=$(TRAIN_DIR)/data NN_RUNS_DIR=$(TRAIN_DIR)/runs NN_DISTILL_DIR=$(TRAIN_DIR)/distill
-GPU := $(NN_PYTHON) -m nn.gpulock $(TRAIN_DIR)/gpu.lock --
+# (the GPU stages hold the GPU lock and use two CPU threads - more don't speed a step, and the CPU stages beside them
+# would oversubscribe the cores)
+GPU := OMP_NUM_THREADS=2 $(NN_PYTHON) -m nn.gpulock $(TRAIN_DIR)/gpu.lock --
 TRAIN_RUNS := $(TRAIN_DIR)/runs
 
 .PHONY: train

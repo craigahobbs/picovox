@@ -257,7 +257,9 @@ checkout, by one recipe, `data/nn/train.json` (every stage's settings and seeds)
 | student-eval - the panel and the gate (`nn.distill pick`: within the tolerance) | CPU | polish, teacher-eval |
 | package - `lib/models/voiceModel.js`, with its provenance | CPU | student-eval |
 
-The voice data is built with the committed G2P, so the G2P retrain is off the critical path; if the retrained G2P
+The critical path - the readers' data, teacher A (~22 minutes) and B (~60), the targets (~9), the student (~11) and
+its polish (~9), the gate, the package - takes about 2 hours on an M3 Max (the corpora downloaded once before). The
+voice data is built with the committed G2P, so the G2P retrain is off the critical path; if the retrained G2P
 differs, its stage updates `lib/models/g2pModel.js` and fails, and `make train` again rebuilds the data with it. The
 package's manifest records its provenance: the commit, the recipe's and the training data's hashes, and the gate's
 scores. `python -m nn.smoke` runs every stage's entry point for a few steps on the CPU.

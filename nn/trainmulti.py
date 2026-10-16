@@ -277,8 +277,8 @@ def crop(values, batch, crop_frames, rate, rng):
 # Low-pass audio [B, N] at a cutoff per item (Hz) - zeroing the FFT bins above it (so the magnitude spectra of the
 # losses and the critic take a small epsilon - a magnitude of exactly zero has an infinite gradient); cutoff_tensor is
 # the cutoffs as a float32 tensor on the audio's device, if the caller has it
-# The spectral loss compiled - on MPS its elementwise work fused into a few kernels (the gradient within rounding of the
-# eager loss's, 143 dB); on the CPU the eager loss (bit-exact)
+# The spectral loss compiled - on MPS its elementwise work fused into a few kernels (8-13% of a stage-A step; the
+# gradient within rounding of the eager loss's, 143 dB)
 compiled_spectral_loss = torch.compile(spectral_loss)
 
 
@@ -548,7 +548,8 @@ def argument_parser():
     parser = argparse.ArgumentParser(prog='python -m nn.trainmulti', description='Train the multi-speaker, multi-style model')
     # (the training settings' defaults are the recipe's teacher.defaults)
     parser.add_argument('--name', required=True)
-    parser.add_argument('--recipe', help='the settings of a section of data/nn/train.json (teacher.a), flags overriding them')
+    parser.add_argument('--recipe', help='the settings of a section of the recipe (teacher.a), flags overriding them')
+    parser.add_argument('--recipe-file', default=RECIPE_PATH, help='the recipe (default data/nn/train.json)')
     parser.add_argument('--steps', type=int, help='the learning rate schedule\'s steps')
     parser.add_argument('--stop', type=int, default=None, help='stop after this many steps (default: --steps)')
     parser.add_argument('--batch', type=int)
@@ -612,9 +613,10 @@ def default_settings(**overrides):
 
 def main(argv=None):
     parser = argument_parser()
-    recipe = parser.parse_known_args(argv)[0].recipe
-    if recipe:
-        parser.set_defaults(**recipe_defaults(recipe))
+    known = parser.parse_known_args(argv)[0]
+    parser.set_defaults(**recipe_defaults('teacher.defaults', known.recipe_file))
+    if known.recipe:
+        parser.set_defaults(**recipe_defaults(known.recipe, known.recipe_file))
     args = parser.parse_args(argv)
     args.crop_frames = int(round(args.crop * params.FRAME_RATE))
     stop = min(args.stop or args.steps, args.steps)
