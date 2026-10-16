@@ -11,6 +11,7 @@ directory that nn/data.py's ArcticData loads.
     build/venv-nn/bin/python -B -m nn.multi settings                # 2. per-speaker analysis settings (about 5 minutes)
     build/venv-nn/bin/python -B -m nn.multi pool                    # 3. the accent filter and the pool (a report)
     build/venv-nn/bin/python -B -m nn.multi build -j 8              # 4. build/nn/data/multi/ (about 6 minutes on 14 cores)
+    build/venv-nn/bin/python -B -m nn.multi build --pool data/nn/speakers.json   # 4 alone: the committed pool (no 1-3)
     build/venv-nn/bin/python -B -m nn.multi verify-tokens           # nn/js/tokens.js == nn/frontend.py on the pool texts
     build/venv-nn/bin/python -B -m nn.multi stats                   # the pool's speakers, hours, and match rates
     build/venv-nn/bin/python -B -m nn.multi listen                  # UTMOS per speaker -> data/nn/speakers.json
@@ -332,6 +333,22 @@ def select_pool(speakers, accents, settings, hours):
     return kept, rows
 
 
+# The pool of a speaker table (data/nn/speakers.json, which records each kept speaker's accent and analysis settings) -
+# (the kept speakers in id order, their rows as select_pool gives them), so a build needn't classify accents or measure
+# settings again
+def table_pool(path):
+    table = sorted(load_json(path, None)['speakers'], key=lambda row: row['id'])
+    rows = []
+    for row in table:
+        accent = row['accent']
+        rows.append({'key': row['key'], 'keep': True,
+                     'accent': {'top': accent['top'], 'posterior': {'us': accent['us'], 'canada': accent['canada']},
+                                'votes': accent['votes']} if accent else None,
+                     'settings': {'pitchFloor': row['pitchFloor'], 'pitchCeiling': row['pitchCeiling'],
+                                  'formantCeiling': row['formantCeiling'], 'erF3Ratio': row['erF3Ratio']}})
+    return [row['key'] for row in rows], rows
+
+
 # Print the accent distribution and the pool, per sex
 def pool_command(_args):
     speakers = candidate_speakers()
@@ -390,11 +407,14 @@ def build_command(args):
     start_time = time.time()
     out_dir = args.out or OUT_DIR
     speakers = candidate_speakers()
-    accents = load_json(ACCENT_PATH, {})
-    settings = load_json(SETTINGS_PATH, {})
-    hours = {key: speaker_hours(speaker['utterances']) for key, speaker in speakers.items()}
-    kept, rows = select_pool(speakers, accents, settings, hours)
-    write_json(os.path.join(MULTI_DIR, 'pool.json'), [{key: value for key, value in row.items() if key != 'settings'} for row in rows])
+    if args.pool:
+        kept, rows = table_pool(args.pool)
+    else:
+        accents = load_json(ACCENT_PATH, {})
+        settings = load_json(SETTINGS_PATH, {})
+        hours = {key: speaker_hours(speaker['utterances']) for key, speaker in speakers.items()}
+        kept, rows = select_pool(speakers, accents, settings, hours)
+        write_json(os.path.join(MULTI_DIR, 'pool.json'), [{key: value for key, value in row.items() if key != 'settings'} for row in rows])
     if args.speakers:
         kept = [key for key in kept if key in args.speakers]
     row_of = {row['key']: row for row in rows}
@@ -788,6 +808,7 @@ def main(argv=None):
     build_parser.add_argument('--limit', type=int, help='at most this many utterances per speaker (a quick test)')
     build_parser.add_argument('-j', '--jobs', type=int, default=None, help='worker processes (default: all cores)')
     build_parser.add_argument('--out', help='the corpus directory (default: build/nn/data/multi/, its tables in data/nn/)')
+    build_parser.add_argument('--pool', help='the pool from a speaker table (data/nn/speakers.json) - no accents or settings needed')
     verify_parser = commands.add_parser('verify-tokens', help='check nn/js/tokens.js against nn/frontend.py on the pool texts')
     verify_parser.add_argument('--out', help='the corpus directory (default: build/nn/data/multi/)')
     verify_parser.add_argument('-j', '--jobs', type=int, default=None, help='worker processes (default: all cores)')

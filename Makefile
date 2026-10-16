@@ -95,15 +95,10 @@ $(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/corpora.done
 	$(NN_PYTHON) -m nn.heteronyms --out $(TRAIN_DIR)/heteronyms -j 4 --check data/nn/g2p-relabel.json
 	touch $@
 
-# The reader pool - accents and per-speaker analysis settings (CPU)
-$(TRAIN_DIR)/pool.done: $(TRAIN_DIR)/corpora.done | build/venv-listeners.build
-	$(LISTENERS_PYTHON) -m nn.accent
-	$(NN_PYTHON) -m nn.multi settings
-	touch $@
-
-# The training data - the readers (CPU, every core) and the emotional speech (its alignment on the GPU)
-$(TRAIN_DIR)/data-multi.done: $(TRAIN_DIR)/pool.done lib/models/g2pModel.js
-	$(TRAIN_ENV) $(NN_PYTHON) -m nn.multi build --out $(TRAIN_DIR)/data/multi
+# The training data - the readers (CPU, every core; the pool and its analysis settings are data/nn/speakers.json's) and
+# the emotional speech (its alignment on the GPU)
+$(TRAIN_DIR)/data-multi.done: $(TRAIN_DIR)/corpora.done lib/models/g2pModel.js data/nn/speakers.json
+	$(TRAIN_ENV) $(NN_PYTHON) -m nn.multi build --out $(TRAIN_DIR)/data/multi --pool data/nn/speakers.json
 	touch $@
 
 $(TRAIN_DIR)/cremad-align.done: $(TRAIN_DIR)/corpora.done | build/venv-listeners.build

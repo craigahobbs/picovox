@@ -249,8 +249,7 @@ checkout, by one recipe, `data/nn/train.json` (every stage's settings and seeds)
 | corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D | network | |
 | g2p - the G2P retrain, checked to reproduce `lib/models/g2pModel.js` | 1 CPU core, ~30 min | |
 | heteronyms - the relabeled words, checked to reproduce `data/nn/g2p-relabel.json` | CPU, ~6 min | corpora |
-| pool - the readers' accents and analysis settings | CPU | corpora |
-| data-multi - the readers' training data | CPU (every core) | pool, `lib/models/g2pModel.js` |
+| data-multi - the readers' training data (the pool: `data/nn/speakers.json`) | CPU (every core) | corpora, `lib/models/g2pModel.js` |
 | cremad-align, data-cremad - the emotional speech | GPU 2 min, CPU 1 min | corpora |
 | teacher-a, teacher-b - the teacher (`nn.trainmulti --recipe teacher.a`, `teacher.b`) | GPU | the data |
 | teacher-eval - the teacher through the listener panel | CPU | teacher-b |
