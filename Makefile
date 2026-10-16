@@ -84,6 +84,10 @@ $(TRAIN_DIR)/corpora.done: | build/venv-analysis.build build/venv-nn.build
 	$(NN_PYTHON) -m nn.cremad fetch
 	@mkdir -p $(@D) && touch $@
 
+# The CPU-only checks (the G2P chain, the heteronym relabeling) are scheduled after the readers' data build (order-only
+# prerequisites) - into the teacher's GPU-bound hours, when the cores are idle - not competing with the data build on
+# the critical path; the G2P network itself needs no corpora, so it runs during their download.
+#
 # The G2P (CPU) - a check beside the voice stages, which use the committed lib/models/g2pModel.js: the network's four
 # stages (one core, deterministic), the heteronym context labels (the books fetched by id; part-of-speech tags in
 # build/venv-pos), the reading stage and the context network (two threads each), the export to $(TRAIN_DIR), the
@@ -95,7 +99,7 @@ $(TRAIN_DIR)/g2p-network.done: data/nn/train.json data/nn/g2p-words.json data/nn
 	@mkdir -p $(@D) && touch $@
 
 $(TRAIN_DIR)/context-labels.done: $(TRAIN_DIR)/corpora.done data/nn/train.json data/nn/context-labels.json \
-		data/nn/heteronyms-test.json | build/venv-nn.build build/venv-pos.build
+		data/nn/heteronyms-test.json | build/venv-nn.build build/venv-pos.build $(TRAIN_DIR)/data-multi.done
 	$(NN_PYTHON) -m nn.contextlabels books
 	$(NN_PYTHON) -m nn.contextlabels aligned --out $(TRAIN_DIR)/context -j 3
 	build/venv-pos/bin/python -B -m nn.contextlabels tag --out $(TRAIN_DIR)/context -j 3
@@ -116,7 +120,7 @@ $(TRAIN_DIR)/g2p.done: $(TRAIN_DIR)/g2p-network.done $(TRAIN_DIR)/context-labels
 
 
 # The heteronym relabeling (CPU) - it must reproduce data/nn/g2p-relabel.json's words
-$(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/corpora.done
+$(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/corpora.done | $(TRAIN_DIR)/data-multi.done
 	$(NN_PYTHON) -m nn.heteronyms --out $(TRAIN_DIR)/heteronyms -j 4 --check data/nn/g2p-relabel.json
 	touch $@
 
