@@ -36,8 +36,9 @@ formant order, smoothness, frication band) plus:
   to flat static
 - a smoothness penalty on each speaker's channel equalizer (its second differences), so blended curves stay smooth
 
-Checkpoints and the log go to build/nn/runs/<name>/ (last.pt, best.pt - the lowest reader validation score,
-step-<n>.pt every --keep-every steps, log.jsonl).
+Checkpoints and the log go to build/nn/runs/<name>/ (last.pt every --save-every steps, best.pt - the lowest reader
+validation score, validated every --val-every steps from --val-from and at the end, step-<n>.pt every --keep-every steps,
+log.jsonl).
 
 Quantization-aware training (off by default - without it, training is unchanged):
 
@@ -553,7 +554,10 @@ def argument_parser():
     parser.add_argument('--critic-lr', type=float)
     parser.add_argument('--critic-precision', choices=['float32', 'bfloat16', 'float16'],
                         help="the critic's convolutions' precision")
+    parser.add_argument('--critic-channels', type=int, default=32, help="the critic's convolutions' width")
     parser.add_argument('--val-every', type=int, default=1000)
+    parser.add_argument('--val-from', type=int, default=0, help='validate (every --val-every steps) from this step on')
+    parser.add_argument('--save-every', type=int, default=1000, help='save last.pt every this many steps (and at validations)')
     parser.add_argument('--val-count', type=int, help='reader validation utterances')
     parser.add_argument('--log-every', type=int, default=50)
     parser.add_argument('--keep-every', type=int, default=5000, help='keep step-<n>.pt every this many steps (0: none)')
@@ -623,7 +627,7 @@ def main(argv=None):
     critic = None
     if args.adversarial > 0:
         critic_dtype = None if args.critic_precision == 'float32' else getattr(torch, args.critic_precision)
-        critic = discriminator.Critic(args.rate, args.max_hz, eps=1e-9, dtype=critic_dtype).to(device)
+        critic = discriminator.Critic(args.rate, args.max_hz, eps=1e-9, dtype=critic_dtype, channels=args.critic_channels).to(device)
         if args.init_critic:
             critic.load_state_dict(torch.load(args.init_critic, map_location=device, weights_only=False)['critic'])
             print(f'critic init from {args.init_critic}', file=sys.stderr)
@@ -777,7 +781,13 @@ def main(argv=None):
             log.write(json.dumps({'train': row}) + '\n')
             log.flush()
             sums, sum_counts = {}, {}
-        if step % args.val_every == 0 or step == stop:
+        # Validation (every --val-every steps from --val-from, and the last step) - the best checkpoint is the lowest
+        # reader score; last.pt every --save-every steps and at each validation; step-<n>.pt every --keep-every steps.
+        # (Validation draws from no training random state - its own rng, eval mode, the synthesizer's seeded noise - so
+        # the schedule doesn't change the training.)
+        validating = step == stop or (step % args.val_every == 0 and step >= args.val_from)
+        extra = None
+        if validating:
             results = {name: validate(model, synth, corpus_set, args, device, sonorants) for name, corpus_set in val_sets.items()}
             result = dict(results['multi'])
             for name, other in results.items():
@@ -786,12 +796,14 @@ def main(argv=None):
             print('  VAL ' + ' '.join(f'{key} {value:.4g}' for key, value in result.items()), file=sys.stderr, flush=True)
             log.write(json.dumps({'val': {'step': step, **result}}) + '\n')
             log.flush()
+            extra = {'val': result}
             if result['score'] < best:
                 best = result['score']
-                save(os.path.join(directory, 'best.pt'), {'val': result})
-            save(os.path.join(directory, 'last.pt'), {'val': result})
-            if args.keep_every and step % args.keep_every == 0:
-                save(os.path.join(directory, f'step-{step}.pt'), {'val': result})
+                save(os.path.join(directory, 'best.pt'), extra)
+        if validating or (args.save_every and step % args.save_every == 0):
+            save(os.path.join(directory, 'last.pt'), extra)
+        if args.keep_every and step % args.keep_every == 0:
+            save(os.path.join(directory, f'step-{step}.pt'), extra)
     prefetcher.close()
     log.close()
     return 0

@@ -108,15 +108,15 @@ class SpectrogramDiscriminator(torch.nn.Module):
 class Critic(torch.nn.Module):
     """Spectrogram discriminators at several resolutions; dtype (torch.bfloat16 or torch.float16) runs their
     convolutions in that precision (autocast - the spectrograms, the weights, and the scores stay float32; the
-    intermediate features stay in that precision until generator_losses uses them)"""
+    intermediate features stay in that precision until generator_losses uses them); channels is each convolution's width"""
 
-    def __init__(self, sample_rate, max_hz, eps=0.0, dtype=None):
+    def __init__(self, sample_rate, max_hz, eps=0.0, dtype=None, channels=32):
         super().__init__()
         self.dtype = dtype
         self.discriminators = torch.nn.ModuleList([
-            SpectrogramDiscriminator(sample_rate, 1024, 80, max_hz, eps=eps),
-            SpectrogramDiscriminator(sample_rate, 512, 64, max_hz, eps=eps),
-            SpectrogramDiscriminator(sample_rate, 256, 32, max_hz, eps=eps)
+            SpectrogramDiscriminator(sample_rate, 1024, 80, max_hz, channels=channels, eps=eps),
+            SpectrogramDiscriminator(sample_rate, 512, 64, max_hz, channels=channels, eps=eps),
+            SpectrogramDiscriminator(sample_rate, 256, 32, max_hz, channels=channels, eps=eps)
         ])
 
     def spectrograms(self, audio):
