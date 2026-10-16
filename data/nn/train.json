@@ -66,17 +66,8 @@
             {"name": "s48", "config": {"dim": 48, "decoderDim": 48, "encoderLayers": 2, "decoderLayers": 4}},
             {"name": "s32", "config": {"dim": 32, "decoderDim": 32, "encoderLayers": 2, "decoderLayers": 3}}
         ],
-        "polish": {
-            "steps": 2000,
-            "lr": 0.0002,
-            "warmup": 200,
-            "cremad": 0.2,
-            "adversarial": 0.1,
-            "featureMatching": 1.0,
-            "adversarialStart": 200,
-            "guideSteps": 0.001,
-            "valEvery": 500
-        },
+        "polish": {"steps": 2000, "lr": 0.0002, "warmup": 200, "cremad": 0.2, "adversarial": 0.1, "feature-matching": 1.0,
+                   "adversarial-start": 200, "guide-steps": 0.001, "val-every": 500, "keep-every": 0},
         "eval": {
             "speakers": [["arctic-slt", "female"], ["libritts-5895", "female"], ["libritts-6345", "female"],
                          ["arctic-bdl", "male"], ["libritts-5750", "male"], ["libritts-2843", "male"]],
