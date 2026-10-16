@@ -16,7 +16,7 @@ from . import params, spectral
 from .model import BOS, FIRST_PHONE, PAD, is_boundary
 
 
-# Parameter priors per speaker (the analysis-by-synthesis fits' medians, nn/fit.py) - the head's starting point
+# Parameter priors per speaker (the analysis-by-synthesis fits' medians - the former nn/fit.py) - the head's starting point
 PRIORS = {
     'slt': {'f0': 185, 'av': -30, 'rd': 1.0, 'shelf': 10, 'ah': -65, 'af': -50, 'f1': 600, 'f2': 1800, 'f3': 3000, 'f4': 4100,
             'f5': 5100, 'f6': 5900, 'b1': 150, 'b2': 180, 'b3': 200, 'b4': 220, 'b5': 300, 'b6': 320, 'fnp': 260, 'bnp': 100,

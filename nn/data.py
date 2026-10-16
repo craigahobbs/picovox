@@ -126,7 +126,7 @@ def arctic_utterances(speaker):
     prompts = read_prompts(os.path.join(directory, 'etc', 'txt.done.data'))
     utterances = []
     for name in sorted(os.listdir(os.path.join(directory, 'wav'))):
-        # Only the recordings (nn/evaluate.py caches whisper.cpp transcripts beside them)
+        # Only the recordings (earlier evaluations cached whisper.cpp transcripts beside them)
         if not name.endswith('.wav'):
             continue
         sentence = os.path.splitext(name)[0]
