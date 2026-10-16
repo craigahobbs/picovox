@@ -49,7 +49,7 @@ from .frontend import BOUNDARIES, PHRASE_ENDS, ROOT, WORD, pronounce_texts, set_
 
 CORPORA_DIR = os.path.join(ROOT, 'data', 'corpora')
 ARCTIC_DIR = os.path.join(CORPORA_DIR, 'arctic')
-DATA_DIR = os.path.join(ROOT, 'build', 'nn', 'data')
+DATA_DIR = os.environ.get('NN_DATA_DIR', os.path.join(ROOT, 'build', 'nn', 'data'))
 SPLIT_PATH = os.path.join(ROOT, 'data', 'nn', 'arctic-split.json')
 
 # The format

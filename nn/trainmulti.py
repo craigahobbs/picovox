@@ -5,9 +5,11 @@
 Training the multi-speaker, multi-style model (nn/model.py's MultiModel) - nn/train.py's end-to-end training through
 the differentiable synthesizer, over many speakers and the emotional styles:
 
-    build/venv-nn/bin/python -B -m nn.trainmulti --name multi-a --steps 30000
-    build/venv-nn/bin/python -B -m nn.trainmulti --name multi-b --init build/nn/runs/multi-a/last.pt --cremad 0.2 \
-        --adversarial 0.1 --steps 30000
+    build/venv-nn/bin/python -B -m nn.trainmulti --name multi-a --recipe teacher.a
+    build/venv-nn/bin/python -B -m nn.trainmulti --name multi-b --recipe teacher.b --init build/nn/runs/multi-a/last.pt
+
+--recipe takes the settings of a section of make train's recipe (data/nn/train.json - its keys are the flags), and
+flags given override them.
 
 The corpora (nn/data.py's format, memory-mapped - the audio is read a crop at a time):
 
@@ -72,6 +74,9 @@ from .train import F_INDEX, PRIORS, RUNS_DIR, duration_loss, f0_track, render_va
 
 # The data's sample rate
 SOURCE_RATE = 24000
+
+# make train's recipe
+RECIPE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'nn', 'train.json')
 
 # The most training steps the CPU runs ahead of the GPU (MPS)
 IN_FLIGHT = 2
@@ -513,10 +518,21 @@ def validate(model, synth, corpus, args, device, sonorants):
     return result
 
 
+# The settings of a section of the recipe (data/nn/train.json; "teacher.a" - a dotted path) as argparse defaults
+def recipe_defaults(section, path=RECIPE_PATH):
+    with open(path, encoding='utf-8') as file:
+        settings = json.load(file)
+    for key in section.split('.'):
+        settings = settings[key]
+    return {key.replace('-', '_'): value for key, value in settings.items() if key != 'description'}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='python -m nn.trainmulti', description='Train the multi-speaker, multi-style model')
     parser.add_argument('--name', required=True)
-    parser.add_argument('--steps', type=int, default=30000)
+    parser.add_argument('--recipe', help='the settings of a section of data/nn/train.json (teacher.a), flags overriding them')
+    parser.add_argument('--steps', type=int, default=30000, help='the learning rate schedule\'s steps')
+    parser.add_argument('--stop', type=int, default=None, help='stop after this many steps (default: --steps)')
     parser.add_argument('--batch', type=int, default=16)
     parser.add_argument('--max-frames', type=int, default=16000, help='the most padded 10 ms frames in a batch')
     parser.add_argument('--crop', type=float, default=2.0, help='the rendered crop (seconds)')
@@ -563,8 +579,12 @@ def main(argv=None):
                         help='the encoder - self-attention, or all-convolution (LightSpeech-style)')
     parser.add_argument('--qat-bits', type=int, default=0, help='quantization-aware training at this bit width (0: none)')
     parser.add_argument('--qat-group', type=int, default=0, help='QAT per-group scales of this many weights (0: per row)')
+    recipe = parser.parse_known_args(argv)[0].recipe
+    if recipe:
+        parser.set_defaults(**recipe_defaults(recipe))
     args = parser.parse_args(argv)
     args.crop_frames = int(round(args.crop * params.FRAME_RATE))
+    stop = min(args.stop or args.steps, args.steps)
     directory = os.path.join(RUNS_DIR, args.name)
     os.makedirs(directory, exist_ok=True)
     torch.manual_seed(args.seed)
@@ -677,7 +697,7 @@ def main(argv=None):
     # GPU is past its step (an event after it): on MPS the steps don't read the device (the synthesizer finishes its
     # plans made ahead there), so the CPU runs up to IN_FLIGHT steps ahead of the GPU
     in_flight = collections.deque()
-    while step < args.steps:
+    while step < stop:
         prepared = prefetcher.next()
         corpus = prepared['corpusName']
         batch = upload(prepared['batch'], device)
@@ -762,7 +782,7 @@ def main(argv=None):
             log.write(json.dumps({'train': row}) + '\n')
             log.flush()
             sums, sum_counts = {}, {}
-        if step % args.val_every == 0 or step == args.steps:
+        if step % args.val_every == 0 or step == stop:
             results = {name: validate(model, synth, corpus_set, args, device, sonorants) for name, corpus_set in val_sets.items()}
             result = dict(results['multi'])
             for name, other in results.items():

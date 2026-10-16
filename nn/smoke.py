@@ -84,10 +84,10 @@ def main(argv=None):
     common = ['--device', 'cpu', '--batch', '4', '--val-count', '4', '--keep-every', '0', '--log-every', '1']
     teacher = os.path.join(runs, 'smoke-b', 'last.pt')
     if 'teacher' in stages:
-        if run('teacher-a', ['nn.trainmulti', '--name', 'smoke-a', '--steps', '3', '--val-every', '3'] + common,
+        if run('teacher-a', ['nn.trainmulti', '--name', 'smoke-a', '--recipe', 'teacher.a', '--steps', '3', '--val-every', '3'] + common,
                [os.path.join(runs, 'smoke-a', 'last.pt')]):
-            run('teacher-b', ['nn.trainmulti', '--name', 'smoke-b', '--init', os.path.join(runs, 'smoke-a', 'last.pt'), '--steps', '3',
-                              '--val-every', '3', '--cremad', '0.5', '--adversarial', '0.1', '--adversarial-start', '1'] + common,
+            run('teacher-b', ['nn.trainmulti', '--name', 'smoke-b', '--recipe', 'teacher.b', '--init', os.path.join(runs, 'smoke-a', 'last.pt'),
+                              '--steps', '3', '--val-every', '3', '--adversarial-start', '1'] + common,
                 [teacher])
 
     student = os.path.join(runs, 'distill-s32-polish', 'best.pt')
@@ -96,14 +96,14 @@ def main(argv=None):
         os.makedirs(books, exist_ok=True)
         with open(os.path.join(books, 'book.txt'), 'w', encoding='utf-8') as file:
             file.write(BOOK_TEXT)
-        with open(os.path.join(ROOT, 'data', 'nn', 'distill.json'), encoding='utf-8') as file:
-            config = json.load(file)
-        config['targets'].update({'books': books, 'valItems': 4})
-        config['train'].update({'batch': 8, 'valEvery': 3})
-        config['polish'].update({'valEvery': 2})
-        config_path = os.path.join(out, 'distill.json')
+        with open(os.path.join(ROOT, 'data', 'nn', 'train.json'), encoding='utf-8') as file:
+            recipe = json.load(file)
+        recipe['distill']['targets'].update({'books': books, 'valItems': 4})
+        recipe['distill']['train'].update({'batch': 8, 'valEvery': 3})
+        recipe['distill']['polish'].update({'valEvery': 2})
+        config_path = os.path.join(out, 'train.json')
         with open(config_path, 'w', encoding='utf-8') as file:
-            json.dump(config, file)
+            json.dump(recipe, file)
         targets = os.path.join(out, 'targets')
         distill = ['--config', config_path, '--device', 'cpu']
         if run('distill-targets', ['nn.distill', 'targets', '--teacher', teacher, '--out', targets, '--limit', '32'] + distill,

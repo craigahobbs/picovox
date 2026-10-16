@@ -844,7 +844,7 @@ def print_emotion_summary(summary):
 # Build - build/nn/data/cremad/ in nn/data.py's format, with style labels
 #
 
-DATA_DIR = os.path.join(ROOT, 'build', 'nn', 'data', 'cremad')
+DATA_DIR = os.path.join(os.environ.get('NN_DATA_DIR', os.path.join(ROOT, 'build', 'nn', 'data')), 'cremad')
 SUMMARY_PATH = os.path.join(ROOT, 'data', 'nn', 'cremad.json')
 FORMANT_CEILINGS = {'female': 5500, 'male': 5000}
 

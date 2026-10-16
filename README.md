@@ -241,8 +241,8 @@ Fred 0.57 (a shared formant-synthesis signature), every human pair 0.0-0.48, and
 
 Each retrain of the multi-speaker acoustic model ends the same way: train a big teacher, then distill small students
 from it and ship the smallest one that keeps the teacher's quality. `nn/distill.py` runs that pipeline, with its
-settings in `data/nn/distill.json` (the teacher, the distillation set, the training settings, the student ladder, the
-polish, the evaluation speakers, and the tolerance):
+settings in `data/nn/train.json`'s `distill` (the teacher, the distillation set, the training settings, the student
+ladder, the polish, the evaluation speakers, and the tolerance):
 
 ```sh
 build/venv-nn/bin/python -B -m nn.distill ladder                  # everything below, in order

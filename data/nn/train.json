@@ -1,5 +1,5 @@
 {
-    "description": "The shipped recipe of make train - every stage's settings and seeds",
+    "description": "make train's recipe - every stage's settings and seeds: the G2P network (nn/g2p.py), the teacher (nn/trainmulti.py --recipe), and the distilled student with its evaluation and gate (nn/distill.py, nn/panel.py)",
     "g2p": {
         "description": "The G2P network (nn/g2p.py): the AR encoder-decoder trained on every dictionary word, frequency-weighted, with teacher-labeled unknown words, in four stages (base, two polishes over the most frequent words, then the readers' pronunciations of the relabeled words - focus), exported at 6 bits",
         "model": {"embed": 32, "hidden": 96},
@@ -16,5 +16,73 @@
              "relabel": "data/nn/g2p-relabel.json", "focusBoost": {"share": 0.02}}
         ],
         "export": {"bits": 6, "groupSize": 0, "biasBits": 8}
+    },
+    "teacher": {
+        "description": "The teacher (nn/trainmulti.py --recipe teacher.a, then teacher.b): stage A on the readers (the 30,000-step schedule, stopped at 15,000), then stage B from A's weights with the emotional speech and the adversarial critic - B's best validation checkpoint is the teacher; the keys are nn/trainmulti.py's flags (the rest at their defaults)",
+        "a": {"steps": 30000, "stop": 15000, "lr": 0.001, "warmup": 1000, "seed": 1},
+        "b": {"steps": 20000, "lr": 0.0005, "warmup": 500, "cremad": 0.2, "adversarial": 0.1, "adversarial-start": 1000, "guide-steps": 0.001,
+              "seed": 1}
+    },
+    "distill": {
+        "description": "Knowledge distillation of the teacher (nn/distill.py) - its distillation set, the student ladder, the polish fine-tune, the evaluation (nn/panel.py), and the tolerance (fixed before any student is measured)",
+        "teacher": "build/nn/runs/multi-b/best.pt",
+        "targets": {
+            "books": "build/nn/g2p/books",
+            "bookCopies": 2,
+            "actorShare": 0.08,
+            "blendShare": 0.1,
+            "emotionShare": 0.3,
+            "intensity": [0.25, 1.0],
+            "minTokens": 4,
+            "maxTokens": 256,
+            "valItems": 1500,
+            "seed": 1
+        },
+        "train": {
+            "steps": 20000,
+            "batch": 48,
+            "maxFrames": 24000,
+            "lr": 0.0015,
+            "warmup": 500,
+            "durationWeight": 0.25,
+            "dropout": 0.05,
+            "weightDecay": 0.0001,
+            "valEvery": 1000
+        },
+        "students": [
+            {"name": "s96", "config": {"dim": 96, "decoderDim": 96, "encoderLayers": 3, "decoderLayers": 6}},
+            {"name": "s80", "config": {"dim": 80, "decoderDim": 80, "encoderLayers": 3, "decoderLayers": 4}},
+            {"name": "s64", "config": {"dim": 64, "decoderDim": 64, "encoderLayers": 3, "decoderLayers": 4}},
+            {"name": "s48", "config": {"dim": 48, "decoderDim": 48, "encoderLayers": 2, "decoderLayers": 4}},
+            {"name": "s32", "config": {"dim": 32, "decoderDim": 32, "encoderLayers": 2, "decoderLayers": 3}}
+        ],
+        "polish": {
+            "steps": 2000,
+            "lr": 0.0002,
+            "warmup": 200,
+            "cremad": 0.2,
+            "adversarial": 0.1,
+            "featureMatching": 1.0,
+            "adversarialStart": 200,
+            "guideSteps": 0.001,
+            "valEvery": 500
+        },
+        "eval": {
+            "speakers": [["arctic-slt", "female"], ["libritts-5895", "female"], ["libritts-6345", "female"],
+                         ["arctic-bdl", "male"], ["libritts-5750", "male"], ["libritts-2843", "male"]],
+            "rate": 16000,
+            "valCount": 240
+        },
+        "tolerance": {
+            "description": "The smallest student whose mean UTMOS is within mos of the teacher's, whose Whisper WER is at most wer points worse, and whose speaker similarity to the teacher is at least similarity - the per-speaker cosine of the mean ECAPA embedding of the student's panel renderings with the mean of the teacher's renderings of the same texts, averaged over the six speakers",
+            "mos": 0.05,
+            "wer": 1.0,
+            "similarity": 0.85
+        },
+        "samples": {
+            "speakers": ["arctic-bdl", "arctic-slt"],
+            "texts": ["melville-moby", "austen-pride"],
+            "rate": 44100
+        }
     }
 }

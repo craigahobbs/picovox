@@ -11,7 +11,7 @@ spoken by the browser path, nn/js/speak.js):
   the word error rate as tools/eval.js counts it
 - cosine - the speaker similarity of two embeddings
 - speak - a batch of texts with an exported model (its speed report)
-- score_model - the voice model's evaluation (make train's gate measure): six speakers (data/nn/distill.json eval) by the
+- score_model - the voice model's evaluation (make train's gate measure): six speakers (data/nn/train.json distill eval) by the
   panel's 16 texts (tools/panel-texts.json), each speaker's mean UTMOS, WER, and mean embedding, and against a
   reference result (the teacher's), the speaker similarity - the result JSON nn/distill.py pick compares
 
@@ -34,7 +34,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LISTENERS_PYTHON = os.path.join(ROOT, 'build', 'venv-listeners', 'bin', 'python')
 WHISPER_MODEL = os.path.join(ROOT, 'data', 'whisper', 'ggml-base.en.bin')
 TEXTS_PATH = os.path.join(ROOT, 'tools', 'panel-texts.json')
-CONFIG_PATH = os.path.join(ROOT, 'data', 'nn', 'distill.json')
+CONFIG_PATH = os.path.join(ROOT, 'data', 'nn', 'train.json')
 
 
 # Score WAV files with the listener panel - {path: {mos, embedding[, emotion]}}
@@ -151,11 +151,11 @@ def main(argv=None):
     score_parser.add_argument('model', help='the export (its .json and .bin without the extension)')
     score_parser.add_argument('--out', required=True)
     score_parser.add_argument('--reference', help='another model\'s result.json (the similarity)')
-    score_parser.add_argument('--config', default=CONFIG_PATH, help='the settings (its eval: speakers, rate)')
+    score_parser.add_argument('--config', default=CONFIG_PATH, help='the recipe (its distill eval: speakers, rate)')
     score_parser.add_argument('--whisper-workers', type=int, default=6)
     args = parser.parse_args(argv)
     with open(args.config, encoding='utf-8') as file:
-        settings = json.load(file)['eval']
+        settings = json.load(file)['distill']['eval']
     reference = None
     if args.reference:
         with open(args.reference, encoding='utf-8') as file:

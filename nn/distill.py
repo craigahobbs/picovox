@@ -14,7 +14,7 @@ imitate a big teacher, the way the project shrinks its voice model at each retra
     build/venv-nn/bin/python -B -m nn.distill ladder                                              # 1-5, all of the ladder
 
 The settings - the teacher, the distillation set's sources, the training settings, the student ladder, the polish, the
-evaluation speakers, and the tolerance - are data/nn/distill.json (--config another file). The outputs go to
+evaluation speakers, and the tolerance - are data/nn/train.json's distill (--config another file). The outputs go to
 NN_DISTILL_DIR (default build/nn/distill/): targets/ (the distillation set), eval/<model>/ (exports, renderings,
 result.json), and summary.json (pick); progress lines go to its code.log, targets.log, students.log, and eval.log. Runs
 go to build/nn/runs/distill-<student>/ (train.log, log.jsonl, best.pt, last.pt), and listening samples to
@@ -74,7 +74,7 @@ from . import panel, params
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CONFIG_PATH = os.path.join(ROOT, 'data', 'nn', 'distill.json')
+CONFIG_PATH = os.path.join(ROOT, 'data', 'nn', 'train.json')
 DISTILL_DIR = os.environ.get('NN_DISTILL_DIR', os.path.join(ROOT, 'build', 'nn', 'distill'))
 RUNS_DIR = os.environ.get('NN_RUNS_DIR', os.path.join(ROOT, 'build', 'nn', 'runs'))
 SAMPLES_DIR = os.environ.get('NN_DISTILL_SAMPLES', os.path.join(ROOT, 'build', 'nn', 'distill-samples'))
@@ -100,9 +100,10 @@ ITEM_DTYPE = numpy.dtype([
 # Settings and logs
 #
 
+# The settings - the recipe's (data/nn/train.json) distill
 def load_config(path=CONFIG_PATH):
     with open(path, encoding='utf-8') as file:
-        return json.load(file)
+        return json.load(file)['distill']
 
 
 # A path of the settings (relative to the repository root) as an absolute path
@@ -978,7 +979,7 @@ def main(argv=None):
     subparsers = parser.add_subparsers(dest='command', required=True)
 
     def add_common(sub):
-        sub.add_argument('--config', default=CONFIG_PATH, help='the settings (default data/nn/distill.json)')
+        sub.add_argument('--config', default=CONFIG_PATH, help='the recipe (default data/nn/train.json - its distill)')
         sub.add_argument('--device', default=None)
 
     sub = subparsers.add_parser('targets', help='the distillation set')
@@ -993,7 +994,7 @@ def main(argv=None):
 
     sub = subparsers.add_parser('train', help='a student')
     add_common(sub)
-    sub.add_argument('--student', required=True, help='the ladder student (data/nn/distill.json students)')
+    sub.add_argument('--student', required=True, help='the ladder student (the recipe\'s distill students)')
     sub.add_argument('--student-config', default=None, help='a model config instead of the ladder\'s (JSON)')
     sub.add_argument('--name', default=None, help='the run name (distill-<name>; default the student)')
     sub.add_argument('--targets', default=None)
