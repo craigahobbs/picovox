@@ -18,7 +18,15 @@
         "export": {"bits": 6, "groupSize": 0, "biasBits": 8}
     },
     "teacher": {
-        "description": "The teacher (nn/trainmulti.py --recipe teacher.a, then teacher.b): stage A on the readers (the 30,000-step schedule, stopped at 15,000), then stage B from A's weights with the emotional speech and the adversarial critic - B's best validation checkpoint is the teacher; the keys are nn/trainmulti.py's flags (the rest at their defaults)",
+        "description": "The teacher (nn/trainmulti.py --recipe teacher.a, then teacher.b): stage A on the readers (the 30,000-step schedule, stopped at 15,000), then stage B from A's weights with the emotional speech and the adversarial critic - B's best validation checkpoint is the teacher; the keys are nn/trainmulti.py's flags, defaults every training setting's default",
+        "defaults": {
+            "steps": 30000, "batch": 16, "max-frames": 16000, "crop": 2.0, "bucket-ratio": 1.125, "rate": 24000, "max-hz": 10500,
+            "cremad": 0.0, "lr": 0.001, "warmup": 1000, "duration-weight": 1.0, "f0-weight": 2.0, "formant-weight": 1.0,
+            "guide-floor": 0.1, "guide-steps": 0.3, "smooth-weight": 0.05, "frication-max-hz": 11000, "sonorant-frication": 1.0,
+            "sonorant-af-db": 40.0, "speaker-noise": 0.03, "dropout": 0.1, "weight-decay": 0.0001, "adversarial": 0.0,
+            "feature-matching": 1.0, "adversarial-start": 500, "critic-lr": 0.0002, "critic-precision": "bfloat16", "val-count": 480,
+            "seed": 1
+        },
         "a": {"steps": 30000, "stop": 15000, "lr": 0.001, "warmup": 1000, "seed": 1},
         "b": {"steps": 20000, "lr": 0.0005, "warmup": 500, "cremad": 0.2, "adversarial": 0.1, "adversarial-start": 1000, "guide-steps": 0.001,
               "seed": 1}
