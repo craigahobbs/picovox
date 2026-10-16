@@ -332,7 +332,10 @@ def check_built(utterance, tokens, totals):
     from .frontend import BOUNDARIES  # pylint: disable=import-outside-toplevel
     aligned = utterance.get('alignedReadings')
     if aligned:
-        count_disagreements(tokens, aligned, _INVENTORY_CACHE.setdefault('inventory', inventory()), BOUNDARIES, totals)
+        # (built once - setdefault would evaluate inventory(), about 1.7 s, on every call)
+        if 'inventory' not in _INVENTORY_CACHE:
+            _INVENTORY_CACHE['inventory'] = inventory()
+        count_disagreements(tokens, aligned, _INVENTORY_CACHE['inventory'], BOUNDARIES, totals)
 
 
 _INVENTORY_CACHE = {}

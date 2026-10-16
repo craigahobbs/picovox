@@ -424,6 +424,8 @@ def build_command(args):
 
     # Pronounce the texts' words once (the G2P network), for every worker
     pronunciations = pronounce_texts([utterance['text'] for utterance, _, _ in tasks], args.jobs)
+    # (this process too - its per-utterance checks tokenize the texts, about 0.1 s each uncached)
+    set_pronunciations(pronunciations)
     print(f'{len(pronunciations)} distinct words pronounced, {time.time() - start_time:.0f} s', flush=True)
 
     # Heteronym readings - the aligner's reading where it differs from the front end's (nn/readings.py)
