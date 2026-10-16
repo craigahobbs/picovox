@@ -650,27 +650,25 @@ def command_export(args):
 # The gate - the held-out aligned accuracy against the majority baseline
 #
 
-# The gate's words, and its margin over the majority baseline
+# The gate's words (the review's: read, use, close, lives) less the words whose readings differ only by S against Z - the
+# aligner can't judge those (word-final voicing), so the regression set covers them - and its margin over the majority
+# baseline
 GATE_WORDS = ['read', 'use', 'close', 'lives']
 GATE_MARGIN = 0.20
 
 
-def describe_heldout(result):
-    """The held-out examples' accuracy - over all, and the mean of the words' (all sources pooled per word)"""
-    words = collections.defaultdict(lambda: [0, 0])
-    for key, counts in result['words'].items():
-        words[key.split('/', 1)[1]][0] += counts['right']
-        words[key.split('/', 1)[1]][1] += counts['total']
-    right, total = sum(right for right, _ in words.values()), sum(total for _, total in words.values())
-    macro = sum(right / total for right, total in words.values()) / max(1, len(words))
-    return f'held-out {right}/{total} ({100 * right / max(1, total):.1f}%), word mean {100 * macro:.1f}% ({len(words)} words)'
+def gate_words(labels):
+    """The gate's words - GATE_WORDS less the S/Z-only pairs (by the labels' readings)"""
+    from .readings import sz_only  # pylint: disable=import-outside-toplevel
+    return [word for word in GATE_WORDS
+            if word in labels['words'] and not sz_only(*(reading[0] for reading in labels['words'][word]['readings'][:2]))]
 
 
-def gate_result(result):
-    """The gate on the held-out aligned tokens of GATE_WORDS (pooled) - (passed, line)"""
+def gate_result(result, labels):
+    """The gate on the held-out aligned tokens of the gate's words (pooled) - (passed, line)"""
     right = total = majority = 0
     parts = []
-    for word in GATE_WORDS:
+    for word in gate_words(labels):
         counts = result['words'].get(f'aligned/{word}', {'right': 0, 'total': 0, 'majority': 0})
         right, total, majority = right + counts['right'], total + counts['total'], majority + counts['majority']
         parts.append(f'{word} {counts["right"]}/{counts["total"]} (majority {counts["majority"]})')
@@ -681,12 +679,25 @@ def gate_result(result):
     return passed, line
 
 
+def word_margins(result, labels, least=20):
+    """The held-out aligned accuracy against the majority of every word with least tokens, S/Z-only pairs apart - a line"""
+    from .readings import sz_only  # pylint: disable=import-outside-toplevel
+    parts = []
+    for key, counts in sorted(result['words'].items(), key=lambda item: -item[1]['total']):
+        word = key.split('/', 1)[1]
+        if key.startswith('aligned/') and counts['total'] >= least and word in labels['words']:
+            readings = labels['words'][word]['readings']
+            kind = ' S/Z' if sz_only(readings[0][0], readings[1][0]) else ''
+            parts.append(f'{word}{kind} {counts["right"]}/{counts["total"]} ({100 * (counts["right"] - counts["majority"]) / counts["total"]:+.0f})')
+    return 'per word (vs majority): ' + ', '.join(parts)
+
+
 def command_gate(args):
     """The held-out accuracy of a module's context network (as the app runs it - nn/g2pmodel.py), and the gate"""
     labels = load_labels(args.labels)
     g2p = g2pmodel.G2p(g2pmodel.read_module(args.model))
     result = evaluate_context(lambda windows: g2p.choose_slots(windows), labels)
-    passed, line = gate_result(result)
+    passed, line = gate_result(result, labels)
     sources = ', '.join(f'{source} {counts["right"]}/{counts["total"]} (majority {counts["majority"]})'
                         for source, counts in sorted(result['sources'].items()))
     print(f'{line}; all held-out: {sources}')
@@ -753,7 +764,7 @@ def command_train_context(args):
     quantizer = WeightQuantizer(model, EXPORT)
     quantizer.quantize()
     result = evaluate_context(lambda windows: context_predict(model, windows), labels)
-    _, line = gate_result(result)
+    _, line = gate_result(result, labels)
     log_line(args.log, f'train-context{"" if args.fold is None else f" fold {args.fold}"}: {line}; {describe_heldout(result)}')
     with open(os.path.splitext(args.out)[0] + '.json', 'w', encoding='utf-8') as file:
         json.dump(result, file, indent=1)
@@ -771,8 +782,10 @@ def command_folds(args):
             if key.startswith('aligned/'):
                 for name in ('right', 'total', 'majority'):
                     pooled['words'][key][name] += counts[name]
-    passed, line = gate_result(pooled)
+    labels = load_labels(args.labels)
+    passed, line = gate_result(pooled, labels)
     print(f'{len(args.results)} folds: {line}')
+    print(word_margins(pooled, labels))
     return 0 if passed else 1
 
 
@@ -797,6 +810,7 @@ def main(argv=None):
     context_parser.set_defaults(func=command_train_context)
     folds_parser = commands.add_parser('folds', help='the cross-validated gate over the folds\' held-out results')
     folds_parser.add_argument('results', nargs='+')
+    folds_parser.add_argument('--labels', required=True)
     folds_parser.set_defaults(func=command_folds)
     export_parser = commands.add_parser('export', help='the generated module')
     export_parser.add_argument('--g2p', required=True)

@@ -5,7 +5,8 @@
 Heteronym readings - the pronouncing dictionary's variants of a word clustered into readings, and the readings the
 LibriTTS-R speakers used, by the Montreal Forced Aligner's word and phone labels (LibriTTSLabel). The voice training
 data (nn/multi.py build) takes a heteronym token's reading from the alignment where the aligner chose a dictionary
-variant of another reading than the front end's - the speaker's reading, heard in the audio.
+variant of another reading than the front end's - the speaker's reading, heard in the audio - unless the two differ only by
+S against Z (the aligner's word-final voicing choice is unreliable: use, close, excuse), where the front end's is kept.
 
     build/venv-nn/bin/python -B -m nn.readings check --out DIR     # a build's heteronym tokens against the aligner
 
@@ -184,6 +185,15 @@ def inventory(variants=None):
     return result
 
 
+# Whether two pronunciations (strings) differ only by S against Z (and stress) - the aligner can't judge those
+# (word-final voicing: use, close, excuse), so the front end's reading is kept
+def sz_only(first, second):
+    ops = edit_ops(first.split(), second.split())
+    voicing = [left is not None and right is not None and {base(left), base(right)} == {'S', 'Z'} for left, right in ops]
+    stress = [left is not None and right is not None and base(left) == base(right) for left, right in ops]
+    return any(voicing) and all(flag or same for flag, same in zip(voicing, stress))
+
+
 # The index of the variant observed phones (a string) match - exactly, else ignoring stress when that leaves one; or None
 def match_variant(phones, variants):
     if phones in variants:
@@ -261,8 +271,10 @@ def utterance_readings(text, phone_lab, readings, pronounce_word=None):
             variant = variants[choice]
             reading = reading_of(variant, word_readings)
             front_reading = reading_of(front_phones, word_readings)
-            tokens.append({'position': position, 'word': word, 'reading': reading, 'frontEnd': front_reading})
-            if reading != front_reading:
+            voicing = reading != front_reading and sz_only(variant, front_phones)
+            tokens.append({'position': position, 'word': word, 'reading': reading, 'frontEnd': front_reading, 'variant': variant,
+                           'szOnly': voicing})
+            if reading != front_reading and not voicing:
                 overrides[position] = variant.split()
     return overrides, tokens
 
@@ -284,9 +296,12 @@ def token_words(tokens, boundaries):
 def count_disagreements(tokens, aligned, readings, boundaries, totals):
     words = token_words(tokens, boundaries)
     for token in aligned:
-        totals['tokens'] += 1
         position = token['position']
         built = words[position] if position < len(words) else None
+        if built is not None and reading_of(built, readings[token['word']]) != token['reading'] and sz_only(token['variant'], built):
+            totals['szOnly'] = totals.get('szOnly', 0) + 1
+            continue
+        totals['tokens'] += 1
         if built is None or reading_of(built, readings[token['word']]) != token['reading']:
             totals['disagree'] += 1
 
@@ -332,7 +347,7 @@ def check_command(args):
         index = json.load(file)
     included = {entry['id']: entry for entry in index['utterances'] if entry['include'] and entry['speaker'].startswith('libritts')}
     readings = inventory()
-    totals = {'tokens': 0, 'disagree': 0, 'overrides': 0}
+    totals = {'tokens': 0, 'disagree': 0, 'overrides': 0, 'szOnly': 0}
     with open(os.path.join(args.out, 'alignment.jsonl'), encoding='utf-8') as file:
         for line in file:
             record = json.loads(line)
@@ -351,7 +366,8 @@ def check_command(args):
     share = totals['disagree'] / max(1, totals['tokens'])
     failed = share > MAX_DISAGREE
     print(f'readings check {args.out}: {totals["tokens"]} heteronym tokens, {totals["disagree"]} ({100 * share:.2f}%) disagree with '
-          f'the aligner, {totals["overrides"]} overrides{" - FAILED (over 1%)" if failed else ""}')
+          f'the aligner, {totals["overrides"]} overrides; {totals["szOnly"]} tokens differ from the aligner only by S/Z (the front '
+          f'end\'s reading kept){" - FAILED (over 1%)" if failed else ""}')
     return 1 if failed else 0
 
 

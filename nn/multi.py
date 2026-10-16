@@ -441,7 +441,7 @@ def build_command(args):
 
     # Heteronym readings - the aligner's reading where it differs from the front end's (nn/readings.py)
     reading_counts = readings.attach_readings(tasks)
-    reading_check = {'tokens': 0, 'disagree': 0}
+    reading_check = {'tokens': 0, 'disagree': 0, 'szOnly': 0}
     print(f'heteronym readings: {reading_counts["tokens"]} aligned tokens in {reading_counts["utterances"]} LibriTTS-R utterances, '
           f'{reading_counts["overrides"]} overrides, {time.time() - start_time:.0f} s', flush=True)
 
@@ -542,7 +542,8 @@ def build_command(args):
         'wordMatchExempt': 'LibriTTS-R utterances: function words and abbreviation expansions (nn/multi.py WORD_MATCH_EXEMPT); '
                            'worstAnyWord is nn/data.py\'s worst word over all words',
         'speakers': speaker_index,
-        'readings': {**reading_counts, 'checkedTokens': reading_check['tokens'], 'disagree': reading_check['disagree']},
+        'readings': {**reading_counts, 'checkedTokens': reading_check['tokens'], 'disagree': reading_check['disagree'],
+                     'szOnly': reading_check['szOnly']},
         'utterances': entries
     }
     with open(os.path.join(out_dir, 'index.json'), 'w', encoding='utf-8') as file:
@@ -556,7 +557,8 @@ def build_command(args):
         write_split(entries, split_path)
     share = reading_check['disagree'] / max(1, reading_check['tokens'])
     print(f'heteronym readings: {reading_counts["overrides"]} overrides; included utterances\' heteronym tokens {reading_check["tokens"]}, '
-          f'{reading_check["disagree"]} ({100 * share:.2f}%) disagree with the aligner'
+          f'{reading_check["disagree"]} ({100 * share:.2f}%) disagree with the aligner, {reading_check["szOnly"]} differ only by S/Z '
+          f'(the front end\'s reading kept)'
           f'{" - over the 1% limit (nn/readings.py MAX_DISAGREE)" if share > readings.MAX_DISAGREE else ""}')
     print(f'Built {out_dir}: {len(entries)} utterances ({sum(1 for entry in entries if entry["include"])} included), '
           f'{frame_offset / 100 / 3600:.2f} hours, {len(failures)} failures, {time.time() - start_time:.0f} s')

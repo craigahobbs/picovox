@@ -384,7 +384,9 @@ training time only - `requirements/pos.txt`), mapped to readings only for words 
 audio on 95% of 10 or more tokens; and hand-written seed sentences and reviewed collocations for the readings the tags
 can't separate (lead the metal, bass, bow, row, does the deer, house the verb) and the pairs the audio doesn't
 validate. The voice training data (`nn.multi build`) takes a heteronym token's reading from the alignment where the
-aligner chose another dictionary reading than the front end's (`nn/readings.py`; `python -m nn.readings check`).
+aligner chose another dictionary reading than the front end's (`nn/readings.py`; `python -m nn.readings check`) - except
+where the two differ only by S against Z (use, close, excuse): the aligner can't judge word-final voicing, so those keep
+the front end's reading, and the held-out accuracy gate (`nn.context gate`, `folds`) leaves them to the regression set.
 
 
 ## The library
