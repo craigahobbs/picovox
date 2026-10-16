@@ -107,7 +107,8 @@ class SpectrogramDiscriminator(torch.nn.Module):
 
 class Critic(torch.nn.Module):
     """Spectrogram discriminators at several resolutions; dtype (torch.bfloat16 or torch.float16) runs their
-    convolutions in that precision (autocast - the spectrograms, the weights, and the outputs stay float32)"""
+    convolutions in that precision (autocast - the spectrograms, the weights, and the scores stay float32; the
+    intermediate features stay in that precision until generator_losses uses them)"""
 
     def __init__(self, sample_rate, max_hz, eps=0.0, dtype=None):
         super().__init__()
@@ -129,7 +130,7 @@ class Critic(torch.nn.Module):
         device_type = spectrograms[0].device.type
         with torch.autocast(device_type, dtype=self.dtype):
             outputs = [discriminator.score(spectrogram) for discriminator, spectrogram in zip(self.discriminators, spectrograms)]
-        return [(scores.float(), [feature.float() for feature in features]) for scores, features in outputs]
+        return [(scores.float(), features) for scores, features in outputs]
 
     def forward(self, audio):
         return self.score(self.spectrograms(audio))
@@ -150,5 +151,5 @@ def generator_losses(real_outputs, fake_outputs):
     for (_, real_features), (fake, fake_features) in zip(real_outputs, fake_outputs):
         adversarial = adversarial + ((fake - 1) ** 2).mean()
         for real_feature, fake_feature in zip(real_features, fake_features):
-            matching = matching + (real_feature.detach() - fake_feature).abs().mean() / len(real_features)
+            matching = matching + (real_feature.detach().float() - fake_feature.float()).abs().mean() / len(real_features)
     return adversarial / len(real_outputs), matching / len(real_outputs)
