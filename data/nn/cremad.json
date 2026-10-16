@@ -58,19 +58,7 @@
   "method": "CTC forced alignment with facebook/wav2vec2-lv-60-espeak-cv-ft (nn/cremad.py)",
   "shift": -0.005,
   "split": "mid",
-  "edgeExtend": 0.15,
-  "arcticCheck": {
-   "shift": -0.005,
-   "split": "mid",
-   "frames": "20ms",
-   "phones": 9183,
-   "medianAbsMs": 15.0,
-   "meanAbsMs": 17.6,
-   "biasMs": 0.5,
-   "within20Ms": 0.676,
-   "within40Ms": 0.928,
-   "durationCorrelation": 0.671
-  }
+  "edgeExtend": 0.15
  },
  "actors": {
   "cremad-1001": {
@@ -81,8 +69,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 82.3,
    "pitchCeiling": 269.1,
-   "accent": "us",
-   "northAmerican": 0.841,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1002": {
@@ -93,8 +81,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 146.4,
    "pitchCeiling": 424.5,
-   "accent": "us",
-   "northAmerican": 0.914,
+   "accent": null,
+   "northAmerican": null,
    "included": 80
   },
   "cremad-1003": {
@@ -105,8 +93,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 134.8,
    "pitchCeiling": 368.5,
-   "accent": "us",
-   "northAmerican": 0.951,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1004": {
@@ -117,8 +105,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 112.8,
    "pitchCeiling": 342.5,
-   "accent": "us",
-   "northAmerican": 0.988,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   },
   "cremad-1005": {
@@ -129,8 +117,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 81.9,
    "pitchCeiling": 300.3,
-   "accent": "us",
-   "northAmerican": 0.817,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1006": {
@@ -141,8 +129,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 123.7,
    "pitchCeiling": 345.5,
-   "accent": "us",
-   "northAmerican": 0.866,
+   "accent": null,
+   "northAmerican": null,
    "included": 80
   },
   "cremad-1007": {
@@ -153,8 +141,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 97.4,
    "pitchCeiling": 335.7,
-   "accent": "us",
-   "northAmerican": 0.695,
+   "accent": null,
+   "northAmerican": null,
    "included": 75
   },
   "cremad-1008": {
@@ -165,8 +153,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 161.8,
    "pitchCeiling": 445.0,
-   "accent": "us",
-   "northAmerican": 0.895,
+   "accent": null,
+   "northAmerican": null,
    "included": 72
   },
   "cremad-1009": {
@@ -177,8 +165,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 149.6,
    "pitchCeiling": 484.6,
-   "accent": "us",
-   "northAmerican": 0.947,
+   "accent": null,
+   "northAmerican": null,
    "included": 75
   },
   "cremad-1010": {
@@ -189,8 +177,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 142.0,
    "pitchCeiling": 377.7,
-   "accent": "us",
-   "northAmerican": 0.854,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1011": {
@@ -201,8 +189,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 82.3,
    "pitchCeiling": 300.1,
-   "accent": "us",
-   "northAmerican": 0.89,
+   "accent": null,
+   "northAmerican": null,
    "included": 80
   },
   "cremad-1012": {
@@ -213,8 +201,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 147.9,
    "pitchCeiling": 364.9,
-   "accent": "us",
-   "northAmerican": 0.78,
+   "accent": null,
+   "northAmerican": null,
    "included": 80
   },
   "cremad-1013": {
@@ -225,8 +213,8 @@
    "ethnicity": "Hispanic",
    "pitchFloor": 138.0,
    "pitchCeiling": 402.5,
-   "accent": "us",
-   "northAmerican": 0.854,
+   "accent": null,
+   "northAmerican": null,
    "included": 77
   },
   "cremad-1014": {
@@ -237,8 +225,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 103.3,
    "pitchCeiling": 327.6,
-   "accent": "us",
-   "northAmerican": 0.927,
+   "accent": null,
+   "northAmerican": null,
    "included": 80
   },
   "cremad-1015": {
@@ -249,8 +237,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 85.1,
    "pitchCeiling": 330.5,
-   "accent": "us",
-   "northAmerican": 0.72,
+   "accent": null,
+   "northAmerican": null,
    "included": 77
   },
   "cremad-1016": {
@@ -261,8 +249,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 88.2,
    "pitchCeiling": 328.4,
-   "accent": "us",
-   "northAmerican": 0.854,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1017": {
@@ -273,8 +261,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 78.9,
    "pitchCeiling": 284.4,
-   "accent": "us",
-   "northAmerican": 0.805,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   },
   "cremad-1018": {
@@ -285,8 +273,8 @@
    "ethnicity": "Hispanic",
    "pitchFloor": 140.1,
    "pitchCeiling": 362.3,
-   "accent": "us",
-   "northAmerican": 0.915,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   },
   "cremad-1019": {
@@ -297,8 +285,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 96.4,
    "pitchCeiling": 265.4,
-   "accent": "us",
-   "northAmerican": 0.895,
+   "accent": null,
+   "northAmerican": null,
    "included": 76
   },
   "cremad-1020": {
@@ -309,8 +297,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 116.7,
    "pitchCeiling": 334.0,
-   "accent": "us",
-   "northAmerican": 0.732,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1021": {
@@ -321,8 +309,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 129.3,
    "pitchCeiling": 335.0,
-   "accent": "us",
-   "northAmerican": 0.902,
+   "accent": null,
+   "northAmerican": null,
    "included": 79
   },
   "cremad-1022": {
@@ -333,8 +321,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 86.4,
    "pitchCeiling": 313.8,
-   "accent": "us",
-   "northAmerican": 0.841,
+   "accent": null,
+   "northAmerican": null,
    "included": 80
   },
   "cremad-1023": {
@@ -345,8 +333,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 106.3,
    "pitchCeiling": 336.2,
-   "accent": "us",
-   "northAmerican": 0.841,
+   "accent": null,
+   "northAmerican": null,
    "included": 80
   },
   "cremad-1024": {
@@ -357,8 +345,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 129.2,
    "pitchCeiling": 352.5,
-   "accent": "us",
-   "northAmerican": 0.902,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1025": {
@@ -369,8 +357,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 119.6,
    "pitchCeiling": 332.8,
-   "accent": "us",
-   "northAmerican": 0.951,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1026": {
@@ -381,8 +369,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 81.2,
    "pitchCeiling": 315.5,
-   "accent": "us",
-   "northAmerican": 0.89,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   },
   "cremad-1027": {
@@ -393,8 +381,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 84.3,
    "pitchCeiling": 333.1,
-   "accent": "us",
-   "northAmerican": 0.927,
+   "accent": null,
+   "northAmerican": null,
    "included": 75
   },
   "cremad-1028": {
@@ -405,8 +393,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 134.9,
    "pitchCeiling": 453.6,
-   "accent": "us",
-   "northAmerican": 0.878,
+   "accent": null,
+   "northAmerican": null,
    "included": 78
   },
   "cremad-1029": {
@@ -417,8 +405,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 165.3,
    "pitchCeiling": 513.7,
-   "accent": "us",
-   "northAmerican": 0.939,
+   "accent": null,
+   "northAmerican": null,
    "included": 80
   },
   "cremad-1030": {
@@ -429,8 +417,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 102.6,
    "pitchCeiling": 341.7,
-   "accent": "us",
-   "northAmerican": 0.927,
+   "accent": null,
+   "northAmerican": null,
    "included": 79
   },
   "cremad-1031": {
@@ -441,8 +429,8 @@
    "ethnicity": "Hispanic",
    "pitchFloor": 83.2,
    "pitchCeiling": 260.9,
-   "accent": "us",
-   "northAmerican": 0.89,
+   "accent": null,
+   "northAmerican": null,
    "included": 80
   },
   "cremad-1032": {
@@ -453,8 +441,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 77.9,
    "pitchCeiling": 253.2,
-   "accent": "us",
-   "northAmerican": 0.817,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   },
   "cremad-1033": {
@@ -465,8 +453,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 81.7,
    "pitchCeiling": 282.1,
-   "accent": "us",
-   "northAmerican": 0.976,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   },
   "cremad-1034": {
@@ -477,8 +465,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 76.1,
    "pitchCeiling": 269.8,
-   "accent": "us",
-   "northAmerican": 0.793,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1035": {
@@ -489,8 +477,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 87.5,
    "pitchCeiling": 351.3,
-   "accent": "us",
-   "northAmerican": 0.915,
+   "accent": null,
+   "northAmerican": null,
    "included": 79
   },
   "cremad-1036": {
@@ -501,8 +489,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 108.4,
    "pitchCeiling": 366.6,
-   "accent": "us",
-   "northAmerican": 0.622,
+   "accent": null,
+   "northAmerican": null,
    "included": 78
   },
   "cremad-1037": {
@@ -513,8 +501,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 127.7,
    "pitchCeiling": 372.9,
-   "accent": "us",
-   "northAmerican": 0.878,
+   "accent": null,
+   "northAmerican": null,
    "included": 79
   },
   "cremad-1038": {
@@ -525,8 +513,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 96.9,
    "pitchCeiling": 356.9,
-   "accent": "us",
-   "northAmerican": 0.927,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   },
   "cremad-1039": {
@@ -537,8 +525,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 81.7,
    "pitchCeiling": 296.7,
-   "accent": "us",
-   "northAmerican": 0.622,
+   "accent": null,
+   "northAmerican": null,
    "included": 80
   },
   "cremad-1040": {
@@ -549,8 +537,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 97.1,
    "pitchCeiling": 307.1,
-   "accent": "us",
-   "northAmerican": 0.902,
+   "accent": null,
+   "northAmerican": null,
    "included": 79
   },
   "cremad-1041": {
@@ -561,8 +549,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 83.0,
    "pitchCeiling": 279.7,
-   "accent": "us",
-   "northAmerican": 0.89,
+   "accent": null,
+   "northAmerican": null,
    "included": 78
   },
   "cremad-1042": {
@@ -573,8 +561,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 102.2,
    "pitchCeiling": 294.9,
-   "accent": "us",
-   "northAmerican": 0.927,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1043": {
@@ -585,8 +573,8 @@
    "ethnicity": "Hispanic",
    "pitchFloor": 152.8,
    "pitchCeiling": 421.8,
-   "accent": "us",
-   "northAmerican": 0.915,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1044": {
@@ -597,8 +585,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 88.0,
    "pitchCeiling": 285.9,
-   "accent": "us",
-   "northAmerican": 0.939,
+   "accent": null,
+   "northAmerican": null,
    "included": 79
   },
   "cremad-1045": {
@@ -609,8 +597,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 88.6,
    "pitchCeiling": 289.6,
-   "accent": "us",
-   "northAmerican": 0.866,
+   "accent": null,
+   "northAmerican": null,
    "included": 78
   },
   "cremad-1046": {
@@ -621,8 +609,8 @@
    "ethnicity": "Hispanic",
    "pitchFloor": 139.3,
    "pitchCeiling": 396.6,
-   "accent": "us",
-   "northAmerican": 0.841,
+   "accent": null,
+   "northAmerican": null,
    "included": 80
   },
   "cremad-1047": {
@@ -633,8 +621,8 @@
    "ethnicity": "Hispanic",
    "pitchFloor": 144.5,
    "pitchCeiling": 416.1,
-   "accent": "us",
-   "northAmerican": 0.866,
+   "accent": null,
+   "northAmerican": null,
    "included": 80
   },
   "cremad-1048": {
@@ -645,8 +633,8 @@
    "ethnicity": "Hispanic",
    "pitchFloor": 113.1,
    "pitchCeiling": 337.9,
-   "accent": "us",
-   "northAmerican": 0.927,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1049": {
@@ -657,8 +645,8 @@
    "ethnicity": "Hispanic",
    "pitchFloor": 150.2,
    "pitchCeiling": 424.1,
-   "accent": "us",
-   "northAmerican": 0.89,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   },
   "cremad-1050": {
@@ -669,8 +657,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 86.1,
    "pitchCeiling": 339.3,
-   "accent": "us",
-   "northAmerican": 0.561,
+   "accent": null,
+   "northAmerican": null,
    "included": 73
   },
   "cremad-1051": {
@@ -681,8 +669,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 76.3,
    "pitchCeiling": 284.9,
-   "accent": "us",
-   "northAmerican": 0.89,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1052": {
@@ -693,8 +681,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 129.8,
    "pitchCeiling": 366.3,
-   "accent": "us",
-   "northAmerican": 0.915,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   },
   "cremad-1053": {
@@ -705,8 +693,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 150.1,
    "pitchCeiling": 451.0,
-   "accent": "us",
-   "northAmerican": 0.902,
+   "accent": null,
+   "northAmerican": null,
    "included": 80
   },
   "cremad-1054": {
@@ -717,8 +705,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 147.3,
    "pitchCeiling": 423.7,
-   "accent": "us",
-   "northAmerican": 0.72,
+   "accent": null,
+   "northAmerican": null,
    "included": 80
   },
   "cremad-1055": {
@@ -729,8 +717,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 122.9,
    "pitchCeiling": 447.6,
-   "accent": "us",
-   "northAmerican": 0.939,
+   "accent": null,
+   "northAmerican": null,
    "included": 79
   },
   "cremad-1056": {
@@ -741,8 +729,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 119.7,
    "pitchCeiling": 375.2,
-   "accent": "us",
-   "northAmerican": 0.817,
+   "accent": null,
+   "northAmerican": null,
    "included": 78
   },
   "cremad-1057": {
@@ -753,8 +741,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 105.4,
    "pitchCeiling": 327.0,
-   "accent": "us",
-   "northAmerican": 0.659,
+   "accent": null,
+   "northAmerican": null,
    "included": 77
   },
   "cremad-1058": {
@@ -765,8 +753,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 140.6,
    "pitchCeiling": 434.8,
-   "accent": "us",
-   "northAmerican": 0.988,
+   "accent": null,
+   "northAmerican": null,
    "included": 80
   },
   "cremad-1059": {
@@ -777,8 +765,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 112.9,
    "pitchCeiling": 408.5,
-   "accent": "us",
-   "northAmerican": 0.878,
+   "accent": null,
+   "northAmerican": null,
    "included": 67
   },
   "cremad-1060": {
@@ -789,8 +777,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 128.5,
    "pitchCeiling": 351.7,
-   "accent": "us",
-   "northAmerican": 0.841,
+   "accent": null,
+   "northAmerican": null,
    "included": 75
   },
   "cremad-1061": {
@@ -801,8 +789,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 110.9,
    "pitchCeiling": 334.3,
-   "accent": "us",
-   "northAmerican": 0.854,
+   "accent": null,
+   "northAmerican": null,
    "included": 77
   },
   "cremad-1062": {
@@ -813,8 +801,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 82.0,
    "pitchCeiling": 255.7,
-   "accent": "us",
-   "northAmerican": 0.72,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   },
   "cremad-1063": {
@@ -825,8 +813,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 150.5,
    "pitchCeiling": 430.8,
-   "accent": "us",
-   "northAmerican": 0.732,
+   "accent": null,
+   "northAmerican": null,
    "included": 78
   },
   "cremad-1064": {
@@ -837,8 +825,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 78.6,
    "pitchCeiling": 289.2,
-   "accent": "us",
-   "northAmerican": 0.817,
+   "accent": null,
+   "northAmerican": null,
    "included": 76
   },
   "cremad-1065": {
@@ -849,8 +837,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 79.2,
    "pitchCeiling": 270.7,
-   "accent": "us",
-   "northAmerican": 0.902,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   },
   "cremad-1066": {
@@ -861,8 +849,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 82.1,
    "pitchCeiling": 262.3,
-   "accent": "us",
-   "northAmerican": 0.841,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   },
   "cremad-1067": {
@@ -873,8 +861,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 107.2,
    "pitchCeiling": 323.9,
-   "accent": "us",
-   "northAmerican": 0.707,
+   "accent": null,
+   "northAmerican": null,
    "included": 77
   },
   "cremad-1068": {
@@ -885,8 +873,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 82.6,
    "pitchCeiling": 270.3,
-   "accent": "us",
-   "northAmerican": 0.963,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   },
   "cremad-1069": {
@@ -897,8 +885,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 90.3,
    "pitchCeiling": 313.3,
-   "accent": "us",
-   "northAmerican": 0.744,
+   "accent": null,
+   "northAmerican": null,
    "included": 78
   },
   "cremad-1070": {
@@ -909,8 +897,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 87.3,
    "pitchCeiling": 295.9,
-   "accent": "us",
-   "northAmerican": 0.744,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1071": {
@@ -921,8 +909,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 76.8,
    "pitchCeiling": 234.6,
-   "accent": "us",
-   "northAmerican": 0.841,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1072": {
@@ -933,8 +921,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 138.2,
    "pitchCeiling": 440.9,
-   "accent": "us",
-   "northAmerican": 0.988,
+   "accent": null,
+   "northAmerican": null,
    "included": 79
   },
   "cremad-1073": {
@@ -945,8 +933,8 @@
    "ethnicity": "Hispanic",
    "pitchFloor": 130.3,
    "pitchCeiling": 341.7,
-   "accent": "us",
-   "northAmerican": 0.902,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1074": {
@@ -957,8 +945,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 151.0,
    "pitchCeiling": 433.5,
-   "accent": "us",
-   "northAmerican": 0.854,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1075": {
@@ -969,8 +957,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 133.8,
    "pitchCeiling": 376.3,
-   "accent": "us",
-   "northAmerican": 0.878,
+   "accent": null,
+   "northAmerican": null,
    "included": 72
   },
   "cremad-1076": {
@@ -981,8 +969,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 136.8,
    "pitchCeiling": 342.4,
-   "accent": "us",
-   "northAmerican": 0.975,
+   "accent": null,
+   "northAmerican": null,
    "included": 79
   },
   "cremad-1077": {
@@ -993,8 +981,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 72.7,
    "pitchCeiling": 198.3,
-   "accent": "us",
-   "northAmerican": 0.756,
+   "accent": null,
+   "northAmerican": null,
    "included": 80
   },
   "cremad-1078": {
@@ -1005,8 +993,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 150.2,
    "pitchCeiling": 459.2,
-   "accent": "us",
-   "northAmerican": 0.805,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   },
   "cremad-1079": {
@@ -1017,8 +1005,8 @@
    "ethnicity": "Hispanic",
    "pitchFloor": 152.0,
    "pitchCeiling": 472.7,
-   "accent": "us",
-   "northAmerican": 0.976,
+   "accent": null,
+   "northAmerican": null,
    "included": 79
   },
   "cremad-1080": {
@@ -1029,8 +1017,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 81.0,
    "pitchCeiling": 283.1,
-   "accent": "us",
-   "northAmerican": 0.927,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   },
   "cremad-1081": {
@@ -1041,8 +1029,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 80.4,
    "pitchCeiling": 282.1,
-   "accent": "us",
-   "northAmerican": 0.829,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   },
   "cremad-1082": {
@@ -1053,8 +1041,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 138.4,
    "pitchCeiling": 412.8,
-   "accent": "us",
-   "northAmerican": 0.963,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1083": {
@@ -1065,8 +1053,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 54.5,
    "pitchCeiling": 169.5,
-   "accent": "us",
-   "northAmerican": 0.866,
+   "accent": null,
+   "northAmerican": null,
    "included": 80
   },
   "cremad-1084": {
@@ -1077,8 +1065,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 99.4,
    "pitchCeiling": 280.3,
-   "accent": "us",
-   "northAmerican": 0.927,
+   "accent": null,
+   "northAmerican": null,
    "included": 80
   },
   "cremad-1085": {
@@ -1089,8 +1077,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 80.3,
    "pitchCeiling": 225.4,
-   "accent": "us",
-   "northAmerican": 0.939,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   },
   "cremad-1086": {
@@ -1101,8 +1089,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 82.4,
    "pitchCeiling": 236.7,
-   "accent": "us",
-   "northAmerican": 0.902,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1087": {
@@ -1113,8 +1101,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 57.5,
    "pitchCeiling": 170.7,
-   "accent": "us",
-   "northAmerican": 0.829,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1088": {
@@ -1125,8 +1113,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 59.8,
    "pitchCeiling": 180.6,
-   "accent": "us",
-   "northAmerican": 0.89,
+   "accent": null,
+   "northAmerican": null,
    "included": 78
   },
   "cremad-1089": {
@@ -1137,8 +1125,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 142.0,
    "pitchCeiling": 478.4,
-   "accent": "us",
-   "northAmerican": 0.768,
+   "accent": null,
+   "northAmerican": null,
    "included": 82
   },
   "cremad-1090": {
@@ -1149,8 +1137,8 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 73.9,
    "pitchCeiling": 217.2,
-   "accent": "us",
-   "northAmerican": 0.622,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   },
   "cremad-1091": {
@@ -1161,560 +1149,9 @@
    "ethnicity": "Not Hispanic",
    "pitchFloor": 118.2,
    "pitchCeiling": 338.3,
-   "accent": "us",
-   "northAmerican": 0.963,
+   "accent": null,
+   "northAmerican": null,
    "included": 81
   }
- },
- "emotionRecognition": {
-  "model": "emotion2vec/emotion2vec_plus_base (tools/listeners.py)",
-  "caveat": "emotion2vec+ descends from emotion2vec+ seed, fine-tuned on the EmoBox academic corpora, which include CREMA-D - these clips (or their pseudo-labels) were likely in its training lineage, so its accuracy here (far above the crowd's audio-only 40%) is optimistic; expect less on new voices and texts",
-  "intendedProbabilityByIntensity": {
-   "angry": {
-    "low": 0.916,
-    "medium": 0.965,
-    "high": 0.984,
-    "correlationWithCrowdAgreement": 0.27
-   },
-   "disgusted": {
-    "low": 0.788,
-    "medium": 0.837,
-    "high": 0.833,
-    "correlationWithCrowdAgreement": 0.19
-   },
-   "fearful": {
-    "low": 0.608,
-    "medium": 0.638,
-    "high": 0.814,
-    "correlationWithCrowdAgreement": 0.292
-   },
-   "happy": {
-    "low": 0.914,
-    "medium": 0.913,
-    "high": 0.915,
-    "correlationWithCrowdAgreement": 0.239
-   },
-   "sad": {
-    "low": 0.743,
-    "medium": 0.794,
-    "high": 0.702,
-    "correlationWithCrowdAgreement": 0.199
-   }
-  },
-  "all": {
-   "clips": 7442,
-   "accuracy": 0.868,
-   "unweightedRecall": 0.871,
-   "recall": {
-    "angry": 0.962,
-    "disgusted": 0.797,
-    "fearful": 0.734,
-    "happy": 0.925,
-    "neutral": 0.985,
-    "sad": 0.822
-   },
-   "columns": [
-    "angry",
-    "disgusted",
-    "fearful",
-    "happy",
-    "neutral",
-    "sad"
-   ],
-   "matrix": [
-    [
-     1223,
-     14,
-     5,
-     7,
-     20,
-     2
-    ],
-    [
-     80,
-     1013,
-     16,
-     16,
-     64,
-     82
-    ],
-    [
-     23,
-     32,
-     933,
-     28,
-     70,
-     185
-    ],
-    [
-     21,
-     8,
-     9,
-     1176,
-     50,
-     7
-    ],
-    [
-     2,
-     0,
-     1,
-     6,
-     1071,
-     7
-    ],
-    [
-     5,
-     27,
-     38,
-     10,
-     146,
-     1045
-    ]
-   ]
-  },
-  "allNineClass": {
-   "clips": 7442,
-   "accuracy": 0.867,
-   "unweightedRecall": 0.87,
-   "recall": {
-    "angry": 0.961,
-    "disgusted": 0.797,
-    "fearful": 0.732,
-    "happy": 0.923,
-    "neutral": 0.985,
-    "sad": 0.822
-   },
-   "columns": [
-    "angry",
-    "disgusted",
-    "fearful",
-    "happy",
-    "neutral",
-    "sad",
-    "other"
-   ],
-   "matrix": [
-    [
-     1222,
-     14,
-     5,
-     7,
-     20,
-     2,
-     1
-    ],
-    [
-     80,
-     1013,
-     15,
-     16,
-     64,
-     82,
-     1
-    ],
-    [
-     23,
-     32,
-     930,
-     28,
-     70,
-     185,
-     3
-    ],
-    [
-     21,
-     7,
-     9,
-     1173,
-     50,
-     7,
-     4
-    ],
-    [
-     2,
-     0,
-     1,
-     6,
-     1071,
-     7,
-     0
-    ],
-    [
-     5,
-     27,
-     37,
-     10,
-     146,
-     1045,
-     1
-    ]
-   ]
-  },
-  "crowdRecognized": {
-   "clips": 3085,
-   "accuracy": 0.959,
-   "unweightedRecall": 0.94,
-   "recall": {
-    "angry": 0.996,
-    "disgusted": 0.892,
-    "fearful": 0.886,
-    "happy": 0.991,
-    "neutral": 0.987,
-    "sad": 0.886
-   },
-   "columns": [
-    "angry",
-    "disgusted",
-    "fearful",
-    "happy",
-    "neutral",
-    "sad"
-   ],
-   "matrix": [
-    [
-     760,
-     1,
-     1,
-     0,
-     1,
-     0
-    ],
-    [
-     23,
-     297,
-     2,
-     1,
-     4,
-     6
-    ],
-    [
-     5,
-     5,
-     358,
-     7,
-     1,
-     28
-    ],
-    [
-     0,
-     0,
-     1,
-     328,
-     2,
-     0
-    ],
-    [
-     2,
-     0,
-     0,
-     6,
-     1030,
-     6
-    ],
-    [
-     0,
-     6,
-     6,
-     1,
-     11,
-     186
-    ]
-   ]
-  },
-  "byIntensity": {
-   "low": {
-    "clips": 455,
-    "accuracy": 0.804,
-    "unweightedRecall": 0.67,
-    "recall": {
-     "angry": 0.923,
-     "disgusted": 0.813,
-     "fearful": 0.615,
-     "happy": 0.901,
-     "neutral": 0.0,
-     "sad": 0.769
-    },
-    "columns": [
-     "angry",
-     "disgusted",
-     "fearful",
-     "happy",
-     "neutral",
-     "sad"
-    ],
-    "matrix": [
-     [
-      84,
-      3,
-      0,
-      1,
-      3,
-      0
-     ],
-     [
-      5,
-      74,
-      0,
-      2,
-      3,
-      7
-     ],
-     [
-      3,
-      2,
-      56,
-      2,
-      7,
-      21
-     ],
-     [
-      1,
-      0,
-      2,
-      82,
-      6,
-      0
-     ],
-     [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-     ],
-     [
-      0,
-      0,
-      7,
-      1,
-      13,
-      70
-     ]
-    ]
-   },
-   "medium": {
-    "clips": 455,
-    "accuracy": 0.842,
-    "unweightedRecall": 0.701,
-    "recall": {
-     "angry": 0.967,
-     "disgusted": 0.857,
-     "fearful": 0.659,
-     "happy": 0.923,
-     "neutral": 0.0,
-     "sad": 0.802
-    },
-    "columns": [
-     "angry",
-     "disgusted",
-     "fearful",
-     "happy",
-     "neutral",
-     "sad"
-    ],
-    "matrix": [
-     [
-      88,
-      0,
-      1,
-      1,
-      0,
-      1
-     ],
-     [
-      8,
-      78,
-      1,
-      0,
-      2,
-      2
-     ],
-     [
-      3,
-      9,
-      60,
-      1,
-      8,
-      10
-     ],
-     [
-      2,
-      1,
-      0,
-      84,
-      4,
-      0
-     ],
-     [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-     ],
-     [
-      0,
-      1,
-      10,
-      1,
-      6,
-      73
-     ]
-    ]
-   },
-   "high": {
-    "clips": 455,
-    "accuracy": 0.853,
-    "unweightedRecall": 0.711,
-    "recall": {
-     "angry": 0.978,
-     "disgusted": 0.824,
-     "fearful": 0.824,
-     "happy": 0.923,
-     "neutral": 0.0,
-     "sad": 0.714
-    },
-    "columns": [
-     "angry",
-     "disgusted",
-     "fearful",
-     "happy",
-     "neutral",
-     "sad"
-    ],
-    "matrix": [
-     [
-      89,
-      1,
-      1,
-      0,
-      0,
-      0
-     ],
-     [
-      8,
-      75,
-      0,
-      2,
-      4,
-      2
-     ],
-     [
-      8,
-      4,
-      75,
-      2,
-      0,
-      2
-     ],
-     [
-      5,
-      1,
-      0,
-      84,
-      1,
-      0
-     ],
-     [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-     ],
-     [
-      5,
-      4,
-      7,
-      3,
-      7,
-      65
-     ]
-    ]
-   },
-   "unspecified": {
-    "clips": 4990,
-    "accuracy": 0.852,
-    "unweightedRecall": 0.71,
-    "recall": {
-     "angry": 0.964,
-     "disgusted": 0.788,
-     "fearful": 0.743,
-     "happy": 0.928,
-     "neutral": 0.0,
-     "sad": 0.839
-    },
-    "columns": [
-     "angry",
-     "disgusted",
-     "fearful",
-     "happy",
-     "neutral",
-     "sad"
-    ],
-    "matrix": [
-     [
-      962,
-      10,
-      3,
-      5,
-      17,
-      1
-     ],
-     [
-      59,
-      786,
-      15,
-      12,
-      55,
-      71
-     ],
-     [
-      9,
-      17,
-      742,
-      23,
-      55,
-      152
-     ],
-     [
-      13,
-      6,
-      7,
-      926,
-      39,
-      7
-     ],
-     [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-     ],
-     [
-      0,
-      22,
-      14,
-      5,
-      120,
-      837
-     ]
-    ]
-   }
-  },
-  "crowdVoiceAgreement": {
-   "angry": 0.516,
-   "disgusted": 0.283,
-   "fearful": 0.314,
-   "happy": 0.283,
-   "neutral": 0.754,
-   "sad": 0.249
-  },
-  "crowdVoiceAgreementMean": 0.4
  }
 }

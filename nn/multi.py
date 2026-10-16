@@ -383,9 +383,11 @@ def print_pool_report(rows, kept, hours):
 # Build
 #
 
-# The paths of a corpus directory's speaker table and split - data/nn/'s for the default directory, else beside it
+# The paths of a corpus directory's speaker table and split - data/nn/'s for the repository's default directory
+# (build/nn/data/multi), else beside it - so a build elsewhere (make train's, with NN_DATA_DIR) never rewrites the
+# committed files
 def table_paths(out_dir):
-    if os.path.abspath(out_dir) == os.path.abspath(OUT_DIR):
+    if os.path.abspath(out_dir) == os.path.abspath(os.path.join(ROOT, 'build', 'nn', 'data', 'multi')):
         return SPEAKERS_PATH, SPLIT_PATH
     return os.path.join(out_dir, 'speakers.json'), os.path.join(out_dir, 'multi-split.json')
 

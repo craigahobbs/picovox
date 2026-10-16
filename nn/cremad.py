@@ -1123,7 +1123,9 @@ def build(args):
     with open(os.path.join(out_dir, 'index.json'), 'w', encoding='utf-8') as file:
         json.dump(index, file, indent=1)
         file.write('\n')
-    default_dir = os.path.abspath(out_dir) == os.path.abspath(DATA_DIR)
+    # (the committed summary only for the repository's default directory - a build elsewhere, as make train's with
+    # NN_DATA_DIR, writes it beside its data)
+    default_dir = os.path.abspath(out_dir) == os.path.abspath(os.path.join(ROOT, 'build', 'nn', 'data', 'cremad'))
     write_summary(index, SUMMARY_PATH if default_dir else os.path.join(out_dir, 'cremad.json'))
     included = [entry for entry in entries if entry['include']]
     print(f'Built {out_dir}: {len(entries)} clips ({len(included)} included), {frame_offset / 100 / 3600:.2f} hours '
