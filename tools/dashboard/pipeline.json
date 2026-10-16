@@ -53,7 +53,8 @@
             "steps": [
                 {"title": "Integration branch: distillation, G2P-network data, G2P training tooling", "log": "build/nn/loop/merge.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 2},
                 {"title": "Alternating loop on the training code: optimize, simplify, repeat", "log": "build/nn/loop/loop.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 6},
-                {"title": "Merged into main", "file": "build/nn/pipeline/merged.json", "weight": 1}
+                {"title": "Merged into main", "file": "build/nn/pipeline/merged.json", "weight": 1},
+                {"title": "Remove code not in use or planned (inventory, then removal, every check kept green)", "log": "build/nn/cleanup/cleanup.log", "doneWhen": "done:", "failWhen": "FAILED", "weight": 4}
             ]
         },
         {
