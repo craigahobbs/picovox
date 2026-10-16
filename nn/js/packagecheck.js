@@ -98,7 +98,9 @@ async function main() {
         }
         tensors++;
     }
-    if (Object.keys(packaged.tensors).length !== tensors || JSON.stringify(packaged.manifest) !== JSON.stringify(exported.manifest)) {
+    // (the manifest as exported - nn/package.py --provenance adds only its provenance record)
+    const {'provenance': _provenance, ...packagedManifest} = packaged.manifest;
+    if (Object.keys(packaged.tensors).length !== tensors || JSON.stringify(packagedManifest) !== JSON.stringify(exported.manifest)) {
         throw new Error('the package\'s tensors or manifest differ');
     }
 
