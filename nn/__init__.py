@@ -64,4 +64,6 @@ Shrinking and checking:
 - nn/panel.py - the listener panel's scoring (UTMOS, Whisper's WER, speaker similarity) of an exported model, shared by
   every evaluation
 - nn/smoke.py - every training entry point for a few steps on the CPU (the pipeline's smoke test)
+- nn/gpulock.py - a command run holding the GPU lock (make train's GPU stages one at a time); the Makefile's train
+  target is the pipeline, data/nn/train.json its recipe
 """
