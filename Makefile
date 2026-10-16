@@ -230,8 +230,8 @@ $(TRAIN_DIR)/student-eval.done: $(TRAIN_DIR)/polish.done $(TRAIN_DIR)/teacher-ev
 # The voice model module, with its provenance (the commit, the recipe's and the data's hashes, the gate's scores)
 $(TRAIN_DIR)/package.done: $(TRAIN_DIR)/student-eval.done
 	@$(STAGE) start
-	$(STAGE) -- $(NN_PYTHON) -m nn.export $(TRAIN_RUNS)/distill-student-polish/best.pt --voice multi --out $(TRAIN_DIR)/export
-	$(STAGE) -- $(NN_PYTHON) -m nn.package $(TRAIN_DIR)/export/multi -o lib/models/voiceModel.js --provenance --recipe data/nn/train.json \
+	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.export $(TRAIN_RUNS)/distill-student-polish/best.pt --voice multi --out $(TRAIN_DIR)/export
+	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.package $(TRAIN_DIR)/export/multi -o lib/models/voiceModel.js --provenance --recipe data/nn/train.json \
 		--data $(TRAIN_DIR)/data/multi $(TRAIN_DIR)/data/cremad --scores $(TRAIN_DIR)/distill/eval/student/result.json
 	@$(STAGE) end
 	touch $@
