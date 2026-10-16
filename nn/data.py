@@ -533,24 +533,6 @@ def collate(items):
     }
 
 
-# Length-bucketed batches of dataset indices, each at most max_frames frames in all (shuffled with a seed)
-def length_batches(dataset, max_frames, seed=0):
-    rng = np.random.default_rng(seed)
-    order = sorted(range(len(dataset)), key=lambda index: dataset.items[index]['frameCount'] + rng.random())
-    batches, batch, longest = [], [], 0
-    for index in order:
-        length = dataset.items[index]['frameCount']
-        if batch and max(longest, length) * (len(batch) + 1) > max_frames:
-            batches.append(batch)
-            batch, longest = [], 0
-        batch.append(index)
-        longest = max(longest, length)
-    if batch:
-        batches.append(batch)
-    rng.shuffle(batches)
-    return batches
-
-
 #
 # Token verification - nn/js/tokens.js against nn/frontend.py
 #
