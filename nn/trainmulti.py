@@ -277,6 +277,11 @@ def crop(values, batch, crop_frames, rate, rng):
 # Low-pass audio [B, N] at a cutoff per item (Hz) - zeroing the FFT bins above it (so the magnitude spectra of the
 # losses and the critic take a small epsilon - a magnitude of exactly zero has an infinite gradient); cutoff_tensor is
 # the cutoffs as a float32 tensor on the audio's device, if the caller has it
+# The spectral loss compiled - on MPS its elementwise work fused into a few kernels (the gradient within rounding of the
+# eager loss's, 143 dB); on the CPU the eager loss (bit-exact)
+compiled_spectral_loss = torch.compile(spectral_loss)
+
+
 def band_limit(audio, cutoffs, rate, cutoff_tensor=None):
     if all(cutoff >= rate / 2 for cutoff in cutoffs):
         return audio
@@ -460,7 +465,13 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
     cutoffs = [0.95 * item['bandwidth'] for item in batch['items']]
     audio = band_limit(audio, cutoffs, args.rate, batch.get('cutoffs'))
     target = band_limit(target, cutoffs, args.rate, batch.get('cutoffs'))
-    losses['spectral'] = spectral_loss(audio, target, args.rate, args.max_hz, mel_eps=1e-9)
+    if audio.device.type == 'mps' and audio.shape[1] == round(args.crop * args.rate):
+        # (the full-length crops - nearly every step - through the compiled loss, the batch size a dynamic dimension)
+        torch._dynamo.mark_dynamic(audio, 0)
+        torch._dynamo.mark_dynamic(target, 0)
+        losses['spectral'] = compiled_spectral_loss(audio, target, args.rate, args.max_hz, mel_eps=1e-9)
+    else:
+        losses['spectral'] = spectral_loss(audio, target, args.rate, args.max_hz, mel_eps=1e-9)
 
     total = (losses['spectral'] + args.duration_weight * (losses['durPhone'] + losses['durPause'] + losses['durPaused']) +
              args.f0_weight * losses['f0'] + guide_weight * args.formant_weight * losses['formant'] + losses['order'] +

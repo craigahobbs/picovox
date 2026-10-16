@@ -19,6 +19,53 @@ import torch
 from . import spectral
 
 
+class _StridedConvFunction(torch.autograd.Function):
+    """A (3, 9) convolution of stride (1, 2) and padding (1, 4) whose input gradient is two stride-1 convolutions of the
+    output gradient - the kernel's even and odd columns (its polyphase components), flipped - interleaved: on MPS the
+    strided convolution's own input gradient takes about 2.7 times its forward. The forward is the convolution itself
+    (in the autocast precision, as autocast runs it)."""
+
+    @staticmethod
+    def forward(ctx, x, weight, bias):  # pylint: disable=arguments-differ
+        dtype = torch.get_autocast_dtype(x.device.type) if torch.is_autocast_enabled(x.device.type) else x.dtype
+        x, weight, bias = x.to(dtype), weight.to(dtype), bias.to(dtype)
+        ctx.save_for_backward(x, weight)
+        with torch.autocast(x.device.type, enabled=False):
+            return torch.nn.functional.conv2d(x, weight, bias, stride=(1, 2), padding=(1, 4))
+
+    @staticmethod
+    def backward(ctx, grad):  # pylint: disable=arguments-differ
+        x, weight = ctx.saved_tensors
+        grad_x = grad_weight = grad_bias = None
+        if ctx.needs_input_grad[0]:
+            # grad_x[..., 2p + r] = the output gradient correlated with the kernel's columns r, r + 2, ... (time and
+            # columns flipped, input and output channels swapped)
+            flipped = weight.flip(2).transpose(0, 1)
+            even = torch.nn.functional.conv2d(grad, flipped[..., 0::2].flip(-1), padding=(1, 2))
+            odd = torch.nn.functional.conv2d(torch.nn.functional.pad(grad, (1, 2)), flipped[..., 1::2].flip(-1), padding=(1, 0))
+            grad_x = grad.new_empty(grad.shape[0], weight.shape[1], grad.shape[2], x.shape[3])
+            grad_x[..., 0::2] = even[..., :(x.shape[3] + 1) // 2]
+            grad_x[..., 1::2] = odd[..., :x.shape[3] // 2]
+        if ctx.needs_input_grad[1] or ctx.needs_input_grad[2]:
+            _, grad_weight, grad_bias = torch.ops.aten.convolution_backward(
+                grad, x, weight, [weight.shape[0]], (1, 2), (1, 4), (1, 1), False, (0, 0), 1,
+                (False, ctx.needs_input_grad[1], ctx.needs_input_grad[2]))
+        return grad_x, grad_weight, grad_bias
+
+
+class StridedConv2d(torch.nn.Conv2d):
+    """The discriminators' (3, 9) convolution of stride (1, 2) - on MPS with the faster input gradient
+    (_StridedConvFunction); elsewhere torch's"""
+
+    def __init__(self, channels):
+        super().__init__(channels, channels, (3, 9), stride=(1, 2), padding=(1, 4))
+
+    def forward(self, input):  # pylint: disable=redefined-builtin
+        if input.device.type == 'mps':
+            return _StridedConvFunction.apply(input, self.weight, self.bias)
+        return super().forward(input)
+
+
 class SpectrogramDiscriminator(torch.nn.Module):
     """A log-mel spectrogram discriminator at one resolution"""
 
@@ -31,9 +78,9 @@ class SpectrogramDiscriminator(torch.nn.Module):
         leaky = torch.nn.LeakyReLU(0.2)
         self.layers = torch.nn.ModuleList([
             torch.nn.Sequential(torch.nn.Conv2d(1, channels, (3, 9), padding=(1, 4)), leaky),
-            torch.nn.Sequential(torch.nn.Conv2d(channels, channels, (3, 9), stride=(1, 2), padding=(1, 4)), leaky),
-            torch.nn.Sequential(torch.nn.Conv2d(channels, channels, (3, 9), stride=(1, 2), padding=(1, 4)), leaky),
-            torch.nn.Sequential(torch.nn.Conv2d(channels, channels, (3, 9), stride=(1, 2), padding=(1, 4)), leaky),
+            torch.nn.Sequential(StridedConv2d(channels), leaky),
+            torch.nn.Sequential(StridedConv2d(channels), leaky),
+            torch.nn.Sequential(StridedConv2d(channels), leaky),
             torch.nn.Sequential(torch.nn.Conv2d(channels, channels, (3, 3), padding=(1, 1)), leaky)
         ])
         self.out = torch.nn.Conv2d(channels, 1, (3, 3), padding=(1, 1))
