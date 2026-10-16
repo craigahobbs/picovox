@@ -14,6 +14,11 @@
 //         [--blend '{"5": 0.6, "12": 0.4}'] [--embedding '[...]']                  # a blend, or a raw embedding
 //         [--style happy --intensity 0.7] [--style '{"happy": 0.5, "sad": 0.2}']   # an emotion, or a blend
 //
+// or a designed voice and style of data/nn/voices.json (nn/js/voices.js; batch items may set voice and voiceStyle):
+//
+//     node nn/js/speak.js -m data/nn/multi "Hello." -o hello.wav --voice narrator-f [--voice-style whisper]
+//         [--voices data/nn/voices.json] [--rate 1 (the duration multiplier - 0.9 is 10% faster)]
+//
 // It prints one JSON line: the audio seconds, and the seconds spent loading, in the network, and rendering.
 // --frames-only skips the rendering (the params file only).
 
@@ -26,13 +31,15 @@ import {applyTransforms} from './transforms.js';
 import {encodeWav} from '../../lib/wav.js';
 import process from 'node:process';
 import {render} from './render.js';
+import {voiceOptions} from './voices.js';
 
 
 // Parse the command line
 function parseArgs(argv) {
     const args = {'model': 'data/nn/slt', 'text': null, 'wav': null, 'params': null, 'sampleRate': 44100, 'seed': 1, 'batch': null,
         'transform': null, 'pauseThreshold': 0.5, 'rate': 1, 'framesOnly': false, 'peak': 0.89, 'bandwidthScale': null,
-        'speaker': undefined, 'embedding': undefined, 'style': undefined, 'intensity': 1};
+        'speaker': undefined, 'embedding': undefined, 'style': undefined, 'intensity': 1,
+        'voices': 'data/nn/voices.json', 'voice': undefined, 'voiceStyle': undefined};
     for (let ix = 0; ix < argv.length; ix++) {
         const arg = argv[ix];
         const take = () => argv[++ix];
@@ -69,6 +76,12 @@ function parseArgs(argv) {
             args.style = style.startsWith('{') ? JSON.parse(style) : style;
         } else if (arg === '--intensity') {
             args.intensity = Number(take());
+        } else if (arg === '--voices') {
+            args.voices = take();
+        } else if (arg === '--voice') {
+            args.voice = take();
+        } else if (arg === '--voice-style') {
+            args.voiceStyle = take();
         } else if (arg === '--frames-only') {
             args.framesOnly = true;
         } else {
@@ -107,16 +120,29 @@ function main() {
     const loadSeconds = (performance.now() - startLoad) / 1000;
     const items = args.batch ? JSON.parse(readFileSync(args.batch, 'utf8')) :
         [{'text': args.text, 'wav': args.wav, 'params': args.params, 'seed': args.seed, 'transform': args.transform}];
+    let voices = null;
     let networkSeconds = 0;
     let renderSeconds = 0;
     let audioSeconds = 0;
     for (const item of items) {
         const startNetwork = performance.now();
-        const spoken = speakFrames(model, item.text, {'pauseThreshold': item.pauseThreshold ?? args.pauseThreshold,
+        let options = {'pauseThreshold': item.pauseThreshold ?? args.pauseThreshold,
             'rate': item.rate ?? args.rate, 'bandwidthScale': item.bandwidthScale ?? args.bandwidthScale ?? undefined,
-            'speaker': item.speaker ?? args.speaker, 'embedding': item.embedding ?? args.embedding, 'style': item.style ?? defaultStyle});
+            'speaker': item.speaker ?? args.speaker, 'embedding': item.embedding ?? args.embedding, 'style': item.style ?? defaultStyle};
+        let voiceTransforms = [];
+        const voiceId = item.voice ?? args.voice;
+        if (voiceId !== undefined) {
+            // A designed voice - its blend, style, and transforms (the rate is the listener's speed: 1 / the duration multiplier)
+            voices ??= JSON.parse(readFileSync(args.voices, 'utf8'));
+            const resolved = voiceOptions(model, voices, {'voice': voiceId, 'style': item.voiceStyle ?? args.voiceStyle,
+                'rate': 1 / options.rate, 'pauseThreshold': options.pauseThreshold, 'bandwidthScale': options.bandwidthScale});
+            // (an explicit model style - --style or the item's style - replaces the designed style's)
+            options = {...resolved.options, 'style': options.style ?? resolved.options.style};
+            voiceTransforms = resolved.transforms;
+        }
+        const spoken = speakFrames(model, item.text, options);
         networkSeconds += (performance.now() - startNetwork) / 1000;
-        const frames = applyTransforms(spoken.frames, item.transform ?? args.transform ?? []);
+        const frames = applyTransforms(applyTransforms(spoken.frames, voiceTransforms), item.transform ?? args.transform ?? []);
         if (item.params) {
             const round = (value) => Math.round(value * 10000) / 10000;
             const rows = frames.map((frame) => Array.from(frame.subarray(0, NAMES.length), round));
