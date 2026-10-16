@@ -86,11 +86,9 @@ def main(argv=None):
     voice = {'speaker': args.speaker, 'blend': blend, 'emotion': args.style, 'intensity': args.intensity}
     quantized = Voice(args.checkpoint, quantized=True, bandwidth_scale=scale, bits=bits, group=group, **voice)
     floating = Voice(args.checkpoint, quantized=False, bandwidth_scale=scale, **voice)
-    js_voice = []
-    if quantized.multi:
-        js_voice = ['--blend', json.dumps(blend)] if blend else ['--speaker', str(quantized.speaker)]
-        if args.style:
-            js_voice += ['--style', args.style, '--intensity', str(args.intensity)]
+    js_voice = ['--blend', json.dumps(blend)] if blend else ['--speaker', str(quantized.speaker)]
+    if args.style:
+        js_voice += ['--style', args.style, '--intensity', str(args.intensity)]
 
     with tempfile.TemporaryDirectory() as directory:
         batch = [{'text': text, 'params': os.path.join(directory, f'{ix}.json')} for ix, text in enumerate(items)]

@@ -62,9 +62,10 @@ import numpy as np
 
 from . import data
 from . import readings
-from .data import (BOUNDARIES, CORPORA_DIR, DATA_DIR, FORMAT_VERSION, HOP, MAX_EDGE_SILENCE, MIN_MATCH,
-                   MIN_WORD_MATCH, SAMPLE_RATE, CHANNELS, CHANNEL_NOTES, ArcticData, match_rate, read_mfa)
-from .frontend import ABBREVIATIONS, FUNCTION_WORDS, ROOT, pronounce_texts, set_pronunciations, tokenize, vocabulary
+from .data import (CORPORA_DIR, DATA_DIR, FORMAT_VERSION, HOP, MAX_EDGE_SILENCE, MIN_MATCH, MIN_WORD_MATCH, SAMPLE_RATE,
+                   CHANNELS, CHANNEL_NOTES, ArcticData, match_rate, read_mfa)
+from .frontend import (ABBREVIATIONS, BOUNDARIES, FUNCTION_WORDS, ROOT, pronounce_texts, set_pronunciations, tokenize,
+                       vocabulary)
 
 
 MULTI_DIR = os.path.join(ROOT, 'build', 'nn', 'multi')

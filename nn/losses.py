@@ -2,7 +2,7 @@
 # https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
 
 """
-The training losses and targets shared by the trainers (nn/trainmulti.py, nn/train.py): the parameter priors, the F0
+The training losses and targets of the trainer (nn/trainmulti.py; nn/distill.py's polish): the parameter priors, the F0
 target track, the multi-resolution STFT and log-mel loss, the duration loss, and the parameter frames made ready to
 render (the end frame, silence past each utterance, the recorded F0).
 """

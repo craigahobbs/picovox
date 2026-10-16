@@ -18,7 +18,6 @@ STREAM_ASPIRATION = 1
 STREAM_FRICATION = 2
 STREAM_JITTER = 3
 STREAM_SHIMMER = 4
-STREAM_RESIDUAL = 5
 
 
 # The seed of a stream of a synthesis seed (32-bit)

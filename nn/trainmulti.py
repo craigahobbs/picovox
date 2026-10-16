@@ -2,8 +2,8 @@
 # https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
 
 """
-Training the multi-speaker, multi-style model (nn/model.py's MultiModel) - nn/train.py's end-to-end training through
-the differentiable synthesizer, over many speakers and the emotional styles:
+Training the multi-speaker, multi-style model (nn/model.py's MultiModel) - end-to-end training through the
+differentiable synthesizer (nn/dsynth.py), over many speakers and the emotional styles:
 
     build/venv-nn/bin/python -B -m nn.trainmulti --name multi-a --recipe teacher.a
     build/venv-nn/bin/python -B -m nn.trainmulti --name multi-b --recipe teacher.b --init build/nn/runs/multi-a/last.pt
@@ -24,7 +24,7 @@ corpora's rate) and compares below each utterance's own band: the recordings' ba
 stop at 8 kHz, LibriTTS-R at 12 kHz), so the rendering and the recording are both low-passed at 0.95 of the
 recording's bandwidth before the losses, and the spectral losses stop at --max-hz (the synthesizer's harmonic taper).
 
-The losses are nn/train.py's (the multi-resolution STFT and log-mel loss, durations, log F0, the fading formant guide,
+The losses are nn/losses.py's (the multi-resolution STFT and log-mel loss, durations, log F0, the fading formant guide,
 formant order, smoothness, frication band) plus:
 
 - the adversarial critic (nn/discriminator.py, --adversarial and --feature-matching) on the reader batches only - the

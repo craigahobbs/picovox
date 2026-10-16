@@ -24,7 +24,7 @@ import soundfile
 import torch
 
 from . import dsynth, params
-from .export import is_multi, load_model, quantized_model, token_remap, training_token_counts
+from .export import load_model, quantized_model, token_remap, training_token_counts
 from .frontend import tokenize
 from .model import STYLE_NAMES
 
@@ -57,7 +57,6 @@ class Voice:
         self.model = quantized_model(model, bits, group) if quantized else model
         self.model.eval()
         self.state = state
-        self.multi = is_multi(model)
         counts, self.vocab = training_token_counts(state)
         remap = token_remap(self.vocab, counts)
         self.remap = {self.vocab.index(source): self.vocab.index(target) for source, target in remap.items()}
@@ -82,9 +81,7 @@ class Voice:
 
     # The model's conditioning arguments
     def condition(self):
-        if self.multi:
-            return {'speaker': self.speaker_input, 'emotion': self.emotion, 'intensity': self.intensity}
-        return {'speaker': torch.tensor([self.speaker], device=self.device)}
+        return {'speaker': self.speaker_input, 'emotion': self.emotion, 'intensity': self.intensity}
 
     def frames(self, text, pause_threshold=0.5, rate=1.0):
         """Text to parameter frames [T, COUNT] (numpy, the end frame included) and the sentences' token ids and

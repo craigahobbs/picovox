@@ -20,10 +20,13 @@ shimmer are constants (the spectral loss gives jitter no gradient), and a static
 (nn/params.py's EQ, 24 bands) models the recording channel.
 
 F0 gets no useful gradient through the synthesizer (nn/dsynth.py), so the F0 column is trained by regression on the
-recordings' Praat F0 (nn/train.py), and training renders with the recorded F0 (teacher forcing, as FastPitch does).
+recordings' Praat F0 (nn/trainmulti.py, nn/losses.py), and training renders with the recorded F0 (teacher forcing, as
+FastPitch does).
 
-Conditioning: a speaker embedding (speakers > 1; with one speaker it is a learned bias) and an optional style vector
-(style_dim > 0, unused for now) are added to the token features and to the decoder's input.
+Conditioning: MultiModel's condition vector - a speaker embedding (a row, or a blend of rows, of the speaker table)
+and a style embedding (an emotion row of the style table, scaled by its intensity) - is added to the token features,
+the duration predictor's input, and the decoder's input, and modulates every conv-FFN block (FiLM). (The first,
+single-speaker model and its trainer, nn/train.py, are in git history.)
 
 No absolute positional encoding - order comes from the convolutions - so any length works; nn/synthesize.py and
 nn/js/model.js speak long texts a sentence at a time, like the training data.
@@ -50,8 +53,8 @@ import torch
 from . import params
 
 
-# The model's hyperparameters (the defaults are the experiment's model)
-DEFAULT_CONFIG = {
+# The model's hyperparameters (config 'kind': 'multi')
+MULTI_CONFIG = {
     'vocab': 78,
     'dim': 128,                # token feature width
     'encoderLayers': 3,
@@ -59,16 +62,19 @@ DEFAULT_CONFIG = {
     'encoderKernel': 5,        # depthwise convolution kernel in the encoder's FFN
     'ffnMultiple': 2,
     'durationKernel': 3,
-    'durationDropout': 0.1,    # training only
+    'durationDropout': 0.2,    # training only
     'decoderDim': 128,
-    'decoderLayers': 4,
+    'decoderLayers': 6,
     'decoderKernel': 9,        # depthwise convolution kernel in the decoder (10 ms frames)
     'subframes': 2,            # parameter frames (5 ms) per decoder frame (10 ms)
-    'speakers': 1,
-    'styleDim': 0,
+    'speakers': 328,           # the speaker table's rows (data/nn/speakers.json ids, then the style corpus's actors)
+    'styleDim': 8,             # the style embedding's width
     'jitter': 0.005,
     'shimmer': 0.02,
-    'positionFeatures': 5
+    'positionFeatures': 5,
+    'kind': 'multi',
+    'speakerDim': 16,          # the speaker embedding's width
+    'styles': 5                # the emotions with a style row (neutral is the zero vector) - STYLE_NAMES
 }
 
 # The spectral correction head's default bound (dB)
@@ -191,179 +197,6 @@ def correction_gains(model, hidden):
     return model.config.get('correctionRangeDb', CORRECTION_RANGE_DB) * gains
 
 
-class Model(torch.nn.Module):
-    """Tokens to durations to synthesizer parameter frames - see the module documentation"""
-
-    def __init__(self, config=None, priors=None, dropout=0.1):
-        super().__init__()
-        self.config = {**DEFAULT_CONFIG, **(config or {})}
-        cfg = self.config
-        dim, decoder_dim = cfg['dim'], cfg['decoderDim']
-        self.embedding = torch.nn.Embedding(cfg['vocab'], dim, padding_idx=PAD)
-        self.speaker = torch.nn.Embedding(cfg['speakers'], dim)
-        torch.nn.init.zeros_(self.speaker.weight)
-        self.style = torch.nn.Linear(cfg['styleDim'], dim) if cfg['styleDim'] > 0 else None
-        layers = []
-        for layer in range(cfg['encoderLayers']):
-            layers.append(ConvFFN(dim, dim * cfg['ffnMultiple'], cfg['encoderKernel'], dropout))
-            layers.append(context_block(cfg, layer, dim, dropout))
-        self.encoder = torch.nn.ModuleList(layers)
-        self.encoder_norm = LayerNorm(dim)
-
-        # The duration predictor - two depthwise-separable convolution layers, then [log(d + 1), pause logit,
-        # log(paused d + 1)]
-        self.duration_layers = torch.nn.ModuleList()
-        for _ in range(2):
-            self.duration_layers.append(torch.nn.ModuleDict({
-                'conv': DepthwiseConv(dim, cfg['durationKernel']), 'linear': torch.nn.Linear(dim, dim), 'norm': LayerNorm(dim)
-            }))
-        self.duration_out = torch.nn.Linear(dim, 3)
-        self.duration_dropout = torch.nn.Dropout(cfg['durationDropout'])
-
-        # The decoder - the frame's token features and its position in the token, then conv-FFN blocks
-        self.decoder_in = torch.nn.Linear(dim, decoder_dim)
-        self.position_in = torch.nn.Linear(cfg['positionFeatures'], decoder_dim)
-        self.decoder_speaker = torch.nn.Embedding(cfg['speakers'], decoder_dim)
-        torch.nn.init.zeros_(self.decoder_speaker.weight)
-        self.decoder = torch.nn.ModuleList([
-            ConvFFN(decoder_dim, decoder_dim * cfg['ffnMultiple'], cfg['decoderKernel'], dropout)
-            for _ in range(cfg['decoderLayers'])
-        ])
-        self.decoder_norm = LayerNorm(decoder_dim)
-        self.head = torch.nn.Linear(decoder_dim, cfg['subframes'] * params.COUNT)
-
-        # The parameter head's bias starts at the priors (normalized), so training starts from a plausible voice
-        with torch.no_grad():
-            self.head.weight.mul_(0.1)
-            prior = torch.tensor([float((priors or {}).get(name, params.DEFAULTS[name])) for name in params.NAMES])
-            unit = params.normalize(prior[None])[0].clamp(0.02, 0.98)
-            self.head.bias.copy_(torch.log(unit / (1 - unit)).repeat(cfg['subframes']))
-
-        # The channel equalizer per speaker (dB = EQ_RANGE_DB tanh(free)) and the constant jitter and shimmer
-        self.eq_free = torch.nn.Parameter(torch.zeros(cfg['speakers'], params.EQ_BAND_COUNT))
-        fixed = torch.zeros(params.COUNT)
-        fixed_mask = torch.zeros(params.COUNT)
-        for name in FIXED_NAMES:
-            fixed[params.INDEX[name]] = cfg[name]
-            fixed_mask[params.INDEX[name]] = 1
-        self.register_buffer('fixed', fixed, persistent=False)
-        self.register_buffer('fixed_mask', fixed_mask, persistent=False)
-
-        # The optional spectral correction head (created last, so the other layers' initialization is unchanged)
-        self.correction_head = correction_head(cfg, decoder_dim)
-
-    # The conditioning vector [B, 1, D] - the speaker embedding plus the optional style
-    def _condition(self, speaker, style):
-        condition = self.speaker(speaker)[:, None, :]
-        if self.style is not None and style is not None:
-            condition = condition + self.style(style)[:, None, :]
-        return condition
-
-    def encode(self, tokens, speaker=None, style=None):
-        """Token features [B, N, D] and the token mask [B, N, 1]"""
-        mask = (tokens != PAD).float()[..., None]
-        if speaker is None:
-            speaker = torch.zeros(tokens.shape[0], dtype=torch.long, device=tokens.device)
-        x = (self.embedding(tokens) + self._condition(speaker, style)) * mask
-        for layer in self.encoder:
-            x = layer(x, mask)
-        return self.encoder_norm(x) * mask, mask
-
-    def durations(self, features, mask):
-        """The duration predictor's outputs [B, N, 3] - log(d + 1), the pause logit, log(paused d + 1)"""
-        x = features
-        for layer in self.duration_layers:
-            x = self.duration_dropout(layer['norm'](torch.nn.functional.silu(layer['linear'](layer['conv'](x * mask))))) * mask
-        return self.duration_out(x)
-
-    # Durations (frames, integer) from the duration predictor's outputs, for inference
-    @staticmethod
-    def predicted_durations(outputs, tokens, pause_threshold=0.5, rate=1.0):
-        log_duration, pause_logit, log_paused = outputs.unbind(-1)
-        phone = torch.expm1(log_duration).clamp(min=1.0) * rate
-        paused = torch.expm1(log_paused).clamp(min=1.0) * rate
-        boundary = is_boundary(tokens) | (tokens == BOS)
-        pause = torch.sigmoid(pause_logit) > pause_threshold
-        durations = torch.where(boundary, torch.where(pause, paused, torch.zeros_like(paused)), phone)
-        durations = durations * (tokens != PAD)
-        # Round the running sum, so rounding errors don't accumulate
-        ends = torch.round(torch.cumsum(durations, dim=-1))
-        starts = torch.cat([torch.zeros_like(ends[:, :1]), ends[:, :-1]], dim=-1)
-        return (ends - starts).long()
-
-    @staticmethod
-    def regulate(features, durations, frame_count=None):
-        """The length regulator - token features [B, N, D] repeated for their durations [B, N] (10 ms frames) to
-        [B, F, D], with the position features [B, F, 5] and the frame mask [B, F, 1]; frame_count is F when the caller
-        knows it (max(1, the longest total duration) - reading it from the device synchronizes)"""
-        batch = features.shape[0]
-        lengths = durations.sum(dim=1)
-        frame_count = max(1, int(lengths.max())) if frame_count is None else frame_count
-        ends = torch.cumsum(durations, dim=1)
-        frames = torch.arange(frame_count, device=features.device)
-        # Each frame's token - the first token whose end is after it
-        token_index = torch.searchsorted(ends, frames[None].expand(batch, -1).contiguous(), right=True)
-        token_index = token_index.clamp(max=features.shape[1] - 1)
-        regulated = torch.gather(features, 1, token_index[..., None].expand(-1, -1, features.shape[2]))
-        duration = torch.gather(durations, 1, token_index).float().clamp(min=1)
-        start = torch.gather(ends - durations, 1, token_index).float()
-        offset = frames[None].float() - start
-        positions = torch.stack([
-            (offset + 0.5) / duration, 1 - (offset + 0.5) / duration, torch.log1p(duration) / 3,
-            torch.clamp(offset, max=20) / 20, torch.clamp(duration - 1 - offset, max=20) / 20
-        ], dim=-1)
-        mask = (frames[None] < lengths[:, None]).float()[..., None]
-        return regulated * mask, positions * mask, mask
-
-    def decode(self, regulated, positions, mask, speaker=None, return_correction=False):
-        """Decoder frames [B, F, D] (10 ms) to normalized parameter frames [B, F * subframes, COUNT] (5 ms, sigmoid
-        outputs, the fixed parameters not yet applied); with return_correction, (frames, the spectral correction's band
-        gains (dB) [B, F * subframes, K] or None)"""
-        if speaker is None:
-            speaker = torch.zeros(regulated.shape[0], dtype=torch.long, device=regulated.device)
-        x = (self.decoder_in(regulated) + self.position_in(positions) + self.decoder_speaker(speaker)[:, None, :]) * mask
-        for layer in self.decoder:
-            x = layer(x, mask)
-        hidden = self.decoder_norm(x)
-        logits = self.head(hidden)
-        batch, frames, _ = logits.shape
-        unit = torch.sigmoid(logits.reshape(batch, frames * self.config['subframes'], params.COUNT))
-        if return_correction:
-            return unit, (correction_gains(self, hidden) if self.correction_head is not None else None)
-        return unit
-
-    def parameters_from_unit(self, unit):
-        """Normalized frames [B, T, COUNT] to parameter values, with the fixed parameters (jitter, shimmer)"""
-        values = params.denormalize(unit)
-        return values * (1 - self.fixed_mask) + self.fixed * self.fixed_mask
-
-    def eq(self, speaker):
-        """The channel equalizer gains (dB) [B, EQ_BAND_COUNT]"""
-        return params.EQ_RANGE_DB * torch.tanh(self.eq_free[speaker])
-
-    def forward(self, tokens, durations, speaker=None, style=None):
-        """Training forward pass (teacher-forced durations [B, N], 10 ms frames) - {duration (the predictor's outputs
-        [B, N, 3]), unit (normalized parameter frames [B, 2F, COUNT]), frameMask [B, F, 1]}"""
-        features, mask = self.encode(tokens, speaker, style)
-        duration_outputs = self.durations(features, mask)
-        regulated, positions, frame_mask = self.regulate(features, durations)
-        unit, correction = self.decode(regulated, positions, frame_mask, speaker, return_correction=True)
-        outputs = {'duration': duration_outputs, 'unit': unit, 'frameMask': frame_mask}
-        if correction is not None:
-            outputs['correction'] = correction
-        return outputs
-
-    @torch.no_grad()
-    def infer(self, tokens, speaker=None, style=None, pause_threshold=0.5, rate=1.0):
-        """Inference - {durations [B, N] (10 ms frames), values (parameter frames [B, 2F + 1, COUNT]), frames (2F + 1
-        per item)}"""
-        features, mask = self.encode(tokens, speaker, style)
-        durations = self.predicted_durations(self.durations(features, mask), tokens, pause_threshold, rate)
-        regulated, positions, frame_mask = self.regulate(features, durations)
-        unit, correction = self.decode(regulated, positions, frame_mask, speaker, return_correction=True)
-        return _inferred(self, durations, unit, correction)
-
-
 # Inference's result - {durations [B, N] (10 ms frames), values (parameter frames [B, 2F + 1, COUNT], the end frame
 # appended), frames (2F + 1 per item), and with the spectral correction head correction (its gains (dB) [B, 2F + 1, K])}
 def _inferred(model, durations, unit, correction):
@@ -383,18 +216,6 @@ def parameter_count(model):
 #
 # The multi-speaker, multi-style model
 #
-
-# The multi-speaker model's hyperparameters (config 'kind': 'multi')
-MULTI_CONFIG = {
-    **DEFAULT_CONFIG,
-    'kind': 'multi',
-    'decoderLayers': 6,
-    'durationDropout': 0.2,
-    'speakers': 328,           # the speaker table's rows (data/nn/speakers.json ids, then the style corpus's actors)
-    'speakerDim': 16,          # the speaker embedding's width
-    'styles': 5,               # the emotions with a style row (neutral is the zero vector) - STYLE_NAMES
-    'styleDim': 8              # the style embedding's width
-}
 
 # The style rows of the multi-speaker model's style table, in order - neutral is the absence of style (the zero vector)
 STYLE_NAMES = ('angry', 'disgusted', 'fearful', 'happy', 'sad')
@@ -419,7 +240,7 @@ class FiLMConvFFN(ConvFFN):
 
 
 class MultiModel(torch.nn.Module):
-    """The multi-speaker, multi-style model - Model's tokens-to-durations-to-frames network, conditioned on a condition
+    """The multi-speaker, multi-style model - the tokens-to-durations-to-frames network, conditioned on a condition
     vector c = [speaker embedding (speakerDim), style embedding (styleDim)]:
 
     - the speaker embedding - a row of the speaker table, or any blend (a convex combination of rows) or raw vector
@@ -528,9 +349,49 @@ class MultiModel(torch.nn.Module):
             x = self.duration_dropout(layer['norm'](torch.nn.functional.silu(layer['linear'](layer['conv'](x * mask))))) * mask
         return self.duration_out(x)
 
-    predicted_durations = staticmethod(Model.predicted_durations)
-    regulate = staticmethod(Model.regulate)
-    parameters_from_unit = Model.parameters_from_unit
+    # Durations (frames, integer) from the duration predictor's outputs, for inference
+    @staticmethod
+    def predicted_durations(outputs, tokens, pause_threshold=0.5, rate=1.0):
+        log_duration, pause_logit, log_paused = outputs.unbind(-1)
+        phone = torch.expm1(log_duration).clamp(min=1.0) * rate
+        paused = torch.expm1(log_paused).clamp(min=1.0) * rate
+        boundary = is_boundary(tokens) | (tokens == BOS)
+        pause = torch.sigmoid(pause_logit) > pause_threshold
+        durations = torch.where(boundary, torch.where(pause, paused, torch.zeros_like(paused)), phone)
+        durations = durations * (tokens != PAD)
+        # Round the running sum, so rounding errors don't accumulate
+        ends = torch.round(torch.cumsum(durations, dim=-1))
+        starts = torch.cat([torch.zeros_like(ends[:, :1]), ends[:, :-1]], dim=-1)
+        return (ends - starts).long()
+
+    @staticmethod
+    def regulate(features, durations, frame_count=None):
+        """The length regulator - token features [B, N, D] repeated for their durations [B, N] (10 ms frames) to
+        [B, F, D], with the position features [B, F, 5] and the frame mask [B, F, 1]; frame_count is F when the caller
+        knows it (max(1, the longest total duration) - reading it from the device synchronizes)"""
+        batch = features.shape[0]
+        lengths = durations.sum(dim=1)
+        frame_count = max(1, int(lengths.max())) if frame_count is None else frame_count
+        ends = torch.cumsum(durations, dim=1)
+        frames = torch.arange(frame_count, device=features.device)
+        # Each frame's token - the first token whose end is after it
+        token_index = torch.searchsorted(ends, frames[None].expand(batch, -1).contiguous(), right=True)
+        token_index = token_index.clamp(max=features.shape[1] - 1)
+        regulated = torch.gather(features, 1, token_index[..., None].expand(-1, -1, features.shape[2]))
+        duration = torch.gather(durations, 1, token_index).float().clamp(min=1)
+        start = torch.gather(ends - durations, 1, token_index).float()
+        offset = frames[None].float() - start
+        positions = torch.stack([
+            (offset + 0.5) / duration, 1 - (offset + 0.5) / duration, torch.log1p(duration) / 3,
+            torch.clamp(offset, max=20) / 20, torch.clamp(duration - 1 - offset, max=20) / 20
+        ], dim=-1)
+        mask = (frames[None] < lengths[:, None]).float()[..., None]
+        return regulated * mask, positions * mask, mask
+
+    def parameters_from_unit(self, unit):
+        """Normalized frames [B, T, COUNT] to parameter values, with the fixed parameters (jitter, shimmer)"""
+        values = params.denormalize(unit)
+        return values * (1 - self.fixed_mask) + self.fixed * self.fixed_mask
 
     def decode(self, regulated, positions, mask, condition, return_correction=False):
         """Decoder frames [B, F, D] (10 ms) to normalized parameter frames [B, F * subframes, COUNT]; with
@@ -582,8 +443,9 @@ class MultiModel(torch.nn.Module):
         return _inferred(self, durations, unit, correction)
 
 
-# A model of a config - the multi-speaker model (config 'kind': 'multi') or the single-speaker one
+# A model of a config - the multi-speaker model (config 'kind': 'multi'; the single-speaker model and its trainer,
+# nn/train.py, are in git history)
 def build_model(config, priors=None, dropout=0.1):
-    if (config or {}).get('kind') == 'multi':
-        return MultiModel(config, priors=priors, dropout=dropout)
-    return Model(config, priors=priors, dropout=dropout)
+    if (config or {}).get('kind') != 'multi':
+        raise ValueError('only the multi-speaker model (config kind "multi") is supported')
+    return MultiModel(config, priors=priors, dropout=dropout)

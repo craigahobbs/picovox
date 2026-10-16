@@ -92,14 +92,6 @@ EQ_HIGH_HZ = 16000.0
 EQ_RANGE_DB = 30.0
 
 
-# The residual noise (optional, experimental) - a third noise component, unmodulated and not through the tract, whose
-# per-frame spectrum is RESIDUAL_BAND_COUNT band levels (dB, like ah and af) at log-spaced frequencies from
-# RESIDUAL_LOW_HZ to RESIDUAL_HIGH_HZ, interpolated linearly in dB over log frequency
-RESIDUAL_BAND_COUNT = 12
-RESIDUAL_LOW_HZ = 100.0
-RESIDUAL_HIGH_HZ = 16000.0
-
-
 # The spectral correction (optional - a model option, nn/model.py correctionBands) - a learned per-frame envelope that
 # multiplies the voicing's harmonic amplitudes and the noise (aspiration and frication) spectra: K band gains (dB, the
 # network's tanh output bounded by its correctionRangeDb) at log-spaced frequencies from CORRECTION_LOW_HZ to
@@ -113,11 +105,6 @@ CORRECTION_HIGH_HZ = 12000.0
 # The spectral correction's band frequencies (Hz) for K bands
 def correction_frequencies(bands):
     return [CORRECTION_LOW_HZ * (CORRECTION_HIGH_HZ / CORRECTION_LOW_HZ) ** (ix / (bands - 1)) for ix in range(bands)]
-
-
-# The channel equalizer's band frequencies (Hz)
-def eq_frequencies():
-    return [EQ_LOW_HZ * (EQ_HIGH_HZ / EQ_LOW_HZ) ** (ix / (EQ_BAND_COUNT - 1)) for ix in range(EQ_BAND_COUNT)]
 
 
 # The parameters - (name, group, units, scale, low, high, default, doc). The scale is how a network should map a
@@ -178,21 +165,6 @@ DB_NAMES = [parameter[0] for parameter in PARAMETERS if parameter[2] == 'dB' and
 TRACT_FREQUENCIES = ['f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'fnp', 'fnz', 'fp1', 'fp2', 'fhp']
 
 
-# A level in dB to a linear amplitude
-def db_to_amp(db):
-    return 10 ** (db / 20)
-
-
-# A linear amplitude to a level in dB (at least the floor)
-def amp_to_db(amp, floor=FLOOR_DB):
-    return max(floor, 20 * math.log10(amp)) if amp > 0 else floor
-
-
-# A frame dict (missing parameters take their defaults) to a list of values in parameter order
-def frame_values(frame):
-    return [float(frame.get(name, DEFAULTS[name])) for name in NAMES]
-
-
 # Normalize parameter values (a torch tensor or numpy array [..., COUNT]) to 0-1 - the inverse of denormalize
 def normalize(values):
     columns = []
@@ -232,70 +204,20 @@ def _stack(columns, like):
 
 
 #
-# Voice and style transforms of parameter values ([..., COUNT] torch tensors or numpy arrays, returned as copies) - the
-# interpretable controls the network's outputs stay subject to
+# The bandwidth transform of parameter values ([..., COUNT] torch tensors or numpy arrays, returned as copies) - the
+# inference default (the export's bandwidthScale); the voice and style transforms are nn/js/transforms.js's
 #
 
 def _copy(values):
     return values.clone() if hasattr(values, 'clone') else values.copy()
 
 
-# Scale the vocal tract length - every resonance frequency (scale > 1 is a shorter tract)
-def tract_scale(values, scale):
-    out = _copy(values)
-    for name in TRACT_FREQUENCIES:
-        out[..., INDEX[name]] = out[..., INDEX[name]] * scale
-    return out
-
-
 # Scale the formant bandwidths (b1-b5) - below 1 sharpens the resonances (a network trained by spectral regression
-# over-smooths them - nn/train.py), above 1 dulls them
+# over-smooths them), above 1 dulls them
 def bandwidth_scale(values, scale, names=('b1', 'b2', 'b3', 'b4', 'b5')):
     out = _copy(values)
     for name in names:
         out[..., INDEX[name]] = out[..., INDEX[name]] * scale
-    return out
-
-
-# Scale the pitch
-def pitch_scale(values, scale):
-    out = _copy(values)
-    out[..., INDEX['f0']] = out[..., INDEX['f0']] * scale
-    return out
-
-
-# Whisper - remove the voicing (intensity 0 to 1) and add aspiration (breath_db more at full intensity, relative to the
-# voicing level the frame had)
-def whisper(values, intensity=1.0, breath_db=-28.0):
-    out = _copy(values)
-    av = values[..., INDEX['av']]
-    ah = values[..., INDEX['ah']]
-    if intensity >= 1:
-        out[..., INDEX['av']] = av * 0 + FLOOR_DB
-    else:
-        out[..., INDEX['av']] = av + 20 * math.log10(1 - intensity)
-    # The whisper's aspiration - power sum of the frame's own and the voicing level plus breath_db
-    if hasattr(av, 'clone'):
-        import torch  # pylint: disable=import-outside-toplevel
-        added = torch.where(av > FLOOR_DB, av + breath_db + 20 * math.log10(max(intensity, 1e-9)), av * 0 + FLOOR_DB)
-        out[..., INDEX['ah']] = 10 * torch.log10(10 ** (ah / 10) + 10 ** (added / 10))
-    else:
-        import numpy  # pylint: disable=import-outside-toplevel
-        added = numpy.where(av > FLOOR_DB, av + breath_db + 20 * math.log10(max(intensity, 1e-9)), FLOOR_DB)
-        out[..., INDEX['ah']] = 10 * numpy.log10(10 ** (ah / 10) + 10 ** (added / 10))
-    out[..., INDEX['jitter']] = out[..., INDEX['jitter']] * (1 - intensity)
-    out[..., INDEX['shimmer']] = out[..., INDEX['shimmer']] * (1 - intensity)
-    return out
-
-
-# Vocal effort - louder voicing (db), a brighter source (shelf_per_db dB of shelf per dB), a more pressed pulse
-# (Rd scaled by rd_per_db per dB, geometrically)
-def effort(values, db, shelf_per_db=0.5, rd_per_db=-0.02):
-    out = _copy(values)
-    out[..., INDEX['av']] = values[..., INDEX['av']] + db
-    out[..., INDEX['shelf']] = values[..., INDEX['shelf']] + shelf_per_db * db
-    rd = values[..., INDEX['rd']] * (1 + rd_per_db) ** db
-    out[..., INDEX['rd']] = rd.clamp(0.3, 2.7) if hasattr(rd, 'clamp') else rd.clip(0.3, 2.7)
     return out
 
 
@@ -317,33 +239,12 @@ def write_params(path, frames, eq=None):
         json.dump(data, file, separators=(',', ':'))
 
 
-# Read a JSON parameter file's channel equalizer gains (dB), or None
-def read_eq(path):
-    with open(path, encoding='utf-8') as file:
-        return json.load(file).get('eq')
-
-
 # Read a JSON parameter file's spectral correction (dB) [T, K] (numpy), or None
 def read_correction(path):
     import numpy  # pylint: disable=import-outside-toplevel
     with open(path, encoding='utf-8') as file:
         correction = json.load(file).get('correction')
     return None if correction is None else numpy.array(correction, dtype=numpy.float64)
-
-
-# Read a JSON parameter file to a numpy array [T, COUNT] (parameters missing from the file take their defaults)
-def read_params(path):
-    import numpy  # pylint: disable=import-outside-toplevel
-    with open(path, encoding='utf-8') as file:
-        data = json.load(file)
-    if data.get('frameRate', FRAME_RATE) != FRAME_RATE:
-        raise ValueError(f'{path}: frame rate {data["frameRate"]} is not {FRAME_RATE}')
-    names = data['names']
-    out = numpy.tile(numpy.array([DEFAULTS[name] for name in NAMES], dtype=numpy.float64), (len(data['frames']), 1))
-    for ix, name in enumerate(names):
-        if name in INDEX:
-            out[:, INDEX[name]] = [row[ix] for row in data['frames']]
-    return out
 
 
 #

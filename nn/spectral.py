@@ -2,8 +2,9 @@
 # https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
 
 """
-Spectral losses and distances - the multi-resolution STFT loss that trains through nn/dsynth.py, log-mel spectra, and
-the log-spectral distance used to compare renderings and recordings.
+Spectral analysis - the STFT and its magnitude (nn/losses.py's multi-resolution STFT and log-mel loss, and
+nn/discriminator.py's critic input), the mel filterbank, log-mel spectra, and the log-spectral distance used to compare
+renderings (nn/parity.py).
 """
 
 import functools
@@ -33,23 +34,6 @@ def spectrum_magnitude(spectrum, eps=1e-7):
 # The STFT magnitude [B, frames, bins] of audio [B, N]
 def stft_magnitude(audio, fft_size, hop, eps=1e-7):
     return spectrum_magnitude(stft(audio, fft_size, hop), eps)
-
-
-# The multi-resolution STFT loss - for each FFT size, the spectral convergence plus the mean absolute log-magnitude
-# difference (Yamamoto et al., 2020; DDSP), averaged over the resolutions. Optionally weighted per frame ([B, T] at
-# any rate - resampled to each resolution's frames).
-def multi_resolution_stft_loss(predicted, target, fft_sizes=(2048, 1024, 512, 256, 128), overlap=0.75, log_weight=1.0,
-                               convergence_weight=1.0):
-    total = 0
-    for fft_size in fft_sizes:
-        hop = int(fft_size * (1 - overlap))
-        magnitude_predicted = stft_magnitude(predicted, fft_size, hop)
-        magnitude_target = stft_magnitude(target, fft_size, hop)
-        convergence = torch.linalg.norm(magnitude_target - magnitude_predicted, dim=(1, 2)) / \
-            (torch.linalg.norm(magnitude_target, dim=(1, 2)) + 1e-7)
-        log_distance = (torch.log(magnitude_target) - torch.log(magnitude_predicted)).abs().mean(dim=(1, 2))
-        total = total + convergence_weight * convergence.mean() + log_weight * log_distance.mean()
-    return total / len(fft_sizes)
 
 
 # A mel filterbank [mels, bins] (Slaney-style triangles on the HTK mel scale), as a numpy array
@@ -97,13 +81,3 @@ def log_spectral_distance(reference, other, sample_rate, floor_db=50.0, match=Tr
     difference = numpy.maximum(mel_reference, mel_reference.max() - 80) - numpy.maximum(mel_other, mel_reference.max() - 80)
     return float(numpy.sqrt((difference[active] ** 2).mean(axis=1)).mean())
 
-
-# The long-term average spectra difference (dB per mel band, other minus reference) of level-matched signals
-def ltas_difference(reference, other, sample_rate, high=None):
-    length = min(len(reference), len(other))
-    reference = numpy.asarray(reference[:length], dtype=numpy.float64)
-    other = numpy.asarray(other[:length], dtype=numpy.float64)
-    other = other * numpy.sqrt((reference ** 2).mean() / max((other ** 2).mean(), 1e-20))
-    mel_reference = 10 ** (log_mel(reference, sample_rate, high=high) / 10)
-    mel_other = 10 ** (log_mel(other, sample_rate, high=high) / 10)
-    return 10 * numpy.log10(mel_other.mean(axis=0) / mel_reference.mean(axis=0))

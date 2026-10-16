@@ -34,9 +34,9 @@ Checks per clip (build) - the recognizer's greedy phone string against the sente
 sentences is relabeled (two), a clip cut short (its final phones missing) or garbled (greedy phone error above 0.6)
 is excluded, as is one with more than 0.5% of its samples clipped at full scale.
 
-The data (build/nn/data/cremad/) - nn/data.py's format (ArcticData(directory) loads it; cremad_dataset() adds the
-style labels to each item), one speaker per actor ('cremad-<actor>'), with per-utterance style fields: emotion and
-emotionId (index of index.json "emotions"), intensity and intensityId ("intensities"), the crowd's audio-only voiceVote,
+The data (build/nn/data/cremad/) - nn/data.py's format (ArcticData(directory) loads it), one speaker per actor
+('cremad-<actor>'), with per-utterance style fields: emotion and emotionId (index of index.json "emotions"), intensity
+and intensityId ("intensities"), the crowd's audio-only voiceVote,
 voiceAgreement, and voiceLevel, alignment quality (alignScore, phoneConfidence, heard, phoneError), and recording
 measures (clipped, peakDb, levelDb, noiseFloorDb). The split is by actor and sentence (all six emotions together),
 about 5% validation and 5% test. data/nn/cremad.json is the committed summary.
@@ -1179,32 +1179,6 @@ def write_summary(index, path=SUMMARY_PATH):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w', encoding='utf-8') as file:
         file.write(json.dumps(summary, indent=1) + '\n')
-
-
-# The CREMA-D training data (build/nn/data/cremad/) as nn/data.py's ArcticData
-def cremad_data(directory=DATA_DIR):
-    from .data import ArcticData  # pylint: disable=import-outside-toplevel
-    return ArcticData(directory)
-
-
-# A PyTorch dataset of CREMA-D clips - nn/data.py's items (tokens, durations, seconds, audio, frames, speaker, id)
-# plus 'emotion' and 'intensity' (indexes of index.json's "emotions" and "intensities") and 'voiceAgreement'
-def cremad_dataset(split='train', speakers=None, data=None):
-    from .data import arctic_dataset  # pylint: disable=import-outside-toplevel
-    dataset = arctic_dataset(split, speakers, data or cremad_data())
-    base_getitem = type(dataset).__getitem__
-
-    class CremadDataset(type(dataset)):
-        def __getitem__(self, index):
-            item = base_getitem(self, index)
-            entry = self.items[index]
-            item['emotion'] = entry['emotionId']
-            item['intensity'] = entry['intensityId']
-            item['voiceAgreement'] = entry['voiceAgreement'] if entry['voiceAgreement'] is not None else 0.0
-            return item
-
-    dataset.__class__ = CremadDataset
-    return dataset
 
 
 # Realign clips to the sentence actually read - ids as clip=SENTENCE -> build/nn/cremad/realigned.jsonl

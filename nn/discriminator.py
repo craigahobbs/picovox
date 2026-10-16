@@ -2,7 +2,7 @@
 # https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
 
 """
-The adversarial critic for training (optional, nn/train.py --adversarial) - spectrogram discriminators that judge the
+The adversarial critic for training (nn/trainmulti.py --adversarial) - spectrogram discriminators that judge the
 synthesizer's renderings of the network's parameters against the recordings. A deterministic network trained by
 spectral regression over-smooths: where a formant's position is uncertain, a broad peak minimizes the expected error,
 so the predicted bandwidths come out wide and the voice muffled. The critic penalizes what no recording looks like.

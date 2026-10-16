@@ -1210,15 +1210,6 @@ class DSynth(torch.nn.Module):
         noise = torch.randn(2, count, generator=generator) * scale
         return noise[0], noise[1]
 
-    # The residual noise sequence for one item
-    def _residual_noise(self, count, seed, device):
-        scale = math.sqrt(self.sample_rate / params.REF_RATE)
-        if self.noise == 'counter':
-            residual = rng.gauss(rng.stream_seed(seed, rng.STREAM_RESIDUAL), 0, count)
-            return torch.tensor(residual * scale, dtype=torch.float32, device=device)
-        generator = torch.Generator(device='cpu').manual_seed(int(seed) + 7919)
-        return (torch.randn(count, generator=generator) * scale).to(device)
-
     # The harmonic count for a batch's frames' F0 and voicing [B, T] - enough for the lowest voiced F0
     def _harmonic_count(self, f0_frames, av_frames):
         voiced = av_frames > params.FLOOR_DB + 30
@@ -1291,7 +1282,7 @@ class DSynth(torch.nn.Module):
         return signal.reshape(batch, -1).index_select(1, grid['cells'])
 
     # The noise (aspiration and frication) signal [B, N]
-    def _noise_signal(self, values, linear, tensors, grid, seeds, count, eq=None, residual=None, correction=None):
+    def _noise_signal(self, values, linear, tensors, grid, seeds, count, eq=None, correction=None):
         device = values.device
         batch = values.shape[0]
         fft_size, hop = self.noise_fft, self.noise_hop
@@ -1335,14 +1326,6 @@ class DSynth(torch.nn.Module):
             filter_aspiration = filter_aspiration * filter_correction
             filter_frication = filter_frication * filter_correction
         filtered = spectrum_aspiration * filter_aspiration + spectrum_frication * filter_frication
-        if residual is not None:
-            # The residual noise - its band levels (dB) interpolated to the noise frames
-            residual_db = interpolate_frames(residual, positions, key=('noise', self.sample_rate, frames_count, hop))
-            filter_residual = torch.exp(band_log_grid(frequency, residual_db, params.RESIDUAL_LOW_HZ, params.RESIDUAL_HIGH_HZ))
-            if eq is not None:
-                filter_residual = filter_residual * channel
-            residual_noise = torch.stack([self._residual_noise(count, seed, device) for seed in seeds])
-            filtered = filtered + torch.fft.rfft(framed(residual_noise)) * filter_residual
         frames_out = torch.fft.irfft(filtered, n=fft_size) * self.window
 
         # Overlap-add (hop is a quarter frame) and normalize by the windows' squared sum
@@ -1369,11 +1352,9 @@ class DSynth(torch.nn.Module):
             window_sum[quarter:quarter + frames_count] += window_squared[quarter]
         return window_sum
 
-    def forward(self, values, seed=1, return_parts=False, eq=None, residual=None, plan=None, correction=None,
-                constant_f0=False):
+    def forward(self, values, seed=1, return_parts=False, eq=None, plan=None, correction=None, constant_f0=False):
         """Render parameter values [B, T, COUNT] (or [T, COUNT]) to audio [B, N] (or [N]); seed is an int or a list; eq is
-        the optional channel equalizer's gains (dB) [B, EQ_BAND_COUNT] (or [EQ_BAND_COUNT]); residual is the optional
-        (experimental, PyTorch only) residual noise's band levels (dB) [B, T, RESIDUAL_BAND_COUNT]; plan is the
+        the optional channel equalizer's gains (dB) [B, EQ_BAND_COUNT] (or [EQ_BAND_COUNT]); plan is the
         optional cycle plan made ahead (plan_cycles, of these values' F0 and jitter and these seeds, optionally with its
         plan_host_tensors as 'host') - it leaves only a few columns to read from the device here; correction is the
         optional spectral correction's band gains (dB) [B, T, K] (or [T, K]) - nn/params.py CORRECTION_*; constant_f0
@@ -1384,8 +1365,6 @@ class DSynth(torch.nn.Module):
             values = values[None]
             if eq is not None and eq.dim() == 1:
                 eq = eq[None]
-            if residual is not None and residual.dim() == 2:
-                residual = residual[None]
             if correction is not None and correction.dim() == 2:
                 correction = correction[None]
         batch, frame_count, _ = values.shape
@@ -1425,7 +1404,7 @@ class DSynth(torch.nn.Module):
         index, weight = grid['index'], grid['weight']
         shimmer_amount = linear[:, index, params.INDEX['shimmer']] * (1 - weight) + linear[:, index + 1, params.INDEX['shimmer']] * weight
         voicing = voicing * torch.relu(1 + shimmer_amount * tensors['shimmer'])
-        noise = self._noise_signal(values, linear, tensors, grid, seeds, count, eq, residual, correction)
+        noise = self._noise_signal(values, linear, tensors, grid, seeds, count, eq, correction)
         audio = voicing + noise
         if return_parts:
             parts = {'audio': audio, 'voicing': voicing, 'noise': noise}
