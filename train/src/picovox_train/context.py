@@ -5,15 +5,17 @@
 The heteronym models - the G2P network's reading input and ambiguity head, and the context network that chooses a
 reading from the neighboring words (lib/g2p.js runs both from lib/models/g2pModel.js; g2pmodel.py is the port). No
 dictionary, word list, or rule at runtime: a word whose ambiguity head fires takes the reading slot the context network
-chooses, and the G2P pronounces the word in that reading.
+chooses, and the G2P pronounces the word in that reading. The commands (python is
+PYTHONPATH=train/src build/venv-nn/bin/python -B):
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context train-g2p --labels DIR/labels.json --init G2P.pt --out DIR/g2p.pt
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context train-context --labels DIR/labels.json --out DIR/context.pt
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context export --g2p DIR/g2p.pt --context DIR/context.pt [--out lib/models/g2pModel.js]
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context gate --labels DIR/labels.json [MODULE]    # held-out accuracy (one split)
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context cross-validate --labels DIR/labels.json --out DIR/folds  # the gate, 10 folds
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context check NEW.js     # make train: identical to lib/models/g2pModel.js, else the
-                                                                # quality gate (it never replaces the committed module)
+    python -m picovox_train.context train-g2p --labels DIR/labels.json --init G2P.pt --out DIR/g2p.pt
+    python -m picovox_train.context train-context --labels DIR/labels.json --out DIR/context.pt
+    python -m picovox_train.context export --g2p DIR/g2p.pt --context DIR/context.pt [--out lib/models/g2pModel.js]
+    python -m picovox_train.context gate --labels DIR/labels.json [MODULE]       # held-out accuracy (one split)
+    python -m picovox_train.context cross-validate --labels DIR/labels.json --out DIR/folds   # the gate, 10 folds
+    python -m picovox_train.context folds DIR/folds/fold-*.json --labels DIR/labels.json       # the gate of the folds' results
+    python -m picovox_train.context check NEW.js     # make train: identical to lib/models/g2pModel.js, else the quality
+                                                     # gate (it never replaces the committed module)
 
 The settings are data/nn/train.json's "context" section (g2p, network, export, gate).
 
@@ -245,10 +247,12 @@ def train_g2p(model, items, probabilities, labels, settings, log):
         parameter.requires_grad_(any(parameter is other for other in trained))
     head_rate = float(settings['headRate'])
     heads = [parameter for name, parameter in model.named_parameters() if name.split('.')[0] in HEADS]
-    optimizer = torch.optim.AdamW([{'params': [parameter for parameter in trained if not any(parameter is head for head in heads)], 'scale': 1.0},
-                                   {'params': [parameter for parameter in trained if any(parameter is head for head in heads)], 'scale': head_rate}],
-                                  lr=peak, weight_decay=0.0)
-    log(f'train-g2p: {sum(parameter.numel() for parameter in trained)} parameters trained ({settings["train"]}), {len(items)} items, {len(ambiguous)} ambiguous words, {len(targets)} reading targets, {steps} steps')
+    optimizer = torch.optim.AdamW([
+        {'params': [parameter for parameter in trained if not any(parameter is head for head in heads)], 'scale': 1.0},
+        {'params': [parameter for parameter in trained if any(parameter is head for head in heads)], 'scale': head_rate}
+    ], lr=peak, weight_decay=0.0)
+    log(f'train-g2p: {sum(parameter.numel() for parameter in trained)} parameters trained ({settings["train"]}), {len(items)} '
+        f'items, {len(ambiguous)} ambiguous words, {len(targets)} reading targets, {steps} steps')
     window = collections.defaultdict(float)
     window_start = time.time()
     batches = []
@@ -305,7 +309,7 @@ def evaluate_g2p(model, labels, words):
     predictions = decode_readings(model, [word for word, _, _ in targets], [reading for _, _, reading in targets])
     right = 0
     wrong = []
-    for (word, phones, reading), predicted in zip(targets, predictions):
+    for (word, _, reading), predicted in zip(targets, predictions):
         variants = labels['words'][word]['readings'][reading]
         if ' '.join(predicted) in variants:
             right += 1
@@ -710,7 +714,8 @@ def word_margins(result, labels, least=20):
         if key.startswith('aligned/') and counts['total'] >= least and word in labels['words']:
             readings = labels['words'][word]['readings']
             kind = ' S/Z' if sz_only(readings[0][0], readings[1][0]) else ''
-            parts.append(f'{word}{kind} {counts["right"]}/{counts["total"]} ({100 * (counts["right"] - counts["majority"]) / counts["total"]:+.0f})')
+            margin = 100 * (counts['right'] - counts['majority']) / counts['total']
+            parts.append(f'{word}{kind} {counts["right"]}/{counts["total"]} ({margin:+.0f})')
     return 'per word (vs majority): ' + ', '.join(parts)
 
 
@@ -718,7 +723,7 @@ def command_gate(args):
     """The held-out accuracy of a module's context network (as the app runs it - g2pmodel.py), and the gate"""
     labels = load_labels(args.labels)
     g2p = g2pmodel.G2p(g2pmodel.read_module(args.model))
-    result = evaluate_context(lambda windows: g2p.choose_slots(windows), labels)
+    result = evaluate_context(g2p.choose_slots, labels)
     passed, line = gate_result(result, labels)
     sources = ', '.join(f'{source} {counts["right"]}/{counts["total"]} (majority {counts["majority"]})'
                         for source, counts in sorted(result['sources'].items()))
@@ -727,18 +732,6 @@ def command_gate(args):
         with open(args.out, 'w', encoding='utf-8') as file:
             json.dump(result, file, indent=1)
     return 0 if passed else 1
-
-
-#
-# The dev twin - the G2P recipe with the dictionary's test split held out (g2p.py's split), for the held-out WER
-#
-
-def twin_data(data):
-    """g2p.py's data with the test split held out like the monitoring set (out of the training items, with the unknown
-    words labeled from its words) - and its test words"""
-    from . import g2p  # pylint: disable=import-outside-toplevel
-    test = set(g2p.split_words(data['first'])['test'])
-    return {**data, 'monitor': sorted(set(data['monitor']) | test), 'test': sorted(test)}
 
 
 #
@@ -820,8 +813,6 @@ def command_train_g2p(args):
     settings = {key: value for key, value in config.items() if key not in ('stages', 'export')}
     settings = {**settings, **stage}
     data = g2p.load_data(settings.get('relabel') and os.path.join(g2p.ROOT, settings['relabel']))
-    if args.twin:
-        data = twin_data(data)
     items, probabilities = g2p.training_items(data, settings)
     model = load_g2p(args.init)
     overrides = json.loads(args.settings) if args.settings else {}
@@ -899,7 +890,6 @@ def main(argv=None):
     g2p_parser.add_argument('--out', required=True)
     g2p_parser.add_argument('--config', default=None, help='g2p.py\'s settings (default data/nn/train.json)')
     g2p_parser.add_argument('--settings', help='JSON settings over G2P_SETTINGS')
-    g2p_parser.add_argument('--twin', action='store_true', help='the dev twin - the dictionary\'s test split held out')
     g2p_parser.add_argument('--log')
     g2p_parser.set_defaults(func=command_train_g2p)
     context_parser = commands.add_parser('train-context', help='the context network')

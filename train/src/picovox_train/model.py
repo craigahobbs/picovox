@@ -188,7 +188,7 @@ class MultiModel(torch.nn.Module):
         self.style = torch.nn.Parameter(torch.randn(cfg['styles'], cfg['styleDim']) * 0.3)
         self.condition_encoder = torch.nn.Linear(condition_dim, dim)
         layers = []
-        for layer in range(cfg['encoderLayers']):
+        for _ in range(cfg['encoderLayers']):
             layers.append(FiLMConvFFN(dim, dim * cfg['ffnMultiple'], cfg['encoderKernel'], dropout, condition_dim))
             layers.append(SelfAttention(dim, cfg['heads'], dropout))
         self.encoder = torch.nn.ModuleList(layers)

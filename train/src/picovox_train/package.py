@@ -6,7 +6,8 @@ Packaging - an exported acoustic model (export.py's <voice>.json manifest and <v
 JavaScript module, which lib/package.js loads the same way in Node, the browser, and a Web Worker (a plain import -
 no fetch, no file system):
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.package data/nn/multi -o build/nn/packages/multi.js [--compress auto|never|always]
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.package data/nn/multi -o build/nn/packages/multi.js \\
+        [--compress auto|never|always]
 
     import * as voice from './multi.js';
     import {loadPackagedModel} from './lib/package.js';
@@ -189,7 +190,8 @@ def package(model_path, compress='auto', min_saving=0.02, provenance_info=None):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog='python -m picovox_train.package', description='An exported model as a generated JavaScript module')
+    parser = argparse.ArgumentParser(prog='python -m picovox_train.package',
+                                     description='An exported model as a generated JavaScript module')
     parser.add_argument('model', help='the exported model (data/nn/<voice>, without extension)')
     parser.add_argument('-o', '--output', required=True)
     parser.add_argument('--compress', choices=('auto', 'never', 'always'), default='auto')

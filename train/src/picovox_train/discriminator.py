@@ -19,7 +19,8 @@ import torch
 from . import spectral
 
 
-class _StridedConvFunction(torch.autograd.Function):
+# (an autograd Function needs only forward and backward, not the other abstract methods)
+class _StridedConvFunction(torch.autograd.Function):  # pylint: disable=abstract-method
     """A (3, 9) convolution of stride (1, 2) and padding (1, 4) whose input gradient is two stride-1 convolutions of the
     output gradient - the kernel's even and odd columns (its polyphase components), flipped - interleaved: on MPS the
     strided convolution's own input gradient takes about 2.7 times its forward. The forward is the convolution itself
@@ -60,7 +61,7 @@ class StridedConv2d(torch.nn.Conv2d):
     def __init__(self, channels):
         super().__init__(channels, channels, (3, 9), stride=(1, 2), padding=(1, 4))
 
-    def forward(self, input):  # pylint: disable=redefined-builtin
+    def forward(self, input):
         if input.device.type == 'mps':
             return _StridedConvFunction.apply(input, self.weight, self.bias)
         return super().forward(input)

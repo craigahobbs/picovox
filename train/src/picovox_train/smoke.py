@@ -5,7 +5,8 @@
 The training pipeline's smoke test - every make-train entry point run for a few steps on the CPU, into a scratch
 directory, each checked to finish and write its outputs:
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke [--out build/nn/smoke] [--only g2p,context,data,teacher,distill,package]
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke [--out build/nn/smoke] \
+        [--only g2p,context,data,teacher,distill,package]
 
 - g2p - picovox_train.g2p train (each stage 3 steps) and export
 - context - picovox_train.context train-g2p and train-context (3 steps) and export, from the g2p stage (when build/nn/context has the
@@ -82,8 +83,9 @@ def main(argv=None):
             labels = os.path.join(ROOT, 'build', 'nn', 'context', 'labels.json')
             if 'context' in stages and os.path.exists(labels):
                 g2p_checkpoint, context_checkpoint = os.path.join(out, 'context-g2p.pt'), os.path.join(out, 'context.pt')
-                if run('context-g2p', ['picovox_train.context', 'train-g2p', '--labels', labels, '--init', os.path.join(g2p_dir, 'focus.pt'),
-                                       '--out', g2p_checkpoint, '--settings', '{"steps": 3}'], [g2p_checkpoint]) and \
+                if run('context-g2p', ['picovox_train.context', 'train-g2p', '--labels', labels, '--init',
+                                       os.path.join(g2p_dir, 'focus.pt'), '--out', g2p_checkpoint, '--settings', '{"steps": 3}'],
+                       [g2p_checkpoint]) and \
                         run('context-train', ['picovox_train.context', 'train-context', '--labels', labels, '--out', context_checkpoint,
                                               '--settings', '{"steps": 3, "quantSteps": 2}'], [context_checkpoint]):
                     run('context-export', ['picovox_train.context', 'export', '--g2p', g2p_checkpoint, '--context', context_checkpoint,
@@ -97,11 +99,11 @@ def main(argv=None):
     common = ['--device', 'cpu', '--batch', '4', '--val-count', '4', '--keep-every', '0', '--log-every', '1']
     teacher = os.path.join(runs, 'smoke-b', 'last.pt')
     if 'teacher' in stages:
-        if run('teacher-a', ['picovox_train.trainmulti', '--name', 'smoke-a', '--recipe', 'teacher.a', '--steps', '3', '--val-every', '3'] + common,
-               [os.path.join(runs, 'smoke-a', 'last.pt')]):
-            run('teacher-b', ['picovox_train.trainmulti', '--name', 'smoke-b', '--recipe', 'teacher.b', '--init', os.path.join(runs, 'smoke-a', 'last.pt'),
-                              '--steps', '3', '--val-every', '3', '--adversarial-start', '1'] + common,
-                [teacher])
+        if run('teacher-a', ['picovox_train.trainmulti', '--name', 'smoke-a', '--recipe', 'teacher.a', '--steps', '3',
+                             '--val-every', '3'] + common, [os.path.join(runs, 'smoke-a', 'last.pt')]):
+            run('teacher-b', ['picovox_train.trainmulti', '--name', 'smoke-b', '--recipe', 'teacher.b', '--init',
+                              os.path.join(runs, 'smoke-a', 'last.pt'), '--steps', '3', '--val-every', '3', '--adversarial-start',
+                              '1'] + common, [teacher])
 
     student = os.path.join(runs, 'distill-s32-polish', 'best.pt')
     if 'distill' in stages and os.path.exists(teacher):
@@ -128,7 +130,8 @@ def main(argv=None):
 
     if 'package' in stages and os.path.exists(student):
         export_dir = os.path.join(out, 'export')
-        if run('export', ['picovox_train.export', student, '--voice', 'smoke', '--out', export_dir], [os.path.join(export_dir, 'smoke.json')]):
+        if run('export', ['picovox_train.export', student, '--voice', 'smoke', '--out', export_dir],
+               [os.path.join(export_dir, 'smoke.json')]):
             run('package', ['picovox_train.package', os.path.join(export_dir, 'smoke'), '-o', os.path.join(out, 'voiceModel.js')],
                 [os.path.join(out, 'voiceModel.js')])
 

@@ -40,6 +40,11 @@ from .frontend import ROOT, tokenize
 
 CORPORA_DIR = os.path.join(ROOT, 'data', 'corpora')
 ARCTIC_DIR = os.path.join(CORPORA_DIR, 'arctic')
+
+# The LibriTTS-R alignments (LibriTTSLabel's MFA phone labels) and the LibriTTS-R subsets in the pool (multi.py,
+# readings.py)
+LABEL_DIR = os.path.join(CORPORA_DIR, 'libritts_label', 'lab', 'phone')
+SUBSETS = ['train-clean-100', 'dev-clean']
 DATA_DIR = os.environ.get('NN_DATA_DIR', os.path.join(ROOT, 'build', 'nn', 'data'))
 
 # The format
@@ -247,7 +252,7 @@ def sample_track(track_times, track_values, frame_count, tolerance=0.006):
 # The auxiliary frame tracks of 24 kHz audio - [frames, channels]
 def frame_tracks(samples, frame_count, pitch_floor, pitch_ceiling, formant_ceiling):
     import parselmouth  # pylint: disable=import-outside-toplevel
-    sound = parselmouth.Sound(samples.astype(np.float64), sampling_frequency=SAMPLE_RATE)
+    sound = parselmouth.Sound(samples.astype(np.float64), sampling_frequency=SAMPLE_RATE)  # pylint: disable=c-extension-no-member
     tracks = np.zeros((frame_count, len(CHANNELS)), dtype=np.float32)
 
     # F0, voicing, and pitch strength
@@ -317,8 +322,9 @@ def match_rate(report):
 # Loading (for the trainer)
 #
 
-# The memory-mapped data of a corpus directory (build/nn/data/<corpus>/)
 class ArcticData:
+    """The memory-mapped data of a corpus directory (build/nn/data/<corpus>/)"""
+
     def __init__(self, directory):
         self.directory = directory
         with open(os.path.join(directory, 'index.json'), encoding='utf-8') as file:

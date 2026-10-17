@@ -1,0 +1,244 @@
+# Licensed under the MIT License
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
+
+# pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
+
+import json
+import os
+import runpy
+import subprocess
+import tempfile
+import unittest
+import unittest.mock
+import warnings
+
+import numpy
+import torch
+
+from picovox_train import ROOT, export, params, quant
+from picovox_train.synthesize import Voice
+from tests import helpers, model_fixtures
+
+
+class TestExport(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
+        cls.root = cls.temp.name
+        cls.patches = model_fixtures.patched_dirs(cls.root)
+        cls.data_dir = cls.patches.__enter__()
+        model_fixtures.write_data(cls.data_dir)
+        cls.checkpoint = model_fixtures.write_checkpoint(os.path.join(cls.root, 'teacher.pt'), args={
+            'recipe_file': os.path.join(ROOT, 'data', 'nn', 'train.json'), 'init': 'build/train/runs/a/best.pt',
+            'init_critic': os.path.join(cls.root, 'critic.pt'), 'steps': 3, 'config': '{}', 'files': ['/a/b', 'c']
+        })
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.patches.__exit__(None, None, None)
+        cls.temp.cleanup()
+
+    def test_load_model(self):
+        model, state = export.load_model(self.checkpoint)
+        self.assertFalse(model.training)
+        self.assertEqual(state['speakers'], model_fixtures.SPEAKERS)
+        self.assertEqual(model.config['dim'], 16)
+
+    def test_exported_tensors(self):
+        model, _ = export.load_model(self.checkpoint)
+        with torch.no_grad():
+            model.eq_free.fill_(10.0)
+        tensors = export.exported_tensors(model)
+        self.assertNotIn('eq_free', tensors)
+        expected = torch.full_like(tensors['eq_table'], params.EQ_RANGE_DB * float(numpy.tanh(10.0)))
+        self.assertTrue(torch.allclose(tensors['eq_table'], expected))
+        self.assertTrue(all(tensor.dtype == torch.float32 for tensor in tensors.values()))
+
+    def test_quantize(self):
+        tensor = torch.tensor([[1.0, -0.5, 0.25], [0.0, 0.0, 0.0]])
+        values, scales = export.quantize(tensor)
+        self.assertEqual(values.dtype, numpy.int8)
+        self.assertEqual(values.tolist(), [[127, -64, 32], [0, 0, 0]])
+        self.assertEqual(scales.dtype, numpy.float32)
+        self.assertAlmostEqual(float(scales[0]), 1 / 127, places=7)
+        self.assertEqual(float(scales[1]), 1.0)
+
+    def test_is_quantized(self):
+        self.assertTrue(export.is_quantized(torch.zeros(32, 32)))
+        self.assertFalse(export.is_quantized(torch.zeros(32, 32), 'eq_table'))
+        self.assertFalse(export.is_quantized(torch.zeros(1024)))
+        self.assertFalse(export.is_quantized(torch.zeros(10, 10)))
+
+    def test_quantized_model(self):
+        model, _ = export.load_model(self.checkpoint)
+        for bits, group in ((8, 0), (6, 16)):
+            quantized = export.quantized_model(model, bits, group)
+            state, original = quantized.state_dict(), model.state_dict()
+            name = 'embedding.weight'
+            self.assertFalse(torch.equal(state[name], original[name]))
+            self.assertLess(float((state[name] - original[name]).abs().max()), float(original[name].abs().max()) / 2 ** (bits - 2))
+            self.assertTrue(torch.equal(state['head.bias'], original['head.bias']))
+            self.assertTrue(torch.equal(state['eq_free'], original['eq_free']))
+
+    def test_token_remap(self):
+        vocab = ['<pad>', '<unk>', '<question>', 'AA0', 'AA1', 'AA2', 'B', 'CH', 'EH0', 'EH1', 'EH2', '<period>']
+        counts = {vocab.index('AA1'): 50, vocab.index('AA0'): 3, vocab.index('B'): 20, vocab.index('<period>'): 30,
+                  vocab.index('EH1'): 5}
+        self.assertEqual(export.token_remap(vocab, counts), {
+            '<unk>': '_', '<question>': '<period>', 'AA0': 'AA1', 'AA2': 'AA1'
+        })
+
+    def test_training_token_counts(self):
+        counts, vocab = export.training_token_counts({'args': {'cremad': 0.2}})
+        counts_readers, _ = export.training_token_counts({'args': {'cremad': 0}})
+        counts_none, _ = export.training_token_counts({})
+        self.assertEqual(vocab[2], '<bos>')
+        self.assertEqual(counts_readers, counts_none)
+        self.assertGreater(counts[2], counts_readers[2])
+        # (the readers' train split - two utterances per speaker, two speakers)
+        self.assertEqual(counts_readers[2], 4)
+
+    def test_speaker_list(self):
+        speakers = export.speaker_list({'speakers': model_fixtures.SPEAKERS})
+        self.assertEqual([speaker['role'] for speaker in speakers], ['reader', 'reader', 'style', 'style'])
+        self.assertEqual(speakers[0]['key'], 'arctic-slt')
+        self.assertEqual(speakers[0]['sex'], 'female')
+        self.assertEqual(speakers[2], {'id': 2, 'key': 'cremad-1001', 'sex': 'male', 'corpus': 'CREMA-D', 'role': 'style'})
+        self.assertEqual(export.speaker_list({'speakers': ['arctic-slt', 'unknown']})[1]['sex'], None)
+        with self.assertRaisesRegex(ValueError, 'is not its data/nn/speakers.json id'):
+            export.speaker_list({'speakers': ['arctic-bdl']})
+
+    def test_relative_paths(self):
+        self.assertEqual(export.relative_paths({
+            'under': os.path.join(ROOT, 'data', 'nn', 'train.json'), 'outside': os.path.join(os.path.dirname(ROOT), 'x.pt'),
+            'relative': 'build/train/runs/a.pt', 'number': 3, 'none': None, 'list': [os.path.join(ROOT, 'a'), 'b', 1],
+            'nested': {'path': os.path.join(ROOT, 'lib')}
+        }), {
+            'under': 'data/nn/train.json', 'outside': '../x.pt', 'relative': 'build/train/runs/a.pt', 'number': 3, 'none': None,
+            'list': ['a', 'b', 1], 'nested': {'path': 'lib'}
+        })
+        self.assertIsNone(export.relative_paths(None))
+
+    def test_export(self):
+        model, state = export.load_model(self.checkpoint)
+        with tempfile.TemporaryDirectory() as out_dir:
+            manifest = export.export(model, state, 'voice', out_dir, extra={'note': 'x'}, speaker=1, bandwidth_scale=0.9)
+            with open(os.path.join(out_dir, 'voice.json'), encoding='utf-8') as file:
+                self.assertEqual(json.load(file), json.loads(json.dumps(manifest)))
+            binary_size = os.path.getsize(os.path.join(out_dir, 'voice.bin'))
+        self.assertEqual(manifest['bytes'], binary_size)
+        self.assertEqual(manifest['note'], 'x')
+        self.assertNotIn('quantization', manifest)
+        self.assertEqual(manifest['defaultSpeaker'], 1)
+        self.assertEqual(manifest['inference'], {'pauseThreshold': 0.5, 'bandwidthScale': 0.9})
+        self.assertEqual(len(manifest['eq']), params.EQ_BAND_COUNT)
+        encodings = {tensor['name']: tensor['encoding'] for tensor in manifest['tensors']}
+        self.assertEqual(encodings['embedding.weight'], 'int8')
+        self.assertEqual(encodings['eq_table'], 'float32')
+        self.assertEqual(encodings['head.bias'], 'float32')
+        self.assertEqual(manifest['parameterCountCore'], manifest['parameterCount'] - 4 * 4 - 4 * params.EQ_BAND_COUNT)
+        # The training record - its paths relative to the repository root, never absolute
+        training = manifest['training']
+        self.assertEqual(training['step'], 3)
+        self.assertEqual(training['args']['recipe_file'], 'data/nn/train.json')
+        self.assertEqual(training['args']['init'], 'build/train/runs/a/best.pt')
+        self.assertEqual(training['args']['init_critic'], os.path.relpath(os.path.join(self.root, 'critic.pt'), ROOT))
+        self.assertFalse(os.path.isabs(training['args']['files'][0]))
+        self.assertNotIn(ROOT, json.dumps(manifest))
+
+    def test_export_packed(self):
+        model, state = export.load_model(self.checkpoint)
+        with tempfile.TemporaryDirectory() as out_dir:
+            manifest = export.export(model, state, 'voice', out_dir, bits=5, group=24)
+            with open(os.path.join(out_dir, 'voice.bin'), 'rb') as file:
+                binary = file.read()
+        self.assertEqual(manifest['quantization'], {'bits': 5, 'group': 24})
+        entry = next(tensor for tensor in manifest['tensors'] if tensor['name'] == 'embedding.weight')
+        self.assertEqual((entry['encoding'], entry['bits'], entry['group']), ('packed', 5, 16))
+        self.assertEqual(entry['offset'] % 4, 0)
+        self.assertEqual(entry['scaleOffset'] % 4, 0)
+        # The packed values and float16 scales dequantize to the quantized model's weights
+        tensor = model.state_dict()['embedding.weight']
+        count = tensor.numel()
+        values = quant.unpack(binary[entry['offset']:entry['scaleOffset']], 5, count).reshape(tensor.shape[0], -1)
+        scales = numpy.frombuffer(binary[entry['scaleOffset']:entry['scaleOffset'] + tensor.shape[0] * 2], dtype='<f2').reshape(-1, 1)
+        expected = export.quantized_model(model, 5, 24).state_dict()['embedding.weight'].numpy()
+        self.assertTrue(numpy.array_equal(quant.dequantize_array(values, scales.astype(numpy.float64), tuple(tensor.shape), 24), expected))
+
+    def test_main(self):
+        with tempfile.TemporaryDirectory() as out_dir, helpers.captured() as (stdout, _):
+            self.assertEqual(export.main([self.checkpoint, '--voice', 'model', '--out', out_dir]), 0)
+            self.assertEqual(export.main([self.checkpoint, '--voice', 'small', '--out', out_dir, '--speaker', 'arctic-slt',
+                                          '--bits', '4', '--bandwidth-scale', '0.8']), 0)
+            with open(os.path.join(out_dir, 'small.json'), encoding='utf-8') as file:
+                small = json.load(file)
+            with open(os.path.join(out_dir, 'model.json'), encoding='utf-8') as file:
+                default = json.load(file)
+        lines = [json.loads(line) for line in stdout.getvalue().splitlines()]
+        self.assertEqual([line['voice'] for line in lines], ['model', 'small'])
+        self.assertEqual(lines[0]['quantized'] + lines[0]['float32'], len(default['tensors']))
+        self.assertEqual(default['defaultSpeaker'], 1)
+        self.assertEqual(small['defaultSpeaker'], 0)
+        self.assertEqual(small['quantization'], {'bits': 4, 'group': 0})
+        self.assertEqual(small['inference']['bandwidthScale'], 0.8)
+
+    def test_module_main(self):
+        with unittest.mock.patch('sys.argv', ['export', '--help']), helpers.captured() as (stdout, _), \
+                self.assertRaises(SystemExit) as raised, warnings.catch_warnings():
+            # (runpy's warning that the module is imported already - the tests imported it)
+            warnings.filterwarnings('ignore', "'picovox_train.export' found in sys.modules", RuntimeWarning)
+            runpy.run_module('picovox_train.export', run_name='__main__')
+        self.assertEqual(raised.exception.code, 0)
+        self.assertIn('usage:', stdout.getvalue())
+
+
+class TestExportParity(unittest.TestCase):
+    """lib/model.js (nn/js/speak.js --frames-only) against PyTorch with the export's dequantized weights - the browser
+    path's inference is the exported model's (the former parity.py's check)"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
+        cls.root = cls.temp.name
+        cls.patches = model_fixtures.patched_dirs(cls.root)
+        cls.data_dir = cls.patches.__enter__()
+        model_fixtures.write_data(cls.data_dir)
+        cls.checkpoint = model_fixtures.write_checkpoint(os.path.join(cls.root, 'teacher.pt'), seed=3)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.patches.__exit__(None, None, None)
+        cls.temp.cleanup()
+
+    def check_parity(self, bits, group, speaker, style=None):
+        texts = ['Call me Ishmael.', 'It was the best of times, it was the worst of times.', 'Is it cold? Wait here!']
+        model, state = export.load_model(self.checkpoint)
+        out_dir = os.path.join(self.root, f'export-{bits}-{group}')
+        export.export(model, state, 'model', out_dir, bits=bits, group=group)
+        batch = [{'text': text, 'params': os.path.join(out_dir, f'{index}.json')} for index, text in enumerate(texts)]
+        with open(os.path.join(out_dir, 'batch.json'), 'w', encoding='utf-8') as file:
+            json.dump(batch, file)
+        style_args = ['--style', style, '--intensity', '0.7'] if style else []
+        subprocess.run(['node', os.path.join(ROOT, 'nn', 'js', 'speak.js'), '-m', os.path.join(out_dir, 'model'), '--batch',
+                        os.path.join(out_dir, 'batch.json'), '--frames-only', '--speaker', str(speaker), *style_args],
+                       check=True, capture_output=True, cwd=ROOT)
+        voice = Voice(self.checkpoint, quantized=True, speaker=speaker, bits=bits, group=group, emotion=style, intensity=0.7)
+        for item, text in zip(batch, texts):
+            with open(item['params'], encoding='utf-8') as file:
+                data = json.load(file)
+            values, parts = voice.frames(text)
+            self.assertEqual([duration for sentence in data['sentences'] for duration in sentence['durations']],
+                             [duration for part in parts for duration in part['durations']])
+            js_values = numpy.array(data['frames'], dtype=numpy.float64)
+            self.assertEqual(js_values.shape, values.shape)
+            self.assertGreater(len(values), 10)
+            difference = numpy.abs(params.normalize(js_values) - params.normalize(values))
+            self.assertLess(float(difference.max()), 1e-4)
+            self.assertTrue(numpy.allclose(data['eq'], voice.eq, atol=1e-3))
+
+    def test_parity_int8(self):
+        self.check_parity(8, 0, 1)
+
+    def test_parity_packed(self):
+        self.check_parity(6, 32, 3, style='happy')

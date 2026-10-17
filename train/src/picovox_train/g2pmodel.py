@@ -434,8 +434,8 @@ class G2p:
 
         # Each letter's attention key (attention^T @ encoded) and context value (combine's context half @ encoded)
         flat = encoded.reshape(count * steps, 2 * hidden)
-        keys = _matrix_vectors(self.attention_columns, flat).reshape(count, steps, decoder)
-        values = _matrix_vectors(self.combine_context_columns, flat).reshape(count, steps, decoder)
+        keys = _matrix_vectors(self.attention_columns, flat).reshape((count, steps, decoder))
+        values = _matrix_vectors(self.combine_context_columns, flat).reshape((count, steps, decoder))
         letter_valid = np.arange(steps)[None, :] < lengths[:, None]
 
         # Decode greedily until <eos> - at most 3 phones a letter, plus 6

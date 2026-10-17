@@ -217,11 +217,10 @@ def number_words(value):
         return [ONES[value]]
     if value < 100:
         return [TENS[value // 10]] if value % 10 == 0 else [TENS[value // 10], ONES[value % 10]]
-    for size, name in ((10 ** 9, 'billion'), (10 ** 6, 'million'), (10 ** 3, 'thousand'), (100, 'hundred')):
-        if value >= size:
-            rest = value % size
-            return number_words(value // size) + [name] + ([] if rest == 0 else number_words(rest))
-    return []
+    size, name = next((size, name) for size, name in ((10 ** 9, 'billion'), (10 ** 6, 'million'), (10 ** 3, 'thousand'),
+                                                       (100, 'hundred')) if value >= size)
+    rest = value % size
+    return number_words(value // size) + [name] + ([] if rest == 0 else number_words(rest))
 
 
 # The context marks of the phrase ends - a phrase end's item in the context sequence (the context network's input)

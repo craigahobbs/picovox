@@ -24,6 +24,9 @@ over-smoothed bandwidths, chosen on the validation sentences).
 The quantization is the only lossy step - quantized_model() gives the PyTorch model with the exported weights
 (dequantized), which lib/model.js must match.
 
+The manifest's training record (the checkpoint's step, validation, and arguments) has its paths relative to the
+repository root.
+
 Lower precision (--bits 6, 5, 4, and --group for per-group scales) uses quant.py's 'packed' encoding: the values
 packed at the bit width, float16 scales per row or per group (the manifest entry's bits and group). The default (8 bits
 per row) is the 'int8' format above, unchanged.
@@ -156,6 +159,18 @@ def speaker_list(state):
     return out
 
 
+# A checkpoint's training arguments as the manifest records them - every absolute path relative to the repository root
+# (a published model never records the training machine's paths)
+def relative_paths(value):
+    if isinstance(value, dict):
+        return {key: relative_paths(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [relative_paths(item) for item in value]
+    if isinstance(value, str) and os.path.isabs(value):
+        return os.path.relpath(value, ROOT)
+    return value
+
+
 # Export a model - writes <out>/<voice>.bin and <voice>.json, returns the manifest (bits and group - the weights'
 # precision, quant.py; the default is the 8-bit per-row 'int8' format)
 def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0, bandwidth_scale=1.0, bits=8, group=0):
@@ -205,7 +220,7 @@ def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0, bandwidt
         'parameterCount': parameter_count(model),
         'parameterCountCore': parameter_count(model) - model.speaker.weight.numel() - model.eq_free.numel(),
         'bytes': len(binary), 'tensors': tensors,
-        'training': {'step': state.get('step'), 'val': state.get('val'), 'args': state.get('args')},
+        'training': {'step': state.get('step'), 'val': state.get('val'), 'args': relative_paths(state.get('args'))},
         'license': 'Trained on LibriTTS-R (CC BY 4.0), CMU ARCTIC (free use with attribution), and CREMA-D (a Produced '
                    'Work of the Open Database License 1.0 database - Cao, Cooper, Keutmann, Gur, Nenkova, and Verma, '
                    '"CREMA-D: Crowd-sourced Emotional Multimodal Actors Dataset", IEEE Transactions on Affective '

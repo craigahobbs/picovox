@@ -95,9 +95,8 @@ def align_sequences(tokens, labels):
     cost[0][0] = 0.0
     for i_token in range(count_tokens + 1):
         for i_label in range(count_labels + 1):
+            # (every cell is reachable - a token or a label alone is always a finite step)
             here = cost[i_token][i_label]
-            if here == INFINITY:
-                continue
             # Pair the token and the label
             if i_token < count_tokens and i_label < count_labels:
                 label = labels[i_label]

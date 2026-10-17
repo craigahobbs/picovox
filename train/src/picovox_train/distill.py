@@ -5,13 +5,15 @@
 Knowledge distillation of the multi-speaker acoustic model (model.py's MultiModel) - small students trained to
 imitate a big teacher, the way the project shrinks its voice model at each retrain: train a big teacher, then
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill targets [--teacher build/nn/runs/multi-b/best.pt]    # 1. the distillation set
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill train --student s64                                 # 2. a student (each one)
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill polish --student s64                                # 3. optional - real audio
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill eval teacher s96 s64 s48 s32 s64-polish             # 4. the browser path
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill eval NAME=CHECKPOINT [--whisper-workers 3]          #    any checkpoint
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill pick                                                # 5. the smallest in tolerance
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill ladder                                              # 1-5, all of the ladder
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill COMMAND ...
+
+    targets [--teacher build/nn/runs/multi-b/best.pt]       # 1. the distillation set
+    train --student s64                                     # 2. a student (each one)
+    polish --student s64                                    # 3. optional - real audio
+    eval teacher s96 s64 s48 s32 s64-polish                 # 4. the browser path
+    eval NAME=CHECKPOINT [--whisper-workers 3]              #    any checkpoint
+    pick                                                    # 5. the smallest in tolerance
+    ladder                                                  # 1-5, all of the ladder
 
 The settings - the teacher, the distillation set's sources, the training settings, the student ladder, the polish, the
 evaluation speakers, and the tolerance - are data/nn/train.json's distill (--config another file). The outputs go to
@@ -302,7 +304,8 @@ def make_targets(args):
         records = [records[index] for index in keep]
     items = numpy.array(records, dtype=ITEM_DTYPE)
     prepare_seconds = time.time() - start
-    log(f'inputs: {len(items)} items ({", ".join(f"{name} {int((items["source"] == index).sum())}" for index, name in enumerate(SOURCES))}; '
+    log(f'inputs: {len(items)} items ('
+        f'{", ".join(f"{name} {int((items["source"] == index).sum())}" for index, name in enumerate(SOURCES))}; '
         f'{int((items["split"] == 1).sum())} validation) in {prepare_seconds:.0f} s')
 
     # The teacher's outputs, in length-sorted batches, appended to the arrays' files
@@ -328,7 +331,7 @@ def make_targets(args):
     # the conversions and writes overlap the next batch's work on the device
     def write_batch(number, batch, copies, event):
         if event is not None:
-            event.synchronize()
+            event.synchronize()  # pragma: no cover - (an Apple GPU's event; the CPU's copies are done)
         duration_outputs, durations, unit = (copy.numpy() for copy in copies)
         duration_outputs = duration_outputs.astype(numpy.float16)
         unit = unit.astype(numpy.float16)
@@ -360,14 +363,15 @@ def make_targets(args):
                                            torch.tensor(record['speakerB'].astype(numpy.int64), device=device),
                                            torch.tensor(record['blend'].astype(numpy.float32), device=device))
             outputs = teacher_outputs(
-                model, torch.tensor(tokens, device=device), speaker_vector, torch.tensor(record['emotion'].astype(numpy.int64), device=device),
+                model, torch.tensor(tokens, device=device), speaker_vector,
+                torch.tensor(record['emotion'].astype(numpy.int64), device=device),
                 torch.tensor(record['intensity'].astype(numpy.float32), device=device))
             copies = [output.float().to('cpu', non_blocking=True) if output.is_floating_point() else output.to('cpu', non_blocking=True)
                       for output in outputs]
             event = None
             if device.type == 'mps':
-                event = torch.mps.Event()
-                event.record()
+                event = torch.mps.Event()  # pragma: no cover - (the Apple GPU only)
+                event.record()  # pragma: no cover
             if previous is not None:
                 write_batch(*previous)
             previous = (number, batch, copies, event)
@@ -441,7 +445,8 @@ def collate_targets(targets, indices):
         'tokens': torch.from_numpy(tokens), 'durations': torch.from_numpy(durations),
         'durationOutputs': torch.from_numpy(duration_outputs), 'unit': torch.from_numpy(unit),
         'frameCounts': torch.from_numpy(items['frameCount'].astype(numpy.int64)),
-        'speakerA': torch.from_numpy(items['speakerA'].astype(numpy.int64)), 'speakerB': torch.from_numpy(items['speakerB'].astype(numpy.int64)),
+        'speakerA': torch.from_numpy(items['speakerA'].astype(numpy.int64)),
+        'speakerB': torch.from_numpy(items['speakerB'].astype(numpy.int64)),
         'blend': torch.from_numpy(items['blend'].astype(numpy.float32)), 'emotion': torch.from_numpy(items['emotion'].astype(numpy.int64)),
         'intensity': torch.from_numpy(items['intensity'].astype(numpy.float32)), 'frameCount': frame_count
     }
@@ -574,7 +579,7 @@ def student_config(config, name):
 def build_student(student_cfg, teacher, teacher_state, dropout, init_teacher=False):
     """A student - the teacher's config with the student's widths and depths, the teacher's speaker, style, and
     equalizer tables (copied, frozen), and with init_teacher every teacher tensor of the same name and shape"""
-    config = {key: value for key, value in teacher_state['config'].items()}
+    config = dict(teacher_state['config'])
     config.update(student_cfg)
     model = MultiModel(config, priors=teacher_state.get('priors'), dropout=dropout)
     teacher_tensors = teacher.state_dict()
@@ -591,7 +596,8 @@ def build_student(student_cfg, teacher, teacher_state, dropout, init_teacher=Fal
     return model, copied
 
 
-class FeatureProjections(torch.nn.Module):
+# (a holder of the maps, never called itself - no forward)
+class FeatureProjections(torch.nn.Module):  # pylint: disable=abstract-method
     """Linear maps from a student's encoder and decoder features to the teacher's widths (intermediate-feature matching)"""
 
     def __init__(self, student, teacher):
@@ -729,8 +735,8 @@ def train_student(args):
         total.backward()
         norm = torch.nn.utils.clip_grad_norm_(trainable, 1.0)
         if fused:
-            optimizer.found_inf = (~torch.isfinite(norm)).float()
-            optimizer.step()
+            optimizer.found_inf = (~torch.isfinite(norm)).float()  # pragma: no cover - (the GPU's fused AdamW only)
+            optimizer.step()  # pragma: no cover
         elif torch.isfinite(norm):
             optimizer.step()
         scheduler.step()
@@ -748,11 +754,13 @@ def train_student(args):
             log.flush()
         if step % settings['valEvery'] == 0 or step == steps:
             result = validate_student(model, targets, val_indices, device, column_mask)
-            result['total'] = result['frames'] + settings['durationWeight'] * (result['durPhone'] + result['durPause'] + result['durPaused'])
+            result['total'] = result['frames'] + settings['durationWeight'] * (result['durPhone'] + result['durPause'] +
+                                                                              result['durPaused'])
             say('  VAL ' + ' '.join(f'{key} {value:.4g}' for key, value in result.items()))
             log.write(json.dumps({'val': {'step': step, **result}}) + '\n')
             log.flush()
-            state = checkpoint_state(model, teacher_state, step, args_dict, result, {'distill': {'student': student_cfg, 'targets': targets.directory}})
+            state = checkpoint_state(model, teacher_state, step, args_dict, result,
+                                     {'distill': {'student': student_cfg, 'targets': targets.directory}})
             if result['total'] < best:
                 best = result['total']
                 torch.save(state, os.path.join(directory, 'best.pt'))
@@ -807,7 +815,8 @@ def polish(args):
     directory = os.path.join(RUNS_DIR, f'distill-{name}')
     os.makedirs(directory, exist_ok=True)
     student_cfg = {key: value for key, value in state['config'].items() if key != 'kind'}
-    argv = ['--name', f'distill-{name}', '--recipe-file', args.config, '--recipe', 'distill.polish', '--init', init, '--init-critic', teacher,
+    argv = ['--name', f'distill-{name}', '--recipe-file', args.config, '--recipe', 'distill.polish', '--init', init,
+            '--init-critic', teacher,
             '--config', json.dumps(student_cfg), '--steps', str(settings['steps'])]
     if args.device:
         argv += ['--device', args.device]
@@ -916,7 +925,8 @@ def measure_speed(names, config, repeats=3):
                 os.remove(item['wav'])
             previous = best.get(name)
             if previous is None or report['networkSeconds'] < previous['networkSeconds']:
-                best[name] = {**report, 'renderSeconds': min(report['renderSeconds'], previous['renderSeconds']) if previous else report['renderSeconds']}
+                best[name] = {**report, 'renderSeconds': min(report['renderSeconds'], previous['renderSeconds']) if previous
+                              else report['renderSeconds']}
             elif report['renderSeconds'] < previous['renderSeconds']:
                 previous['renderSeconds'] = report['renderSeconds']
     for report in best.values():
@@ -943,7 +953,8 @@ def render_samples(name, config):
 def brief(result):
     out = {key: value for key, value in result.items() if key not in ('utterances', 'speakers')}
     if 'speakers' in result:
-        out['speakers'] = {speaker: {key: value for key, value in row.items() if key != 'embedding'} for speaker, row in result['speakers'].items()}
+        out['speakers'] = {speaker: {key: value for key, value in row.items() if key != 'embedding'}
+                           for speaker, row in result['speakers'].items()}
     return out
 
 
@@ -998,7 +1009,8 @@ def pick(args):
         row = {'name': name, 'parameters': result['parameters'], 'moduleBytes': result['size']['moduleBytes'],
                'moduleGzipBytes': result['size']['moduleGzipBytes'], 'mos': measures['mos'], 'wer': measures['wer'],
                'similarity': measures.get('similarity', 1.0), 'pairedSimilarity': measures.get('pairedSimilarity', 1.0),
-               'realTimeNetwork': result.get('speed', {}).get('realTimeNetwork'), 'realTimeTotal': result.get('speed', {}).get('realTimeTotal')}
+               'realTimeNetwork': result.get('speed', {}).get('realTimeNetwork'),
+               'realTimeTotal': result.get('speed', {}).get('realTimeTotal')}
         if name not in ('teacher', args.against):
             row['within'] = {'mos': measures['mos'] >= basis['panel']['mos'] - tolerance['mos'],
                              'wer': measures['wer'] <= basis['panel']['wer'] + tolerance['wer'],
@@ -1009,7 +1021,8 @@ def pick(args):
     passing = [row for row in rows if row.get('withinTolerance')]
     # (the fewest parameters; of one size - a student and its polish - the higher UTMOS)
     chosen = min(passing, key=lambda row: (row['parameters'], -row['mos'])) if passing else None
-    summary = {'teacher': teacher['checkpoint'], 'against': args.against, 'tolerance': tolerance, 'rows': rows, 'chosen': chosen and chosen['name'],
+    summary = {'teacher': teacher['checkpoint'], 'against': args.against, 'tolerance': tolerance, 'rows': rows,
+               'chosen': chosen and chosen['name'],
                'results': {name: brief(result) for name, result in results.items()}}
     samples = []
     if not args.no_samples:
@@ -1026,7 +1039,8 @@ def pick(args):
                  f'{row["realTimeNetwork"] or 0:.0f}x network / {row["realTimeTotal"] or 0:.1f}x total'
                  + ('' if 'withinTolerance' not in row else f', within tolerance: {"yes" if row["withinTolerance"] else "no"}'))
     log_line('eval', f'done: chosen {chosen["name"] if chosen else "none"}' + (
-        f' - {chosen["parameters"]} parameters, {chosen["moduleBytes"]} bytes ({chosen["moduleGzipBytes"]} gzip), UTMOS {chosen["mos"]:.3f} '
+        f' - {chosen["parameters"]} parameters, {chosen["moduleBytes"]} bytes ({chosen["moduleGzipBytes"]} gzip), '
+        f'UTMOS {chosen["mos"]:.3f} '
         f'({args.against} {basis["panel"]["mos"]:.3f}), WER {chosen["wer"]:.2f}% ({args.against} {basis["panel"]["wer"]:.2f}%), similarity '
         f'{chosen["similarity"]:.3f}' if chosen else ' - no student is within the tolerance'))
     # (the gate - no student within the tolerance fails)
@@ -1052,7 +1066,8 @@ def ladder(args):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog='python -m picovox_train.distill', description='Distill small students from the multi-speaker model')
+    parser = argparse.ArgumentParser(prog='python -m picovox_train.distill',
+                                     description='Distill small students from the multi-speaker model')
     subparsers = parser.add_subparsers(dest='command', required=True)
 
     def add_common(sub):

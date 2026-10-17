@@ -6,7 +6,8 @@ Training the multi-speaker, multi-style model (model.py's MultiModel) - end-to-e
 differentiable synthesizer (dsynth.py), over many speakers and the emotional styles:
 
     PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.trainmulti --name multi-a --recipe teacher.a
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.trainmulti --name multi-b --recipe teacher.b --init build/nn/runs/multi-a/last.pt
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.trainmulti --name multi-b --recipe teacher.b \
+        --init build/nn/runs/multi-a/last.pt
 
 --recipe takes the settings of a section of make train's recipe (data/nn/train.json - its keys are the flags), and
 flags given override them.
@@ -155,7 +156,7 @@ def make_batches(corpus, batch_size, max_frames, rng):
     batches = []
     current = []
     for index in order:
-        longest = max([corpus.items[ix]['frameCount'] for ix in current + [index]])
+        longest = max(corpus.items[ix]['frameCount'] for ix in current + [index])
         if current and (len(current) >= batch_size or longest * (len(current) + 1) > max_frames):
             batches.append(current)
             current = []
@@ -361,9 +362,9 @@ class Prefetcher:
 # Losses
 #
 
-# Voice-quality statistics of parameter frames in strongly voiced frames (within 15 dB of the utterance's peak voicing) - median b1-b3 (Hz), ah and af relative to
-# av (dB) - for monitoring the over-smoothing
-# (0-dim tensors on the device, not read - no synchronization; NaN if there are no strong frames)
+# Voice-quality statistics of parameter frames in strongly voiced frames (within 15 dB of the utterance's peak voicing) -
+# median b1-b3 (Hz), ah and af relative to av (dB) - for monitoring the over-smoothing (0-dim tensors on the device, not
+# read - no synchronization; NaN if there are no strong frames)
 @torch.no_grad()
 def quality_stats(values, frame_mask):
     av = values[..., params.INDEX['av']]
@@ -439,10 +440,11 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
     cutoffs = [0.95 * item['bandwidth'] for item in batch['items']]
     audio = band_limit(audio, cutoffs, args.rate, batch.get('cutoffs'))
     target = band_limit(target, cutoffs, args.rate, batch.get('cutoffs'))
-    if audio.device.type == 'mps' and audio.shape[1] == round(args.crop * args.rate):
+    if audio.device.type == 'mps' and audio.shape[1] == round(args.crop * args.rate):  # pragma: no cover - the Apple GPU only
         # (the full-length crops - nearly every step - through the compiled loss, the batch size a dynamic dimension)
-        torch._dynamo.mark_dynamic(audio, 0)
-        torch._dynamo.mark_dynamic(target, 0)
+        # (torch's API for a dynamic dimension is torch._dynamo's)
+        torch._dynamo.mark_dynamic(audio, 0)  # pylint: disable=protected-access
+        torch._dynamo.mark_dynamic(target, 0)  # pylint: disable=protected-access
         losses['spectral'] = compiled_spectral_loss(audio, target, args.rate, args.max_hz, mel_eps=1e-9)
     else:
         losses['spectral'] = spectral_loss(audio, target, args.rate, args.max_hz, mel_eps=1e-9)
@@ -475,9 +477,8 @@ def qat_context(model, args):
     return contextlib.nullcontext()
 
 
-# Validation of one corpus - mean losses and quality statistics (fixed crops and seeds), and the F0 error
-@torch.no_grad()
-# The validation losses and statistics of a corpus (no gradients; the model in eval mode)
+# The validation losses and statistics of a corpus (no gradients; the model in eval mode) - mean losses and quality
+# statistics (fixed crops and seeds), and the F0 error
 @torch.no_grad()
 def validate(model, synth, corpus, args, device, sonorants):
     model.eval()
@@ -736,7 +737,7 @@ def main(argv=None):
         optimizer.zero_grad()
         losses['total'].backward()
         norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        if fused:
+        if fused:  # pragma: no cover - the GPU's fused optimizer
             # (the fused step skips itself - parameters, moments, and step count - when found_inf is 1)
             optimizer.found_inf = (~torch.isfinite(norm)).float()
             optimizer.step()
@@ -744,7 +745,7 @@ def main(argv=None):
             optimizer.step()
         scheduler.step()
         step += 1
-        if device.type == 'mps':
+        if device.type == 'mps':  # pragma: no cover - the Apple GPU only
             event = torch.mps.Event()
             event.record()
             in_flight.append((event, prepared))
@@ -768,7 +769,7 @@ def main(argv=None):
                     sum_counts[prefix_keys + key] = sum_counts.get(prefix_keys + key, 0) + 1
             pending = []
             # (a plan made ahead that didn't match its frames - one finished on the device can't be made again)
-            if synth.deferred_plan_mismatches():
+            if synth.deferred_plan_mismatches():  # pragma: no cover - plans are finished on the device only on the Apple GPU
                 raise RuntimeError('a synthesis cycle plan made ahead did not match its frames')
         if step % args.log_every == 0:
             elapsed = time.time() - last_time

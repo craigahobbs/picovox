@@ -3,10 +3,11 @@
 
 """
 The G2P's relabeled words (data/nn/g2p-relabel.json, g2p.py's focus stage) - dictionary words whose first
-pronunciation isn't what readers say, from the LibriTTS-R readers' usage of the dictionary's variants:
+pronunciation isn't what readers say, from the LibriTTS-R readers' usage of the dictionary's variants (python is
+PYTHONPATH=train/src build/venv-nn/bin/python -B):
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.heteronyms --out build/nn/heteronyms [-j 6]     # every step (resumable)
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.heteronyms --out DIR --check data/nn/g2p-relabel.json   # and the same words?
+    python -m picovox_train.heteronyms --out build/nn/heteronyms [-j 6]                     # every step (resumable)
+    python -m picovox_train.heteronyms --out DIR --check data/nn/g2p-relabel.json           # and the same words?
 
 1. readers - for every word with 2+ pronunciations, which variant the readers used, by the MFA word and phone alignments
    (data/corpora/libritts_label/lab/{word,phone}/{train-clean-100,dev-clean}): each aligned token's phones are matched
@@ -244,7 +245,7 @@ def candidates(out):
     items = []
     for word, entry in counts.items():
         matched = [exact + loose for exact, loose in zip(entry['exact'], entry['stressOnly'])]
-        best = max(range(len(matched)), key=lambda index: (matched[index], -index))
+        best = max(range(len(matched)), key=lambda index, matched=matched: (matched[index], -index))
         if best == 0:
             continue
         lower = wilson_lower(matched[best], matched[best] + matched[0])
@@ -293,7 +294,7 @@ def measure(task):
     wav = os.path.join(AUDIO, subset, speaker, chapter, name[:-4] + '.wav')
     if not os.path.exists(wav):
         return None
-    sound = parselmouth.Sound(wav)
+    sound = parselmouth.Sound(wav)  # pylint: disable=c-extension-no-member # (a compiled module pylint can't inspect)
     formant = sound.to_formant_burg(time_step=0.005, max_number_of_formants=5, maximum_formant=5500 if sex == 'F' else 5000)
     pitch = None
     phones = read_lab(os.path.join(LABELS, 'phone', rel))
@@ -332,7 +333,7 @@ def measure(task):
     return {'rel': rel, 'speaker': speaker, 'vowels': vowels, 'targets': targets}
 
 
-def acoustic(out, jobs, per_word):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+def acoustic(out, jobs, per_word):
     """acoustic.json - per significant candidate, the aligner's and the acoustic check's votes"""
     rng = random.Random(1)
     with open(os.path.join(out, 'candidates.json'), encoding='utf-8') as file:
@@ -503,7 +504,8 @@ def select(out, share):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog='python -m picovox_train.heteronyms', description='The G2P\'s relabeled words from readers\' usage')
+    parser = argparse.ArgumentParser(prog='python -m picovox_train.heteronyms',
+                                     description='The G2P\'s relabeled words from readers\' usage')
     parser.add_argument('--out', required=True, help='the output directory')
     parser.add_argument('-j', '--jobs', type=int, default=6)
     parser.add_argument('--per-word', type=int, default=240, help='the acoustic check\'s tokens a word')

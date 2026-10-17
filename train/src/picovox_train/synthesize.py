@@ -6,9 +6,10 @@ Inference in PyTorch - text to parameter frames with a trained model (a checkpoi
 via export.py's quantized_model), the same steps as lib/model.js: tokens (frontend.py), split into sentences
 (each with its own <bos>), rare tokens remapped (the export manifest's remap), durations, frames.
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.synthesize build/nn/runs/slt/best.pt "Hello, world." -o hello.wav [--rate 44100]
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.synthesize build/nn/runs/multi-b/best.pt "Hello." -o hello.wav --speaker libritts-6454 \
-        [--blend '{"5": 0.5, "12": 0.5}'] [--style angry --intensity 0.7]
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.synthesize build/nn/runs/slt/best.pt "Hello, world." \
+        -o hello.wav [--rate 44100]
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.synthesize build/nn/runs/multi-b/best.pt "Hello." \
+        -o hello.wav --speaker libritts-6454 [--blend '{"5": 0.5, "12": 0.5}'] [--style angry --intensity 0.7]
 
 A multi-speaker model's voice is a speaker (a key or an id of its table) or a blend ({id: weight}, the weights
 normalized to sum to 1), and its style an emotion (model.py's STYLE_NAMES, or neutral) at an intensity (0-1).

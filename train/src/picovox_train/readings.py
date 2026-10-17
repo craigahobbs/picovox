@@ -8,7 +8,8 @@ data (multi.py build) takes a heteronym token's reading from the alignment where
 variant of another reading than the front end's - the speaker's reading, heard in the audio - unless the two differ only by
 S against Z (the aligner's word-final voicing choice is unreliable: use, close, excuse), where the front end's is kept.
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.readings check --out DIR     # a build's heteronym tokens against the aligner
+    # a build's heteronym tokens against the aligner
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.readings check --out DIR
 
 Readings: two variants are different readings when they differ lexically (a stressed vowel's quality; the primary
 stress moving with a quality change), by a consonant (close S/Z), by the primary stress moving alone (the noun/verb
@@ -28,6 +29,7 @@ import os
 import re
 import sys
 
+from . import data
 from .frontend import FUNCTION_WORDS, ROOT, text_to_phrases
 
 
@@ -345,7 +347,6 @@ _INVENTORY_CACHE = {}
 # readings, re-aligned); exits 1 above MAX_DISAGREE
 def check_command(args):
     from .frontend import BOUNDARIES  # pylint: disable=import-outside-toplevel
-    from .multi import LABEL_DIR, SUBSETS  # pylint: disable=import-outside-toplevel
     with open(os.path.join(args.out, 'index.json'), encoding='utf-8') as file:
         index = json.load(file)
     included = {entry['id']: entry for entry in index['utterances'] if entry['include'] and entry['speaker'].startswith('libritts')}
@@ -360,8 +361,8 @@ def check_command(args):
             totals['overrides'] += len(record.get('readings', {}))
             sentence = entry['sentence']
             speaker, chapter = sentence.split('_')[:2]
-            lab = next((path for path in (os.path.join(LABEL_DIR, subset, speaker, chapter, sentence + '.lab') for subset in SUBSETS)
-                        if os.path.exists(path)), None)
+            lab = next((path for path in (os.path.join(data.LABEL_DIR, subset, speaker, chapter, sentence + '.lab')
+                                          for subset in data.SUBSETS) if os.path.exists(path)), None)
             if lab is None:
                 continue
             _, aligned = utterance_readings(entry['text'], lab, readings, lambda word: [])

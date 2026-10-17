@@ -8,8 +8,8 @@ data.py featurizes ARCTIC (the same tokens, alignment, format, and auxiliary tra
 data.py's ArcticData loads. The pool is the committed speaker table, data/nn/speakers.json (its accents and analysis
 settings were measured by the former accent classification, settings, and pool commands - see git history).
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.multi build -j 8              # build/nn/data/multi/ (about 6 minutes on 14 cores)
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.multi verify-tokens           # lib/tokens.js == frontend.py on the pool texts
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.multi build -j 8     # build/nn/data/multi/ (6 minutes, 14 cores)
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.multi verify-tokens  # lib/tokens.js == frontend.py
 
 The corpus (build/nn/data/multi/) has data.py's format (index.json, tokens.npy, durations.npy, seconds.npy,
 audio.npy, frames.npy, alignment.jsonl): load it with ArcticData(os.path.join(DATA_DIR, 'multi')). build --out DIR
@@ -57,7 +57,7 @@ import numpy as np
 from . import data
 from . import readings
 from .data import (CORPORA_DIR, DATA_DIR, FORMAT_VERSION, HOP, MAX_EDGE_SILENCE, MIN_MATCH, MIN_WORD_MATCH, SAMPLE_RATE,
-                   CHANNELS, CHANNEL_NOTES, ArcticData, match_rate, read_mfa)
+                   CHANNELS, CHANNEL_NOTES, LABEL_DIR, SUBSETS, ArcticData, match_rate)
 from .frontend import (ABBREVIATIONS, BOUNDARIES, FUNCTION_WORDS, ROOT, pronounce_texts, set_pronunciations, tokenize,
                        vocabulary)
 
@@ -66,10 +66,6 @@ OUT_DIR = os.path.join(DATA_DIR, 'multi')
 SPEAKERS_PATH = os.path.join(ROOT, 'data', 'nn', 'speakers.json')
 SPLIT_PATH = os.path.join(ROOT, 'data', 'nn', 'multi-split.json')
 LIBRITTS_DIR = os.path.join(CORPORA_DIR, 'libritts_r', 'LibriTTS_R')
-LABEL_DIR = os.path.join(CORPORA_DIR, 'libritts_label', 'lab', 'phone')
-
-# The LibriTTS-R subsets in the pool
-SUBSETS = ['train-clean-100', 'dev-clean']
 
 # The labeled ARCTIC US speakers in the pool, in id order (slt and bdl first, as in the single-speaker data)
 ARCTIC_SPEAKERS = {'slt': 'female', 'bdl': 'male', 'clb': 'female', 'rms': 'male'}
@@ -492,11 +488,6 @@ def verify_tokens_command(args):
                     print(f'MISMATCH: {text!r}')
     print(f'verify-tokens: {len(texts)} pool texts, {tokens} tokens: {len(texts) - mismatches} identical, {mismatches} different')
     return 1 if mismatches else 0
-
-
-#
-# Listening proxy - UTMOS per speaker
-#
 
 
 #

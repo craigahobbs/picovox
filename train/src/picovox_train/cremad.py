@@ -7,10 +7,10 @@ each reading 12 fixed sentences as angry, disgusted, fearful, happy, neutral, an
 medium, and high intensity), 7,442 clips, 16 kHz WAV, with crowd-sourced ratings of every clip's emotion and intensity
 (audio alone, video alone, and both - about 10 ratings each).
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.cremad fetch            # data/corpora/crema_d/ (650 MB, about 7 minutes)
-    PYTHONPATH=train/src build/venv-listeners/bin/python -B -m picovox_train.cremad align     # CTC phone alignments -> build/nn/cremad/alignments.jsonl (GPU, 2 min)
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.cremad build            # build/nn/data/cremad/ and data/nn/cremad.json (1 minute)
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.cremad build --out DIR  # elsewhere, its summary (cremad.json) beside it
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.cremad fetch          # data/corpora/crema_d/ (650 MB, 7 min)
+    PYTHONPATH=train/src build/venv-listeners/bin/python -B -m picovox_train.cremad align   # build/nn/cremad/alignments.jsonl (GPU)
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.cremad build          # build/nn/data/cremad/, data/nn/cremad.json
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.cremad build --out DIR   # elsewhere, its cremad.json beside it
 
 The align command needs transformers, so it runs in build/venv-listeners (no new packages); build needs Praat
 (parselmouth), so it runs in build/venv-nn.
@@ -159,7 +159,10 @@ README_END = '<!-- crema-d end -->'
 # writes it again after it; the marker keeps its first writer's name, so an existing section is found)
 def write_readme():
     path = os.path.join(CORPORA_DIR, 'README.md')
-    text = open(path, encoding='utf-8').read() if os.path.exists(path) else '# Speech corpora\n'
+    text = '# Speech corpora\n'
+    if os.path.exists(path):
+        with open(path, encoding='utf-8') as file:
+            text = file.read()
     if README_START in text:
         text = text[:text.index(README_START)].rstrip('\n') + '\n' + text[text.index(README_END) + len(README_END):].lstrip('\n')
     size = directory_size(CREMAD_DIR) / 1e6 if os.path.isdir(CREMAD_DIR) else 0
@@ -283,8 +286,9 @@ EDGE_EXTEND = 0.15
 def load_ctc(device=None):
     os.environ.setdefault('HF_HOME', HF_HOME)
     import torch  # pylint: disable=import-outside-toplevel
-    from huggingface_hub import snapshot_download  # pylint: disable=import-outside-toplevel
-    from transformers import Wav2Vec2ForCTC  # pylint: disable=import-outside-toplevel
+    # (huggingface_hub and transformers are build/venv-listeners's)
+    from huggingface_hub import snapshot_download  # pylint: disable=import-outside-toplevel,import-error
+    from transformers import Wav2Vec2ForCTC  # pylint: disable=import-outside-toplevel,import-error
     if device is None:
         device = 'mps' if torch.backends.mps.is_available() else 'cpu'
     directory = snapshot_download(CTC_REPO, allow_patterns=['*.json', 'pytorch_model.bin', 'README.md'])
@@ -604,7 +608,7 @@ def clip_split(actor, sentence):
 def first_pass_f0(path):
     import numpy as np  # pylint: disable=import-outside-toplevel
     import parselmouth  # pylint: disable=import-outside-toplevel
-    sound = parselmouth.Sound(path)
+    sound = parselmouth.Sound(path)  # pylint: disable=c-extension-no-member
     f0 = sound.to_pitch_ac(time_step=0.01, pitch_floor=60, pitch_ceiling=700).selected_array['frequency']
     return f0[f0 > 0].astype(np.float32)
 
@@ -671,7 +675,7 @@ def build(args):
             check['reasons'].append('no alignment (silent or too short)')
         else:
             errors = {code: greedy_phone_error(record['greedy'], tokens) for code, tokens in sentence_tokens.items()}
-            best = min(errors, key=lambda code: errors[code][0])
+            best = min(errors.items(), key=lambda pair: pair[1][0])[0]
             if best != item['sentence'] and errors[best][0] <= WRONG_BEST and errors[item['sentence']][0] >= WRONG_INTENDED:
                 check['sentence'] = best
             check['phoneError'], check['tail'] = errors[check['sentence']]
@@ -873,7 +877,7 @@ def write_summary(index, path=SUMMARY_PATH):
     import collections  # pylint: disable=import-outside-toplevel
     entries = index['utterances']
     included = [entry for entry in entries if entry['include']]
-    counts = collections.defaultdict(lambda: collections.Counter())
+    counts = collections.defaultdict(collections.Counter)
     for entry in included:
         counts['emotion'][entry['emotion']] += 1
         counts['intensity'][entry['intensity']] += 1

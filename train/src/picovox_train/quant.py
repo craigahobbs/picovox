@@ -60,7 +60,7 @@ def quantize_array(tensor, bits=8, group=0):
     count = -(-length // size)
     padded = numpy.zeros((rows.shape[0], count * size))
     padded[:, :length] = rows
-    scales = numpy.abs(padded.reshape(rows.shape[0], count, size)).max(axis=2) / qmax(bits)
+    scales = numpy.abs(padded.reshape((rows.shape[0], count, size))).max(axis=2) / qmax(bits)
     scales[scales == 0] = 1.0
     if is_int8(bits, group):
         values = numpy.clip(numpy.round(rows / scales), -127, 127).astype(numpy.int32)

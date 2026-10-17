@@ -367,7 +367,8 @@ def _harmonic_library():
     return _HARMONIC_LIBRARY['library']
 
 
-class _HarmonicSum(torch.autograd.Function):
+# (an autograd Function needs only forward and backward, not the other abstract methods)
+class _HarmonicSum(torch.autograd.Function):  # pylint: disable=abstract-method
     """The harmonic sums [B, T - 1, H] of phases [B, T - 1, H], amplitudes [B, T, K] (real, imaginary), and the
     interpolation weights [T - 1, H] - differentiable in the amplitudes; active is the summed harmonic count (an int32
     device tensor [1], at most K - the harmonics past it are left out), or None for all K"""
@@ -528,7 +529,8 @@ def _tract_library():
     return _TRACT_LIBRARY['library']
 
 
-class _TractResponse(torch.autograd.Function):
+# (an autograd Function needs only forward and backward, not the other abstract methods)
+class _TractResponse(torch.autograd.Function):  # pylint: disable=abstract-method
     """The tract's log magnitude [B, T, M] (and with_phase its phase) from its frequencies' trigonometry ([B, T, M] or
     [M] each) and its resonators' coefficients b, c, log a [B, T, R] (the last resonator the zero)"""
 
@@ -579,7 +581,12 @@ def _tract_kernel(trig, poles, zero, phase):
     if center.device.type != 'mps' or center.dtype != torch.float32 or center.dim() != 3 or center.shape[-1] != 1 or \
             _tract_library() is None:
         return None
-    batch, frames = center.shape[:2]
+    return _tract_metal(trig, poles, zero, phase)  # pragma: no cover - MPS only (the tests run on the CPU)
+
+
+# _tract_kernel's response of MPS float32 [B, T, 1] parameters, or None where the frequencies don't apply
+def _tract_metal(trig, poles, zero, phase):
+    batch, frames = poles[0][0].shape[:2]
     if not (trig[0].dim() == 1 or tuple(trig[0].shape[:2]) == (batch, frames)) or trig[0].dtype != torch.float32:
         return None
     resonators = [*poles, zero]
@@ -725,7 +732,8 @@ def _frication_library():
     return _FRICATION_LIBRARY['library']
 
 
-class _FricationResponse(torch.autograd.Function):
+# (an autograd Function needs only forward and backward, not the other abstract methods)
+class _FricationResponse(torch.autograd.Function):  # pylint: disable=abstract-method
     """The frication magnitude [B, T, M] from [M] frequencies' trigonometry and the filters' per-frame coefficients
     [B, T, 18] - differentiable in the coefficients"""
 
@@ -758,7 +766,12 @@ def _frication_kernel(trig, values):
             trig[0].dim() != 1 or trig[0].dtype != torch.float32 or any(value.requires_grad for value in trig) or \
             _frication_library() is None:
         return None
-    batch, frames = center.shape[:2]
+    return _frication_metal(trig, values)  # pragma: no cover - MPS only (the tests run on the CPU)
+
+
+# _frication_kernel's magnitude of MPS float32 [B, T, 1] parameters at [M] frequencies
+def _frication_metal(trig, values):
+    batch, frames = values['fp1'].shape[:2]
     columns = [values['ab'], values['ap1'], values['ap2'], *_bandpass_coefficients(values['fp1'], values['bp1']),
                *_bandpass_coefficients(values['fp2'], values['bp2']), *_highpass_coefficients(values['fhp'])]
     coef = torch.cat([torch.broadcast_to(column, (batch, frames, 1)) for column in columns], dim=-1).contiguous()
@@ -963,7 +976,8 @@ def _amplitudes_library_for(values):
     return _AMPLITUDES_LIBRARY['library']
 
 
-class _HarmonicAmplitudes(torch.autograd.Function):
+# (an autograd Function needs only forward and backward, not the other abstract methods)
+class _HarmonicAmplitudes(torch.autograd.Function):  # pylint: disable=abstract-method
     """The complex harmonic amplitudes [B, T, K] (real, imaginary) from the frames' F0 [B, T] (constant), voicing
     (linear) [B, T], LF table row (int32) and Rd weight [B, T], shelf coefficients [B, T, 5], the tract's log magnitude
     and phase [B, T, K], and the channel equalizer's gains (dB) [B, 24] or None - differentiable in all but the F0 and
@@ -988,7 +1002,7 @@ class _HarmonicAmplitudes(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_re, grad_im):  # pylint: disable=arguments-differ
         f0, av, low, weight, shelf, tract_magnitude, tract_phase, eq_buffer, lf_re, lf_im = ctx.saved_tensors
-        batch, frames, harmonics = tract_magnitude.shape
+        batch, frames, _ = tract_magnitude.shape
         grad_re = torch.zeros_like(tract_magnitude) if grad_re is None else grad_re.contiguous()
         grad_im = torch.zeros_like(tract_magnitude) if grad_im is None else grad_im.contiguous()
         grad_av = torch.empty_like(av)
@@ -1216,7 +1230,8 @@ class DSynth(torch.nn.Module):
         # the tract in a Metal kernel)
         tract_magnitude, tract_phase = tract_log(frequency, split, trig)
         if constant_f0 and _amplitudes_library_for(values) is not None:
-            shelf = torch.cat([torch.broadcast_to(coefficient, split['shelf'].shape) for coefficient in _shelf_coefficients(split['shelf'])], dim=-1)
+            shelf = torch.cat([torch.broadcast_to(coefficient, split['shelf'].shape)
+                               for coefficient in _shelf_coefficients(split['shelf'])], dim=-1)
             return _HarmonicAmplitudes.apply(f0[..., 0].contiguous(), split['av'][..., 0].contiguous(), low.int().contiguous(),
                                              weight[..., 0].contiguous(), shelf.contiguous(), tract_magnitude.contiguous(),
                                              tract_phase.contiguous(), None if eq is None else eq.contiguous(), self.lf_re, self.lf_im,
@@ -1231,7 +1246,7 @@ class DSynth(torch.nn.Module):
         return source_re * filter_re - source_im * filter_im, source_re * filter_im + source_im * filter_re
 
     # The harmonic (voicing) signal [B, N]
-    def _voicing(self, values, linear, tensors, grid, harmonics, count, eq=None, constant_f0=False):
+    def _voicing(self, values, linear, tensors, grid, harmonics, eq=None, constant_f0=False):
         batch = values.shape[0]
         amp_re, amp_im = self.harmonic_amplitudes(values, harmonics, eq, linear, constant_f0)
         # (a deferred plan's harmonic count is on the device - the amplitudes are made for its upper bound)
@@ -1242,7 +1257,8 @@ class DSynth(torch.nn.Module):
         # sums in one product each
         weight = grid['gridWeight']
         if values.device.type == 'mps' and values.dtype == torch.float32 and _harmonic_library() is not None:
-            signal = _HarmonicSum.apply(tensors['fraction'].contiguous(), amp_re.contiguous(), amp_im.contiguous(),
+            # (MPS only - the tests run on the CPU)
+            signal = _HarmonicSum.apply(tensors['fraction'].contiguous(), amp_re.contiguous(), amp_im.contiguous(),  # pragma: no cover
                                         weight[0].contiguous(), active)
         else:
             k = torch.arange(1, harmonics + 1, device=values.device, dtype=values.dtype)
@@ -1256,7 +1272,7 @@ class DSynth(torch.nn.Module):
         return signal.reshape(batch, -1).index_select(1, grid['cells'])
 
     # The noise (aspiration and frication) signal [B, N]
-    def _noise_signal(self, values, linear, tensors, grid, seeds, count, eq=None):
+    def _noise_signal(self, values, linear, tensors, grid, count, eq=None):
         device = values.device
         batch = values.shape[0]
         fft_size, hop = self.noise_fft, self.noise_hop
@@ -1365,11 +1381,11 @@ class DSynth(torch.nn.Module):
             harmonics = plan['harmonics']
 
         # The voicing, with shimmer, and the noise
-        voicing = self._voicing(values, linear, tensors, grid, harmonics, count, eq, constant_f0)
+        voicing = self._voicing(values, linear, tensors, grid, harmonics, eq, constant_f0)
         index, weight = grid['index'], grid['weight']
         shimmer_amount = linear[:, index, params.INDEX['shimmer']] * (1 - weight) + linear[:, index + 1, params.INDEX['shimmer']] * weight
         voicing = voicing * torch.relu(1 + shimmer_amount * tensors['shimmer'])
-        noise = self._noise_signal(values, linear, tensors, grid, seeds, count, eq)
+        noise = self._noise_signal(values, linear, tensors, grid, count, eq)
         audio = voicing + noise
         if return_parts:
             parts = {'audio': audio, 'voicing': voicing, 'noise': noise}

@@ -87,8 +87,9 @@ def to_stderr(function, *args, **kwargs):
 
 
 # Download a Hugging Face model snapshot, or find it in the cache without network access - returns its local directory
+# (the listener models' libraries - huggingface_hub, speechbrain, funasr - are build/venv-listeners's)
 def hf_snapshot(repo):
-    import huggingface_hub  # pylint: disable=import-outside-toplevel
+    import huggingface_hub  # pylint: disable=import-outside-toplevel,import-error
     try:
         return huggingface_hub.snapshot_download(repo, local_files_only=True)
     except Exception:  # pylint: disable=broad-exception-caught
@@ -108,7 +109,7 @@ def load_utmos(device):
 
 # Load the ECAPA-TDNN speaker encoder (speechbrain)
 def load_ecapa(device):
-    from speechbrain.inference.speaker import EncoderClassifier  # pylint: disable=import-outside-toplevel
+    from speechbrain.inference.speaker import EncoderClassifier  # pylint: disable=import-outside-toplevel,import-error
     source = hf_snapshot(ECAPA_REPO)
     savedir = os.path.join(CACHE_DIR, 'spkrec-ecapa-voxceleb')
     return to_stderr(EncoderClassifier.from_hparams, source=source, savedir=savedir, run_opts={'device': device})
@@ -116,7 +117,7 @@ def load_ecapa(device):
 
 # Load the emotion2vec+ emotion recognizer (funasr) from its local snapshot
 def load_emotion(model_repo, device):
-    from funasr import AutoModel  # pylint: disable=import-outside-toplevel
+    from funasr import AutoModel  # pylint: disable=import-outside-toplevel,import-error
     model_dir = hf_snapshot(model_repo)
     return to_stderr(AutoModel, model=model_dir, disable_update=True, device=device, log_level='ERROR')
 

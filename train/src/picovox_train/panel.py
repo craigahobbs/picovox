@@ -5,8 +5,7 @@
 The listener panel's scoring - how every evaluation measures speech (no training framework: an exported voice model is
 spoken by the browser path, nn/js/speak.js):
 
-- listen - UTMOS, the ECAPA speaker embedding, and optionally the emotion2vec+ probabilities (listeners.py in the
-  listener-model environment, build/venv-listeners)
+- listen - UTMOS and the ECAPA speaker embedding (listeners.py in the listener-model environment, build/venv-listeners)
 - transcribe - whisper.cpp base.en (data/whisper/ggml-base.en.bin), cached beside each WAV; words and edit_distance give
   the word error rate as the former tools/eval.js counted it
 - cosine - the speaker similarity of two embeddings
@@ -33,11 +32,9 @@ WHISPER_MODEL = os.path.join(ROOT, 'data', 'whisper', 'ggml-base.en.bin')
 TEXTS_PATH = os.path.join(ROOT, 'tools', 'panel-texts.json')
 
 
-# Score WAV files with the listener panel - {path: {mos, embedding[, emotion]}}
-def listen(paths, device='cpu', emotion=False):
-    command = [LISTENERS_PYTHON, '-I', LISTENERS_SCRIPT, '--device', device, '--files-from', '-']
-    if not emotion:
-        command.insert(-2, '--no-emotion')
+# Score WAV files with the listener panel (on the CPU) - {path: {mos, embedding}}
+def listen(paths):
+    command = [LISTENERS_PYTHON, '-I', LISTENERS_SCRIPT, '--device', 'cpu', '--no-emotion', '--files-from', '-']
     process = subprocess.run(command, input='\n'.join(paths), capture_output=True, text=True, check=True)
     return {item['file']: item for item in (json.loads(line) for line in process.stdout.splitlines() if line.strip())}
 
@@ -88,12 +85,10 @@ def panel_texts():
 
 
 # Speak a batch ([{text, wav, seed, speaker}]) with an export (nn/js/speak.js) - its speed report
-def speak(model_path, batch, batch_path, rate, frames_only=False):
+def speak(model_path, batch, batch_path, rate):
     with open(batch_path, 'w', encoding='utf-8') as file:
         json.dump(batch, file)
     command = ['node', os.path.join(ROOT, 'nn', 'js', 'speak.js'), '-m', model_path, '--batch', batch_path, '-r', str(rate)]
-    if frames_only:
-        command.append('--frames-only')
     process = subprocess.run(command, check=True, capture_output=True, text=True, cwd=ROOT)
     return json.loads(process.stdout.strip().splitlines()[-1])
 
@@ -129,7 +124,8 @@ def score_model(model_path, out_dir, settings, reference=None, whisper_workers=6
                 for item in group]))
         speakers[speaker] = row
     result['speakers'] = speakers
-    result['utterances'] = {os.path.basename(item['wav']): {'mos': scores[item['wav']]['mos'], 'embedding': scores[item['wav']]['embedding'],
+    result['utterances'] = {os.path.basename(item['wav']): {'mos': scores[item['wav']]['mos'],
+                                                            'embedding': scores[item['wav']]['embedding'],
                                                             'transcript': transcripts[item['wav']]} for item in items}
     result['panel'] = {key: float(numpy.mean([row[key] for row in speakers.values()]))
                        for key in ('mos', 'wer', 'similarity', 'pairedSimilarity') if all(key in row for row in speakers.values())}

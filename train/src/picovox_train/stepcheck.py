@@ -30,7 +30,6 @@ from picovox_train.trainmulti import MULTI_PRIORS, Corpus, batch_losses, collate
 from picovox_train.model import MultiModel  # noqa: E402
 
 
-
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='stepcheck.py', description='Step-0 losses on fixed batches, exactly')
     parser.add_argument('--init', required=True)
@@ -51,7 +50,7 @@ def main(argv=None):
     synth = dsynth.DSynth(settings.rate).to(device)
     out = {'init': args.init, 'device': args.device, 'config': json.loads(args.config), 'batches': []}
     for corpus in corpora:
-        order = sorted(range(len(corpus)), key=lambda index: corpus.items[index]['frameCount'])
+        order = sorted(range(len(corpus)), key=lambda index, items=corpus.items: items[index]['frameCount'])
         for number in range(args.batches):
             indices = order[number * 7:number * 7 + args.batch]
             row = {'corpus': corpus.name, 'items': [corpus.items[index]['id'] for index in indices]}

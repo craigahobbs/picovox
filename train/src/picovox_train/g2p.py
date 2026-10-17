@@ -5,8 +5,8 @@
 Training the grapheme-to-phoneme (G2P) network - the app's only pronouncer (lib/g2p.js runs lib/models/g2pModel.js for
 every word; g2pmodel.py is its Python port). The recipe is data/nn/train.json's "g2p" settings:
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p train --out build/nn/g2p-train          # every stage (resumable)
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p export build/nn/g2p-train --out lib/models/g2pModel.js    # the last stage's
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p train --out build/nn/g2p-train   # every stage (resumable)
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p export build/nn/g2p-train --out lib/models/g2pModel.js
     PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p evaluate [lib/models/g2pModel.js | CHECKPOINT]
 
 The data:
@@ -205,7 +205,8 @@ def build_model(config):
 
     config = model_config(config)
 
-    class ArModel(nn.Module):
+    # (no forward - the model is run by its loss and decode)
+    class ArModel(nn.Module):  # pylint: disable=abstract-method
         """The autoregressive encoder-decoder"""
 
         def __init__(self):

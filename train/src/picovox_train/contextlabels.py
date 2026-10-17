@@ -5,12 +5,13 @@
 The heteronym labels - for the G2P network's reading input and ambiguity head and the context network (context.py):
 which words have more than one reading the neighboring words decide, their readings in the G2P's order, and labeled
 examples of each reading in context. Training-time only: the app has no word list - the G2P's ambiguity head says when
-to ask the context network.
+to ask the context network. The commands (each with PYTHONPATH=train/src; tag in build/venv-pos - spaCy,
+requirements/pos.txt - the others in build/venv-nn):
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.contextlabels books                  # 0. the recipe's books (Project Gutenberg)
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.contextlabels aligned --out DIR      # 1. the aligned readings (LibriTTS-R MFA labels)
-    PYTHONPATH=train/src build/venv-pos/bin/python -B -m picovox_train.contextlabels tag --out DIR         # 2. part-of-speech tags (spaCy, requirements/pos.txt)
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.contextlabels labels --out DIR       # 3. the words, readings, and examples -> labels.json
+    build/venv-nn/bin/python -B -m picovox_train.contextlabels books               # 0. the recipe's books (Project Gutenberg)
+    build/venv-nn/bin/python -B -m picovox_train.contextlabels aligned --out DIR   # 1. the aligned readings (LibriTTS-R MFA labels)
+    build/venv-pos/bin/python -B -m picovox_train.contextlabels tag --out DIR      # 2. part-of-speech tags
+    build/venv-nn/bin/python -B -m picovox_train.contextlabels labels --out DIR    # 3. the words, readings, and examples -> labels.json
 
 The label sources (data/nn/context-labels.json is the curated part):
 
@@ -315,7 +316,7 @@ def paragraphs(text):
 
 # The spaCy tags of texts at the candidate words' offsets - [{offset: tag}] (n_process worker processes)
 def tag_texts(texts, words, jobs):
-    import spacy  # pylint: disable=import-outside-toplevel
+    import spacy  # pylint: disable=import-outside-toplevel,import-error # (build/venv-pos only - not the test environment's)
     nlp = spacy.load('en_core_web_sm', disable=['parser', 'ner', 'lemmatizer'])
     results = []
     for text, doc in zip(texts, nlp.pipe(texts, batch_size=64, n_process=jobs)):
@@ -442,7 +443,8 @@ def labels_command(args):
         for example in text_examples(record['text'], labeled):
             examples.append({**example, 'source': 'aligned', 'split': split, 'group': record['speaker']})
     silver = collections.Counter()
-    collocations = {word: [(re.compile(pattern), variant) for pattern, variant in entries] for word, entries in spec['collocations'].items()}
+    collocations = {word: [(re.compile(pattern), variant) for pattern, variant in entries]
+                    for word, entries in spec['collocations'].items()}
     with open(os.path.join(args.out, 'books.jsonl'), encoding='utf-8') as file:
         for record in map(json.loads, file):
             split = 'heldout' if record['book'] in HELD_OUT_BOOKS else 'train'
@@ -499,7 +501,7 @@ def labels_command(args):
         if word not in eligible or len(common) < 2:
             continue
         others = sorted((reading for reading in range(len(entry['readings'])) if reading != default),
-                        key=lambda reading: (-aligned_counts[word][reading], reading))
+                        key=lambda reading, word=word: (-aligned_counts[word][reading], reading))
         order = [default] + others
         ambiguous[word] = {'readings': [entry['readings'][reading] for reading in order], 'order': order,
                            'family': entry['family'], 'counts': [counts[word][reading] for reading in order]}
@@ -515,7 +517,8 @@ def labels_command(args):
     sources = collections.Counter((example['source'], example['split']) for example in labeled)
     print(f'labels: {len(ambiguous)} ambiguous words ({len(words)} candidates, {len(valid)} with a validated mapping), '
           f'{len(labeled)} examples: ' + ', '.join(f'{source} {split} {count}' for (source, split), count in sorted(sources.items())))
-    print('families (aligned agreement): ' + ', '.join(f'{family} {counts["agree"]}/{counts["total"]}' for family, counts in sorted(by_family.items())))
+    print('families (aligned agreement): ' +
+          ', '.join(f'{family} {counts["agree"]}/{counts["total"]}' for family, counts in sorted(by_family.items())))
     return 0
 
 
