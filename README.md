@@ -5,7 +5,7 @@
 
 **PicoVox - realistic speech synthesis in pure JavaScript, under 1 MB.**
 
-**The paper:** [Small Voices: Browser Speech Synthesis for Audiobooks](https://craigahobbs.github.io/picovox/paper/) -
+**The paper:** [PicoVox: Realistic Neural Speech Synthesis in Under 1 MB of JavaScript](https://craigahobbs.github.io/picovox/paper/) -
 how PicoVox's networks are designed, trained, distilled, and evaluated.
 
 PicoVox speaks English text with natural-sounding male and female voices, entirely on your device - in the browser or
@@ -165,7 +165,7 @@ Dictionary (the G2P network's training labels; it is not used at runtime) - by `
 `lib/models/g2pModel.js` and `lib/models/voiceModel.js` from a clean checkout in about 2 hours on an M3 Max: a large
 teacher model trained through a differentiable copy of the synthesizer, distilled to the small student that ships. See
 [make train](#make-train) below, and the paper,
-[Small Voices: Browser Speech Synthesis for Audiobooks](paper/paper.md), for the methods and results.
+[PicoVox: Realistic Neural Speech Synthesis in Under 1 MB of JavaScript](paper/paper.md), for the methods and results.
 
 
 ## PicoShelf

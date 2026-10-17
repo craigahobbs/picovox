@@ -1,4 +1,4 @@
-# Small Voices: Browser Speech Synthesis for Audiobooks
+# PicoVox: Realistic Neural Speech Synthesis in Under 1 MB of JavaScript
 
 Craig A. Hobbs, with Claude (Anthropic)
 
