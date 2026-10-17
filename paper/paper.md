@@ -1,4 +1,4 @@
-# Small Voices: Browser Speech Synthesis for Audiobooks
+# PicoVox: Realistic Neural Speech Synthesis in Under 1 MB of JavaScript
 
 Craig A. Hobbs, with Claude (Anthropic)
 
@@ -157,7 +157,7 @@ minute), and voice-source detail. Rule tuning had reached diminishing returns.
 ### 5.1 A differentiable source-filter synthesizer
 
 To train a network to drive the synthesizer without hand-labeled formant targets, we wrote a differentiable version
-of it in PyTorch (`nn/dsynth.py`), DDSP-style - no recursive filters:
+of it in PyTorch (`picovox_train/dsynth.py`), DDSP-style - no recursive filters:
 
 - Voicing is harmonic synthesis: each frame's harmonic amplitudes are the product of the voicing level, the LF
   pulse's Fourier coefficients for the frame's Rd (a precomputed table), a source shelf, and the analytic frequency
@@ -450,7 +450,7 @@ multi-style run (stage B) at step 1,000.
 make commit                                                     # tests, lint, docs, 100% coverage of lib/
 make listeners                                                  # the listener panel's environment
 make train                                                      # the corpora, the G2P, the teacher, the distilled student
-build/venv-nn/bin/python -B -m nn.smoke                         # every training entry point, a few steps on the CPU
+PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke    # every training entry point, a few steps on the CPU
 node nn/js/speak.js -m data/nn/slt "Call me Ishmael." -o ishmael.wav   # the single-speaker slt voice of Section 5
 ```
 
