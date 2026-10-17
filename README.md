@@ -5,7 +5,7 @@
 
 **PicoVox - realistic speech synthesis in pure JavaScript, under 1 MB.**
 
-**The paper:** [Small Voices: Browser Speech Synthesis for Audiobooks](https://github.com/craigahobbs/picovox/blob/main/paper/paper.md) -
+**The paper:** [Small Voices: Browser Speech Synthesis for Audiobooks](https://craigahobbs.github.io/picovox/paper/) -
 how PicoVox's networks are designed, trained, distilled, and evaluated.
 
 PicoVox speaks English text with natural-sounding male and female voices, entirely on your device - in the browser or
