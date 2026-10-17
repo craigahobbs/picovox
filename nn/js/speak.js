@@ -1,7 +1,8 @@
 // Licensed under the MIT License
-// https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+// https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-// Speak text with a neural voice (nn/js/model.js) rendered by nn/js/render.js, under Node
+// Speak text with a neural voice (lib/model.js) rendered by lib/render.js, under Node - every word pronounced by the G2P
+// network (lib/g2p.js), as the package pronounces
 //
 //     node nn/js/speak.js -m data/nn/slt "Hello, world." -o hello.wav [-r 44100] [-s seed] [--params out.json]
 //         [--transform '[{"pitchScale": 1.2}]'] [--pause 0.5] [--rate 1] [--bandwidth-scale 1 (the network's own)]
@@ -24,13 +25,16 @@
 
 /* eslint-disable no-console */
 
-import {loadModel, speakFrames} from './model.js';
+import {loadModel, speakFrames} from '../../lib/model.js';
 import {readFileSync, writeFileSync} from 'node:fs';
-import {NAMES} from './params.js';
-import {applyTransforms} from './transforms.js';
+import {NAMES} from '../../lib/params.js';
+import {applyTransforms} from '../../lib/transforms.js';
 import {encodeWav} from '../../lib/wav.js';
+import {g2pModel} from '../../lib/models/g2pModel.js';
+import {loadG2p} from '../../lib/g2p.js';
 import process from 'node:process';
-import {render} from './render.js';
+import {render} from '../../lib/render.js';
+import {setPronouncer} from '../../lib/lexicon.js';
 import {voiceOptions} from './voices.js';
 
 
@@ -162,4 +166,6 @@ function main() {
         'realTimeTotal': audioSeconds / (networkSeconds + renderSeconds)}));
 }
 
+// Every word pronounced by the G2P network, as the package pronounces
+setPronouncer(await loadG2p(g2pModel));
 main();

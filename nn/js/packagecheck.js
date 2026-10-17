@@ -1,5 +1,5 @@
 // Licensed under the MIT License
-// https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+// https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 // Check a packaged model (nn/package.py's generated module) against its export (the .json manifest and .bin weights):
 // the package and the loader import with no Node built-ins (any node: import from them fails, and
@@ -23,12 +23,12 @@ import {registerHooks} from 'node:module';
 const [modulePath, exportPath] = process.argv.slice(2);
 const moduleUrl = pathToFileURL(modulePath).href;
 
-// Fail any node: or bare import from nn/js/ and the package
-const browserRoots = [new URL('./', import.meta.url).href, new URL('../../lib/', import.meta.url).href];
+// Fail any node: or bare import from the package (lib/) and the model module
+const browserRoots = [new URL('../../lib/', import.meta.url).href];
 registerHooks({
     resolve(specifier, context, nextResolve) {
         const parent = context.parentURL ?? '';
-        if ((browserRoots.some((root) => parent.startsWith(root)) || parent === moduleUrl) && !parent.endsWith('/packagecheck.js') &&
+        if ((browserRoots.some((root) => parent.startsWith(root)) || parent === moduleUrl) &&
             (specifier.startsWith('node:') || !/^[./]/u.test(specifier))) {
             throw new Error(`${parent} imports ${specifier}`);
         }
@@ -68,23 +68,25 @@ parentPort.postMessage(hash.digest('hex'));
 
 async function main() {
     // The package and the loader, as a browser would load them
-    const dictionary = readFileSync(new URL('../../data/cmudict.dict', import.meta.url), 'utf8');
     const {getBuiltinModule} = process;
     process.getBuiltinModule = undefined;
     const startImport = performance.now();
     const voice = await import(moduleUrl);
-    const {loadPackagedModel} = await import('./package.js');
+    const {loadPackagedModel} = await import('../../lib/package.js');
     const importSeconds = (performance.now() - startImport) / 1000;
     const startLoad = performance.now();
     const packaged = await loadPackagedModel(voice);
     const loadSeconds = (performance.now() - startLoad) / 1000;
     // eslint-disable-next-line require-atomic-updates
     process.getBuiltinModule = getBuiltinModule;
-    const {setDictionary} = await import('../../lib/lexicon.js');
-    setDictionary(dictionary);
+    // (the frames' words pronounced by the G2P network, as the package pronounces)
+    const {setPronouncer} = await import('../../lib/lexicon.js');
+    const {loadG2p} = await import('../../lib/g2p.js');
+    const {g2pModel} = await import('../../lib/models/g2pModel.js');
+    setPronouncer(await loadG2p(g2pModel));
 
     // The export, loaded from its files
-    const {loadModel, speakFrames} = await import('./model.js');
+    const {loadModel, speakFrames} = await import('../../lib/model.js');
     const buffer = readFileSync(`${exportPath}.bin`);
     const exported = loadModel(JSON.parse(readFileSync(`${exportPath}.json`, 'utf8')),
         buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
@@ -99,7 +101,8 @@ async function main() {
         tensors++;
     }
     // (the manifest as exported - nn/package.py --provenance adds only its provenance record)
-    const {'provenance': _provenance, ...packagedManifest} = packaged.manifest;
+    const packagedManifest = {...packaged.manifest};
+    delete packagedManifest.provenance;
     if (Object.keys(packaged.tensors).length !== tensors || JSON.stringify(packagedManifest) !== JSON.stringify(exported.manifest)) {
         throw new Error('the package\'s tensors or manifest differ');
     }
@@ -119,7 +122,7 @@ async function main() {
 
     // The same model in a worker thread
     const worker = new Worker(new URL(`data:text/javascript,${encodeURIComponent(workerSource)}`),
-        {'workerData': {'loader': new URL('./package.js', import.meta.url).href, 'module': moduleUrl}});
+        {'workerData': {'loader': new URL('../../lib/package.js', import.meta.url).href, 'module': moduleUrl}});
     const workerHash = await new Promise((resolve, reject) => {
         worker.once('message', resolve);
         worker.once('error', reject);

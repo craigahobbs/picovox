@@ -1,6 +1,6 @@
 #!/bin/bash
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 # make train's stage bookkeeping (the training dashboard reads it): each stage's start, end, and failure as a line of
 # TRAIN_DIR/stages.jsonl ({"stage", "event": start|end|fail, "time": epoch seconds}), and each command's output (stdout

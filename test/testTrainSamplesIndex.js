@@ -1,5 +1,5 @@
 // Licensed under the MIT License
-// https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+// https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 import {mergeIndex, parseArgs, parseScores, sampleFile, updateIndex, withLock} from '../tools/trainsamplesindex.js';
 import {mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync} from 'node:fs';

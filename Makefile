@@ -1,12 +1,5 @@
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
-
-
-# The published site - the app (static/audiobook/), its library (lib/), the data, and the catalog
-GHPAGES_SRC := build/site/
-
-# jsdom - a DOM for testing the book parsers (DOMParser) and for building the catalog
-USE_JSDOM := 1
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 
 # Download javascript-build
@@ -27,21 +20,8 @@ $(eval $(call WGET, https://craigahobbs.github.io/javascript-build/eslint.config
 include Makefile.base
 
 
-# The generated model modules (lib/models/) aren't linted
-ESLINT_ARGS := $(ESLINT_ARGS) static/audiobook/ tools/ --ignore-pattern 'lib/models/**'
-
-
-# The book catalog - every Standard Ebooks book and the top GUTENBERG_COUNT Project Gutenberg books (remote pages are
-# cached in out/catalog/, so a rebuild resumes; set GITHUB_TOKEN for GitHub's higher rate limits)
-GUTENBERG_COUNT ?= 1000
-CATALOG_ARGS ?=
-
-.PHONY: catalog
-catalog: build/npm.build
-	$(NODE_SHELL) node tools/catalog.js --gutenberg $(GUTENBERG_COUNT)$(if $(CATALOG_ARGS), $(CATALOG_ARGS))
-
-data/catalog.json:
-	$(MAKE) catalog
+# The development tools are linted too; the generated model modules (lib/models/) aren't
+ESLINT_ARGS := $(ESLINT_ARGS) tools/ nn/js/ --ignore-pattern 'lib/models/**'
 
 
 # Python virtual environments for the analysis tools - build/venv-<name> from requirements/<name>.txt (for example,
@@ -246,7 +226,7 @@ $(TRAIN_DIR)/package.done: $(TRAIN_DIR)/student-eval.done | $(TRAIN_DIR)/samples
 
 # The listening samples (CPU, each beside the next GPU stage - tools/trainsamples.js): each training stage's final model
 # (the checkpoint the next stage starts from, exported as the package stage exports it) speaking data/nn/train.json's
-# samples texts in its speakers' voices as the app speaks them, scored with UTMOS, in $(TRAIN_DIR)/samples/ (index.json)
+# samples texts in its speakers' voices as the package speaks them, scored with UTMOS, in $(TRAIN_DIR)/samples/ (index.json)
 # for the training dashboard's Listen tab - and the reference, the shipped lib/models/voiceModel.js before the package
 # stage replaces it (in the teacher's GPU-bound hours, after the readers' data build)
 SAMPLES := OMP_NUM_THREADS=2 $(BESIDE) node tools/trainsamples.js --out $(TRAIN_DIR)/samples
@@ -280,19 +260,6 @@ $(TRAIN_DIR)/samples-polish.done: $(TRAIN_DIR)/polish.done | build/venv-listener
 	$(STAGE) -- $(TRAIN_ENV) $(SAMPLES) --stage polish --checkpoint $(TRAIN_RUNS)/distill-student-polish/best.pt
 	@$(STAGE) end
 	touch $@
-
-
-# The published site - the app, its library, the paper, the neural voices, the data, and the catalog
-.PHONY: site
-site: data/catalog.json
-	rm -rf build/site
-	mkdir -p build/site/data
-	rsync -a --exclude .DS_Store index.html README.md static lib paper build/site/
-	cp data/LICENSE.cmudict data/catalog.json build/site/data/
-	mkdir -p build/site/nn
-	rsync -a --exclude .DS_Store nn/js nn/vocab.json build/site/nn/
-
-_gh-pages: site
 
 
 clean:

@@ -1,10 +1,10 @@
 // Licensed under the MIT License
-// https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+// https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 // make train's listening samples - a training stage's final model (a checkpoint, exported by nn.export as the package
 // stage exports the student) or a packaged model (the shipped lib/models/voiceModel.js, the reference) speaking
-// data/nn/train.json's samples texts in its speakers' voices exactly as the app speaks them (static/audiobook/worker.js's
-// streamNeuralUnit, every word pronounced by the app's G2P network), each scored with UTMOS on the CPU
+// data/nn/train.json's samples texts in its speakers' voices exactly as the package speaks a sentence (lib/synthesis.js
+// sentenceBlocks, every word pronounced by the G2P network), each scored with UTMOS on the CPU
 // (tools/listeners.py - the GPU is left to training). The WAV files are OUT/<stage>-<speaker>-<text>.wav, and
 // OUT/index.json lists every stage's samples - [{stage, run, checkpoint, step, label, sex, speaker, text, file, seconds,
 // mos}] - updated under a lock and replaced atomically, so sample stages finishing at once keep each other's entries.
@@ -16,6 +16,7 @@
 // data/nn/train.json). The export reads the training data (NN_DATA_DIR - make train's TRAIN_ENV) for its token remap.
 
 import {copyFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync} from 'node:fs';
+import {defaultSampleRate, sentenceBlocks, sentencePause} from '../lib/synthesis.js';
 import {dirname, join, relative, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {parseArgs, parseScores, sampleFile, updateIndex} from './trainsamplesindex.js';
@@ -23,11 +24,10 @@ import {encodeWav} from '../lib/wav.js';
 import {execFileSync} from 'node:child_process';
 import {g2pModel} from '../lib/models/g2pModel.js';
 import {loadG2p} from '../lib/g2p.js';
-import {loadModel} from '../nn/js/model.js';
-import {loadPackagedModel} from '../nn/js/package.js';
+import {loadModel} from '../lib/model.js';
+import {loadPackagedModel} from '../lib/package.js';
 import process from 'node:process';
 import {setPronouncer} from '../lib/lexicon.js';
-import {streamNeuralUnit} from '../static/audiobook/worker.js';
 
 
 // The repository
@@ -44,7 +44,7 @@ async function main() {
     mkdirSync(work, {'recursive': true});
     const log = (message) => process.stdout.write(`trainsamples: ${message}\n`);
 
-    // The app's pronouncer
+    // The G2P network - the package's pronouncer
     setPronouncer(await loadG2p(g2pModel));
 
     // The model - a checkpoint (copied first, so its trainer may replace it meanwhile) exported to the browser's format,
@@ -69,7 +69,7 @@ async function main() {
     const step = model.manifest.training?.step ?? null;
     log(`${args.stage}: ${checkpoint}${step === null ? '' : ` (step ${step})`}`);
 
-    // Each speaker's texts, rendered as the app renders a unit (seed 1, normal speed)
+    // Each speaker's texts, rendered as the package renders a sentence (seed 1, normal speed)
     const samples = [];
     for (const speaker of settings.speakers) {
         const entry = model.manifest.speakers.find((item) => item.key === speaker.key);
@@ -77,12 +77,8 @@ async function main() {
             throw new Error(`the speaker ${speaker.key} isn't in the model`);
         }
         for (const text of settings.texts) {
-            const blocks = [];
-            let sampleRate = 0;
-            streamNeuralUnit(model, text.text, {'speaker': entry.id, 'seed': 1}, (block, rate) => {
-                blocks.push(block);
-                sampleRate = rate;
-            });
+            const blocks = [...sentenceBlocks(model, text.text, {'speaker': entry.id, 'seed': 1, 'pause': sentencePause})];
+            const sampleRate = defaultSampleRate;
             const audio = new Float32Array(blocks.reduce((sum, block) => sum + block.length, 0));
             blocks.reduce((offset, block) => {
                 audio.set(block, offset);

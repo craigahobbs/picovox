@@ -3,8 +3,8 @@
 
 """
 The synthesizer parameter set - the interpretable, sample-rate-independent source-filter parameters that the network
-predicts frame by frame, that nn/dsynth.py (PyTorch, differentiable) and nn/js/render.js (JavaScript) render, and that
-voices and styles transform. This module is the one definition: the JavaScript copy, nn/js/params.js, is generated
+predicts frame by frame, that nn/dsynth.py (PyTorch, differentiable) and lib/render.js (JavaScript) render, and that
+voices and styles transform. This module is the one definition: the JavaScript copy, lib/params.js, is generated
 from it (python -m nn.params --write-js; --check verifies it is current).
 
 Frames are FRAME_RATE (200) per second - one every 5 ms, frame t at time t / FRAME_RATE - and the synthesizers
@@ -190,7 +190,7 @@ def _stack(columns, like):
 
 #
 # The bandwidth transform of parameter values ([..., COUNT] torch tensors or numpy arrays, returned as copies) - the
-# inference default (the export's bandwidthScale); the voice and style transforms are nn/js/transforms.js's
+# inference default (the export's bandwidthScale); the voice and style transforms are lib/transforms.js's
 #
 
 def _copy(values):
@@ -222,10 +222,10 @@ def write_params(path, frames, eq=None):
 
 
 #
-# The JavaScript copy - nn/js/params.js
+# The JavaScript copy - lib/params.js
 #
 
-JS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'js', 'params.js')
+JS_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'lib', 'params.js')
 
 
 # A JavaScript literal of a value (single-quoted strings)
@@ -283,8 +283,8 @@ def javascript():
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='python -m nn.params', description='The synthesizer parameter set')
-    parser.add_argument('--write-js', action='store_true', help='write nn/js/params.js')
-    parser.add_argument('--check', action='store_true', help='check nn/js/params.js is current')
+    parser.add_argument('--write-js', action='store_true', help='write lib/params.js')
+    parser.add_argument('--check', action='store_true', help='check lib/params.js is current')
     args = parser.parse_args(argv)
     if args.write_js:
         with open(JS_PATH, 'w', encoding='utf-8') as file:

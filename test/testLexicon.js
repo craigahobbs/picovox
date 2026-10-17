@@ -1,12 +1,14 @@
 // Licensed under the MIT License
-// https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+// https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-import {numberWords, textToPhrases, whWords} from '../lib/lexicon.js';
+import {numberWords, setPronouncer, textToPhrases, whWords} from '../lib/lexicon.js';
 import {strict as assert} from 'node:assert';
+import {g2pModel} from '../lib/models/g2pModel.js';
+import {loadG2p} from '../lib/g2p.js';
 import test from 'node:test';
 
 
-// A fresh instance of the lexicon module, with no dictionary loaded
+// A fresh instance of the lexicon module, with no pronouncer set
 function freshLexicon(name) {
     return import(`../lib/lexicon.js?${name}`);
 }
@@ -24,52 +26,36 @@ function wordTexts(phrase) {
 }
 
 
-// A small pronouncing dictionary - a comment, a blank line, and an alternate pronunciation
-const miniDictionary = `\
-# a full-line comment
-
-walk W AO1 K
-walk(2) W AA1 K
-box B AA1 K S # a trailing comment
-quick K W IH1 K
-the DH AH0
-have HH AE1 V
-`;
+// A small pronouncer - a few words' phones
+const miniPhones = {
+    'walk': ['W', 'AO1', 'K'], 'box': ['B', 'AA1', 'K', 'S'], 'quick': ['K', 'W', 'IH1', 'K'], 'the': ['DH', 'AH0'],
+    'have': ['HH', 'AE1', 'V']
+};
+function miniPronouncer(word) {
+    return miniPhones[word];
+}
 
 
-test('lexicon.setDictionary, no pronouncer', async () => {
-    const lexicon = await freshLexicon('no-dictionary');
-    // As in a browser - no Node built-in modules
-    const {process} = globalThis;
-    const {getBuiltinModule} = process;
-    process.getBuiltinModule = undefined;
-    try {
-        assert.throws(() => lexicon.textToPhrases('walk'), {'message': 'No pronouncer - call setPronouncer(pronounce) first'});
-    } finally {
-        process.getBuiltinModule = getBuiltinModule;
-    }
-});
+// The module's pronouncer - the G2P network, as the package sets it
+setPronouncer(await loadG2p(g2pModel));
 
 
-test('lexicon.setDictionary', async () => {
-    const lexicon = await freshLexicon('set-dictionary');
-    lexicon.setDictionary(miniDictionary);
+test('lexicon.textToPhrases, no pronouncer', async () => {
+    const lexicon = await freshLexicon('no-pronouncer');
+    assert.throws(() => lexicon.textToPhrases('walk'), {'message': 'No pronouncer - call setPronouncer(pronounce) first'});
 
-    // First pronunciations only, trailing comments stripped
-    const [phrase] = lexicon.textToPhrases('walk box quick');
-    assert.deepEqual(wordPhones(phrase), ['W AO1 K', 'B AA1 K S', 'K W IH1 K']);
-
-    // Setting the dictionary again replaces it
-    lexicon.setDictionary('walk W AA1 K\n');
-    assert.deepEqual(wordPhones(lexicon.textToPhrases('walk')[0]), ['W AA1 K']);
+    // Unset again
+    lexicon.setPronouncer(miniPronouncer);
+    assert.deepEqual(wordPhones(lexicon.textToPhrases('walk')[0]), ['W AO1 K']);
+    lexicon.setPronouncer(null);
+    assert.throws(() => lexicon.textToPhrases('walk'), {'message': 'No pronouncer - call setPronouncer(pronounce) first'});
 });
 
 
 test('lexicon.setPronouncer', async () => {
     const lexicon = await freshLexicon('set-pronouncer');
-    lexicon.setDictionary(miniDictionary);
 
-    // A pronouncer replaces the dictionary for every word - function words still lose their stress
+    // The pronouncer pronounces every word - function words lose their stress
     const words = [];
     lexicon.setPronouncer((word) => {
         words.push(word);
@@ -78,8 +64,8 @@ test('lexicon.setPronouncer', async () => {
     assert.deepEqual(wordPhones(lexicon.textToPhrases('the walk')[0]), ['DH IY0', 'B AA1 K S']);
     assert.deepEqual(words, ['the', 'walk']);
 
-    // Null restores the dictionary
-    lexicon.setPronouncer(null);
+    // Setting it again replaces it
+    lexicon.setPronouncer(miniPronouncer);
     assert.deepEqual(wordPhones(lexicon.textToPhrases('the walk')[0]), ['DH AH0', 'W AO1 K']);
 });
 
@@ -106,61 +92,27 @@ test('lexicon.setPronouncer, readings from context', async () => {
     assert.deepEqual(phrases.map((phrase) => [phrase.end, phrase.major]), [['comma', true], ['period', false], ['exclamation', false]]);
     const items = ['i', 'will', 'read', ',', 'i', 'read', 'it', '.', 'read', '!'];
     assert.deepEqual(choices, [[items, 2], [items, 5], [items, 8]]);
-    lexicon.setPronouncer(null);
 });
 
 
-test('lexicon.textToPhrases, Node dictionary', () => {
+test('lexicon.textToPhrases, the G2P network', () => {
     const [phrase] = textToPhrases('Hello world');
     assert.deepEqual(wordTexts(phrase), ['hello', 'world']);
     assert.deepEqual(wordPhones(phrase), ['HH AH0 L OW1', 'W ER1 L D']);
     assert.deepEqual(phrase.words.map((word) => word.syllables), [2, 1]);
     assert.deepEqual(phrase.words.map((word) => word.isFunction), [false, false]);
     assert.equal(phrase.end, 'period');
-});
 
-
-test('lexicon.textToPhrases, unknown words with suffixes', async () => {
-    const lexicon = await freshLexicon('suffixes');
-    lexicon.setDictionary(miniDictionary);
-    const [phrase] = lexicon.textToPhrases('walks boxes walked walking walker quickly');
-    assert.deepEqual(wordPhones(phrase), [
-        'W AO1 K Z',
-        'B AA1 K S IH0 Z',
-        'W AO1 K D',
-        'W AO1 K IH0 NG',
-        'W AO1 K ER0',
-        'K W IH1 K L IY0'
-    ]);
-    assert.deepEqual(phrase.words.map((word) => word.syllables), [1, 2, 1, 2, 2, 2]);
-});
-
-
-test('lexicon.textToPhrases, unknown words spelled by letter', async () => {
-    const lexicon = await freshLexicon('letters');
-    lexicon.setDictionary(miniDictionary);
-    const [phrase] = lexicon.textToPhrases('blorr zug fex jive yoh');
-    assert.deepEqual(wordPhones(phrase), [
-        // Doubled letters collapse
-        'B L AA1 R',
-        'Z AH1 G',
-        // X is two phones
-        'F EH1 K S',
-        'JH IH1 V EH1',
-        'Y AA1 HH'
-    ]);
-
-    // Doubled phones from different letters collapse, apostrophes inside a word are skipped
-    assert.deepEqual(wordPhones(lexicon.textToPhrases('kcuq o\'qt')[0]), ['K AH1 K', 'AA1 K T']);
-
-    // A suffix whose stem is unknown falls back to letters
-    assert.deepEqual(wordPhones(lexicon.textToPhrases('cats')[0]), ['K AE1 T S']);
+    // Words no dictionary has, and a heteronym read from its context
+    assert.deepEqual(wordPhones(textToPhrases('Queequeg')[0]), ['K W IY1 K W EH2 G']);
+    assert.deepEqual(wordPhones(textToPhrases('I will read it.')[0])[2], 'R IY1 D');
+    assert.deepEqual(wordPhones(textToPhrases('I read it yesterday.')[0])[1], 'R EH1 D');
 });
 
 
 test('lexicon.textToPhrases, function words', async () => {
     const lexicon = await freshLexicon('function-words');
-    lexicon.setDictionary(miniDictionary);
+    lexicon.setPronouncer(miniPronouncer);
     const [phrase] = lexicon.textToPhrases('have the box');
     assert.deepEqual(phrase.words.map((word) => word.isFunction), [true, true, false]);
 

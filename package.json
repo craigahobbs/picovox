@@ -1,15 +1,45 @@
 {
-  "name": "picovox",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "description": "PicoVox - realistic speech synthesis in pure JavaScript, under 1 MB",
-  "devDependencies": {
-    "@eslint/js": "~10.0",
-    "c8": "~12.0",
-    "eslint": "~10.12",
-    "globals": "~17.13",
-    "jsdoc": "~4.0",
-    "jsdom": "~30.1"
-  }
+    "type": "module",
+    "name": "picovox",
+    "version": "1.0.0",
+    "description": "PicoVox - realistic speech synthesis in pure JavaScript, under 1 MB",
+    "keywords": [
+        "speech",
+        "speech-synthesis",
+        "text-to-speech",
+        "tts",
+        "voice",
+        "neural-network",
+        "web-audio"
+    ],
+    "homepage": "https://github.com/craigahobbs/picovox#readme",
+    "bugs": "https://github.com/craigahobbs/picovox/issues",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/craigahobbs/picovox.git"
+    },
+    "license": "MIT",
+    "author": {
+        "name": "Craig A. Hobbs",
+        "email": "craigahobbs@gmail.com",
+        "url": "https://github.com/craigahobbs"
+    },
+    "main": "./lib/index.js",
+    "exports": {
+        ".": "./lib/index.js",
+        "./lib/*": "./lib/*"
+    },
+    "files": [
+        "lib/**/*"
+    ],
+    "scripts": {
+        "test": "node --test"
+    },
+    "devDependencies": {
+        "@eslint/js": "~10.0",
+        "c8": "~12.0",
+        "eslint": "~10.12",
+        "globals": "~17.13",
+        "jsdoc": "~4.0"
+    }
 }

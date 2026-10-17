@@ -12,7 +12,7 @@ directory that nn/data.py's ArcticData loads.
     build/venv-nn/bin/python -B -m nn.multi pool                    # 3. the accent filter and the pool (a report)
     build/venv-nn/bin/python -B -m nn.multi build -j 8              # 4. build/nn/data/multi/ (about 6 minutes on 14 cores)
     build/venv-nn/bin/python -B -m nn.multi build --pool data/nn/speakers.json   # 4 alone: the committed pool (no 1-3)
-    build/venv-nn/bin/python -B -m nn.multi verify-tokens           # nn/js/tokens.js == nn/frontend.py on the pool texts
+    build/venv-nn/bin/python -B -m nn.multi verify-tokens           # lib/tokens.js == nn/frontend.py on the pool texts
     build/venv-nn/bin/python -B -m nn.multi stats                   # the pool's speakers, hours, and match rates
     build/venv-nn/bin/python -B -m nn.multi listen                  # UTMOS per speaker -> data/nn/speakers.json
 
@@ -675,7 +675,7 @@ def write_split(entries, path=SPLIT_PATH):
 # Token parity and statistics
 #
 
-# Verify nn/js/tokens.js and nn/frontend.py agree on every pool text
+# Verify lib/tokens.js and nn/frontend.py agree on every pool text
 def verify_tokens_command(args):
     corpus_data = ArcticData(args.out or OUT_DIR)
     texts = sorted({entry['text'] for entry in corpus_data.index['utterances']})
@@ -818,7 +818,7 @@ def main(argv=None):
     build_parser.add_argument('-j', '--jobs', type=int, default=None, help='worker processes (default: all cores)')
     build_parser.add_argument('--out', help='the corpus directory (default: build/nn/data/multi/, its tables in data/nn/)')
     build_parser.add_argument('--pool', help='the pool from a speaker table (data/nn/speakers.json) - no accents or settings needed')
-    verify_parser = commands.add_parser('verify-tokens', help='check nn/js/tokens.js against nn/frontend.py on the pool texts')
+    verify_parser = commands.add_parser('verify-tokens', help='check lib/tokens.js against nn/frontend.py on the pool texts')
     verify_parser.add_argument('--out', help='the corpus directory (default: build/nn/data/multi/)')
     verify_parser.add_argument('-j', '--jobs', type=int, default=None, help='worker processes (default: all cores)')
     stats_parser = commands.add_parser('stats', help='the pool\'s statistics')

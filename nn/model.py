@@ -4,7 +4,7 @@
 """
 The network - a small non-autoregressive (FastSpeech/LightSpeech-like) model from our front end's phoneme tokens
 (nn/vocab.json) to per-token durations and then to frame-by-frame interpretable synthesizer parameters (nn/params.py),
-which nn/dsynth.py (training) and nn/js/render.js (the browser) render.
+which nn/dsynth.py (training) and lib/render.js (the browser) render.
 
     tokens [B, N] --embedding--> encoder (conv-FFN + self-attention blocks) --> token features [B, N, D]
         --> duration predictor: log(duration + 1) per token, and for the boundary tokens (word boundaries, phrase
@@ -29,9 +29,9 @@ the duration predictor's input, and the decoder's input, and modulates every con
 single-speaker model and its trainer, nn/train.py, are in git history.)
 
 No absolute positional encoding - order comes from the convolutions - so any length works; nn/synthesize.py and
-nn/js/model.js speak long texts a sentence at a time, like the training data.
+lib/model.js speak long texts a sentence at a time, like the training data.
 
-Every layer is one nn/js/model.js implements: embedding, linear, depthwise 1-D convolution ('same' padding), layer
+Every layer is one lib/model.js implements: embedding, linear, depthwise 1-D convolution ('same' padding), layer
 norm, SiLU, tanh, and multi-head self-attention with a key padding mask. (The spectral correction head and the
 all-convolution encoder, architecture options that weren't adopted, are in git history.)
 """

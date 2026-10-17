@@ -1,6 +1,6 @@
 #!/bin/bash
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 # make train's power check (macOS laptops): the training run keeps the GPU busy for hours, drawing more than a small
 # power adapter supplies (an M3 Max measured ~85 W), so a run on battery or a low-wattage adapter drains the battery and

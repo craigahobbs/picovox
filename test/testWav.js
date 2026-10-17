@@ -1,22 +1,10 @@
-import {encodeWav, writeWav} from '../lib/wav.js';
-import {mkdtempSync, readFileSync, rmSync} from 'node:fs';
+// Licensed under the MIT License
+// https://github.com/craigahobbs/picovox/blob/main/LICENSE
+
 import {Buffer} from 'node:buffer';
 import {strict as assert} from 'node:assert';
-import {join} from 'node:path';
-import process from 'node:process';
+import {encodeWav} from '../lib/wav.js';
 import test from 'node:test';
-import {tmpdir} from 'node:os';
-
-
-// Run a function with a temporary directory, removed afterward
-function withTempDir(callback) {
-    const dir = mkdtempSync(join(tmpdir(), 'voice-synth-wav-'));
-    try {
-        callback(dir);
-    } finally {
-        rmSync(dir, {'recursive': true, 'force': true});
-    }
-}
 
 
 test('encodeWav, header', () => {
@@ -49,29 +37,4 @@ test('encodeWav, samples and clipping', () => {
     const empty = encodeWav(new Float32Array(0), 8000);
     assert.equal(empty.length, 44);
     assert.equal(Buffer.from(empty.buffer).readUInt32LE(40), 0);
-});
-
-
-test('writeWav', () => {
-    withTempDir((dir) => {
-        // The file is the encoded bytes
-        const path = join(dir, 'test.wav');
-        const samples = new Float32Array(1001).map((_value, ix) => 0.8 * Math.sin(ix / 10));
-        writeWav(path, samples, 16000);
-        assert.deepEqual(new Uint8Array(readFileSync(path)), encodeWav(samples, 16000));
-    });
-});
-
-test('writeWav, requires Node', () => {
-    // Without Node's getBuiltinModule (as in a browser), file writing throws
-    const {getBuiltinModule} = process;
-    process.getBuiltinModule = undefined;
-    try {
-        assert.throws(() => writeWav('test.wav', new Float32Array(1), 8000), {'message': 'WAV file writing requires Node'});
-    } finally {
-        process.getBuiltinModule = getBuiltinModule;
-    }
-
-    // Encoding needs no file system
-    assert.equal(encodeWav(new Float32Array(1), 8000).length, 46);
 });

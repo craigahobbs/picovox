@@ -3,7 +3,7 @@
 
 """
 The differentiable source-filter synthesizer - renders parameter frames (nn/params.py) to audio in PyTorch, batched,
-differentiably with respect to every parameter's amplitude and filter effect, at any sample rate. nn/js/render.js is
+differentiably with respect to every parameter's amplitude and filter effect, at any sample rate. lib/render.js is
 the same synthesizer in JavaScript.
 
     synth = DSynth(sample_rate=22050).to(device)
@@ -28,7 +28,7 @@ The design (DDSP-style - no recursive filters, so nothing backpropagates through
   magnitude responses (the spectral shapes) at the frame's interpolated parameters, and overlap-added.
 
 The noise is torch.randn by default (training) or the counter-based generator of nn/rng.py (noise='counter'), which
-nn/js/render.js also uses, so the two synthesizers can be compared sample by sample.
+lib/render.js also uses, so the two synthesizers can be compared sample by sample.
 """
 
 import math

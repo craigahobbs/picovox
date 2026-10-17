@@ -1,5 +1,5 @@
 // Licensed under the MIT License
-// https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+// https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 import {base64Bytes, loadG2p, unpackTensors} from '../lib/g2p.js';
 import {Buffer} from 'node:buffer';

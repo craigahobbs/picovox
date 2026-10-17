@@ -351,10 +351,10 @@ class ArcticData:
 
 
 #
-# Token verification - nn/js/tokens.js against nn/frontend.py
+# Token verification - lib/tokens.js against nn/frontend.py
 #
 
-# Tokenize texts with nn/js/tokens.js
+# Tokenize texts with lib/tokens.js
 def js_tokenize(texts):
     process = subprocess.run(['node', os.path.join(ROOT, 'nn', 'js', 'tokenizeLines.js')],
                              input=''.join(json.dumps(text) + '\n' for text in texts), capture_output=True,

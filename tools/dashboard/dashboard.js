@@ -1361,7 +1361,7 @@ function meanScore(samples, sex) {
 
 
 // Render the checkpoint samples (build/nn/samples-progress/index.json, written by the monitor) - each checkpoint's
-// voices, newest first, then the reference app voices - rebuilt when the index changes, reusing each sample's player so
+// voices, newest first, then the package's voices (the reference) - rebuilt when the index changes, reusing each sample's player so
 // playback continues
 let checkpointsKey = null;
 const voiceTiles = new Map();
@@ -1419,7 +1419,7 @@ async function renderCheckpointSamples() {
     ));
     if (index.reference.length !== 0) {
         const facts = `female ${meanScore(index.reference, 'female')} · male ${meanScore(index.reference, 'male')}`;
-        blocks.push(block('Today\'s app voices (reference)', facts, index.reference));
+        blocks.push(block('The package\'s voices (reference)', facts, index.reference));
     }
     if (checkpoints.length === 0) {
         blocks.unshift(make('p', 'empty', 'No checkpoints yet - samples appear as each one is saved.'));
@@ -1444,7 +1444,7 @@ const trainSamplesHelp = 'make train renders listening samples of each training 
     '(its best - the distillation\'s teacher), the student (its best, before the polish), and the polished student (its ' +
     'best - the model the package stage packages, if it passes the gate). Each speaks the recipe\'s texts ' +
     '(data/nn/train.json samples) in six of the training speakers\' voices, three female and three male, exactly as the ' +
-    'app speaks (exported and quantized as the package stage exports it, its G2P network, 24 kHz, its gain). Beside each ' +
+    'package speaks (exported and quantized as the package stage exports it, its G2P network, 24 kHz, its gain). Beside each ' +
     'is the shipped model, ' +
     'lib/models/voiceModel.js, rendered the same way before make train replaces it - so the new model can be judged by ' +
     'ear. The numbers are UTMOS (1-5, a neural predictor of naturalness; real recordings score about 4.1-4.3), scored on ' +

@@ -47,12 +47,12 @@ training (Section 7). Section 3 describes how we measure voices; Section 8 descr
    word is looked up in the CMU Pronouncing Dictionary (about 135,000 words) for its phonemes and stress. Words the
    dictionary lacks currently go through a naive letter-based fallback; a neural replacement is in progress
    (Section 9.1).
-2. **Phonemes to tokens** (`nn/js/tokens.js`). A fixed table maps phonemes and prosodic cues to 78 token IDs: the
+2. **Phonemes to tokens** (`lib/tokens.js`). A fixed table maps phonemes and prosodic cues to 78 token IDs: the
    phonemes, word boundaries, a start marker, and punctuation tokens (comma, period, question, wh-question,
    exclamation) that tell the network how a phrase should rise, fall, or pause.
-3. **Tokens to synthesizer parameters** (`nn/js/model.js`). The acoustic network predicts each token's duration and
+3. **Tokens to synthesizer parameters** (`lib/model.js`). The acoustic network predicts each token's duration and
    then, every 5 ms, 32 synthesizer parameters. A speaker embedding and a style embedding condition it.
-4. **Parameters to audio** (`nn/js/render.js`). A source-filter synthesizer - Liljencrants-Fant (LF) glottal pulses
+4. **Parameters to audio** (`lib/render.js`). A source-filter synthesizer - Liljencrants-Fant (LF) glottal pulses
    and noise through resonant filters - renders 44.1 kHz audio. There is no neural vocoder.
 
 Everything runs in JavaScript, in Node and in a browser's Web Worker, with no dependencies.
@@ -166,7 +166,7 @@ of it in PyTorch (`nn/dsynth.py`), DDSP-style - no recursive filters:
   gradient flows through the harmonic amplitudes).
 - Aspiration and frication noise are shaped in the frequency domain (short-time Fourier transform, overlap-add).
 
-A JavaScript renderer (`nn/js/render.js`) implements the same synthesizer and matches the PyTorch output sample for
+A JavaScript renderer (`lib/render.js`) implements the same synthesizer and matches the PyTorch output sample for
 sample when given the same noise.
 
 ### 5.2 The network
@@ -205,7 +205,7 @@ multi-speaker training addresses the cause (Section 7).
 ### 5.5 Export and inference
 
 Weights are quantized to 8 bits per row (one scale per row) and exported with a JSON manifest: 811,844 bytes per
-voice. `nn/js/model.js` runs the network in plain JavaScript at 10-14 times real time in Node on an Apple M3 Max,
+voice. `lib/model.js` runs the network in plain JavaScript at 10-14 times real time in Node on an Apple M3 Max,
 and the JavaScript and PyTorch outputs agree to within quantization.
 
 
@@ -300,7 +300,7 @@ recognition rates will be added here.
 
 ## 8. Browser deployment
 
-The audiobook player (`static/audiobook/`) reads public-domain books from Standard Ebooks (EPUB, fetched in byte ranges) and
+The audiobook player (now [PicoShelf](https://github.com/craigahobbs/picoshelf), built on the `picovox` package) reads public-domain books from Standard Ebooks (EPUB, fetched in byte ranges) and
 Project Gutenberg (plain text), with a 2,097-book catalog published as static JSON. Synthesis runs in a Web Worker,
 a sentence at a time, streaming blocks of samples to the page so playback starts within about half a second
 (567-696 ms from Play to playback in headless-browser tests at phone size; the model loads when a book opens).

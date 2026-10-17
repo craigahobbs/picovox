@@ -1,5 +1,5 @@
 // Licensed under the MIT License
-// https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+// https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 // The designed voices and styles of the multi-speaker, multi-style model (data/nn/voices.json, nn/voicedesign.py) -
 // browser and Node, no dependencies beyond nn/js. A voice is a blend of the speaker table's readers (by speaker key)
@@ -13,10 +13,10 @@
 //     const samples = render(frames, {'sampleRate': 44100, eq});
 //
 // voiceOptions resolves a voice and a style to the model's options (speakFrames/streamFrames) and the frame
-// transforms (nn/js/transforms.js applyTransforms) to apply to the frames; streamVoice transforms a stream's chunks.
+// transforms (lib/transforms.js applyTransforms) to apply to the frames; streamVoice transforms a stream's chunks.
 
-import {speakFrames, streamFrames} from './model.js';
-import {applyTransforms} from './transforms.js';
+import {speakFrames, streamFrames} from '../../lib/model.js';
+import {applyTransforms} from '../../lib/transforms.js';
 
 
 // A voice of the voices document by id

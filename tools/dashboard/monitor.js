@@ -6,7 +6,7 @@
 //
 // It also renders samples of each new checkpoint (build/nn/runs/<run>/step-*.pt, of the runs since the pipeline started)
 // with pipeline.json's sample speakers and text, scores them with UTMOS (on the CPU, leaving the GPU to training), and
-// lists them in build/nn/samples-progress/index.json, with today's app voices as a reference.
+// lists them in build/nn/samples-progress/index.json, with the package's voices as a reference.
 //
 // node tools/dashboard/monitor.js
 
@@ -326,7 +326,7 @@ async function scoreSamples(files) {
 }
 
 
-// Render a checkpoint's samples (or, with checkpoint null, the reference app voices) - the index entry's samples
+// Render a checkpoint's samples (or, with checkpoint null, the package's voices, the reference) - the index entry's samples
 async function renderSamples(config, checkpoint, prefix) {
     const env = {...process.env, 'OMP_NUM_THREADS': '2'};
     const voices = checkpoint === null ? config.reference : config.speakers;

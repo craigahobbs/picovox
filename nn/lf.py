@@ -8,7 +8,7 @@ so nn/ doesn't change when lib/ is recalibrated) - and its harmonic table.
 The pulse's shape in normalized time (a fraction of the period) depends only on Rd, and it's normalized so its
 negative peak (Ee) is -1, so its Fourier series coefficients c_k = integral over one period of E(u) exp(-2 pi i k u) du
 are independent of F0. The table holds them for Rd from LF_RD_MIN to LF_RD_MAX (steps of LF_RD_STEP) and
-k = 0 ... LF_HARMONICS - 1, from an FFT of LF_POINTS samples of a period. nn/js/lf.js computes the same table.
+k = 0 ... LF_HARMONICS - 1, from an FFT of LF_POINTS samples of a period. lib/lf.js computes the same table.
 """
 
 import functools

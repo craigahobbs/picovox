@@ -15,7 +15,7 @@ The front end and the G2P:
 - nn/context.py - the heteronyms by context: the G2P's reading input and ambiguity head, and the context network
   (nn.context export writes lib/models/g2pModel.js); nn/contextlabels.py - their labels (data/nn/context-labels.json);
   nn/readings.py - a heteronym token's reading from the forced alignment, for the voice data
-- nn/js/tokens.js - the same tokens in JavaScript, from lib/lexicon.js, for browser-side inference
+- lib/tokens.js - the same tokens in JavaScript, from lib/lexicon.js, for browser-side inference
 
 The data:
 
@@ -30,14 +30,14 @@ The data:
 The synthesizer:
 
 - nn/params.py - the parameter set (32 interpretable source-filter parameters per 5 ms frame, their units, ranges, and
-  network normalization), the channel equalizer, and the parameter file format; nn/js/params.js is generated from it
+  network normalization), the channel equalizer, and the parameter file format; lib/params.js is generated from it
   (python -m nn.params --write-js)
 - nn/dsynth.py - the differentiable synthesizer (PyTorch, batched, any sample rate) - harmonic voicing through the
   tract's analytic response, and STFT-filtered noise; nn/lf.py (the LF pulse's harmonic table) and nn/rng.py (the
   counter-based noise shared with JavaScript)
 - nn/spectral.py - the STFT, log-mel spectra, and the log-spectral distance
-- nn/js/render.js - the same synthesizer in JavaScript (browser and Node, streaming); nn/js/lf.js, nn/js/rng.js,
-  nn/js/fft.js
+- lib/render.js - the same synthesizer in JavaScript (browser and Node, streaming); lib/lf.js, lib/rng.js,
+  lib/fft.js
 
 The network:
 
@@ -46,14 +46,14 @@ The network:
   reader pool and CREMA-D with an adversarial spectrogram critic (nn/discriminator.py) against the over-smoothing; the
   losses are nn/losses.py's
 - nn/quant.py - weight quantization at 8-4 bits, per row or per group, shared by nn/export.py (--bits, --group),
-  quantization-aware training (nn/trainmulti.py --qat-bits), and nn/js/model.js
+  quantization-aware training (nn/trainmulti.py --qat-bits), and lib/model.js
 - nn/distill.py - knowledge distillation of the multi-speaker model into small students (data/nn/train.json's distill)
 - nn/export.py - export to <voice>.bin and .json (8-bit, or nn/quant.py's packed formats); nn/package.py - an export
-  as a generated JavaScript module (lib/models/voiceModel.js), loaded by nn/js/package.js (nn/js/packagecheck.js checks
-  it); nn/js/model.js - the forward pass in JavaScript; nn/js/transforms.js - the voice and style transforms;
+  as a generated JavaScript module (lib/models/voiceModel.js), loaded by lib/package.js (nn/js/packagecheck.js checks
+  it); lib/model.js - the forward pass in JavaScript; lib/transforms.js - the voice and style transforms;
   nn/js/voices.js - the designed voices (data/nn/voices.json; nn/js/voicescheck.js checks them); nn/js/speak.js - text
   to WAV (Node)
-- nn/synthesize.py - inference in PyTorch; nn/parity.py - nn/js/model.js against PyTorch, the quantization, and speed
+- nn/synthesize.py - inference in PyTorch; nn/parity.py - lib/model.js against PyTorch, the quantization, and speed
 
 The pipeline's tools:
 

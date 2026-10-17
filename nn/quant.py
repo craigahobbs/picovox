@@ -3,7 +3,7 @@
 
 """
 Weight quantization - the one definition shared by the export (nn/export.py), quantization-aware training (QAT,
-nn/trainmulti.py --qat-bits), and the JavaScript loader (nn/js/model.js):
+nn/trainmulti.py --qat-bits), and the JavaScript loader (lib/model.js):
 
 - Symmetric, per row (a tensor's output channel - dim 0, the rest flattened) or per group (runs of `group` consecutive
   weights within a row, the last run shorter): scale = max |w| / QMAX, q = round(w / scale) clipped to +-QMAX (QMAX =

@@ -3,7 +3,7 @@
 
 """
 Inference in PyTorch - text to parameter frames with a trained model (a checkpoint, or an exported voice's weights
-via nn/export.py's quantized_model), the same steps as nn/js/model.js: tokens (nn/frontend.py), split into sentences
+via nn/export.py's quantized_model), the same steps as lib/model.js: tokens (nn/frontend.py), split into sentences
 (each with its own <bos>), rare tokens remapped (the export manifest's remap), durations, frames.
 
     build/venv-nn/bin/python -B -m nn.synthesize build/nn/runs/slt/best.pt "Hello, world." -o hello.wav [--rate 44100]
@@ -113,7 +113,7 @@ def speaker_id(state, speaker):
     return state['speakers'].index(speaker)
 
 
-# Render parameter frames [T, COUNT] with nn/dsynth.py (counter noise, as nn/js/render.js), peak-normalized
+# Render parameter frames [T, COUNT] with nn/dsynth.py (counter noise, as lib/render.js), peak-normalized
 def render(values, eq, sample_rate=44100, seed=1, peak=0.89):
     synth = dsynth.DSynth(sample_rate, noise='counter')
     values = numpy.asarray(values)

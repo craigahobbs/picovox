@@ -1,5 +1,5 @@
 // Licensed under the MIT License
-// https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+// https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 import * as voiceModel from '../lib/models/voiceModel.js';
 import {strict as assert} from 'node:assert';

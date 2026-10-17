@@ -1,4 +1,4 @@
-// Heteronym regression check - the sentences of data/nn/heteronyms-test.json through the app's front end (lib/lexicon.js
+// Heteronym regression check - the sentences of data/nn/heteronyms-test.json through the package's front end (lib/lexicon.js
 // textToPhrases with the G2P network as the pronouncer), each expected reading scored: right when the word's phones are
 // one of the reading's variants (or match one without stress and no other reading's). Kinds: "default" (the reading a
 // context-free G2P should give), "context" (another reading - needs the neighboring words), "missing" (no dictionary

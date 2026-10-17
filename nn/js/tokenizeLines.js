@@ -1,7 +1,7 @@
 // Licensed under the MIT License
-// https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+// https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-// Tokenize texts with nn/js/tokens.js, every word pronounced by the app's G2P network (lib/g2p.js with
+// Tokenize texts with lib/tokens.js, every word pronounced by the package's G2P network (lib/g2p.js with
 // lib/models/g2pModel.js) - one JSON string per input line in, one JSON line of {tokens, ids, words} out (used by
 // `python -m nn.data verify-tokens` to compare with the Python front end)
 //
@@ -13,10 +13,10 @@ import {loadG2p} from '../../lib/g2p.js';
 import process from 'node:process';
 import {readFileSync} from 'node:fs';
 import {setPronouncer} from '../../lib/lexicon.js';
-import {tokenize} from './tokens.js';
+import {tokenize} from '../../lib/tokens.js';
 
 
-// The app's pronouncer
+// The package's pronouncer
 setPronouncer(await loadG2p(g2pModel));
 
 // Read standard input (asynchronously - after the awaits above, a synchronous read of a pipe may find it not ready)

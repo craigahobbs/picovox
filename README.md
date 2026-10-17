@@ -1,139 +1,210 @@
 # PicoVox
 
-**PicoVox** (npm `picovox`) - realistic speech synthesis in pure JavaScript, under 1 MB.
+[![npm](https://img.shields.io/npm/v/picovox)](https://www.npmjs.com/package/picovox)
+[![GitHub](https://img.shields.io/github/license/craigahobbs/picovox)](https://github.com/craigahobbs/picovox/blob/main/LICENSE)
 
-A from-scratch speech synthesizer in JavaScript, aiming for realistic male and female voices - no recorded speech at
-runtime. Text goes through a front end (normalization, and a small grapheme-to-phoneme network for every word) to
-tokens; a small neural network (`nn/js/model.js`, trained through a differentiable copy of the synthesizer - `nn/`)
-predicts frames of interpretable synthesizer parameters every 5 ms, which drive a source-filter synthesizer with an LF
-glottal source (`nn/js/render.js`). The generated model modules are in `lib/models/`.
+**PicoVox - realistic speech synthesis in pure JavaScript, under 1 MB.**
 
-It runs under Node (command-line tools and evaluation) and in the browser (Web Audio, synthesis in a Web Worker). There
-are no runtime dependencies. (The first, rule-based formant synthesizer - Klatt's duration rules, intonation, formant
-targets, the "classic voices" - and its analysis tools were removed in commit 33fbfad; see git history.)
+PicoVox speaks English text with natural-sounding male and female voices, entirely on your device - in the browser or
+in Node. There is no recorded speech, no server, no WebAssembly, and no runtime dependencies: a small grapheme-to-phoneme
+network pronounces every word, a small neural network (350K parameters) predicts interpretable source-filter
+synthesizer parameters every 5 ms, and a JavaScript synthesizer with an LF glottal source renders them. The whole
+package - code and both networks - is under 1 MB.
 
-The paper [Small Voices: Browser Speech Synthesis for Audiobooks](paper/paper.md) describes the methods and results -
-the rule-based synthesizer and its calibration, the neural voices that replaced it, and the work in progress. On the
-published site it reads at `paper/` (rendered with [MarkdownUp](https://craigahobbs.github.io/markdown-up/)).
+[PicoShelf](https://craigahobbs.github.io/picoshelf/), every public-domain book read aloud right in your browser, is
+built on PicoVox.
 
 
-## The audiobook player
-
-A public-domain audiobook player, read aloud by the synthesizer - [open the audiobook player](static/audiobook/). Serve
-the repository root statically and open `static/audiobook/` (the root `index.html` shows this README):
+## Installation
 
 ```sh
-python3 -m http.server 8000
-open http://localhost:8000/static/audiobook/
+npm install picovox
 ```
 
-To listen on a phone, open `http://<your computer's LAN address>:8000/` on it (same network).
-
-- **Books** come live from two sources, straight from the browser (both send CORS headers, so no server or proxy is
-  needed): [Standard Ebooks](https://standardebooks.org) - about 1,300 carefully produced classics, downloaded as EPUBs
-  and unzipped in the browser - and [Project Gutenberg](https://www.gutenberg.org) - its catalog through
-  [Gutendex](https://gutendex.com) and its texts through the [GITenberg](https://github.com/GITenberg) mirror on GitHub
-  (gutenberg.org's own text files don't send CORS headers; GITenberg is a 2016 snapshot, so newer books are missing).
-- **The player** has play/pause, back and forward 30 seconds, the book's contents, bookmarks (add, name, go to,
-  delete), and the narrator's voice and speed. It plays on from the library (with a mini player), and works with the
-  lock screen and media keys.
-- **Your place is kept** - every book's position, its bookmarks, and the open book are saved in browser storage as you
-  listen, so reloading, closing the tab, or coming back days later picks up at the same sentence. Downloaded books are
-  cached in IndexedDB, so reopening one is instant (and works offline).
-- **Long books are cheap**: the player's timeline is the book's text, split into sentences (long ones at semicolons and
-  colons) that are synthesized on demand a few minutes ahead of the position, and only the audio near the position is
-  kept - so playback starts in about 0.1 s anywhere in a book, and Moby Dick costs no more memory than a chapter.
-
-The page needs HTTP - it does not work from a `file:` URL, since module workers and fetch require it. The player loads
-the generated G2P and voice model modules (`lib/models/`) and passes them to the worker.
-
-| Module | |
-| --- | --- |
-| `static/audiobook/app.js` | The library and player interface |
-| `static/audiobook/engine.js` | Playback - the text timeline, on-demand synthesis, scheduling, skipping, speech normalization |
-| `static/audiobook/worker.js` | The synthesis Web Worker - speaks the player's units (sentences) with the neural voices |
-| `static/audiobook/sources/standardebooks.js` | Standard Ebooks - browse, search, and EPUB loading |
-| `static/audiobook/sources/gutenberg.js` | Project Gutenberg - Gutendex browse and search, GITenberg texts, boilerplate and chapters |
-| `static/audiobook/store.js` | The listener's state in browser storage - places, bookmarks, settings |
-| `static/audiobook/bookcache.js` | Downloaded books in IndexedDB |
-
-`node tools/browsercheck.js` checks the browser build under Node: it loads the app-time modules (`lib/`, `static/audiobook/worker.js`,
-`nn/js/`, and the generated model module) with `node:` imports forbidden, speaks with the worker's functions from a
-dictionary string, and checks the audio matches the same neural pipeline run directly, sample for sample.
+PicoVox is ESM-only. It runs in current browsers (Chrome, Edge, Firefox, and Safari 16.4 or later) and in Node 22 or
+later.
 
 
-## The catalog and the published site
+## Quick start
 
-The app is published as static files (GitHub Pages). The site holds only a catalog of books - their metadata, in
-`data/catalog.json` - and each book's full text is fetched from its source at play time, with CORS.
+In the browser - speak text aloud with Web Audio (call it from a click, so the browser lets the audio start):
 
-```sh
-make catalog                          # rebuild data/catalog.json (GUTENBERG_COUNT=1000 by default)
-make catalog GUTENBERG_COUNT=2000     # consider more of Project Gutenberg's most-downloaded books
-make site                             # assemble the published site in build/site/
-make gh-pages                         # test, lint, and cover, then sync build/site/ to ../voice-synth.gh-pages
+```html
+<button id="speak">Speak</button>
+<script type="module">
+    import {speak} from './node_modules/picovox/lib/index.js';
+
+    document.getElementById('speak').onclick = () => {
+        speak('It was the best of times, it was the worst of times.', {'voice': 'female'});
+    };
+</script>
 ```
 
-`make catalog` runs `node tools/catalog.js`, which reads every [Standard Ebooks](https://standardebooks.org) book (its
-popularity listing and each book's page) and the top Project Gutenberg books by downloads from
-[Gutendex](https://gutendex.com). Gutenberg books that duplicate a Standard Ebooks book are left out, and each
-remaining book's plain text is found in the [GITenberg](https://github.com/GITenberg) mirror on GitHub (whose
-`raw.githubusercontent.com` files send CORS headers) with the [gitberg](https://github.com/gitenberg-dev/gitberg)
-project's repository list and HEAD requests; books not in GITenberg are left out. Requests are throttled, and every
-fetched page is cached under `out/catalog/`, so a rerun takes seconds and an interrupted build resumes (`--max-age
-<days>`, 30 by default, refetches older pages). For books missing from the gitberg list, the GitHub search API is used -
-10 searches a minute, or many more with a `GITHUB_TOKEN` in the environment.
+(With a bundler or an import map, import from `'picovox'`.)
 
-A full build from an empty cache takes about 45 minutes: Standard Ebooks' ~1,500 book pages at 2 a second (about 12
-minutes), and Gutendex, which can take a minute per page of 32 books (about 30 minutes for 1,000). To finish a partial
-catalog, rerun `make catalog` (with `GITHUB_TOKEN=<token>` set to speed up any GitHub searches) - it picks up from the
-cache and resolves only the books it hasn't yet. `make catalog CATALOG_ARGS=--cache-only` rebuilds the catalog from the
-cache alone, without network requests (books not yet resolved are left out).
-
-The catalog format (`version` 1):
+In Node - synthesize speech and write a WAV file:
 
 ```js
-{
-    'version': 1, 'generated': '<ISO time>',
-    'sources': {'standardebooks': {'name', 'url', 'description'}, 'gutenberg': {'name', 'url', 'description'}},
-    'books': [{
-        'source': 'standardebooks' | 'gutenberg',
-        'id': '/ebooks/herman-melville/moby-dick',  // Standard Ebooks: the book's path; Gutenberg: its number, as a string
-        'title': 'Moby Dick', 'subtitle': 'Or, The Whale',  // the subtitle is optional
-        'author': 'Herman Melville',                        // display names, several joined with ", "
-        'description': '<plain text, at most about 600 characters>',
-        'subjects': ['Fiction'],                            // at most 8
-        'language': 'en',
-        'cover': '<absolute image URL, or null>',
-        'rank': 1,                                          // 1-based popularity rank within its source
-        'words': 211202,                                    // approximate, or null
-        'text': {'url': '<absolute CORS URL of the full text>', 'format': 'epub' | 'gutenberg-text',
-                 'encoding': 'utf-8' | 'windows-1252'}      // the encoding is for gutenberg-text only
-    }]
+import {synthesize, toWav} from 'picovox';
+import {writeFileSync} from 'node:fs';
+
+const {samples, sampleRate} = await synthesize('Call me Ishmael.', {'voice': 'male'});
+writeFileSync('ishmael.wav', toWav(samples, sampleRate));
+```
+
+Streaming - a sentence and a fraction of a second at a time, the first speech in about 70 ms (M3 Max):
+
+```js
+import {stream} from 'picovox';
+
+for await (const block of stream(longText, {'voice': 'female', 'rate': 1.2})) {
+    // block is a Float32Array of 24 kHz samples - play it, or post it from a Web Worker
 }
 ```
 
-`lib/catalog.js` browses it in the app: `listBooks(catalog, source)` (by rank; `'all'` interleaves the sources),
-`searchBooks(catalog, query, source)` (every query word must start a title, subtitle, author, or subject word; title and
-author matches first), `findBook(catalog, source, id)`, `pageItems(items, page, pageSize)`, and `normalizeText(text)`.
+
+## API
+
+### `synthesize(text, options)`
+
+Synthesize speech. Returns a Promise of `{samples, sampleRate}` - `samples` is a `Float32Array` of mono samples (-1 to
+1) at `sampleRate` Hz.
+
+### `stream(text, options)`
+
+Synthesize speech as a stream - an async iterable of `Float32Array` blocks of samples, made as they're taken. The text
+is spoken a sentence at a time, each sentence a fraction of a second at a time, so the first audio comes almost at once.
+The blocks, concatenated, are exactly `synthesize`'s samples. Synthesis runs on the calling thread as each block is
+taken - in a browser, take the blocks in a Web Worker to keep the page responsive.
+
+### `speak(text, options)`
+
+Speak text aloud in a browser, with Web Audio. Returns a playback, `{stop(), finished}` - `stop()` stops it, and
+`finished` is a Promise that resolves when the playback ends or is stopped (and rejects if synthesis fails). Playback
+starts with the first blocks while the rest are synthesized, a few seconds ahead. Synthesis runs on the main thread, a
+block at a time between the page's other work; for long texts, use `stream` in a Web Worker and play its blocks.
+`options.context` is an `AudioContext` to play in (by default, a new one, closed when the playback ends). Under Node,
+`speak` throws an error - there is no Web Audio; use `synthesize` and `toWav`.
+
+### `voices()`
+
+The built-in voices - `[{key, label, sex}]`:
+
+| Key | Label | Sex |
+| --- | --- | --- |
+| `male` (the default) | Male | male |
+| `female` | Female | female |
+
+### `toWav(samples, sampleRate)`
+
+Encode samples (a `Float32Array`, or an array of numbers, -1 to 1 - values beyond are clipped) as a 16-bit PCM mono WAV
+file - a `Uint8Array` of the file's bytes.
+
+### Options
+
+`synthesize`, `stream`, and `speak` take the same options:
+
+| Option | Default | |
+| --- | --- | --- |
+| `voice` | `'male'` | The voice's key - see `voices()` |
+| `rate` | `1` | The speaking speed, from 0.5 to 2 (1.2 is 20% faster) |
+| `seed` | `1000` | The noise seed (an integer) - sentence *i* of the text is rendered with seed + *i* |
+| `sampleRate` | `24000` | The output sample rate (Hz), from 8000 to 96000 - 24 kHz is the voices' own rate |
+
+The text is split into sentences (and paragraphs, at blank lines); each sentence starts with a short pause - 0.24
+seconds, or 0.4 before a paragraph (so the text's first sentence starts with one). Numbers, common abbreviations, dashes,
+ellipses, and Roman-numeral chapter headings are spoken as words. An invalid text or option throws a `TypeError` or a
+`RangeError` with a message saying what's wrong (`stream` and `speak` throw at once; `synthesize` rejects).
+
+The output is bit-for-bit deterministic: the same text and options give the same samples, in the browser and in Node.
+
+### The modules
+
+The package's modules are importable too (`picovox/lib/<module>.js`) - the pieces the API is built from, for an app
+that runs its own synthesis loop (PicoShelf's worker does):
+
+| Module | |
+| --- | --- |
+| `lib/index.js` | The API |
+| `lib/synthesis.js` | The pipeline - the voices, a sentence's blocks (`sentenceBlocks`), a text's (`textBlocks`), the gain and limiter |
+| `lib/sentences.js` | Text to sentences (`splitSentences`) and their speakable text (`speechText`) |
+| `lib/lexicon.js` | Normalization and phrasing (`textToPhrases`), every word pronounced by the pronouncer (`setPronouncer`) |
+| `lib/g2p.js` | The grapheme-to-phoneme network's inference (`loadG2p`) - heteronyms read from their context |
+| `lib/tokens.js` | Phrases to the voice network's tokens |
+| `lib/model.js` | The voice network - text to parameter frames (`speakFrames`, `streamFrames`), any speaker blend and style |
+| `lib/render.js` | The source-filter synthesizer - parameter frames to samples, streaming (`createRenderer`, `render`) |
+| `lib/lf.js`, `lib/rng.js`, `lib/fft.js`, `lib/params.js` | The LF glottal pulse, the counter-based noise, the FFT, the parameter set |
+| `lib/transforms.js` | Voice and style transforms of parameter frames (pitch, tract length, bandwidths, whisper, effort) |
+| `lib/package.js` | The generated model modules' loader (`loadPackagedModel`) |
+| `lib/wav.js` | WAV encoding (`encodeWav`) |
+| `lib/models/g2pModel.js`, `lib/models/voiceModel.js` | The generated models (`make train`) |
+
+
+## Size and speed
+
+| | |
+| --- | --- |
+| The package (`npm pack`) | 803 KB packed, 1.2 MB unpacked - the G2P network 419 KB and the voice network 616 KB of it, as base64 |
+| The voice network | 349,547 parameters, 8-bit weights - 432 KB gzipped |
+| The G2P network | 373,256 parameters (and the heteronym context network's 47,779), 6-bit weights |
+| Speed, Apple M3 Max (Node) | The voice network about 94x real time; synthesis end to end (network and rendering, 24 kHz) about 40x |
+| Speed, iPhone (Safari) | About 1.18x real time - fast enough for continuous playback |
+| Startup | About 0.1 s to load both networks (Node, M3 Max) |
+
+The voices score a mean UTMOS (a neural predictor of listeners' naturalness ratings, 1-5) of about 4.1 on the listener
+panel's texts, with a Whisper word error rate under 2% - see [the listener panel](#the-listener-panel).
+
+
+## How the models are trained
+
+Both networks are trained from scratch from public corpora - CMU ARCTIC, LibriTTS-R, CREMA-D, and the CMU Pronouncing
+Dictionary (the G2P network's training labels; it is not used at runtime) - by `make train`, which rebuilds
+`lib/models/g2pModel.js` and `lib/models/voiceModel.js` from a clean checkout in about 2 hours on an M3 Max: a large
+teacher model trained through a differentiable copy of the synthesizer, distilled to the small student that ships. See
+[make train](#make-train) below, and the paper,
+[Small Voices: Browser Speech Synthesis for Audiobooks](paper/paper.md), for the methods and results.
+
+
+## PicoShelf
+
+[PicoShelf](https://craigahobbs.github.io/picoshelf/) is the showcase app - an audiobook player for every public-domain
+book (Project Gutenberg and Standard Ebooks), read aloud by PicoVox in the browser, in a Web Worker
+([source](https://github.com/craigahobbs/picoshelf)).
+
+
+## Development
+
+This repository is the package (`lib/`, `test/`) and the training pipeline that makes its models (`nn/`, `tools/`,
+`data/`, the paper in `paper/`). The package is developed with
+[javascript-build](https://github.com/craigahobbs/javascript-build#readme):
+
+```sh
+make commit      # the unit tests (100% coverage), lint, and the API documentation (jsdoc)
+make test        # the unit tests (TEST='name' runs one)
+make train       # retrain the models (see below)
+```
+
+The training tools are Node scripts and a Python pipeline (`build/venv-nn`, PyTorch). They use the package's modules
+but aren't part of it.
 
 
 ## Command-line tools
 
-Node 22.3 or later (the library reaches `node:fs` with `process.getBuiltinModule`, so it has no static Node imports).
-
 ```sh
 node nn/js/speak.js -m data/nn/slt "Hello, world." -o out/hello.wav    # an exported model (data/nn/<voice>.json and .bin)
 node nn/js/speak.js -m data/nn/multi "Hello." -o out/hello.wav --voice narrator-f   # a designed voice (data/nn/voices.json)
+node nn/js/unpack.js lib/models/voiceModel.js out/voice                 # a packaged model back to its export
+node nn/js/packagecheck.js lib/models/voiceModel.js out/voice           # check a packaged model against its export
 node nn/js/voicescheck.js [data/nn/multi]                               # check the designed voices
-node tools/browsercheck.js                                              # the browser build under Node
 node tools/heteronyms.js                                                # the heteronym regression set
 ```
 
 `nn/js/speak.js` speaks with an exported model (`nn.export CHECKPOINT --voice NAME` writes `data/nn/NAME.json` and
-`.bin`; `data/nn/multi` is an export of the multi-speaker model; `-r` rate, `-s` seed, `--params` the parameter frames,
-`--batch` a list of items); the multi-speaker model takes a speaker (`--speaker`, `--blend`), a style (`--style`,
-`--intensity`), or a designed voice and style (`--voice`, `--voice-style` - `nn/js/voices.js`).
+`.bin`; `data/nn/multi` is an export of the multi-speaker model), every word pronounced by the G2P network as the
+package pronounces (`-r` rate, `-s` seed, `--params` the parameter frames, `--batch` a list of items); the
+multi-speaker model takes a speaker (`--speaker`, `--blend`), a style (`--style`, `--intensity`), or a designed voice
+and style (`--voice`, `--voice-style` - `nn/js/voices.js`, the designed voices of `data/nn/voices.json`, each a blend of
+the model's speakers with a style and transforms).
 
 The training dashboard, `tools/dashboard/`, follows `make train` and the neural voices' training as they run: serve the
 repository (`python3 -m http.server`), start its monitor (`node tools/dashboard/monitor.js`), and open
@@ -163,7 +234,7 @@ The monitor writes `build/nn/activity.json` every second: the Python and Node pr
 (`pipeline.json`'s workflow, else the newest workflow in `~/.claude/projects/`) - so the dashboard shows the steps that
 write no log. It also renders each new checkpoint of the pipeline's runs (`build/nn/runs/<run>/step-*.pt`) with
 `pipeline.json`'s sample speakers and text, scores the samples with UTMOS on the CPU (leaving the GPU to training), and
-lists them in `build/nn/samples-progress/index.json` with today's app voices as a reference; the dashboard's Checkpoint
+lists them in `build/nn/samples-progress/index.json` with the package's voices as a reference; the dashboard's Checkpoint
 samples section plays them, newest first.
 
 
@@ -171,7 +242,7 @@ samples section plays them, newest first.
 
 Neural listener models score the synthesizer the way a panel of listeners would - a repeatable check of naturalness,
 speaker identity, and speaking style alongside Whisper's intelligibility. They run in a Python environment of their own
-(PyTorch), used only by the tools - the synthesizer and the app have no dependencies.
+(PyTorch), used only by the tools - the package has no dependencies.
 
 | Listener | Model | Measures |
 | --- | --- | --- |
@@ -183,7 +254,8 @@ speaker identity, and speaking style alongside Whisper's intelligibility. They r
 `nn/panel.py` is the panel's scoring, shared by every evaluation (`nn.distill eval`, make train's gate): an exported
 model speaks a fixed evaluation set, `tools/panel-texts.json` - six Harvard sentences, six narrative passages from
 public-domain books with dialogue (Austen, Melville, Dickens, Doyle, Potter, Grahame), two questions, and two
-exclamations - through `nn/js/speak.js`, and the renderings are scored with UTMOS, Whisper's WER, and the ECAPA
+exclamations - through `nn/js/speak.js` (every word pronounced by the G2P network, as the package pronounces), and
+the renderings are scored with UTMOS, Whisper's WER, and the ECAPA
 speaker similarity.
 
 `tools/listeners.py` is the scoring tool itself - WAV files of any sample rate in, one JSON line per file out:
@@ -253,8 +325,8 @@ Each training stage's final model - teacher A's last checkpoint (which teacher B
 distillation's teacher), the student's best, and its polish's best (the model the package stage ships) - is rendered
 for listening as the stage finishes, in its own CPU stage beside the next GPU stage (`tools/trainsamples.js`): exported
 as the package stage exports it, it speaks `data/nn/train.json`'s `samples` texts (Moby-Dick's opening, a dialogue,
-and heteronyms) in six of the training speakers' voices (three female, three male) exactly as the app speaks
-(`static/audiobook/worker.js`, every word pronounced by its G2P network), and each sample is scored with UTMOS on the
+and heteronyms) in six of the training speakers' voices (three female, three male) exactly as the package speaks a
+sentence (`lib/synthesis.js`, every word pronounced by the G2P network), and each sample is scored with UTMOS on the
 CPU. The shipped `lib/models/voiceModel.js` is rendered the same way, as the reference, before the package stage
 replaces it. The WAV files are `TRAIN_DIR/samples/STAGE-SPEAKER-TEXT.wav`, listed in `TRAIN_DIR/samples/index.json`;
 the dashboard's Listen tab plays them, each beside the shipped model's.
@@ -310,7 +382,7 @@ build/venv-nn/bin/python -B -m nn.distill pick                    # 5. speed, sa
    chooses the smallest student within the tolerance - mean UTMOS within 0.05 of the teacher's, WER at most 1 point
    worse, and speaker similarity at least 0.85 - writing `build/nn/distill/summary.json`. With `--against baseline`
    (make train's gate) the basis is instead the shipped model - `eval baseline=lib/models/voiceModel.js` speaks the
-   packaged module as the app does (`nn/js/unpack.js`) - so a new student must be no worse than what ships, and a
+   packaged module, as the package loads it (`nn/js/unpack.js`) - so a new student must be no worse than what ships, and a
    better teacher never fails it.
 
 Progress lines go to `build/nn/distill/` (`targets.log`, `students.log`, `eval.log`), which the training dashboard
@@ -335,13 +407,13 @@ three, about +/-15%):
 | s48 (dim 48, 2 + 4) | 127,035 | 302 KB (196 KB) | 3.935 | 2.32% | 0.924 | 147x / 17.6x |
 | s32 (dim 32, 2 + 3) | 64,683 | 209 KB (125 KB) | 3.593 | 2.72% | 0.831 | 220x / 16.8x |
 
-The polish adds 0.025-0.034 UTMOS, most of it to the two ARCTIC voices the app uses (bdl and slt), which pure
+The polish adds 0.025-0.034 UTMOS, most of it to the package's two ARCTIC voices (bdl and slt), which pure
 distillation loses most; intermediate-feature matching (weight 0.05) adds about 0.02, and the two barely stack.
 
 
 ## Training the G2P model
 
-The app pronounces every word with one small network, `lib/models/g2pModel.js` (`lib/g2p.js` runs it;
+PicoVox pronounces every word with one small network, `lib/models/g2pModel.js` (`lib/g2p.js` runs it;
 `nn/g2pmodel.py` is its bit-exact Python port, which pronounces the voice model's training data). `nn/g2p.py` trains
 and exports it, with the recipe in `data/nn/train.json`'s `g2p` settings:
 
@@ -409,25 +481,6 @@ where the two differ only by S against Z (use, close, excuse): the aligner can't
 the front end's reading, and the held-out accuracy gate (`nn.context gate`, `folds`) leaves them to the regression set.
 
 
-## The library
-
-| Module | |
-| --- | --- |
-| `lib/lexicon.js` | Text normalization, phrasing, and function words - `textToPhrases(text)`, every word pronounced by the pronouncer set with `setPronouncer` (the app's: the G2P network) |
-| `lib/g2p.js` | The grapheme-to-phoneme network's inference (`loadG2p(model)`), run on `lib/models/g2pModel.js` - heteronyms by context |
-| `lib/phonemes.js` | The ARPAbet vowels (`isVowel`) |
-| `lib/wav.js` | WAV encoding (`encodeWav`), and file writing under Node (`writeWav`) |
-| `lib/catalog.js` | The book catalog's browsing and search |
-| `lib/gutenberg.js` | Project Gutenberg texts - decoding, boilerplate, chapters, and speech preparation |
-| `lib/epub.js`, `lib/zip.js` | EPUB books (Standard Ebooks) - ZIP reading in the browser |
-| `lib/models/g2pModel.js`, `lib/models/voiceModel.js` | The generated models (`make train`) |
-
-The voice model runs in `nn/js/`: `model.js` (the network - text to parameter frames, a speaker blend and a style),
-`render.js` (the synthesizer, streaming), `package.js` (the generated module's loader), `transforms.js` (voice and
-style transforms of the frames), and `voices.js` (the designed voices of `data/nn/voices.json` - each a blend of the
-model's speakers with a style and transforms).
-
-
 ## The corpora
 
 The training data comes from public corpora, downloaded by `tools/corpora.py` (make train's first stage) - idempotently
@@ -454,4 +507,5 @@ history); `nn/data.py` featurizes their recordings with them.
 
 ## License
 
-The CMU Pronouncing Dictionary is distributed under its own license, in `data/LICENSE.cmudict`.
+PicoVox is distributed under the [MIT License](LICENSE). The CMU Pronouncing Dictionary, the G2P network's training
+labels (in the repository, not the package), is distributed under its own license, in `data/LICENSE.cmudict`.

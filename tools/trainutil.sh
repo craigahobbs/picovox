@@ -1,6 +1,6 @@
 #!/bin/bash
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 # make train's utilization sampler (the training dashboard charts it): every PERIOD seconds (default 20) while the make
 # process MAKE_PID runs, a line of TRAIN_DIR/util.log - the time, the CPU busy % (top), the GPU utilization % (ioreg's

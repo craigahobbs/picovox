@@ -3,14 +3,14 @@
 
 """
 Export - a trained model (an nn/trainmulti.py or nn/distill.py checkpoint) to the browser's format, <out>/<voice>.bin
-and <out>/<voice>.json (default data/nn/), which nn/js/model.js loads (and nn/package.py packages as a module):
+and <out>/<voice>.json (default data/nn/), which lib/model.js loads (and nn/package.py packages as a module):
 
     build/venv-nn/bin/python -B -m nn.export build/nn/runs/multi-b/best.pt --voice multi
 
 The multi-speaker, multi-style model (nn/model.py's MultiModel) exports whole: its speaker table (a row per speaker -
 the readers' data/nn/speakers.json ids, then the emotional corpus's actors), its style table (nn/model.py's
 STYLE_NAMES; neutral is the zero vector), and its channel equalizers (eq_table, dB, a row per speaker, float32); the
-manifest lists the speakers (id, key, sex, corpus, role) and the styles, so nn/js/model.js can blend speakers and
+manifest lists the speakers (id, key, sex, corpus, role) and the styles, so lib/model.js can blend speakers and
 scale styles.
 
 The weights are quantized to 8 bits: every weight matrix, convolution kernel, and embedding table as int8 with one
@@ -22,7 +22,7 @@ and the inference defaults (the pause threshold, and the formant bandwidth scale
 over-smoothed bandwidths, chosen on the validation sentences).
 
 The quantization is the only lossy step - quantized_model() gives the PyTorch model with the exported weights
-(dequantized), which nn/js/model.js must match.
+(dequantized), which lib/model.js must match.
 
 Lower precision (--bits 6, 5, 4, and --group for per-group scales) uses nn/quant.py's 'packed' encoding: the values
 packed at the bit width, float16 scales per row or per group (the manifest entry's bits and group). The default (8 bits
@@ -197,7 +197,7 @@ def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0, bandwidt
     manifest = {
         'format': 'voice-synth-nn', 'version': FORMAT_VERSION, 'voice': voice, 'kind': 'multi',
         'description': 'The multi-speaker, multi-style neural model (nn/trainmulti.py) - tokens to durations to '
-                       'synthesizer parameter frames (nn/params.py), rendered by nn/js/render.js; a voice is any blend of '
+                       'synthesizer parameter frames (nn/params.py), rendered by lib/render.js; a voice is any blend of '
                        'the speaker table\'s rows, a style any blend of the style table\'s rows (neutral is zero)',
         'config': model.config, 'parameterNames': params.NAMES, 'frameRate': params.FRAME_RATE,
         'speakers': speaker_list(state), 'styles': list(STYLE_NAMES), 'defaultSpeaker': speaker,
@@ -224,13 +224,13 @@ def _aligned(size):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog='python -m nn.export', description='Export a model for nn/js/model.js')
+    parser = argparse.ArgumentParser(prog='python -m nn.export', description='Export a model for lib/model.js')
     parser.add_argument('checkpoint')
     parser.add_argument('--voice', required=True)
     parser.add_argument('--out', default=OUT_DIR)
     parser.add_argument('--speaker', default=None, help='the default speaker and its channel equalizer (default: arctic-bdl)')
     parser.add_argument('--bandwidth-scale', type=float, default=1.0,
-                        help='the default formant bandwidth scale at inference (nn/js/model.js speakFrames)')
+                        help='the default formant bandwidth scale at inference (lib/model.js speakFrames)')
     parser.add_argument('--bits', type=int, default=8, help='the weights\' bit width (nn/quant.py; default 8)')
     parser.add_argument('--group', type=int, default=0, help='per-group scales of this many weights (default 0: per row)')
     args = parser.parse_args(argv)

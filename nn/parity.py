@@ -2,7 +2,7 @@
 # https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
 
 """
-Parity and speed of the browser inference - nn/js/model.js (the exported 8-bit weights, data/nn/<voice>.*) against
+Parity and speed of the browser inference - lib/model.js (the exported 8-bit weights, data/nn/<voice>.*) against
 PyTorch with the same dequantized weights (nn/export.py's quantized_model), and the quantization's own effect (PyTorch
 quantized against the float model):
 
@@ -60,7 +60,7 @@ def forced_values(voice, parts):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog='python -m nn.parity', description='nn/js/model.js against PyTorch')
+    parser = argparse.ArgumentParser(prog='python -m nn.parity', description='lib/model.js against PyTorch')
     parser.add_argument('checkpoint')
     parser.add_argument('model', help='the exported voice (data/nn/<voice>, without extension)')
     parser.add_argument('--count', type=int, default=40)

@@ -1,5 +1,5 @@
 // Licensed under the MIT License
-// https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+// https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 // Check the designed voices (data/nn/voices.json) with nn/js/voices.js under Node: every voice resolves (its speakers
 // are in the model, its blend sums to 1, its sex matches its speakers'), speaks in every style, and its stream
@@ -13,10 +13,13 @@
 /* eslint-disable no-console */
 
 import {findStyle, findVoice, speakVoice, streamVoice, voiceBlend, voiceOptions} from './voices.js';
-import {loadModel, speakFrames} from './model.js';
+import {loadModel, speakFrames} from '../../lib/model.js';
 import assert from 'node:assert/strict';
+import {g2pModel} from '../../lib/models/g2pModel.js';
+import {loadG2p} from '../../lib/g2p.js';
 import process from 'node:process';
 import {readFileSync} from 'node:fs';
+import {setPronouncer} from '../../lib/lexicon.js';
 
 
 // Load an exported model (data/nn/<name>.json and .bin)
@@ -114,4 +117,6 @@ function main() {
     console.log(JSON.stringify({'ok': true, checks, 'voices': voices.voices.length, 'styles': voices.styles.length}));
 }
 
+// Every word pronounced by the G2P network, as the package pronounces
+setPronouncer(await loadG2p(g2pModel));
 main();

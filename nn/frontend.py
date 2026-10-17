@@ -4,7 +4,7 @@
 """
 The network's input tokens - the vocabulary (nn/vocab.json) and a Python port of the text front end,
 lib/lexicon.js textToPhrases, so training data is tokenized exactly as the app tokenizes at inference
-(nn/js/tokens.js with the G2P network; `python -m nn.data verify-tokens` checks that the two agree).
+(lib/tokens.js with the G2P network; `python -m nn.data verify-tokens` checks that the two agree).
 
 A token sequence is:
 

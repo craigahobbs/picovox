@@ -1,5 +1,5 @@
 // Licensed under the MIT License
-// https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+// https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 // make train's listening samples (tools/trainsamples.js) - its command line, its file names, the UTMOS scores, and
 // TRAIN_DIR/samples/index.json, updated under a lock and replaced atomically
