@@ -464,17 +464,103 @@ each checkpoint scored as it is saved.
 ## References
 
 - D. H. Klatt, "Software for a cascade/parallel formant synthesizer," *JASA* 67(3), 1980.
-- G. Fant, J. Liljencrants, Q. Lin, "A four-parameter model of glottal flow," *STL-QPSR* 4, 1985.
+  [doi:10.1121/1.383940](https://doi.org/10.1121/1.383940)
+- D. H. Klatt, "Synthesis by rule of segmental durations in English sentences," ICPhS 1979 (Proceedings of the 9th
+  International Congress of Phonetic Sciences, vol. 2; also in B. Lindblom, S. Öhman (eds.), *Frontiers of Speech
+  Communication Research*, Academic Press, 1979).
+  [ICPhS 1979 proceedings](https://www.coli.uni-saarland.de/Phonetics/icphs/ICPhS1979/p9.2_290.pdf)
+- G. Fant, J. Liljencrants, Q. Lin, "A four-parameter model of glottal flow," *STL-QPSR* 26(4), 1985.
+  [KTH STL-QPSR archive](https://www.speech.kth.se/qpsr/1985/1985_26_4_001-013.pdf)
+- G. Fant, "The LF-model revisited. Transformations and frequency domain analysis," *STL-QPSR* 36(2-3), 1995.
+  [KTH STL-QPSR archive](https://www.speech.kth.se/qpsr/1995/1995_36_2-3_119-156.pdf)
 - J. Engel, L. Hantrakul, C. Gu, A. Roberts, "DDSP: Differentiable Digital Signal Processing," ICLR 2020.
+  [OpenReview](https://openreview.net/forum?id=B1x1ma4tDr)
+- Y. Ren et al., "FastSpeech: Fast, Robust and Controllable Text to Speech," NeurIPS 2019.
+  [NeurIPS proceedings](https://proceedings.neurips.cc/paper/2019/hash/f63f65b503e22cb970527f23c9ad7db1-Abstract.html)
 - Y. Ren et al., "FastSpeech 2: Fast and High-Quality End-to-End Text to Speech," ICLR 2021.
-- A. Łańcucki, "FastPitch: Parallel Text-to-speech with Pitch Prediction," ICASSP 2021.
+  [OpenReview](https://openreview.net/forum?id=piLPYqxtWuA)
+- A. Łańcucki, "FastPitch: Parallel Text-to-Speech with Pitch Prediction," ICASSP 2021.
+  [doi:10.1109/ICASSP39728.2021.9413889](https://doi.org/10.1109/ICASSP39728.2021.9413889)
+- R. Yamamoto, E. Song, J.-M. Kim, "Parallel WaveGAN: A Fast Waveform Generation Model Based on Generative Adversarial
+  Networks with Multi-Resolution Spectrogram" (the multi-resolution STFT loss), ICASSP 2020.
+  [doi:10.1109/ICASSP40776.2020.9053795](https://doi.org/10.1109/ICASSP40776.2020.9053795)
+- K. Kumar et al., "MelGAN: Generative Adversarial Networks for Conditional Waveform Synthesis" (the discriminator
+  feature-matching loss), NeurIPS 2019.
+  [NeurIPS proceedings](https://proceedings.neurips.cc/paper/2019/hash/6804c9bca0a615bdb9374d00a9fcba59-Abstract.html)
+- I. Loshchilov, F. Hutter, "Decoupled Weight Decay Regularization" (AdamW), ICLR 2019.
+  [OpenReview](https://openreview.net/forum?id=Bkg6RiCqY7)
+- G. Hinton, O. Vinyals, J. Dean, "Distilling the Knowledge in a Neural Network," arXiv:1503.02531, 2015.
+  [arXiv:1503.02531](https://arxiv.org/abs/1503.02531)
+- A. Paszke et al., "PyTorch: An Imperative Style, High-Performance Deep Learning Library," NeurIPS 2019.
+  [NeurIPS proceedings](https://proceedings.neurips.cc/paper/2019/hash/bdbca288fee7f92f2bfa9f7012727740-Abstract.html);
+  software: PyTorch 2.14.1, [pytorch.org](https://pytorch.org/)
+- "IEEE Recommended Practice for Speech Quality Measurements" (the Harvard sentences), *IEEE Trans. Audio and
+  Electroacoustics* 17(3), 1969. [doi:10.1109/TAU.1969.1162058](https://doi.org/10.1109/TAU.1969.1162058)
 - T. Saeki et al., "UTMOS: UTokyo-SaruLab System for VoiceMOS Challenge 2022," Interspeech 2022.
-- B. Desplanques, J. Thienpondt, K. Demuynck, "ECAPA-TDNN," Interspeech 2020.
-- Z. Ma et al., "emotion2vec: Self-Supervised Pre-Training for Speech Emotion Representation," ACL Findings 2024.
+  [doi:10.21437/Interspeech.2022-439](https://doi.org/10.21437/Interspeech.2022-439); the UTMOS22 strong predictor
+  through SpeechMOS v1.2.0, [GitHub](https://github.com/tarepan/SpeechMOS/tree/v1.2.0)
+- B. Desplanques, J. Thienpondt, K. Demuynck, "ECAPA-TDNN: Emphasized Channel Attention, Propagation and Aggregation in
+  TDNN Based Speaker Verification," Interspeech 2020.
+  [doi:10.21437/Interspeech.2020-2650](https://doi.org/10.21437/Interspeech.2020-2650)
+- A. Nagrani, J. S. Chung, A. Zisserman, "VoxCeleb: A Large-Scale Speaker Identification Dataset," Interspeech 2017.
+  [doi:10.21437/Interspeech.2017-950](https://doi.org/10.21437/Interspeech.2017-950)
+- J. S. Chung, A. Nagrani, A. Zisserman, "VoxCeleb2: Deep Speaker Recognition," Interspeech 2018.
+  [doi:10.21437/Interspeech.2018-1929](https://doi.org/10.21437/Interspeech.2018-1929)
+- M. Ravanelli et al., "Open-Source Conversational AI with SpeechBrain 1.0," *JMLR* 25(333), 2024.
+  [JMLR](https://jmlr.org/papers/v25/24-0991.html); software: SpeechBrain 1.1.2,
+  [GitHub](https://github.com/speechbrain/speechbrain); the speaker model,
+  [speechbrain/spkrec-ecapa-voxceleb](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb)
+- Z. Ma et al., "emotion2vec: Self-Supervised Pre-Training for Speech Emotion Representation," Findings of ACL 2024.
+  [doi:10.18653/v1/2024.findings-acl.931](https://doi.org/10.18653/v1/2024.findings-acl.931); the emotion2vec+ base
+  model, [Hugging Face](https://huggingface.co/emotion2vec/emotion2vec_plus_base)
 - A. Radford et al., "Robust Speech Recognition via Large-Scale Weak Supervision" (Whisper), ICML 2023.
+  [PMLR](https://proceedings.mlr.press/v202/radford23a.html)
+- *whisper.cpp* (ggml-org), a C/C++ port of Whisper, with the ggml base.en model, software.
+  [GitHub](https://github.com/ggml-org/whisper.cpp)
+- *The CMU Pronouncing Dictionary* (cmudict.dict, commit 0f8072f, 2024), Carnegie Mellon University.
+  [GitHub](https://github.com/cmusphinx/cmudict)
 - J. Kominek, A. W. Black, "The CMU Arctic speech databases," ISCA SSW5, 2004.
+  [ISCA Archive](https://www.isca-archive.org/ssw_2004/kominek04b_ssw.html)
+- H. Zen et al., "LibriTTS: A Corpus Derived from LibriSpeech for Text-to-Speech," Interspeech 2019.
+  [doi:10.21437/Interspeech.2019-2441](https://doi.org/10.21437/Interspeech.2019-2441)
 - Y. Koizumi et al., "LibriTTS-R: A Restored Multi-Speaker Text-to-Speech Corpus," Interspeech 2023.
-- H. Cao et al., "CREMA-D: Crowd-sourced Emotional Multimodal Actors Dataset," *IEEE Trans. Affective Computing*, 2014.
-- R. Escudero, P. Boersma, A. S. Rauber, R. A. H. Bion, "A cross-dialect acoustic description of vowels," *JASA*
-  126(3), 2009.
-- M. Iseli, A. Alwan, "An improved correction formula for the estimation of harmonic magnitudes," ICASSP 2004.
+  [doi:10.21437/Interspeech.2023-1584](https://doi.org/10.21437/Interspeech.2023-1584)
+- T. Hayashi, *LibriTTSLabel*: word and phone alignment labels for LibriTTS (Montreal Forced Aligner), dataset.
+  [GitHub](https://github.com/kan-bayashi/LibriTTSLabel)
+- M. McAuliffe et al., "Montreal Forced Aligner: Trainable Text-Speech Alignment Using Kaldi," Interspeech 2017.
+  [doi:10.21437/Interspeech.2017-1386](https://doi.org/10.21437/Interspeech.2017-1386)
+- H. Cao et al., "CREMA-D: Crowd-Sourced Emotional Multimodal Actors Dataset," *IEEE Trans. Affective Computing* 5(4),
+  2014. [doi:10.1109/TAFFC.2014.2336244](https://doi.org/10.1109/TAFFC.2014.2336244)
+- J. Zuluaga-Gomez, S. Ahmed, D. Visockas, C. Subakan, "CommonAccent: Exploring Large Acoustic Pretrained Models for
+  Accent Classification Based on Common Voice," Interspeech 2023.
+  [doi:10.21437/Interspeech.2023-2419](https://doi.org/10.21437/Interspeech.2023-2419); the classifier,
+  [Jzuluaga/accent-id-commonaccent_ecapa](https://huggingface.co/Jzuluaga/accent-id-commonaccent_ecapa)
+- A. Baevski, Y. Zhou, A. Mohamed, M. Auli, "wav2vec 2.0: A Framework for Self-Supervised Learning of Speech
+  Representations," NeurIPS 2020.
+  [NeurIPS proceedings](https://proceedings.neurips.cc/paper/2020/hash/92d1e1eb1cd6f9fba3227870bb6d7f07-Abstract.html)
+- Q. Xu, A. Baevski, M. Auli, "Simple and Effective Zero-shot Cross-lingual Phoneme Recognition," Interspeech 2022.
+  [doi:10.21437/Interspeech.2022-60](https://doi.org/10.21437/Interspeech.2022-60); the phoneme recognizer,
+  [facebook/wav2vec2-lv-60-espeak-cv-ft](https://huggingface.co/facebook/wav2vec2-lv-60-espeak-cv-ft)
+- *Standard Ebooks*, public-domain ebooks. [standardebooks.org](https://standardebooks.org/)
+- *Project Gutenberg*, public-domain ebooks. [gutenberg.org](https://www.gutenberg.org/)
+- P. Boersma, D. Weenink, *Praat: doing phonetics by computer*, software. [praat.org](https://www.praat.org/)
+- Y. Jadoul, B. Thompson, B. de Boer, "Introducing Parselmouth: A Python interface to Praat," *Journal of Phonetics* 71,
+  2018. [doi:10.1016/j.wocn.2018.07.001](https://doi.org/10.1016/j.wocn.2018.07.001); software: praat-parselmouth 0.4.7,
+  [PyPI](https://pypi.org/project/praat-parselmouth/0.4.7/)
+- P. Escudero, P. Boersma, A. S. Rauber, R. A. H. Bion, "A cross-dialect acoustic description of vowels: Brazilian and
+  European Portuguese," *JASA* 126(3), 2009. [doi:10.1121/1.3180321](https://doi.org/10.1121/1.3180321)
+- M. Iseli, A. Alwan, "An improved correction formula for the estimation of harmonic magnitudes and its application to
+  open quotient estimation," ICASSP 2004. [doi:10.1109/ICASSP.2004.1326074](https://doi.org/10.1109/ICASSP.2004.1326074)
+- J. Hillenbrand, R. A. Cleveland, R. L. Erickson, "Acoustic correlates of breathy vocal quality" (cepstral peak
+  prominence), *Journal of Speech and Hearing Research* 37(4), 1994.
+  [doi:10.1044/jshr.3704.769](https://doi.org/10.1044/jshr.3704.769)
+- D. Hirst, "The analysis by synthesis of speech melody: from data to models" (the two-pass pitch range), *Journal of
+  Speech Sciences* 1(1), 2011. [doi:10.20396/joss.v1i1.15011](https://doi.org/10.20396/joss.v1i1.15011)
+- M. Bisani, H. Ney, "Joint-sequence models for grapheme-to-phoneme conversion," *Speech Communication* 50(5), 2008.
+  [doi:10.1016/j.specom.2008.01.002](https://doi.org/10.1016/j.specom.2008.01.002)
+- R. Kneser, H. Ney, "Improved backing-off for M-gram language modeling," ICASSP 1995.
+  [doi:10.1109/ICASSP.1995.479394](https://doi.org/10.1109/ICASSP.1995.479394)
+- J. R. Novak, N. Minematsu, K. Hirose, "Phonetisaurus: Exploring grapheme-to-phoneme conversion with joint n-gram
+  models in the WFST framework," *Natural Language Engineering* 22(6), 2016.
+  [doi:10.1017/S1351324915000315](https://doi.org/10.1017/S1351324915000315); software,
+  [GitHub](https://github.com/AdolfVonKleist/Phonetisaurus)
