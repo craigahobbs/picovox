@@ -188,6 +188,7 @@ make test        # the package's unit tests (TEST='name' runs one)
 make -C train commit      # the training's gate alone - its unit tests, pylint, and 100% branch coverage
 make -C train test TEST=tests.test_params    # one test module of the training's
 make train       # retrain the models (see below)
+make -j train-g2p   # the G2P chain alone - its stages of make train, for G2P work
 ```
 
 The training pipeline is a Python package, `picovox_train` (`train/src/picovox_train/` - `picovox_train/<module>.py`
@@ -318,7 +319,7 @@ checkout, by one recipe, `data/nn/train.json` (every stage's settings and seeds)
 | Stage | Runs on | Needs |
 | --- | --- | --- |
 | corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D | network | |
-| g2p - the G2P retrain, checked to reproduce `lib/models/g2pModel.js` | 1 CPU core, ~30 min | |
+| g2p-network, context-labels, context-network, g2p - the G2P retrain (the network; the heteronym labels from the pinned books; the context network and its cross-validation; the reading stage and export), checked to reproduce `lib/models/g2pModel.js` | CPU - the network one core, ~30 min | corpora (the labels) |
 | heteronyms - the relabeled words, checked to reproduce `data/nn/g2p-relabel.json` | CPU, ~6 min | corpora |
 | data-multi - the readers' training data (the pool: `data/nn/speakers.json`) | CPU (every core) | corpora, `lib/models/g2pModel.js` |
 | cremad-align, data-cremad - the emotional speech | GPU 2 min, CPU 1 min | corpora |
@@ -331,8 +332,8 @@ checkout, by one recipe, `data/nn/train.json` (every stage's settings and seeds)
 
 The critical path - the readers' data, teacher A (~22 minutes) and B (~60), the targets (~9), the student (~11) and
 its polish (~9), the gate, the package - takes about 2 hours on an M3 Max (the corpora downloaded once before). The
-voice data is built with the committed G2P, so the G2P retrain is off the critical path; if the retrained G2P
-differs, its stage updates `lib/models/g2pModel.js` and fails, and `make train` again rebuilds the data with it. The
+voice data is built with the committed G2P, so the G2P retrain is off the critical path; its module is checked against
+the committed `lib/models/g2pModel.js` (identical, else within the recipe's tolerances - it never replaces it). The
 package's manifest records its provenance: the commit, the recipe's and the training data's hashes, and the gate's
 scores. `python -m picovox_train.smoke` runs every stage's entry point for a few steps on the CPU.
 
@@ -353,6 +354,34 @@ utilization %, the memory used %, and the running stages in `TRAIN_DIR/util.log`
 their dependencies, and their expected times are `data/nn/train-stages.json` (`test/testTrainStages.js` keeps it in
 step with the Makefile). `make train` never removes anything; `make train-clean` removes `TRAIN_DIR` for a run from
 scratch.
+
+The books make train reads - the heteronym labels' 132 Project Gutenberg books and the distillation's 22 - are pinned:
+`data/nn/books.json` records each text (by its name in `build/nn/books/`, the recipe's `texts`) with its Gutenberg id
+and source URL, the SHA-256 and size of its bytes as fetched, the date it was pinned, its Gutenberg revision, and a
+[Wayback Machine](https://web.archive.org/) capture of the source URL with the same bytes, where one exists. Project
+Gutenberg revises its books in place and keeps no old revisions (pg2554 changed on 2026-10-16 and moved the context
+labels by one example), so the pins are the texts the shipped models were trained on - the G2P's labels' copies (fetched
+2026-10-15) and the first full make train's distillation copies (2026-10-16, whose pg2554 is already the revision:
+`pg2554-2026-10-16`). A text is fetched once (`picovox_train/books.py` - its Gutenberg URL, else its archived copy: the
+first with the pinned hash) and verified on every use. A text whose hash doesn't match is never used: the stage fails
+with the book, the expected and actual hashes, and how to proceed - restore the pinned copy (an earlier run's
+`build/nn/books/NAME.txt`; a mismatched download is kept beside it as `NAME.txt.unpinned`), or re-pin deliberately and
+retrain (`python -m picovox_train.books pin NAME` records the new text's hash and looks up an archived copy; the labels
+or the distillation set change with it, so make train no longer reproduces the committed models byte for byte). The
+fetch alone, for every pinned text: `python -m picovox_train.books fetch`.
+
+`make -j train-g2p` runs the G2P chain alone - its four stages, without the voice stages or make train's ordering after
+the readers' data build - for G2P work. The chain's independent parts run in `G2P_JOBS` worker processes - the context
+labels' aligned readings (by utterance) and part-of-speech tags (by book), and cross-validate's ten folds (each one
+thread) - and the context network and its cross-validation run beside the G2P network; every output is the same for any
+count. Inside make train the chain runs beside the GPU stages, which CPU work slows (the Makefile's `BESIDE`), so
+`G2P_JOBS` is 2 there; `make train-g2p` runs `G2P_STANDALONE_JOBS` (10) at the default QoS. Measured at the background
+QoS (the efficiency cores only, beside another job's load - October 2026): the context labels took 36 minutes (65
+before: the tags are made by book in worker processes, not by spaCy's worker pool for each book), and the ten folds 54
+minutes at once (one fold alone, two threads, took 134). On a quiet M3 Max the chain was 59 minutes - the G2P network
+30, then the reading stage, the context network, and the folds one after another (23 minutes) - and is now about the
+network's 30 plus the reading stage and the check (the labels, the context network, and the folds finish beside the
+network).
 
 `make train` first checks the power (`tools/trainpower.sh`, macOS laptops): the run keeps the GPU busy for hours, and
 an M3 Max under it draws about 85 W, so on battery or an adapter under 96 W (`TRAIN_MIN_WATTS`) it says so and, at a
@@ -377,9 +406,9 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill pick  
 
 1. **Targets** - sequence-level distillation in parameter space. The teacher speaks (tokens, speaker, style) to its
    durations (pauses included) and its 32 synthesizer parameters every 5 ms, as inference does, with no audio rendered.
-   The inputs are the training utterances with their own speakers and styles, and every sentence of the Project
-   Gutenberg books in `build/nn/g2p/books/` (tokenized by `picovox_train/frontend.py`, split into sentences as inference
-   splits text) spoken twice, each time by a random reader (8% an emotional-corpus actor, 10% a blend of two readers) in
+   The inputs are the training utterances with their own speakers and styles, and every sentence of the recipe's 22
+   Project Gutenberg books (`distill.targets` `texts` - pinned texts, `data/nn/books.json` - in `build/nn/books/`;
+   tokenized by `picovox_train/frontend.py`, split into sentences as inference splits text) spoken twice, each time by a random reader (8% an emotional-corpus actor, 10% a blend of two readers) in
    a neutral or, 30% of the time, an emotional style at a random intensity. The set goes to `build/nn/distill/targets/`
    (frames as float16).
 2. **Students** - the same `MultiModel` with smaller widths and depths. They share the teacher's conditioning: its
@@ -468,7 +497,7 @@ network (`picovox_train/context.py`: a character GRU over the three words and ph
 bidirectional GRU, and a layer gated by the word itself - 47,779 parameters at 6 bits) chooses the reading.
 
 ```sh
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.contextlabels books                                # the recipe's books (by Gutenberg id)
+PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.contextlabels books                                # the recipe's books (pinned texts)
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.contextlabels aligned --out build/nn/context      # readers' readings (MFA alignments)
 PYTHONPATH=train/src build/venv-pos/bin/python -B -m picovox_train.contextlabels tag --out build/nn/context         # part-of-speech tags (spaCy)
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.contextlabels labels --out build/nn/context       # the ambiguous words and examples
@@ -477,15 +506,16 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context train-
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context train-context --labels build/nn/context/labels.json --out build/nn/context/context.pt
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context export --g2p build/nn/context/g2p.pt --context build/nn/context/context.pt
 node tools/heteronyms.js                                                            # the regression set (exit 1 below the gate)
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context cross-validate --labels build/nn/context/labels.json --out build/nn/context/folds
+PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context cross-validate --labels build/nn/context/labels.json --out build/nn/context/folds -j 10
 ```
+
+(`aligned`, `tag`, and `cross-validate` take `-j`, their worker processes - the results are the same for any count.)
 
 The settings are `data/nn/train.json`'s `context` section. `make train` runs all of it beside the voice stages (which
 use the committed `lib/models/g2pModel.js`) and checks its module with `picovox_train.context check`: identical to the
 committed module below the comment header (the stages are deterministic on the same inputs), else within the recipe's
 tolerances (the regression set, the book error, the top-10K, the monitoring WER) - it never replaces the committed
-module. A clean run reproduces the committed module only while the books are unchanged (Project Gutenberg revises its
-files).
+module. The books are pinned (`data/nn/books.json` - see make train), so a clean run reproduces the committed module.
 
 The labels (`picovox_train/contextlabels.py`, with the curated part in `data/nn/context-labels.json`) come from three
 sources: the LibriTTS-R readers' readings by the forced alignments; part-of-speech tags over the Project Gutenberg books

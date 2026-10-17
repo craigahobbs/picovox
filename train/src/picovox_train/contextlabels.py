@@ -8,19 +8,21 @@ examples of each reading in context. Training-time only: the app has no word lis
 to ask the context network. The commands (each with PYTHONPATH=train/src; tag in build/venv-pos - spaCy,
 requirements/pos.txt - the others in build/venv-nn):
 
-    build/venv-nn/bin/python -B -m picovox_train.contextlabels books               # 0. the recipe's books (Project Gutenberg)
-    build/venv-nn/bin/python -B -m picovox_train.contextlabels aligned --out DIR   # 1. the aligned readings (LibriTTS-R MFA labels)
-    build/venv-pos/bin/python -B -m picovox_train.contextlabels tag --out DIR      # 2. part-of-speech tags
-    build/venv-nn/bin/python -B -m picovox_train.contextlabels labels --out DIR    # 3. the words, readings, and examples -> labels.json
+    build/venv-nn/bin/python -B -m picovox_train.contextlabels books                   # 0. the recipe's books (pinned - books.py)
+    build/venv-nn/bin/python -B -m picovox_train.contextlabels aligned --out DIR [-j]  # 1. the aligned readings (LibriTTS-R MFA labels)
+    build/venv-pos/bin/python -B -m picovox_train.contextlabels tag --out DIR [-j]     # 2. part-of-speech tags
+    build/venv-nn/bin/python -B -m picovox_train.contextlabels labels --out DIR        # 3. the words, readings, and examples -> labels.json
+
+(-j: the worker processes - aligned's utterances and tag's books are independent; the outputs are the same for any -j.)
 
 The label sources (data/nn/context-labels.json is the curated part):
 
 1. Aligned readings - every LibriTTS-R utterance with MFA labels: each token of a candidate word the aligner matched to a
    dictionary variant (readings.py), in its sentence. The speaker's reading, heard in the audio.
-2. Silver readings - Project Gutenberg books tagged for part of speech (training time only), each candidate token's tag
-   mapped to a reading (the word's own mapping, else its family's - the noun/verb stress pairs, the -ate words, the S/Z
-   words), only for the words whose mapping agrees with their aligned readings (the audio) on at least MIN_AGREEMENT
-   of at least MIN_VALIDATE tokens.
+2. Silver readings - Project Gutenberg books (pinned texts - books.py, data/nn/books.json) tagged for part of speech
+   (training time only), each candidate token's tag mapped to a reading (the word's own mapping, else its family's -
+   the noun/verb stress pairs, the -ate words, the S/Z words), only for the words whose mapping agrees with their
+   aligned readings (the audio) on at least MIN_AGREEMENT of at least MIN_VALIDATE tokens.
 3. Seeds - hand-labeled sentences (data/nn/context-labels.json "seeds") for the sense heteronyms (lead the metal, tear, bow,
    bass), the readings the dictionary lacks (does the deer, row the quarrel, house the verb), and the pairs whose tag
    mapping the audio doesn't validate (use, close, separate, increase, ...), and collocations
@@ -40,6 +42,7 @@ import re
 import sys
 
 from .frontend import ROOT, context_sequence, text_items
+from . import books
 from . import readings as readings_module
 
 
@@ -71,10 +74,11 @@ MIN_VALIDATE = SETTINGS['minValidate']
 MIN_ALTERNATE = SETTINGS['minAlternate']
 MIN_ALTERNATE_SHARE = SETTINGS['minAlternateShare']
 
-# The books (Project Gutenberg ids, fetched to the books directory as distill.py fetches its books), the held-out
-# books, and the held-out share of the aligned speakers (percent)
+# The books (pinned Project Gutenberg texts - books.py - fetched to the books directory), the held-out books, and the
+# held-out share of the aligned speakers (percent)
 BOOKS_DIR = os.path.join(ROOT, SETTINGS['books'])
-HELD_OUT_BOOKS = {f'pg{book_id}' for book_id in SETTINGS['heldOutBooks']}
+PINS_PATH = os.path.join(ROOT, SETTINGS['pins'])
+HELD_OUT_BOOKS = set(SETTINGS['heldOutBooks'])
 HELD_OUT_PERCENT = SETTINGS['heldOutPercent']
 
 # The most silver examples of a word kept (the most frequent words have thousands)
@@ -288,24 +292,29 @@ def aligned_command(args):
 # 2. Part-of-speech tags (spaCy - training time only)
 #
 
-# The book texts - [(book id, text)] for the recipe's books (in the books directory), the Project Gutenberg header and
-# footer removed
-def book_texts(books_dir=BOOKS_DIR):
-    books = []
-    for book_id in sorted(f'pg{book_id}' for book_id in SETTINGS['bookIds']):
-        with open(os.path.join(books_dir, f'{book_id}.txt'), encoding='utf-8-sig', errors='replace') as file:
-            text = file.read()
-        start = re.search(r'\*\*\* ?START OF.*?\*\*\*', text)
-        end = re.search(r'\*\*\* ?END OF', text)
-        books.append((book_id, text[start.end() if start else 0:end.start() if end else len(text)]))
-    return books
+# The recipe's books - their text names, in order (each the book's name in the labels - pg<id>)
+def book_names():
+    return sorted(SETTINGS['texts'])
+
+
+# A book's text - the pinned text (books.py: fetched if missing, verified), the Project Gutenberg header and footer removed
+def book_text(books_dir, name, pins):
+    with open(books.pinned_path(books_dir, name, pins), encoding='utf-8-sig', errors='replace') as file:
+        text = file.read()
+    start = re.search(r'\*\*\* ?START OF.*?\*\*\*', text)
+    end = re.search(r'\*\*\* ?END OF', text)
+    return text[start.end() if start else 0:end.start() if end else len(text)]
 
 
 def books_command(args):
-    """Fetch the recipe's books (Project Gutenberg, by id - distill.py's book_paths) into the books directory"""
-    from .distill import book_paths  # pylint: disable=import-outside-toplevel
-    paths = book_paths({'books': args.books or BOOKS_DIR, 'bookIds': SETTINGS['bookIds']})
-    print(f'books: {len(paths)} in {args.books or BOOKS_DIR}')
+    """Fetch the recipe's books (pinned texts - books.py) into the books directory, each verified against its pin"""
+    books_dir = args.books or BOOKS_DIR
+    try:
+        paths = books.pinned_paths(books_dir, book_names(), PINS_PATH)
+    except books.PinError as error:
+        print(f'books: {error}', file=sys.stderr)
+        return 1
+    print(f'books: {len(paths)} pinned texts in {books_dir}')
     return 0
 
 
@@ -314,37 +323,70 @@ def paragraphs(text):
     return [' '.join(part.split()) for part in re.split(r'\n\s*\n', text) if part.strip()]
 
 
-# The spaCy tags of texts at the candidate words' offsets - [{offset: tag}] (n_process worker processes)
-def tag_texts(texts, words, jobs):
+# spaCy's batch - the texts are tagged in batches of TAG_BATCH, as one process tags them, and the aligned utterances are
+# split among the workers in chunks of whole batches (the batches - and so the tags - are the same for any -j)
+TAG_BATCH = 64
+TAG_CHUNK = 8 * TAG_BATCH
+
+_TAGGER = None
+
+
+# Set a tagging worker's spaCy pipeline (the part-of-speech tagger - en_core_web_sm) and the candidate words
+def set_tagger(words):
     import spacy  # pylint: disable=import-outside-toplevel,import-error # (build/venv-pos only - not the test environment's)
-    nlp = spacy.load('en_core_web_sm', disable=['parser', 'ner', 'lemmatizer'])
+    global _TAGGER  # pylint: disable=global-statement
+    _TAGGER = (spacy.load('en_core_web_sm', disable=['parser', 'ner', 'lemmatizer']), words)
+
+
+# The spaCy tags of texts at the candidate words' offsets (a worker task) - [{offset: tag}]
+def tag_texts(texts):
+    nlp, words = _TAGGER
     results = []
-    for text, doc in zip(texts, nlp.pipe(texts, batch_size=64, n_process=jobs)):
+    for text, doc in zip(texts, nlp.pipe(texts, batch_size=TAG_BATCH)):
         offsets = {offset for item, offset in text_items(text) if isinstance(item, str) and item in words}
         results.append({str(token.idx): token.tag_ for token in doc if token.idx in offsets})
     return results
 
 
+# A book's tagged paragraphs (a worker task) - (name, [(paragraph, {offset: tag})]): its paragraphs under 5,000
+# characters with a candidate word
+def tag_book(task):
+    books_dir, name, pins = task
+    words = _TAGGER[1]
+    chosen = [paragraph for paragraph in paragraphs(book_text(books_dir, name, pins)) if len(paragraph) < 5000 and
+              any(isinstance(item, str) and item in words for item, _ in text_items(paragraph))]
+    return name, list(zip(chosen, tag_texts(chosen)))
+
+
 def tag_command(args):
     """Tag the aligned utterances and the books' paragraphs with the candidate words - <out>/aligned-tags.jsonl,
-    <out>/books.jsonl"""
+    <out>/books.jsonl (-j worker processes, each tagging whole batches of utterances and whole books)"""
     words = candidate_words(load_spec())
+    books_dir = args.books or BOOKS_DIR
+    pins = books.load_pins(PINS_PATH)
+    try:
+        for name in book_names():
+            books.pinned_path(books_dir, name, pins)
+    except books.PinError as error:
+        print(f'tag: {error}', file=sys.stderr)
+        return 1
     with open(os.path.join(args.out, 'aligned.jsonl'), encoding='utf-8') as file:
         records = [json.loads(line) for line in file]
-    tags = tag_texts([record['text'] for record in records], words, args.jobs)
-    with open(os.path.join(args.out, 'aligned-tags.jsonl'), 'w', encoding='utf-8') as file:
-        for record, record_tags in zip(records, tags):
-            file.write(json.dumps({'id': record['id'], 'tags': record_tags}) + '\n')
-    print(f'tag: {len(records)} aligned utterances', flush=True)
-    count = 0
-    with open(os.path.join(args.out, 'books.jsonl'), 'w', encoding='utf-8') as file:
-        for book, text in book_texts(args.books or BOOKS_DIR):
-            chosen = [paragraph for paragraph in paragraphs(text) if len(paragraph) < 5000 and
-                      any(isinstance(item, str) and item in words for item, _ in text_items(paragraph))]
-            for paragraph, paragraph_tags in zip(chosen, tag_texts(chosen, words, args.jobs)):
-                file.write(json.dumps({'book': book, 'text': paragraph, 'tags': paragraph_tags}) + '\n')
-            count += len(chosen)
-            print(f'tag: {book} {len(chosen)} paragraphs ({count} in all)', flush=True)
+    texts = [record['text'] for record in records]
+    with multiprocessing.Pool(args.jobs, initializer=set_tagger, initargs=(words,)) as pool:
+        chunks = [texts[index:index + TAG_CHUNK] for index in range(0, len(texts), TAG_CHUNK)]
+        tags = [result for chunk in pool.imap(tag_texts, chunks) for result in chunk]
+        with open(os.path.join(args.out, 'aligned-tags.jsonl'), 'w', encoding='utf-8') as file:
+            for record, record_tags in zip(records, tags):
+                file.write(json.dumps({'id': record['id'], 'tags': record_tags}) + '\n')
+        print(f'tag: {len(records)} aligned utterances', flush=True)
+        count = 0
+        with open(os.path.join(args.out, 'books.jsonl'), 'w', encoding='utf-8') as file:
+            for name, tagged in pool.imap(tag_book, [(books_dir, name, pins) for name in book_names()]):
+                for paragraph, paragraph_tags in tagged:
+                    file.write(json.dumps({'book': name, 'text': paragraph, 'tags': paragraph_tags}) + '\n')
+                count += len(tagged)
+                print(f'tag: {name} {len(tagged)} paragraphs ({count} in all)', flush=True)
     return 0
 
 
@@ -529,7 +571,7 @@ def main(argv=None):
     aligned_parser.add_argument('--out', required=True)
     aligned_parser.add_argument('-j', '--jobs', type=int, default=6)
     aligned_parser.set_defaults(func=aligned_command)
-    books_parser = commands.add_parser('books', help='fetch the recipe\'s Project Gutenberg books')
+    books_parser = commands.add_parser('books', help='fetch the recipe\'s books (pinned Project Gutenberg texts)')
     books_parser.add_argument('--books', help='the books directory (default: the recipe\'s)')
     books_parser.set_defaults(func=books_command)
     tag_parser = commands.add_parser('tag', help='part-of-speech tags (spaCy en_core_web_sm)')

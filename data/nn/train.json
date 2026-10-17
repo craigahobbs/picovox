@@ -18,19 +18,25 @@
         "export": {"bits": 6, "groupSize": 0, "biasBits": 8}
     },
     "context": {
-        "description": "The heteronym models (nn/contextlabels.py, nn/context.py): the context labels (the readers' aligned readings; part-of-speech tags over the Project Gutenberg books bookIds, fetched to books, where the tag mapping agrees with the audio; the hand-written seeds of data/nn/context-labels.json), the G2P's reading stage from the g2p recipe's last stage (the reading vectors, the ambiguity head, and the decoder), the context network, the export to lib/models/g2pModel.js, and the gates - the held-out aligned accuracy over the gate's words (less the S/Z-only pairs), and make train's comparison with the committed module (identical, else within these tolerances)",
+        "description": "The heteronym models (nn/contextlabels.py, nn/context.py): the context labels (the readers' aligned readings; part-of-speech tags over the Project Gutenberg books texts - pinned texts, pins (nn/books.py), fetched to books - where the tag mapping agrees with the audio; the hand-written seeds of data/nn/context-labels.json), the G2P's reading stage from the g2p recipe's last stage (the reading vectors, the ambiguity head, and the decoder), the context network, the export to lib/models/g2pModel.js, and the gates - the held-out aligned accuracy over the gate's words (less the S/Z-only pairs), and make train's comparison with the committed module (identical, else within these tolerances)",
         "labels": {
             "books": "build/nn/books",
-            "bookIds": [11, 23, 35, 36, 42, 43, 72, 74, 76, 84, 98, 100, 103, 108, 120, 145, 158, 161, 174, 175, 204,
-                209, 219, 221, 223, 224, 244, 245, 345, 393, 468, 564, 589, 601, 768, 831, 834, 863, 921,
-                1063, 1112, 1184, 1212, 1259, 1260, 1342, 1400, 1513, 1523, 1608, 1661, 1695, 1727, 2002,
-                2097, 2147, 2148, 2465, 2554, 2620, 2641, 2680, 2701, 2825, 2852, 2868, 3011, 3268, 3296,
-                3922, 4499, 5197, 6133, 7326, 7889, 8492, 14244, 17460, 18143, 18459, 19476, 20203, 21839,
-                22541, 23784, 24739, 24793, 27827, 28203, 31100, 31472, 31635, 32155, 34413, 35312, 35548,
-                36223, 36462, 36725, 37106, 38177, 38311, 40284, 42389, 42671, 42681, 45839, 46276, 47530,
-                48296, 49987, 51252, 51428, 53154, 53416, 53874, 55179, 57641, 59828, 61851, 62215, 64317,
-                65238, 67979, 68283, 69087, 70854, 71046, 75201, 76178, 76639, 76668],
-            "heldOutBooks": [1342, 2701], "heldOutPercent": 10,
+            "pins": "data/nn/books.json",
+            "texts": ["pg11", "pg23", "pg35", "pg36", "pg42", "pg43", "pg72", "pg74", "pg76", "pg84", "pg98", "pg100",
+                "pg103", "pg108", "pg120", "pg145", "pg158", "pg161", "pg174", "pg175", "pg204", "pg209", "pg219",
+                "pg221", "pg223", "pg224", "pg244", "pg245", "pg345", "pg393", "pg468", "pg564", "pg589", "pg601",
+                "pg768", "pg831", "pg834", "pg863", "pg921", "pg1063", "pg1112", "pg1184", "pg1212", "pg1259", "pg1260",
+                "pg1342", "pg1400", "pg1513", "pg1523", "pg1608", "pg1661", "pg1695", "pg1727", "pg2002", "pg2097",
+                "pg2147", "pg2148", "pg2465", "pg2554", "pg2620", "pg2641", "pg2680", "pg2701", "pg2825", "pg2852",
+                "pg2868", "pg3011", "pg3268", "pg3296", "pg3922", "pg4499", "pg5197", "pg6133", "pg7326", "pg7889",
+                "pg8492", "pg14244", "pg17460", "pg18143", "pg18459", "pg19476", "pg20203", "pg21839", "pg22541",
+                "pg23784", "pg24739", "pg24793", "pg27827", "pg28203", "pg31100", "pg31472", "pg31635", "pg32155",
+                "pg34413", "pg35312", "pg35548", "pg36223", "pg36462", "pg36725", "pg37106", "pg38177", "pg38311",
+                "pg40284", "pg42389", "pg42671", "pg42681", "pg45839", "pg46276", "pg47530", "pg48296", "pg49987",
+                "pg51252", "pg51428", "pg53154", "pg53416", "pg53874", "pg55179", "pg57641", "pg59828", "pg61851",
+                "pg62215", "pg64317", "pg65238", "pg67979", "pg68283", "pg69087", "pg70854", "pg71046", "pg75201",
+                "pg76178", "pg76639", "pg76668"],
+            "heldOutBooks": ["pg1342", "pg2701"], "heldOutPercent": 10,
             "minAgreement": 0.95, "minValidate": 10, "minAlternate": 5, "minAlternateShare": 0.02, "maxSilver": 3000
         },
         "g2p": {
@@ -64,11 +70,13 @@
               "val-from": 10000, "seed": 1}
     },
     "distill": {
-        "description": "Knowledge distillation of the teacher (nn/distill.py) - its distillation set, the student ladder, the polish fine-tune, the evaluation (nn/panel.py), and the tolerance (fixed before any student is measured)",
+        "description": "Knowledge distillation of the teacher (nn/distill.py) - its distillation set (the targets: the training utterances, and the sentences of the Project Gutenberg books texts - pinned texts, pins (nn/books.py), fetched to books), the student ladder, the polish fine-tune, the evaluation (nn/panel.py), and the tolerance (fixed before any student is measured)",
         "teacher": "build/nn/runs/multi-b/best.pt",
         "targets": {
             "books": "build/nn/books",
-            "bookIds": [2701, 1342, 84, 64317, 11, 98, 1661, 345, 1400, 174, 76, 74, 768, 1260, 158, 161, 120, 43, 219, 2554, 36, 35],
+            "pins": "data/nn/books.json",
+            "texts": ["pg2701", "pg1342", "pg84", "pg64317", "pg11", "pg98", "pg1661", "pg345", "pg1400", "pg174", "pg76", "pg74",
+                "pg768", "pg1260", "pg158", "pg161", "pg120", "pg43", "pg219", "pg2554-2026-10-16", "pg36", "pg35"],
             "bookCopies": 2,
             "actorShare": 0.08,
             "blendShare": 0.1,

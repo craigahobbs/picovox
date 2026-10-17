@@ -3,6 +3,7 @@
 
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
+import hashlib
 import io
 import json
 import os
@@ -17,6 +18,7 @@ import numpy
 import torch
 
 from picovox_train import ROOT, distill, export, package, params
+from picovox_train.books import PinError
 from tests import helpers, model_fixtures
 
 
@@ -125,20 +127,32 @@ class TestBooks(DistillCase):
     def test_book_paths(self):
         settings = distill.load_config(self.config)['targets']
         self.assertEqual([os.path.basename(path) for path in distill.book_paths(settings)], ['book.txt', 'plain.txt'])
-        # (bookIds - downloaded when missing)
-        books = os.path.join(self.root, 'gutenberg')
-        os.makedirs(books)
-        with open(os.path.join(books, 'pg2.txt'), 'w', encoding='utf-8') as file:
+        # (texts - pinned texts, fetched when missing and verified - books.py)
+        books_dir = os.path.join(self.root, 'gutenberg')
+        os.makedirs(books_dir)
+        with open(os.path.join(books_dir, 'pg2.txt'), 'w', encoding='utf-8') as file:
             file.write('present')
+        pins = {name: {'id': book_id, 'url': f'https://www.gutenberg.org/cache/epub/{book_id}/pg{book_id}.txt',
+                       'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data), 'pinned': '2026-10-15', 'archive': None}
+                for name, book_id, data in (('pg11-2026-10-16', 11, b'downloaded'), ('pg2', 2, b'present'))}
+        pins_path = os.path.join(self.root, 'books.json')
+        with open(pins_path, 'w', encoding='utf-8') as file:
+            json.dump({'description': 'pins', 'texts': pins}, file)
         response = unittest.mock.MagicMock()
         response.__enter__.return_value.read.return_value = b'downloaded'
         with unittest.mock.patch('urllib.request.urlopen', return_value=response) as urlopen:
-            paths = distill.book_paths({'books': books, 'bookIds': [11, 2]})
-        self.assertEqual([os.path.basename(path) for path in paths], ['pg11.txt', 'pg2.txt'])
+            paths = distill.book_paths({'books': books_dir, 'pins': pins_path, 'texts': ['pg2', 'pg11-2026-10-16']})
+        self.assertEqual([os.path.basename(path) for path in paths], ['pg11-2026-10-16.txt', 'pg2.txt'])
         self.assertEqual(urlopen.call_count, 1)
         self.assertEqual(urlopen.call_args[0][0].full_url, 'https://www.gutenberg.org/cache/epub/11/pg11.txt')
-        with open(os.path.join(books, 'pg11.txt'), encoding='utf-8') as file:
+        with open(os.path.join(books_dir, 'pg11-2026-10-16.txt'), encoding='utf-8') as file:
             self.assertEqual(file.read(), 'downloaded')
+
+        # A text that isn't the pinned one is never used
+        with open(os.path.join(books_dir, 'pg2.txt'), 'w', encoding='utf-8') as file:
+            file.write('revised')
+        with self.assertRaises(PinError):
+            distill.book_paths({'books': books_dir, 'pins': pins_path, 'texts': ['pg2']})
 
     def test_book_paragraphs(self):
         paragraphs = distill.book_paragraphs(os.path.join(self.root, 'books', 'book.txt'))

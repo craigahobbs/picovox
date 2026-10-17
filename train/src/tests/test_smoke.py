@@ -110,7 +110,7 @@ class TestSmoke(unittest.TestCase):
             recipe = json.load(file)
         self.assertEqual(recipe['distill']['targets']['books'], os.path.join(run.out, 'books'))
         self.assertEqual(recipe['distill']['targets']['valItems'], 4)
-        self.assertNotIn('bookIds', recipe['distill']['targets'])
+        self.assertNotIn('texts', recipe['distill']['targets'])
         self.assertEqual(recipe['distill']['train']['batch'], 8)
         self.assertEqual(recipe['distill']['polish']['val-every'], 2)
         with open(os.path.join(run.out, 'books', 'book.txt'), encoding='utf-8') as file:

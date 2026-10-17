@@ -1820,7 +1820,7 @@ async function loadTrain() {
     const gates = {
         'heteronyms': lastMatch(texts('heteronyms'), /^check: (?:the \d+ relabeled|the relabeled)/),
         'g2pCheck': lastMatch(texts('g2p'), /^check: .*g2pModel/),
-        'g2pFolds': lastMatch(texts('g2p'), /^\d+ folds: /),
+        'g2pFolds': lastMatch(texts('context-network'), /^\d+ folds: /),
         'teacher': parse(teacherResult),
         'student': parse(studentResult),
         'summary': parse(summaryResult)

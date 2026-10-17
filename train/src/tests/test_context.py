@@ -491,6 +491,34 @@ class TestContext(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(out, 'fold-1.json')))
         self.assertTrue(stdout.getvalue().startswith('2 folds: held-out aligned'))
 
+        # The folds at once (-j - worker processes of one thread each): the same results as one after another
+        class FakePool:
+            def __init__(self, processes):
+                self.processes = processes
+                self.tasks = None
+                pools.append(self)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def imap_unordered(self, function, tasks):
+                self.tasks = list(tasks)
+                return map(function, reversed(self.tasks))
+        pools = []
+        parallel = self.path('parallel')
+        with unittest.mock.patch.dict(context.CONTEXT_SETTINGS, CONTEXT_TINY), unittest.mock.patch.object(context, 'FOLDS', 2), \
+                unittest.mock.patch.object(context.multiprocessing, 'Pool', FakePool), captured() as (stdout, _):
+            self.assertEqual(context.main(['cross-validate', '--labels', path, '--out', parallel, '-j', '4']), status)
+        self.assertEqual([pool.processes for pool in pools], [2])
+        self.assertEqual([(fold, settings) for _, fold, _, _, settings in pools[0].tasks], [(0, {'threads': 1}), (1, {'threads': 1})])
+        with open(os.path.join(out, 'fold-1.json'), encoding='utf-8') as sequential_file, \
+                open(os.path.join(parallel, 'fold-1.json'), encoding='utf-8') as parallel_file:
+            self.assertEqual(parallel_file.read(), sequential_file.read())
+        self.assertTrue(stdout.getvalue().startswith('2 folds: held-out aligned'))
+
         # The folds' gate - aligned results only, pooled
         results = [os.path.join(out, 'fold-0.json'), self.path('more.json')]
         with open(results[1], 'w', encoding='utf-8') as file:

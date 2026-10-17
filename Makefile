@@ -125,37 +125,54 @@ $(TRAIN_DIR)/corpora.done: | build/venv-analysis.build build/venv-nn.build
 # the critical path; the G2P network itself needs no corpora, so it runs during their download.
 #
 # The G2P (CPU) - a check beside the voice stages, which use the committed lib/models/g2pModel.js: the network's four
-# stages (one core, deterministic), the heteronym context labels (the books fetched by id; part-of-speech tags in
-# build/venv-pos), the reading stage and the context network (two threads each), the export to $(TRAIN_DIR), the
-# held-out accuracy gate (the context network cross-validated over the aligned speakers), and picovox_train.context check: identical
-# to the committed module, else within the recipe's tolerances (the committed module is kept either way - make train
-# never replaces it)
+# stages (one core, deterministic), the heteronym context labels (the books - pinned texts, data/nn/books.json - and
+# part-of-speech tags in build/venv-pos), the context network and its held-out accuracy gate (cross-validated over the
+# aligned speakers) beside the G2P network, then the reading stage (two threads), the export to $(TRAIN_DIR), and
+# picovox_train.context check: identical to the committed module, else within the recipe's tolerances (the committed
+# module is kept either way - make train never replaces it).
+#
+# G2P_JOBS is the chain's worker processes - the context labels' aligned and tag workers and cross-validate's folds at
+# once (each fold one thread); the outputs are the same for any count. make train runs the chain beside the GPU stages,
+# so its count is low (BESIDE). make -j train-g2p runs the G2P chain alone, for standalone G2P work: G2P_STANDALONE_JOBS
+# workers at the default QoS, and not after the readers' data build.
+G2P_JOBS ?= 2
+G2P_STANDALONE_JOBS ?= 10
+
+.PHONY: train-g2p
+train-g2p:
+	@$(MAKE) --no-print-directory G2P_STANDALONE=1 G2P_JOBS=$(G2P_STANDALONE_JOBS) BESIDE= $(TRAIN_DIR)/g2p.done
+
 $(TRAIN_DIR)/g2p-network.done: data/nn/train.json data/nn/g2p-words.json data/nn/g2p-relabel.json data/cmudict.dict | build/venv-nn.build
 	@$(STAGE) start
 	$(STAGE) -- $(NN_PYTHON) -m picovox_train.g2p train --out $(TRAIN_DIR)/g2p
 	@$(STAGE) end
 	@mkdir -p $(@D) && touch $@
 
-$(TRAIN_DIR)/context-labels.done: $(TRAIN_DIR)/corpora.done data/nn/train.json data/nn/context-labels.json \
-		data/nn/heteronyms-test.json | build/venv-nn.build build/venv-pos.build $(TRAIN_DIR)/data-multi.done
+$(TRAIN_DIR)/context-labels.done: $(TRAIN_DIR)/corpora.done data/nn/train.json data/nn/books.json data/nn/context-labels.json \
+		data/nn/heteronyms-test.json | build/venv-nn.build build/venv-pos.build $(if $(G2P_STANDALONE),,$(TRAIN_DIR)/data-multi.done)
 	@$(STAGE) start
 	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.contextlabels books
-	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.contextlabels aligned --out $(TRAIN_DIR)/context -j 3
-	$(STAGE) -- $(BESIDE) $(POS_PYTHON) -m picovox_train.contextlabels tag --out $(TRAIN_DIR)/context -j 2
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.contextlabels aligned --out $(TRAIN_DIR)/context -j $(G2P_JOBS)
+	$(STAGE) -- $(BESIDE) $(POS_PYTHON) -m picovox_train.contextlabels tag --out $(TRAIN_DIR)/context -j $(G2P_JOBS)
 	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.contextlabels labels --out $(TRAIN_DIR)/context
 	@$(STAGE) end
 	touch $@
 
-$(TRAIN_DIR)/g2p.done: $(TRAIN_DIR)/g2p-network.done $(TRAIN_DIR)/context-labels.done
+$(TRAIN_DIR)/context-network.done: $(TRAIN_DIR)/context-labels.done
+	@$(STAGE) start
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context train-context --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/context.pt \
+		--log $(TRAIN_DIR)/context/train.log
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context cross-validate --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/folds \
+		--log $(TRAIN_DIR)/context/train.log -j $(G2P_JOBS)
+	@$(STAGE) end
+	touch $@
+
+$(TRAIN_DIR)/g2p.done: $(TRAIN_DIR)/g2p-network.done $(TRAIN_DIR)/context-labels.done $(TRAIN_DIR)/context-network.done
 	@$(STAGE) start
 	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context train-g2p --labels $(TRAIN_DIR)/context/labels.json --init $(TRAIN_DIR)/g2p/focus.pt \
 		--out $(TRAIN_DIR)/context/g2p.pt --log $(TRAIN_DIR)/context/train.log
-	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context train-context --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/context.pt \
-		--log $(TRAIN_DIR)/context/train.log
 	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context export --g2p $(TRAIN_DIR)/context/g2p.pt --context $(TRAIN_DIR)/context/context.pt \
 		--out $(TRAIN_DIR)/g2pModel.js
-	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context cross-validate --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/folds \
-		--log $(TRAIN_DIR)/context/train.log
 	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context check $(TRAIN_DIR)/g2pModel.js
 	@$(STAGE) end
 	touch $@

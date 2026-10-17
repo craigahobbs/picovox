@@ -15,7 +15,8 @@ import types
 import unittest
 import unittest.mock
 
-from picovox_train import contextlabels, distill, g2p
+from picovox_train import contextlabels, g2p
+from picovox_train.books import load_pins
 
 from .helpers import captured
 
@@ -48,8 +49,8 @@ class FakeNlp:
     def __init__(self):
         self.calls = []
 
-    def pipe(self, texts, batch_size, n_process):
-        self.calls.append((batch_size, n_process))
+    def pipe(self, texts, batch_size):
+        self.calls.append((list(texts), batch_size))
         return [self.tag(text) for text in texts]
 
     @staticmethod
@@ -241,46 +242,69 @@ class TestContextLabels(unittest.TestCase):
         self.assertEqual(records[0]['speaker'], speaker(False))
         self.assertEqual(records[0]['text'], 'I had read it.')
 
-    def test_books(self):
-        with unittest.mock.patch.object(distill, 'book_paths', lambda settings: [settings['books']] * len(settings['bookIds'])), \
-                captured() as (stdout, _):
-            self.assertEqual(contextlabels.main(['books', '--books', self.directory]), 0)
-            self.assertEqual(contextlabels.main(['books']), 0)
-        count = len(contextlabels.SETTINGS['bookIds'])
-        self.assertEqual(stdout.getvalue(), f'books: {count} in {self.directory}\nbooks: {count} in {contextlabels.BOOKS_DIR}\n')
-
+    # The test books (pg1, pg2) and their pins (a pins file, patched in with the recipe's texts)
     def write_books(self):
-        books = self.path('books')
-        self.write(os.path.join(books, 'pg1.txt'), 'Header\n*** START OF THE BOOK ***\nI had read the record.\n\nNo words here.\n\n'
-                                                   f'{"read " * 1100}\n\nThey will read it. The lead pipes.\n'
-                                                   '*** END OF THE BOOK ***\nfooter\n')
-        self.write(os.path.join(books, 'pg2.txt'), 'Her lives were long. She read and rested.\n')
-        return books
+        books_dir = self.path('books')
+        self.write(os.path.join(books_dir, 'pg1.txt'), 'Header\n*** START OF THE BOOK ***\nI had read the record.\n\nNo words here.\n\n'
+                                                       f'{"read " * 1100}\n\nThey will read it. The lead pipes.\n'
+                                                       '*** END OF THE BOOK ***\nfooter\n')
+        self.write(os.path.join(books_dir, 'pg2.txt'), 'Her lives were long. She read and rested.\n')
+        pins = {}
+        for name in ('pg1', 'pg2'):
+            with open(os.path.join(books_dir, f'{name}.txt'), 'rb') as file:
+                data = file.read()
+            pins[name] = {'id': int(name[2:]), 'url': f'https://www.gutenberg.org/cache/epub/{name[2:]}/{name}.txt',
+                          'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data), 'pinned': '2026-10-15', 'archive': None}
+        self.write(self.path('books.json'), json.dumps({'description': 'pins', 'texts': pins}))
+        return books_dir
 
-    def test_book_texts(self):
-        books = self.write_books()
-        with unittest.mock.patch.dict(contextlabels.SETTINGS, {'bookIds': [2, 1]}):
-            texts = contextlabels.book_texts(books)
-        self.assertEqual([book for book, _ in texts], ['pg1', 'pg2'])
-        self.assertTrue(texts[0][1].startswith('\nI had read the record.'))
-        self.assertTrue(texts[0][1].endswith('The lead pipes.\n'))
-        self.assertEqual(texts[1][1], 'Her lives were long. She read and rested.\n')
+    # The recipe's texts and pins patched to the test books' (write_books)
+    def patched_books(self, texts=('pg2', 'pg1')):
+        return unittest.mock.patch.multiple(contextlabels, PINS_PATH=self.path('books.json'),
+                                            SETTINGS={**contextlabels.SETTINGS, 'texts': list(texts)})
+
+    def test_books(self):
+        books_dir = self.write_books()
+        with self.patched_books(), captured() as (stdout, _):
+            self.assertEqual(contextlabels.main(['books', '--books', books_dir]), 0)
+        self.assertEqual(stdout.getvalue(), f'books: 2 pinned texts in {books_dir}\n')
+
+        # A book that isn't its pinned text fails, the recipe's books directory by default
+        self.write(os.path.join(books_dir, 'pg2.txt'), 'Revised.\n')
+        with self.patched_books(), unittest.mock.patch.object(contextlabels, 'BOOKS_DIR', books_dir), captured() as (stdout, stderr):
+            self.assertEqual(contextlabels.main(['books']), 1)
+        self.assertEqual(stdout.getvalue(), '')
+        self.assertTrue(stderr.getvalue().startswith('books: book pg2 (Project Gutenberg #2): the copy '))
+
+    def test_book_text(self):
+        books_dir = self.write_books()
+        with self.patched_books():
+            self.assertEqual(contextlabels.book_names(), ['pg1', 'pg2'])
+            pins = load_pins(contextlabels.PINS_PATH)
+        text = contextlabels.book_text(books_dir, 'pg1', pins)
+        self.assertTrue(text.startswith('\nI had read the record.'))
+        self.assertTrue(text.endswith('The lead pipes.\n'))
+        self.assertEqual(contextlabels.book_text(books_dir, 'pg2', pins), 'Her lives were long. She read and rested.\n')
 
     def test_tag(self):
         out = self.path('out')
         self.write(os.path.join(out, 'aligned.jsonl'), json.dumps({'id': 'u1', 'text': 'I had read it.'}) + '\n' +
                    json.dumps({'id': 'u2', 'text': 'Who lives here?'}) + '\n')
-        books = self.write_books()
+        books_dir = self.write_books()
         nlp = FakeNlp()
         spacy = types.ModuleType('spacy')
         spacy.load = lambda name, disable: nlp
-        with unittest.mock.patch.dict(sys.modules, {'spacy': spacy}), \
-                unittest.mock.patch.dict(contextlabels.SETTINGS, {'bookIds': [1, 2]}), \
+        with unittest.mock.patch.dict(sys.modules, {'spacy': spacy}), self.patched_books(), \
+                unittest.mock.patch.object(contextlabels.multiprocessing, 'Pool', FakePool), \
+                unittest.mock.patch.object(contextlabels, 'TAG_CHUNK', 1), \
                 unittest.mock.patch.object(contextlabels, 'candidate_words', lambda spec: tiny_words()), captured() as (stdout, _):
-            self.assertEqual(contextlabels.main(['tag', '--out', out, '--books', books, '-j', '2']), 0)
+            self.assertEqual(contextlabels.main(['tag', '--out', out, '--books', books_dir, '-j', '2']), 0)
         self.assertEqual(stdout.getvalue(),
                          'tag: 2 aligned utterances\ntag: pg1 2 paragraphs (2 in all)\ntag: pg2 1 paragraphs (3 in all)\n')
-        self.assertEqual(nlp.calls[0], (64, 2))
+        # (the utterances in chunks, each tagged in batches of TAG_BATCH in one process)
+        self.assertEqual(nlp.calls, [(['I had read it.'], 64), (['Who lives here?'], 64),
+                                     (['I had read the record.', 'They will read it. The lead pipes.'], 64),
+                                     (['Her lives were long. She read and rested.'], 64)])
         with open(os.path.join(out, 'aligned-tags.jsonl'), encoding='utf-8') as file:
             self.assertEqual([json.loads(line) for line in file], [{'id': 'u1', 'tags': {'6': 'VBD'}}, {'id': 'u2', 'tags': {'4': 'NNS'}}])
         with open(os.path.join(out, 'books.jsonl'), encoding='utf-8') as file:
@@ -291,12 +315,14 @@ class TestContextLabels(unittest.TestCase):
             ('pg2', 'Her lives were long. She read and rested.', {'4': 'NNS', '25': 'VB'})
         ])
 
-        # The recipe's books directory by default
-        with unittest.mock.patch.dict(sys.modules, {'spacy': spacy}), unittest.mock.patch.dict(contextlabels.SETTINGS, {'bookIds': []}), \
-                unittest.mock.patch.object(contextlabels, 'candidate_words', lambda spec: tiny_words()), \
-                unittest.mock.patch.object(contextlabels, 'book_texts', lambda books_dir: [('pg9', books_dir)]), captured() as (stdout, _):
-            self.assertEqual(contextlabels.main(['tag', '--out', out]), 0)
-        self.assertIn('tag: pg9 0 paragraphs', stdout.getvalue())
+        # The recipe's books directory by default; a book that isn't its pinned text fails before any tagging
+        self.write(os.path.join(books_dir, 'pg1.txt'), 'Revised.\n')
+        with unittest.mock.patch.dict(sys.modules, {'spacy': spacy}), self.patched_books(), \
+                unittest.mock.patch.object(contextlabels, 'BOOKS_DIR', books_dir), \
+                unittest.mock.patch.object(contextlabels, 'candidate_words', lambda spec: tiny_words()), captured() as (stdout, stderr):
+            self.assertEqual(contextlabels.main(['tag', '--out', out]), 1)
+        self.assertEqual(stdout.getvalue(), '')
+        self.assertTrue(stderr.getvalue().startswith('tag: book pg1 (Project Gutenberg #1): the copy '))
 
     def test_regression_windows(self):
         path = self.path('test.json')

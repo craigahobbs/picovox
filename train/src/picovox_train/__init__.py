@@ -23,6 +23,8 @@ The data:
   labels - align.py - 24 kHz audio, and Praat's auxiliary tracks), and its loader (ArcticData)
 - multi.py - the American reader pool (LibriTTS-R readers and the CMU ARCTIC speakers)
   in data.py's format, build/nn/data/multi/, its speaker table data/nn/speakers.json
+- books.py - the pinned book texts (data/nn/books.json): the Project Gutenberg books the heteronym labels and the
+  distillation read, each fetched once and verified by its SHA-256 - a revised text is never used
 - cremad.py - emotional speech for the style modifiers: CREMA-D fetched, force-aligned (a wav2vec2 phoneme CTC
   recognizer), and built under build/nn/data/cremad/ in data.py's format with emotion and intensity labels; the
   listener panel's emotion recognition of it (data/nn/cremad.json)

@@ -28,22 +28,22 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
 - `train/` - the Python training pipeline, the package `picovox_train` (`train/src/picovox_train/`; a python-build
   package - its unit tests in `train/src/tests/`): the front end's port (`frontend.py`, `g2pmodel.py`, `vocab.json`),
   the G2P and heteronym models (`g2p.py`, `heteronyms.py`, `context.py`, `contextlabels.py`, `readings.py`), the data
-  (`corpora.py` - the corpus download, `data.py`, `align.py`, `multi.py`, `cremad.py`), the differentiable synthesizer
-  (`params.py`, `dsynth.py`, `lf.py`, `rng.py`, `spectral.py`), the model and its training (`model.py`, `trainmulti.py`,
-  `losses.py`, `discriminator.py`, `quant.py`), distillation (`distill.py`), export (`export.py`, `package.py`,
-  `synthesize.py`), the listener panel (`panel.py`, and the listener models, `listeners.py` - `build/venv-listeners`),
-  and the pipeline's tools (`gpulock.py`, `smoke.py`, `stepcheck.py`). `picovox_train/__init__.py` documents each
-  module. `make train` runs it from its source (`PYTHONPATH=train/src`) in the training environments (`build/venv-nn`,
-  `venv-listeners`, `venv-pos`, `venv-analysis` - `requirements/*.txt`).
+  (`corpora.py` - the corpus download, `books.py` - the pinned book texts, `data.py`, `align.py`, `multi.py`,
+  `cremad.py`), the differentiable synthesizer (`params.py`, `dsynth.py`, `lf.py`, `rng.py`, `spectral.py`), the model
+  and its training (`model.py`, `trainmulti.py`, `losses.py`, `discriminator.py`, `quant.py`), distillation
+  (`distill.py`), export (`export.py`, `package.py`, `synthesize.py`), the listener panel (`panel.py`, and the listener
+  models, `listeners.py` - `build/venv-listeners`), and the pipeline's tools (`gpulock.py`, `smoke.py`, `stepcheck.py`).
+  `picovox_train/__init__.py` documents each module. `make train` runs it from its source (`PYTHONPATH=train/src`) in
+  the training environments (`build/venv-nn`, `venv-listeners`, `venv-pos`, `venv-analysis` - `requirements/*.txt`).
 - `tools/` - the training dashboard (`dashboard/`), `heteronyms.js` (the heteronym regression set), make train's
   bookkeeping (`trainstage.sh`, `trainutil.sh` - the stage events and logs, the utilization samples, `trainpower.sh`)
   and listening samples (`trainsamples.js`, `trainsamplesindex.js`), and the panel's texts (`panel-texts.json`).
 - `test/` - unit tests (`node:test`), one `test<Module>.js` per `lib/` module (`testIndex.js` for the API - including
   `speak` with a fake AudioContext, and the package's browser safety and exports), and the dashboard's and make train's
   (`testTrainDashboard.js`, `testTrainSamplesIndex.js`, `testTrainStages.js`).
-- `data/` - the CMU Pronouncing Dictionary (G2P training only), `data/nn/` (the recipe `train.json`, the speaker pool,
-  the G2P and heteronym data, the designed voices, the single-speaker exports `slt`/`bdl`), and `data/targets/` (the
-  four labeled ARCTIC speakers' analysis settings).
+- `data/` - the CMU Pronouncing Dictionary (G2P training only), `data/nn/` (the recipe `train.json`, the pinned book
+  texts `books.json`, the speaker pool, the G2P and heteronym data, the designed voices, the single-speaker exports
+  `slt`/`bdl`), and `data/targets/` (the four labeled ARCTIC speakers' analysis settings).
 - `paper/` - the paper (`paper.md`; `index.html` renders it with MarkdownUp).
 
 ## javascript-build
@@ -61,8 +61,9 @@ Local Makefile overrides:
 
 `make commit` (test, lint, doc, cover, and the training's gate) is the gate before committing. `npm pack --dry-run`
 lists the package's files (`package.json` `files`: `lib/`). `make train` rebuilds the generated models from the recipe
-(`data/nn/train.json`); `PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke` runs every training
-entry point for a few steps on the CPU.
+(`data/nn/train.json`, with its book texts pinned in `data/nn/books.json` - a revised text fails the fetch, never trains);
+`make -j train-g2p` runs its G2P chain alone (`G2P_STANDALONE_JOBS` workers); `PYTHONPATH=train/src
+build/venv-nn/bin/python -B -m picovox_train.smoke` runs every training entry point for a few steps on the CPU.
 
 ## python-build (train/)
 

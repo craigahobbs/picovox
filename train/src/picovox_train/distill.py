@@ -28,10 +28,11 @@ The method:
   durations (pauses included) and its normalized parameter frames (params.py, 5 ms), exactly as inference does
   (model.infer's duration rounding and pause threshold) but without rendering audio. The inputs are (a) the training
   utterances' tokens with their own speakers and styles (the readers, and the emotional corpus's actors with their
-  emotions and intensities) and (b) sentences of real book text (Project Gutenberg books, tokenized by the Python front
-  end - the training-time label source - and split into sentences as inference splits them), each spoken by a random
-  reader (or actor, or a blend of two readers) in a neutral or random emotional style at a random intensity. Tokens
-  are remapped as inference remaps them (export.py token_remap). Frames are stored as float16.
+  emotions and intensities) and (b) sentences of real book text (Project Gutenberg books - pinned texts, books.py -
+  tokenized by the Python front end - the training-time label source - and split into sentences as inference splits
+  them), each spoken by a random reader (or actor, or a blend of two readers) in a neutral or random emotional style at
+  a random intensity. Tokens are remapped as inference remaps them (export.py token_remap). Frames are stored as
+  float16.
 - Students - MultiModel with smaller widths and depths. They share the teacher's conditioning space: the speaker,
   style, and channel-equalizer tables are copied from the teacher and frozen, so voices designed as blends of the
   teacher's table are the same voices in a student. A student learns, with the teacher's durations (teacher forcing on
@@ -65,7 +66,6 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.request
 
 import numpy
 import torch
@@ -75,7 +75,7 @@ from .export import export, load_model, token_remap, training_token_counts
 from .frontend import pronounce_texts, set_pronunciations, tokenize, vocabulary
 from .model import BOS, FIRST_PHONE, FIXED_NAMES, PAD, STYLE_NAMES, MultiModel, is_boundary, parameter_count
 from .synthesize import sentences
-from . import ROOT, panel, params
+from . import ROOT, books, panel, params
 
 
 CONFIG_PATH = os.path.join(ROOT, 'data', 'nn', 'train.json')
@@ -137,26 +137,13 @@ GUTENBERG_START = re.compile(r'^\*\*\* ?START OF (THE|THIS) PROJECT GUTENBERG.*$
 GUTENBERG_END = re.compile(r'^\*\*\* ?END OF (THE|THIS) PROJECT GUTENBERG.*$', re.MULTILINE)
 
 
-# The books' text files - the settings' bookIds (Project Gutenberg books, downloaded to the books directory if
-# missing), or every .txt file of the books directory
+# The books' text files - the settings' texts (pinned Project Gutenberg texts - books.py: fetched to the books directory
+# if missing, and verified against their pins), or every .txt file of the books directory
 def book_paths(settings):
     books_dir = root_path(settings['books'])
-    if 'bookIds' not in settings:
+    if 'texts' not in settings:
         return sorted(os.path.join(books_dir, name) for name in os.listdir(books_dir) if name.endswith('.txt'))
-    os.makedirs(books_dir, exist_ok=True)
-    paths = []
-    for book_id in settings['bookIds']:
-        path = os.path.join(books_dir, f'pg{book_id}.txt')
-        if not os.path.exists(path):
-            request = urllib.request.Request(f'https://www.gutenberg.org/cache/epub/{book_id}/pg{book_id}.txt',
-                                             headers={'User-Agent': 'voice-synth-train/1.0 (+https://github.com/craigahobbs/voice-synth)'})
-            with urllib.request.urlopen(request, timeout=60) as response:
-                data = response.read()
-            with open(path + '.tmp', 'wb') as file:
-                file.write(data)
-            os.replace(path + '.tmp', path)
-        paths.append(path)
-    return sorted(paths)
+    return sorted(books.pinned_paths(books_dir, settings['texts'], root_path(settings['pins'])))
 
 
 # A Gutenberg book's paragraphs (the text between the license header and footer, line-wrapped paragraphs joined)

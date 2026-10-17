@@ -11,9 +11,9 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B):
     python -m picovox_train.context train-g2p --labels DIR/labels.json --init G2P.pt --out DIR/g2p.pt
     python -m picovox_train.context train-context --labels DIR/labels.json --out DIR/context.pt
     python -m picovox_train.context export --g2p DIR/g2p.pt --context DIR/context.pt [--out lib/models/g2pModel.js]
-    python -m picovox_train.context gate --labels DIR/labels.json [MODULE]       # held-out accuracy (one split)
-    python -m picovox_train.context cross-validate --labels DIR/labels.json --out DIR/folds   # the gate, 10 folds
-    python -m picovox_train.context folds DIR/folds/fold-*.json --labels DIR/labels.json       # the gate of the folds' results
+    python -m picovox_train.context gate --labels DIR/labels.json [MODULE]                           # held-out accuracy (one split)
+    python -m picovox_train.context cross-validate --labels DIR/labels.json --out DIR/folds [-j N]   # the gate, 10 folds
+    python -m picovox_train.context folds DIR/folds/fold-*.json --labels DIR/labels.json             # the gate of the folds' results
     python -m picovox_train.context check NEW.js     # make train: identical to lib/models/g2pModel.js, else the quality
                                                      # gate (it never replaces the committed module)
 
@@ -48,6 +48,7 @@ import datetime
 import gzip
 import hashlib
 import json
+import multiprocessing
 import os
 import sys
 import time
@@ -843,23 +844,35 @@ def command_train_context(args):
     return 0
 
 
+# One fold of the cross-validation (a worker task) - (labels path, fold, results path, log path, settings): the context
+# network trained without the fold's aligned speakers, and its held-out results written to the results path
+def fold_task(task):
+    labels_path, fold, path, log, settings = task
+    fold_set = fold_labels(load_labels(labels_path), fold)
+    model = train_context(fold_set, settings, lambda text: log_line(log, f'fold {fold}: {text}'))
+    WeightQuantizer(model, EXPORT).quantize()
+    result = evaluate_context(lambda windows: context_predict(model, windows), fold_set)
+    with open(path + '.tmp', 'w', encoding='utf-8') as file:
+        json.dump(result, file, indent=1)
+    os.replace(path + '.tmp', path)
+    return path
+
+
 def command_cross_validate(args):
-    """Train the context network once per fold of the aligned speakers (one after another) - each fold's held-out
-    results to <out>/fold-<k>.json - then the cross-validated gate (command_folds)"""
-    labels = load_labels(args.labels)
+    """Train the context network once per fold of the aligned speakers - each fold's held-out results to
+    <out>/fold-<k>.json (resumable: a fold with results is skipped) - then the cross-validated gate (command_folds). The
+    folds are independent: -j trains that many at once, each in a worker process of one thread (the results are the
+    same as one fold after another)"""
     os.makedirs(args.out, exist_ok=True)
-    paths = []
-    for fold in range(FOLDS):
-        path = os.path.join(args.out, f'fold-{fold}.json')
-        if not os.path.exists(path):
-            fold_set = fold_labels(labels, fold)
-            model = train_context(fold_set, {}, lambda text, fold=fold: log_line(args.log, f'fold {fold}: {text}'))
-            WeightQuantizer(model, EXPORT).quantize()
-            result = evaluate_context(lambda windows, model=model: context_predict(model, windows), fold_set)
-            with open(path + '.tmp', 'w', encoding='utf-8') as file:
-                json.dump(result, file, indent=1)
-            os.replace(path + '.tmp', path)
-        paths.append(path)
+    paths = [os.path.join(args.out, f'fold-{fold}.json') for fold in range(FOLDS)]
+    tasks = [(args.labels, fold, path, args.log, {}) for fold, path in enumerate(paths) if not os.path.exists(path)]
+    if args.jobs > 1 and len(tasks) > 1:
+        with multiprocessing.Pool(min(args.jobs, len(tasks))) as pool:
+            for _ in pool.imap_unordered(fold_task, [(*task[:4], {'threads': 1}) for task in tasks]):
+                pass
+    else:
+        for task in tasks:
+            fold_task(task)
     return command_folds(argparse.Namespace(results=paths, labels=args.labels))
 
 
@@ -903,6 +916,7 @@ def main(argv=None):
     cross_parser.add_argument('--labels', required=True)
     cross_parser.add_argument('--out', required=True, help='the folds\' results directory')
     cross_parser.add_argument('--log')
+    cross_parser.add_argument('-j', '--jobs', type=int, default=1, help='folds at once (worker processes, one thread each)')
     cross_parser.set_defaults(func=command_cross_validate)
     folds_parser = commands.add_parser('folds', help='the cross-validated gate over the folds\' held-out results')
     folds_parser.add_argument('results', nargs='+')
