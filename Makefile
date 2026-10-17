@@ -101,7 +101,7 @@ train:
 	@$(MAKE) --no-print-directory train-stages
 
 # (the power check first, alone - its prompt has the terminal - then the stages, in parallel with make -j)
-train-stages: train-util $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.done $(TRAIN_DIR)/package.done $(TRAIN_DIR)/samples-reference.done \
+train-stages: train-util $(TRAIN_DIR)/package.done $(TRAIN_DIR)/samples-reference.done \
 	$(TRAIN_DIR)/samples-teacher-a.done $(TRAIN_DIR)/samples-teacher-b.done $(TRAIN_DIR)/samples-student.done $(TRAIN_DIR)/samples-polish.done
 
 # The utilization sampler - it exits when make does (finished, failed, or interrupted)
@@ -139,6 +139,14 @@ $(TRAIN_DIR)/corpora.done: | build/venv-analysis.build build/venv-nn.build
 # workers at the default QoS, and not after the readers' data build.
 G2P_JOBS ?= 2
 G2P_STANDALONE_JOBS ?= 10
+
+# make train-check - the checks that make train's committed inputs reproduce: the G2P chain (the committed
+# lib/models/g2pModel.js, identical below its header, else within the recipe's tolerances) and the heteronym relabeling
+# (data/nn/g2p-relabel.json's words) - standalone, on every core, so they never compete with make train's GPU stages for
+# memory bandwidth (beside teacher A they cost it about 9 minutes). Run it when the G2P's inputs change.
+.PHONY: train-check
+train-check:
+	@$(MAKE) --no-print-directory G2P_STANDALONE=1 G2P_JOBS=$(G2P_STANDALONE_JOBS) BESIDE= $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.done
 
 .PHONY: train-g2p
 train-g2p:
@@ -183,7 +191,7 @@ $(TRAIN_DIR)/g2p.done: $(TRAIN_DIR)/g2p-network.done $(TRAIN_DIR)/context-labels
 
 
 # The heteronym relabeling (CPU) - it must reproduce data/nn/g2p-relabel.json's words
-$(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/corpora.done | $(TRAIN_DIR)/data-multi.done
+$(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/corpora.done
 	@$(STAGE) start
 	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.heteronyms --out $(TRAIN_DIR)/heteronyms -j 4 --check data/nn/g2p-relabel.json
 	@$(STAGE) end

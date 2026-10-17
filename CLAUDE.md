@@ -64,7 +64,9 @@ Local Makefile overrides:
 `make commit` (test, lint, doc, cover, and the training's gate) is the gate before committing. `npm pack --dry-run`
 lists the package's files (`package.json` `files`: `lib/`). `make train` rebuilds the generated models from the recipe
 (`data/nn/train.json`, with its book texts pinned in `data/nn/books.json` - a revised text fails the fetch, never trains);
-`make -j train-g2p` runs its G2P chain alone (`G2P_STANDALONE_JOBS` workers); `PYTHONPATH=train/src
+`make -j train-check` reproduces and checks the committed G2P and heteronym relabels standalone (not part of make
+train - beside its GPU stages they cost teacher A about 9 minutes), `make -j train-g2p` the G2P chain alone
+(`G2P_STANDALONE_JOBS` workers); `PYTHONPATH=train/src
 build/venv-nn/bin/python -B -m picovox_train.smoke` runs every training entry point for a few steps on the CPU.
 
 ## python-build (train/)

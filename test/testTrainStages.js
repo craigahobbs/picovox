@@ -52,8 +52,11 @@ test('trainStages', () => {
     }
     assert(stages.package.after.includes('samples-reference'));
 
-    // make train's targets reach every stage
-    const [, trainTargets] = makefile.replace(/\\\n/g, ' ').match(/^train-stages: ([^\n]*)$/m);
+    // make train's targets, with make train-check's, reach every stage
+    const joinedMakefile = makefile.replace(/\\\n/g, ' ');
+    const [, stageTargets] = joinedMakefile.match(/^train-stages: ([^\n]*)$/m);
+    const [, checkTargets] = joinedMakefile.match(/^train-check:\n\t([^\n]*)$/m);
+    const trainTargets = `${stageTargets} ${checkTargets}`;
     const reached = new Set();
     const visit = (stage) => {
         reached.add(stage);

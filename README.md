@@ -187,8 +187,9 @@ make commit      # the package's unit tests (100% coverage), lint, and API docum
 make test        # the package's unit tests (TEST='name' runs one)
 make -C train commit      # the training's gate alone - its unit tests, pylint, and 100% branch coverage
 make -C train test TEST=tests.test_params    # one test module of the training's
-make train       # retrain the models (see below)
-make -j train-g2p   # the G2P chain alone - its stages of make train, for G2P work
+make train       # retrain the voice model (see below)
+make -j train-check # check that the committed G2P and heteronym relabels reproduce (standalone)
+make -j train-g2p   # the G2P chain alone, for G2P work
 ```
 
 The training pipeline is a Python package, `picovox_train` (`train/src/picovox_train/` - `picovox_train/<module>.py`
@@ -330,11 +331,12 @@ checkout, by one recipe, `data/nn/train.json` (every stage's settings and seeds)
 | package - `lib/models/voiceModel.js`, with its provenance | CPU | student-eval (after samples-reference) |
 | samples-reference, samples-teacher-a, -teacher-b, -student, -polish - the listening samples | CPU, under a minute each | the shipped model (after data-multi); each stage's model |
 
-The critical path - the readers' data (~6 minutes), teacher A (~20) and B (~22), the targets (~4), the student (~5)
-and its polish (~5), the gate, the package - takes about 65 minutes on an M3 Max on full power (a 90 W+ adapter; the
-corpora downloaded once before) - estimated from interleaved stage timings at 94 W, before a full run measures it. The
-voice data is built with the committed G2P, so the G2P retrain is off the critical path; its module is checked against
-the committed `lib/models/g2pModel.js` (identical, else within the recipe's tolerances - it never replaces it). The
+The critical path - the readers' data (7.3 minutes), teacher A (28.6) and B (20.4), the targets (3.6), the student
+(4.9) and its polish (4.4), the gate, the package (2.0) - took 71 minutes from scratch on an M3 Max on full power (94
+W; the corpora downloaded once before), with the G2P chain beside it; without it - make train-check now runs it
+standalone - teacher A takes about 19, so about 62. The voice data is built with the committed G2P; make train-check
+reproduces the G2P and checks its module against the committed `lib/models/g2pModel.js` (identical, else within the
+recipe's tolerances - it never replaces it), and the heteronym relabeling against `data/nn/g2p-relabel.json`. The
 package's manifest records its provenance: the commit, the recipe's and the training data's hashes, and the gate's
 scores. `python -m picovox_train.smoke` runs every stage's entry point for a few steps on the CPU.
 
@@ -548,8 +550,8 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context cross-
 
 (`aligned`, `tag`, and `cross-validate` take `-j`, their worker processes - the results are the same for any count.)
 
-The settings are `data/nn/train.json`'s `context` section. `make train` runs all of it beside the voice stages (which
-use the committed `lib/models/g2pModel.js`) and checks its module with `picovox_train.context check`: identical to the
+The settings are `data/nn/train.json`'s `context` section. `make train-check` runs all of it (the voice stages use the
+committed `lib/models/g2pModel.js`) and checks its module with `picovox_train.context check`: identical to the
 committed module below the comment header (the stages are deterministic on the same inputs), else within the recipe's
 tolerances (the regression set, the book error, the top-10K, the monitoring WER) - it never replaces the committed
 module. The books are pinned (`data/nn/books.json` - see make train), so a clean run reproduces the committed module.

@@ -3,7 +3,7 @@
     "target": "train",
     "stages": [
         {"stage": "corpora", "group": "Data", "title": "The corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D (downloads, once)", "on": "network", "minutes": 1, "needs": []},
-        {"stage": "heteronyms", "group": "Data", "title": "The heteronym relabeling, checked to reproduce data/nn/g2p-relabel.json", "on": "cpu", "minutes": 6, "needs": ["corpora"], "after": ["data-multi"]},
+        {"stage": "heteronyms", "group": "Data", "title": "The heteronym relabeling, checked to reproduce data/nn/g2p-relabel.json", "on": "cpu", "minutes": 6, "needs": ["corpora"]},
         {"stage": "data-multi", "group": "Data", "title": "The readers' training data (picovox_train.multi build - every core)", "on": "cpu", "minutes": 6, "needs": ["corpora"]},
         {"stage": "cremad-align", "group": "Data", "title": "The emotional speech's alignment (picovox_train.cremad align)", "on": "gpu", "minutes": 2, "needs": ["corpora"]},
         {"stage": "data-cremad", "group": "Data", "title": "The emotional speech's training data (picovox_train.cremad build)", "on": "cpu", "minutes": 1, "needs": ["cremad-align"]},
