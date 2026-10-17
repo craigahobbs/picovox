@@ -1748,8 +1748,11 @@ async function loadTrain() {
     const utilFresh = utilResult !== null && Date.now() - utilResult.modified < 90000;
     const alive = utilFresh || (makeResult !== null && Date.now() - makeResult.modified < 10 * 60000);
     const extraTexts = extra.filter((result) => result !== null).map((result) => result.text);
+    // (the run's target and start - make train, train-check, or train-g2p records them in stages.jsonl)
+    const runTarget = eventsResult === null ? null : trainModel.parseRunTarget(eventsResult.text);
     const states = trainModel.stageStates(manifest, {events, stamps, segments, 'errorTexts': extraTexts, alive, queued,
-        'target': config.target});
+        'target': config.target ?? runTarget?.target, 'started': runTarget?.time});
+    document.getElementById('trainTitle').firstChild.nodeValue = `make ${config.target ?? runTarget?.target ?? manifest.target}`;
 
     // The training runs (TRAIN_DIR/runs/<run>/), each stopped at its recipe's stop
     for (const stage of manifest.stages.filter((item) => item.run)) {

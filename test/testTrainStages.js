@@ -55,8 +55,17 @@ test('trainStages', () => {
     // make train's targets, with make train-check's, reach every stage
     const joinedMakefile = makefile.replace(/\\\n/g, ' ');
     const [, stageTargets] = joinedMakefile.match(/^train-stages: ([^\n]*)$/m);
-    const [, checkTargets] = joinedMakefile.match(/^train-check:\n\t([^\n]*)$/m);
+    const [, checkTargets] = joinedMakefile.match(/^train-check:\n\t[^\n]*\n\t([^\n]*)$/m);
     const trainTargets = `${stageTargets} ${checkTargets}`;
+
+    // The manifest's targets are the Makefile's: make train's stages, make train-check's, make train-g2p's
+    const stampsOf = (text) => [...text.matchAll(/\$\(TRAIN_DIR\)\/([\w-]+)\.done/g)].map((match) => match[1]);
+    const [, g2pTargets] = joinedMakefile.match(/^train-g2p:\n\t[^\n]*\n\t([^\n]*)$/m);
+    assert.deepEqual(manifest.targets, {'train': stampsOf(stageTargets), 'train-check': stampsOf(checkTargets),
+        'train-g2p': stampsOf(g2pTargets)});
+    for (const target of ['train', 'train-check', 'train-g2p']) {
+        assert.match(joinedMakefile, new RegExp(`^${target}:\\n\\t\\$\\(call TRAIN_TARGET,${target}\\)$`, 'm'));
+    }
     const reached = new Set();
     const visit = (stage) => {
         reached.add(stage);

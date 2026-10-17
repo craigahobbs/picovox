@@ -1,6 +1,11 @@
 {
     "description": "make train's stages (the Makefile's $(TRAIN_DIR)/<stage>.done targets) for the training dashboard: each stage's group, what it runs on (cpu, gpu - one at a time under the GPU lock - or network), the stages it needs (data dependencies), the stages it runs after (ordering only - Make's order-only prerequisites: the CPU checks scheduled into the teacher's GPU-bound hours), its expected minutes (quiet M3 Max, the corpora downloaded once), the training run it writes ($(TRAIN_DIR)/runs/<run>/ - its data/nn/train.json section, whose stop ends it early), and for a listening samples stage, the stage whose model it renders (samples - $(TRAIN_DIR)/samples/index.json's stage; reference: the shipped model); test/testTrainStages.js keeps it in sync with the Makefile",
     "target": "train",
+    "targets": {
+        "train": ["package", "samples-reference", "samples-teacher-a", "samples-teacher-b", "samples-student", "samples-polish"],
+        "train-check": ["g2p", "heteronyms"],
+        "train-g2p": ["g2p"]
+    },
     "stages": [
         {"stage": "corpora", "group": "Data", "title": "The corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D (downloads, once)", "on": "network", "minutes": 1, "needs": []},
         {"stage": "heteronyms", "group": "Data", "title": "The heteronym relabeling, checked to reproduce data/nn/g2p-relabel.json", "on": "cpu", "minutes": 6, "needs": ["corpora"]},

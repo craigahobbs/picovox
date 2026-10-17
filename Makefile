@@ -95,8 +95,12 @@ TRAIN_RUNS := $(TRAIN_DIR)/runs
 # expected times are data/nn/train-stages.json's (test/testTrainStages.js checks it against these targets).
 STAGE = tools/trainstage.sh $(TRAIN_DIR) $(basename $(@F))
 
+# Record a make target's run in stages.jsonl (the training dashboard shows its stages)
+TRAIN_TARGET = @mkdir -p $(TRAIN_DIR) && printf '{"event": "target", "target": "%s", "time": %s}\n' $(1) "$$(date +%s)" >> $(TRAIN_DIR)/stages.jsonl
+
 .PHONY: train train-stages train-util train-clean
 train:
+	$(call TRAIN_TARGET,train)
 	@tools/trainpower.sh
 	@$(MAKE) --no-print-directory train-stages
 
@@ -146,10 +150,12 @@ G2P_STANDALONE_JOBS ?= 10
 # memory bandwidth (beside teacher A they cost it about 9 minutes). Run it when the G2P's inputs change.
 .PHONY: train-check
 train-check:
+	$(call TRAIN_TARGET,train-check)
 	@$(MAKE) --no-print-directory G2P_STANDALONE=1 G2P_JOBS=$(G2P_STANDALONE_JOBS) BESIDE= $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.done
 
 .PHONY: train-g2p
 train-g2p:
+	$(call TRAIN_TARGET,train-g2p)
 	@$(MAKE) --no-print-directory G2P_STANDALONE=1 G2P_JOBS=$(G2P_STANDALONE_JOBS) BESIDE= $(TRAIN_DIR)/g2p.done
 
 $(TRAIN_DIR)/g2p-network.done: data/nn/train.json data/nn/g2p-words.json data/nn/g2p-relabel.json data/nn/g2p-fixes.json data/cmudict.dict \

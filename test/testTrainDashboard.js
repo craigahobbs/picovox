@@ -36,6 +36,40 @@ test('train.stageOrder', () => {
 test('train.targetStages', () => {
     assert.deepEqual([...train.targetStages(manifest, 'student')].sort(), ['data', 'student', 'teacher']);
     assert.equal(train.targetStages(manifest, 'train').size, 6);
+
+    // A manifest's named targets - their stages and every stage those need
+    const named = {...manifest, 'targets': {'train-check': ['check'], 'train-voice': ['package']}};
+    assert.deepEqual([...train.targetStages(named, 'train-check')], ['check']);
+    assert.deepEqual([...train.targetStages(named, 'train-voice')].sort(), ['data', 'eval', 'package', 'student', 'teacher']);
+    assert.equal(train.targetStages(named, 'unknown').size, 6);
+});
+
+
+test('train.parseRunTarget', () => {
+    assert.equal(train.parseRunTarget(''), null);
+    assert.deepEqual(train.parseRunTarget([
+        '{"event": "target", "target": "train", "time": 100}',
+        '{"stage": "data", "event": "start", "time": 101}',
+        'not json',
+        '{"event": "target", "target": "train-check", "time": 200}'
+    ].join('\n')), {'target': 'train-check', 'time': 200000});
+});
+
+
+test('train.stageStates, a later run', () => {
+    // An earlier run's unfinished attempts are stale - waiting in the later run; its finished stages stay done
+    const events = train.parseStageEvents([
+        '{"stage": "data", "event": "start", "time": 100}',
+        '{"stage": "data", "event": "end", "time": 160}',
+        '{"stage": "check", "event": "start", "time": 160}',
+        '{"stage": "check", "event": "fail", "time": 170, "status": 2}',
+        '{"stage": "teacher", "event": "start", "time": 160}'
+    ].join('\n'));
+    const states = train.stageStates(manifest, {events, 'stamps': new Map(), 'segments': [], 'alive': true, 'started': 300000,
+        'target': 'train'});
+    assert.equal(states.get('data').status, 'done');
+    assert.equal(states.get('check').status, 'waiting');
+    assert.equal(states.get('teacher').status, 'waiting');
 });
 
 

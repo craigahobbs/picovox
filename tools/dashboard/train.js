@@ -33,10 +33,12 @@ export function stageOrder(manifest) {
 }
 
 
-// The stages a make target builds - the target stage and every stage it needs (the train target: every stage)
+// The stages a make target builds - a stage and every stage it needs, or one of the manifest's targets (make train,
+// train-check, train-g2p: their stages and every stage those need); an unknown target - every stage
 export function targetStages(manifest, target) {
     const byName = new Map(manifest.stages.map((stage) => [stage.stage, stage]));
-    if (!byName.has(target)) {
+    const roots = manifest.targets?.[target] ?? (byName.has(target) ? [target] : null);
+    if (roots === null) {
         return new Set(byName.keys());
     }
     const included = new Set();
@@ -44,8 +46,27 @@ export function targetStages(manifest, target) {
         included.add(name);
         byName.get(name).needs.forEach(visit);
     };
-    visit(target);
+    roots.forEach(visit);
     return included;
+}
+
+
+// The latest make target recorded in stages.jsonl ({"event": "target", ...} - make train, train-check, train-g2p) -
+// {target, time (ms)}, or null
+export function parseRunTarget(text) {
+    let latest = null;
+    for (const line of text.split('\n')) {
+        let record;
+        try {
+            record = JSON.parse(line);
+        } catch {
+            continue;
+        }
+        if (record.event === 'target') {
+            latest = {'target': record.target, 'time': record.time * 1000};
+        }
+    }
+    return latest;
 }
 
 
@@ -158,7 +179,8 @@ export function meanUtilization(samples, start, end) {
 // failed.
 //
 // run: {events (parseStageEvents), stamps (Map stage -> ms), segments (parseMakeLog), errorTexts ([text]), alive (make
-//       runs - with stage events), target (else the segments'), queued (Set of stages waiting for the GPU lock)}
+//       runs - with stage events), target (else the segments'), started (the run's start, ms - earlier unfinished attempts
+//       are stale), queued (Set of stages waiting for the GPU lock)}
 export function stageStates(manifest, run) {
     const states = new Map();
     const segments = run.segments.map((segment) => (
@@ -183,7 +205,10 @@ export function stageStates(manifest, run) {
         // The latest start of a make run building the stage (before a time)
         const runStart = (runs, before) => Math.max(-Infinity, ...runs.
             filter((segment) => segment.stages.has(name) && segment.start <= before).map((segment) => segment.start));
-        const event = run.events.get(name);
+        // (an unfinished attempt from before the run's start is stale - a stage that failed or stopped in an earlier run)
+        const recorded = run.events.get(name);
+        const event = recorded && run.started && recorded.start < run.started && (recorded.end === null || recorded.end < recorded.start) ?
+            undefined : recorded;
         let state;
         if (event && event.end !== null && event.end >= event.start) {
             state = {'status': 'done', 'start': event.start, 'end': event.end};
