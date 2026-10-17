@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Home</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Home</h1>
+
+    
+
+
+
+    
+
+
+    <h3> </h3>
+
+
+
+
+
+
+
+
+
+
+    
+
+
+
+
+    <section>
+        <article><h1>PicoVox</h1>
+<p><a href="https://www.npmjs.com/package/picovox"><img src="https://img.shields.io/npm/v/picovox" alt="npm"></a>
+<a href="https://github.com/craigahobbs/picovox/blob/main/LICENSE"><img src="https://img.shields.io/github/license/craigahobbs/picovox" alt="GitHub"></a></p>
+<p><strong>PicoVox - realistic speech synthesis in pure JavaScript, under 1 MB.</strong></p>
+<p><strong>The paper:</strong> <a href="https://github.com/craigahobbs/picovox/blob/main/paper/paper.md">Small Voices: Browser Speech Synthesis for Audiobooks</a> -
+how PicoVox's networks are designed, trained, distilled, and evaluated.</p>
+<p>PicoVox speaks English text with natural-sounding male and female voices, entirely on your device - in the browser or
+in Node. There is no recorded speech, no server, no WebAssembly, and no runtime dependencies: a small grapheme-to-phoneme
+network pronounces every word, a small neural network (350K parameters) predicts interpretable source-filter
+synthesizer parameters every 5 ms, and a JavaScript synthesizer with an LF glottal source renders them. The whole
+package - code and both networks - is under 1 MB.</p>
+<p><a href="https://craigahobbs.github.io/picoshelf/">PicoShelf</a>, every public-domain book read aloud right in your browser, is
+built on PicoVox.</p>
+<h2>Installation</h2>
+<pre class="prettyprint source lang-sh"><code>npm install picovox
+</code></pre>
+<p>PicoVox is ESM-only. It runs in current browsers (Chrome, Edge, Firefox, and Safari 16.4 or later) and in Node 22 or
+later.</p>
+<h2>Quick start</h2>
+<p>In the browser - speak text aloud with Web Audio (call it from a click, so the browser lets the audio start):</p>
+<pre class="prettyprint source lang-html"><code>&lt;button id=&quot;speak&quot;>Speak&lt;/button>
+&lt;script type=&quot;module&quot;>
+    import {speak} from './node_modules/picovox/lib/index.js';
+
+    document.getElementById('speak').onclick = () => {
+        speak('It was the best of times, it was the worst of times.', {'voice': 'female'});
+    };
+&lt;/script>
+</code></pre>
+<p>(With a bundler or an import map, import from <code>'picovox'</code>.)</p>
+<p>In Node - synthesize speech and write a WAV file:</p>
+<pre class="prettyprint source lang-js"><code>import {synthesize, toWav} from 'picovox';
+import {writeFileSync} from 'node:fs';
+
+const {samples, sampleRate} = await synthesize('Call me Ishmael.', {'voice': 'male'});
+writeFileSync('ishmael.wav', toWav(samples, sampleRate));
+</code></pre>
+<p>Streaming - a sentence and a fraction of a second at a time, the first speech in about 70 ms (M3 Max):</p>
+<pre class="prettyprint source lang-js"><code>import {stream} from 'picovox';
+
+for await (const block of stream(longText, {'voice': 'female', 'rate': 1.2})) {
+    // block is a Float32Array of 24 kHz samples - play it, or post it from a Web Worker
+}
+</code></pre>
+<h2>API</h2>
+<h3><code>synthesize(text, options)</code></h3>
+<p>Synthesize speech. Returns a Promise of <code>{samples, sampleRate}</code> - <code>samples</code> is a <code>Float32Array</code> of mono samples (-1 to</p>
+<ol>
+<li>at <code>sampleRate</code> Hz.</li>
+</ol>
+<h3><code>stream(text, options)</code></h3>
+<p>Synthesize speech as a stream - an async iterable of <code>Float32Array</code> blocks of samples, made as they're taken. The text
+is spoken a sentence at a time, each sentence a fraction of a second at a time, so the first audio comes almost at once.
+The blocks, concatenated, are exactly <code>synthesize</code>'s samples. Synthesis runs on the calling thread as each block is
+taken - in a browser, take the blocks in a Web Worker to keep the page responsive.</p>
+<h3><code>speak(text, options)</code></h3>
+<p>Speak text aloud in a browser, with Web Audio. Returns a playback, <code>{stop(), finished}</code> - <code>stop()</code> stops it, and
+<code>finished</code> is a Promise that resolves when the playback ends or is stopped (and rejects if synthesis fails). Playback
+starts with the first blocks while the rest are synthesized, a few seconds ahead. Synthesis runs on the main thread, a
+block at a time between the page's other work; for long texts, use <code>stream</code> in a Web Worker and play its blocks.
+<code>options.context</code> is an <code>AudioContext</code> to play in (by default, a new one, closed when the playback ends). Under Node,
+<code>speak</code> throws an error - there is no Web Audio; use <code>synthesize</code> and <code>toWav</code>.</p>
+<h3><code>voices()</code></h3>
+<p>The built-in voices - <code>[{key, label, sex}]</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Label</th>
+<th>Sex</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>male</code> (the default)</td>
+<td>Male</td>
+<td>male</td>
+</tr>
+<tr>
+<td><code>female</code></td>
+<td>Female</td>
+<td>female</td>
+</tr>
+</tbody>
+</table>
+<h3><code>toWav(samples, sampleRate)</code></h3>
+<p>Encode samples (a <code>Float32Array</code>, or an array of numbers, -1 to 1 - values beyond are clipped) as a 16-bit PCM mono WAV
+file - a <code>Uint8Array</code> of the file's bytes.</p>
+<h3>Options</h3>
+<p><code>synthesize</code>, <code>stream</code>, and <code>speak</code> take the same options:</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Default</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>voice</code></td>
+<td><code>'male'</code></td>
+<td>The voice's key - see <code>voices()</code></td>
+</tr>
+<tr>
+<td><code>rate</code></td>
+<td><code>1</code></td>
+<td>The speaking speed, from 0.5 to 2 (1.2 is 20% faster)</td>
+</tr>
+<tr>
+<td><code>seed</code></td>
+<td><code>1000</code></td>
+<td>The noise seed (an integer) - sentence <em>i</em> of the text is rendered with seed + <em>i</em></td>
+</tr>
+<tr>
+<td><code>sampleRate</code></td>
+<td><code>24000</code></td>
+<td>The output sample rate (Hz), from 8000 to 96000 - 24 kHz is the voices' own rate</td>
+</tr>
+</tbody>
+</table>
+<p>The text is split into sentences (and paragraphs, at blank lines); each sentence starts with a short pause - 0.24
+seconds, or 0.4 before a paragraph (so the text's first sentence starts with one). Numbers, common abbreviations, dashes,
+ellipses, and Roman-numeral chapter headings are spoken as words. An invalid text or option throws a <code>TypeError</code> or a
+<code>RangeError</code> with a message saying what's wrong (<code>stream</code> and <code>speak</code> throw at once; <code>synthesize</code> rejects).</p>
+<p>The output is bit-for-bit deterministic: the same text and options give the same samples, in the browser and in Node.</p>
+<h3>The modules</h3>
+<p>The package's modules are importable too (<code>picovox/lib/&lt;module&gt;.js</code>) - the pieces the API is built from, for an app
+that runs its own synthesis loop (PicoShelf's worker does):</p>
+<table>
+<thead>
+<tr>
+<th>Module</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lib/index.js</code></td>
+<td>The API</td>
+</tr>
+<tr>
+<td><code>lib/synthesis.js</code></td>
+<td>The pipeline - the voices, a sentence's blocks (<code>sentenceBlocks</code>), a text's (<code>textBlocks</code>), the gain and limiter</td>
+</tr>
+<tr>
+<td><code>lib/sentences.js</code></td>
+<td>Text to sentences (<code>splitSentences</code>) and their speakable text (<code>speechText</code>)</td>
+</tr>
+<tr>
+<td><code>lib/lexicon.js</code></td>
+<td>Normalization and phrasing (<code>textToPhrases</code>), every word pronounced by the pronouncer (<code>setPronouncer</code>)</td>
+</tr>
+<tr>
+<td><code>lib/g2p.js</code></td>
+<td>The grapheme-to-phoneme network's inference (<code>loadG2p</code>) - heteronyms read from their context</td>
+</tr>
+<tr>
+<td><code>lib/tokens.js</code></td>
+<td>Phrases to the voice network's tokens</td>
+</tr>
+<tr>
+<td><code>lib/model.js</code></td>
+<td>The voice network - text to parameter frames (<code>speakFrames</code>, <code>streamFrames</code>), any speaker blend and style</td>
+</tr>
+<tr>
+<td><code>lib/render.js</code></td>
+<td>The source-filter synthesizer - parameter frames to samples, streaming (<code>createRenderer</code>, <code>render</code>)</td>
+</tr>
+<tr>
+<td><code>lib/lf.js</code>, <code>lib/rng.js</code>, <code>lib/fft.js</code>, <code>lib/params.js</code></td>
+<td>The LF glottal pulse, the counter-based noise, the FFT, the parameter set</td>
+</tr>
+<tr>
+<td><code>lib/transforms.js</code></td>
+<td>Voice and style transforms of parameter frames (pitch, tract length, bandwidths, whisper, effort)</td>
+</tr>
+<tr>
+<td><code>lib/package.js</code></td>
+<td>The generated model modules' loader (<code>loadPackagedModel</code>)</td>
+</tr>
+<tr>
+<td><code>lib/wav.js</code></td>
+<td>WAV encoding (<code>encodeWav</code>)</td>
+</tr>
+<tr>
+<td><code>lib/models/g2pModel.js</code>, <code>lib/models/voiceModel.js</code></td>
+<td>The generated models (<code>make train</code>)</td>
+</tr>
+</tbody>
+</table>
+<h2>Size and speed</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The package (<code>npm pack</code>)</td>
+<td>803 KB packed, 1.2 MB unpacked - the G2P network 419 KB and the voice network 616 KB of it, as base64</td>
+</tr>
+<tr>
+<td>The voice network</td>
+<td>349,547 parameters, 8-bit weights - 432 KB gzipped</td>
+</tr>
+<tr>
+<td>The G2P network</td>
+<td>373,256 parameters (and the heteronym context network's 47,779), 6-bit weights</td>
+</tr>
+<tr>
+<td>Speed, Apple M3 Max (Node)</td>
+<td>The voice network about 94x real time; synthesis end to end (network and rendering, 24 kHz) about 40x</td>
+</tr>
+<tr>
+<td>Speed, iPhone (Safari)</td>
+<td>About 1.18x real time - fast enough for continuous playback</td>
+</tr>
+<tr>
+<td>Startup</td>
+<td>About 0.1 s to load both networks (Node, M3 Max)</td>
+</tr>
+</tbody>
+</table>
+<p>The voices score a mean UTMOS (a neural predictor of listeners' naturalness ratings, 1-5) of about 4.1 on the listener
+panel's texts, with a Whisper word error rate under 2% - see <a href="#the-listener-panel">the listener panel</a>.</p>
+<h2>How the models are trained</h2>
+<p>Both networks are trained from scratch from public corpora - CMU ARCTIC, LibriTTS-R, CREMA-D, and the CMU Pronouncing
+Dictionary (the G2P network's training labels; it is not used at runtime) - by <code>make train</code>, which rebuilds
+<code>lib/models/g2pModel.js</code> and <code>lib/models/voiceModel.js</code> from a clean checkout in about 2 hours on an M3 Max: a large
+teacher model trained through a differentiable copy of the synthesizer, distilled to the small student that ships. See
+<a href="#make-train">make train</a> below, and the paper,
+<a href="paper/paper.md">Small Voices: Browser Speech Synthesis for Audiobooks</a>, for the methods and results.</p>
+<h2>PicoShelf</h2>
+<p><a href="https://craigahobbs.github.io/picoshelf/">PicoShelf</a> is the showcase app - an audiobook player for every public-domain
+book (Project Gutenberg and Standard Ebooks), read aloud by PicoVox in the browser, in a Web Worker
+(<a href="https://github.com/craigahobbs/picoshelf">source</a>).</p>
+<h2>Development</h2>
+<p>This repository is the package (<code>lib/</code>, <code>test/</code>) and the training pipeline that makes its models (<code>nn/</code>, <code>tools/</code>,
+<code>data/</code>, the paper in <code>paper/</code>). The package is developed with
+<a href="https://github.com/craigahobbs/javascript-build#readme">javascript-build</a>:</p>
+<pre class="prettyprint source lang-sh"><code>make commit      # the unit tests (100% coverage), lint, and the API documentation (jsdoc)
+make test        # the unit tests (TEST='name' runs one)
+make train       # retrain the models (see below)
+</code></pre>
+<p>The training tools are Node scripts and a Python pipeline (<code>build/venv-nn</code>, PyTorch). They use the package's modules
+but aren't part of it.</p>
+<h2>Command-line tools</h2>
+<pre class="prettyprint source lang-sh"><code>node nn/js/speak.js -m data/nn/slt &quot;Hello, world.&quot; -o out/hello.wav    # an exported model (data/nn/&lt;voice>.json and .bin)
+node nn/js/speak.js -m data/nn/multi &quot;Hello.&quot; -o out/hello.wav --voice narrator-f   # a designed voice (data/nn/voices.json)
+node nn/js/unpack.js lib/models/voiceModel.js out/voice                 # a packaged model back to its export
+node nn/js/packagecheck.js lib/models/voiceModel.js out/voice           # check a packaged model against its export
+node nn/js/voicescheck.js [data/nn/multi]                               # check the designed voices
+node tools/heteronyms.js                                                # the heteronym regression set
+</code></pre>
+<p><code>nn/js/speak.js</code> speaks with an exported model (<code>nn.export CHECKPOINT --voice NAME</code> writes <code>data/nn/NAME.json</code> and
+<code>.bin</code>; <code>data/nn/multi</code> is an export of the multi-speaker model), every word pronounced by the G2P network as the
+package pronounces (<code>-r</code> rate, <code>-s</code> seed, <code>--params</code> the parameter frames, <code>--batch</code> a list of items); the
+multi-speaker model takes a speaker (<code>--speaker</code>, <code>--blend</code>), a style (<code>--style</code>, <code>--intensity</code>), or a designed voice
+and style (<code>--voice</code>, <code>--voice-style</code> - <code>nn/js/voices.js</code>, the designed voices of <code>data/nn/voices.json</code>, each a blend of
+the model's speakers with a style and transforms).</p>
+<p>The training dashboard, <code>tools/dashboard/</code>, follows <code>make train</code> and the neural voices' training as they run: serve the
+repository (<code>python3 -m http.server</code>), start its monitor (<code>node tools/dashboard/monitor.js</code>), and open
+http://localhost:8000/tools/dashboard/. It has five tabs (each linkable, e.g. <code>#listen</code>): Train, Listen, Runs, Logs,
+and Archive. Train is a <code>make train</code> run (<code>tools/dashboard/pipeline.json</code>'s <code>train</code>: its <code>TRAIN_DIR</code>, default
+<code>build/train</code>; the default tab while it runs): the run's state, its ETA and critical path; the CPU and GPU utilization
+over the run with each stage as a band (the GPU's idle time shaded, the forecast faded); every stage of
+<code>data/nn/train-stages.json</code> in collapsible groups - its state (waiting, queued for the GPU, running, done, failed,
+stopped, or not in the run's make target), its start, end, and time against the expected time, and its mean CPU and
+GPU use; the training runs' curves (the teacher's compared with the earlier teacher runs); and the gates (the
+heteronym and G2P checks, the listener panel's scores, and the pick). A run without the stage events (from before the
+bookkeeping) is inferred from its stamps and make's log (<code>pipeline.json</code>'s <code>train.log</code>). Listen plays the <code>make train</code> run's
+listening samples (each training stage's final model beside the shipped model - see make train, below; the stages not
+rendered yet listed as waiting), the monitor's checkpoint samples (below), and other samples in <code>build/nn/</code>, and marks
+new samples until they're heard. Runs has the runs in
+<code>build/nn/runs/</code> (their <code>log.jsonl</code> and <code>train.log</code>) with charts of their losses, validation, pitch error, and step
+times. Logs has the tails
+of <code>make train</code>'s logs and the logs in <code>build/nn/</code> updated in the last hour (all of them with &quot;Show older logs&quot;).
+Archive shows the earlier experiment pipelines (<code>tools/dashboard/pipelines/</code>): each phase is a group with its progress,
+what's happening now, and how many of its steps are done, and it opens to its rows - the workflow's agents, the planned
+steps (each tracked by a log, the newest training run, an output file, and its process), and the work that appeared
+during it. It refreshes every second, read-only, re-fetching only what changed, and reloads itself when its own code
+changes.</p>
+<p>The monitor writes <code>build/nn/activity.json</code> every second: the Python and Node processes working in the repository for
+10 seconds or more (with their multiprocessing workers folded in), running now or before, and the workflow's agents
+(<code>pipeline.json</code>'s workflow, else the newest workflow in <code>~/.claude/projects/</code>) - so the dashboard shows the steps that
+write no log. It also renders each new checkpoint of the pipeline's runs (<code>build/nn/runs/&lt;run&gt;/step-*.pt</code>) with
+<code>pipeline.json</code>'s sample speakers and text, scores the samples with UTMOS on the CPU (leaving the GPU to training), and
+lists them in <code>build/nn/samples-progress/index.json</code> with the package's voices as a reference; the dashboard's Checkpoint
+samples section plays them, newest first.</p>
+<h2>The listener panel</h2>
+<p>Neural listener models score the synthesizer the way a panel of listeners would - a repeatable check of naturalness,
+speaker identity, and speaking style alongside Whisper's intelligibility. They run in a Python environment of their own
+(PyTorch), used only by the tools - the package has no dependencies.</p>
+<table>
+<thead>
+<tr>
+<th>Listener</th>
+<th>Model</th>
+<th>Measures</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Intelligibility</td>
+<td>Whisper <code>base.en</code> (whisper.cpp, <code>whisper-cli</code>, the model in <code>data/whisper/</code>)</td>
+<td>Word error rate against the text</td>
+</tr>
+<tr>
+<td>Naturalness</td>
+<td><a href="https://github.com/sarulab-speech/UTMOS22">UTMOS22 strong</a> (through torch.hub <a href="https://github.com/tarepan/SpeechMOS">tarepan/SpeechMOS</a>)</td>
+<td>Predicted mean opinion score, 1-5</td>
+</tr>
+<tr>
+<td>Speaker identity</td>
+<td><a href="https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb">ECAPA-TDNN</a> (SpeechBrain, VoxCeleb)</td>
+<td>A 192-dimension speaker embedding</td>
+</tr>
+<tr>
+<td>Style</td>
+<td><a href="https://huggingface.co/emotion2vec/emotion2vec_plus_base">emotion2vec+ base</a> (FunASR)</td>
+<td>Probabilities of angry, disgusted, fearful, happy, neutral, other, sad, surprised, unknown</td>
+</tr>
+</tbody>
+</table>
+<p><code>nn/panel.py</code> is the panel's scoring, shared by every evaluation (<code>nn.distill eval</code>, make train's gate): an exported
+model speaks a fixed evaluation set, <code>tools/panel-texts.json</code> - six Harvard sentences, six narrative passages from
+public-domain books with dialogue (Austen, Melville, Dickens, Doyle, Potter, Grahame), two questions, and two
+exclamations - through <code>nn/js/speak.js</code> (every word pronounced by the G2P network, as the package pronounces), and
+the renderings are scored with UTMOS, Whisper's WER, and the ECAPA
+speaker similarity.</p>
+<p><code>tools/listeners.py</code> is the scoring tool itself - WAV files of any sample rate in, one JSON line per file out:</p>
+<pre class="prettyprint source lang-sh"><code>make listeners                                              # build/venv-listeners from requirements/listeners.txt
+build/venv-listeners/bin/python -I tools/listeners.py [--no-mos] [--no-embedding] [--no-emotion] [--device auto|cpu|mps] \
+    [--files-from list.txt|-] file.wav ...
+</code></pre>
+<pre class="prettyprint source lang-json"><code>{&quot;file&quot;: &quot;a.wav&quot;, &quot;seconds&quot;: 2.63, &quot;mos&quot;: 3.33, &quot;embedding&quot;: [31.48, ...], &quot;emotion&quot;: {&quot;angry&quot;: 0.0, ..., &quot;neutral&quot;: 1.0}}
+</code></pre>
+<p>The models load once per run (4-7 s) and then score about 35 seconds of speech a second (6 sentences) on an M3 Max's
+GPU (MPS, the default on Apple silicon - about 3x the CPU, with the same scores). Files longer than 20 s are scored in
+chunks. The models download on first use - about 1.5 GB, into <code>build/listeners/</code> (torch.hub, Hugging Face) - and
+later runs need no network.</p>
+<p>The environment is built with <code>python3</code> (3.14 here; 3.12 also works - <code>make listeners PYTHON_VENV=python3.12</code>). Its
+packages are pinned in <code>requirements/listeners.txt</code>: PyTorch 2.14, torchaudio 2.11 (resampling, for UTMOS),
+SpeechBrain 1.1, FunASR 1.4 (emotion2vec), and soundfile and soxr for reading and resampling audio.</p>
+<p>Calibration (the evaluation set, or 16 recordings of each human speaker; October 2026):</p>
+<table>
+<thead>
+<tr>
+<th>Speech</th>
+<th>MOS mean</th>
+<th>MOS min</th>
+<th>WER</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Human - CMU ARCTIC bdl, rms, aew (men), slt, clb (women)</td>
+<td>4.28-4.39</td>
+<td>4.01-4.27</td>
+<td>2.7-4.7%</td>
+</tr>
+<tr>
+<td>Human - CMU ARCTIC eey (woman)</td>
+<td>3.84</td>
+<td>3.00</td>
+<td>4.0%</td>
+</tr>
+<tr>
+<td>Human - LibriTTS-R dev-clean audiobook readers 174, 251, 1272 (men), 1462, 1673, 2035 (women)</td>
+<td>3.77-4.40</td>
+<td>3.09-4.17</td>
+<td>2.6-8.2%</td>
+</tr>
+<tr>
+<td>Apple Samantha (unit selection)</td>
+<td>3.94</td>
+<td>3.58</td>
+<td>3.9%</td>
+</tr>
+<tr>
+<td>Apple Daniel (unit selection, British)</td>
+<td>3.41</td>
+<td>3.07</td>
+<td>5.7%</td>
+</tr>
+<tr>
+<td>Apple Fred (1980s formant synthesis)</td>
+<td>2.81</td>
+<td>2.52</td>
+<td>10.6%</td>
+</tr>
+</tbody>
+</table>
+<p>Speaker similarity: every human pair 0.0-0.48; halves of one human speaker's recordings about 0.9.</p>
+<h2>make train</h2>
+<p><code>make train</code> recreates the generated models - <code>lib/models/g2pModel.js</code> and <code>lib/models/voiceModel.js</code> - from a clean
+checkout, by one recipe, <code>data/nn/train.json</code> (every stage's settings and seeds). Each stage is a stamp in
+<code>build/train/</code> (<code>TRAIN_DIR</code>), so <code>make -j train</code> runs independent stages at once; the GPU stages run one at a time
+(<code>nn/gpulock.py</code> - two at once each run at about half speed) while the CPU stages run beside them:</p>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Runs on</th>
+<th>Needs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D</td>
+<td>network</td>
+<td></td>
+</tr>
+<tr>
+<td>g2p - the G2P retrain, checked to reproduce <code>lib/models/g2pModel.js</code></td>
+<td>1 CPU core, ~30 min</td>
+<td></td>
+</tr>
+<tr>
+<td>heteronyms - the relabeled words, checked to reproduce <code>data/nn/g2p-relabel.json</code></td>
+<td>CPU, ~6 min</td>
+<td>corpora</td>
+</tr>
+<tr>
+<td>data-multi - the readers' training data (the pool: <code>data/nn/speakers.json</code>)</td>
+<td>CPU (every core)</td>
+<td>corpora, <code>lib/models/g2pModel.js</code></td>
+</tr>
+<tr>
+<td>cremad-align, data-cremad - the emotional speech</td>
+<td>GPU 2 min, CPU 1 min</td>
+<td>corpora</td>
+</tr>
+<tr>
+<td>teacher-a, teacher-b - the teacher (<code>nn.trainmulti --recipe teacher.a</code>, <code>teacher.b</code>)</td>
+<td>GPU</td>
+<td>the data</td>
+</tr>
+<tr>
+<td>teacher-eval - the teacher through the listener panel</td>
+<td>CPU</td>
+<td>teacher-b</td>
+</tr>
+<tr>
+<td>targets, student, polish - the distilled student (<code>nn.distill</code>)</td>
+<td>GPU</td>
+<td>teacher-b</td>
+</tr>
+<tr>
+<td>student-eval - the panel and the gate (<code>nn.distill pick --against baseline</code>: no worse than the shipped model)</td>
+<td>CPU</td>
+<td>polish, teacher-eval</td>
+</tr>
+<tr>
+<td>package - <code>lib/models/voiceModel.js</code>, with its provenance</td>
+<td>CPU</td>
+<td>student-eval (after samples-reference)</td>
+</tr>
+<tr>
+<td>samples-reference, samples-teacher-a, -teacher-b, -student, -polish - the listening samples</td>
+<td>CPU, under a minute each</td>
+<td>the shipped model (after data-multi); each stage's model</td>
+</tr>
+</tbody>
+</table>
+<p>The critical path - the readers' data, teacher A (~22 minutes) and B (~60), the targets (~9), the student (~11) and
+its polish (~9), the gate, the package - takes about 2 hours on an M3 Max (the corpora downloaded once before). The
+voice data is built with the committed G2P, so the G2P retrain is off the critical path; if the retrained G2P
+differs, its stage updates <code>lib/models/g2pModel.js</code> and fails, and <code>make train</code> again rebuilds the data with it. The
+package's manifest records its provenance: the commit, the recipe's and the training data's hashes, and the gate's
+scores. <code>python -m nn.smoke</code> runs every stage's entry point for a few steps on the CPU.</p>
+<p>Each training stage's final model - teacher A's last checkpoint (which teacher B starts from), teacher B's best (the
+distillation's teacher), the student's best, and its polish's best (the model the package stage ships) - is rendered
+for listening as the stage finishes, in its own CPU stage beside the next GPU stage (<code>tools/trainsamples.js</code>): exported
+as the package stage exports it, it speaks <code>data/nn/train.json</code>'s <code>samples</code> texts (Moby-Dick's opening, a dialogue,
+and heteronyms) in six of the training speakers' voices (three female, three male) exactly as the package speaks a
+sentence (<code>lib/synthesis.js</code>, every word pronounced by the G2P network), and each sample is scored with UTMOS on the
+CPU. The shipped <code>lib/models/voiceModel.js</code> is rendered the same way, as the reference, before the package stage
+replaces it. The WAV files are <code>TRAIN_DIR/samples/STAGE-SPEAKER-TEXT.wav</code>, listed in <code>TRAIN_DIR/samples/index.json</code>;
+the dashboard's Listen tab plays them, each beside the shipped model's.</p>
+<p><code>make train</code> keeps a record for the training dashboard (<code>tools/dashboard/</code>): each stage's start, end, and failure in
+<code>TRAIN_DIR/stages.jsonl</code> and each command's output also in <code>TRAIN_DIR/logs/STAGE.log</code> (<code>tools/trainstage.sh</code> - the
+teacher's also in its run's <code>train.log</code>), and every 20 seconds, for the life of <code>make train</code>, the CPU busy %, the GPU
+utilization %, the memory used %, and the running stages in <code>TRAIN_DIR/util.log</code> (<code>tools/trainutil.sh</code>). The stages,
+their dependencies, and their expected times are <code>data/nn/train-stages.json</code> (<code>test/testTrainStages.js</code> keeps it in
+step with the Makefile). <code>make train</code> never removes anything; <code>make train-clean</code> removes <code>TRAIN_DIR</code> for a run from
+scratch.</p>
+<p><code>make train</code> first checks the power (<code>tools/trainpower.sh</code>, macOS laptops): the run keeps the GPU busy for hours, and
+an M3 Max under it draws about 85 W, so on battery or an adapter under 96 W (<code>TRAIN_MIN_WATTS</code>) it says so and, at a
+terminal, waits for Enter - plug in a bigger adapter first (Apple's 96 W or 140 W). <code>TRAIN_POWER_CHECK=0</code> skips it.</p>
+<h2>Distilling the voice model</h2>
+<p>Each retrain of the multi-speaker acoustic model ends the same way: train a big teacher, then distill small students
+from it and ship the smallest one that keeps the teacher's quality. <code>nn/distill.py</code> runs that pipeline, with its
+settings in <code>data/nn/train.json</code>'s <code>distill</code> (the teacher, the distillation set, the training settings, the student
+ladder, the polish, the evaluation speakers, and the tolerance):</p>
+<pre class="prettyprint source lang-sh"><code>build/venv-nn/bin/python -B -m nn.distill ladder                  # everything below, in order
+build/venv-nn/bin/python -B -m nn.distill targets                 # 1. the teacher's targets (about 10 minutes on the GPU)
+build/venv-nn/bin/python -B -m nn.distill train --student s64     # 2. each student of the ladder
+build/venv-nn/bin/python -B -m nn.distill polish --student s64    # 3. optional: a short fine-tune on the recordings
+build/venv-nn/bin/python -B -m nn.distill eval teacher s96 s64 s48 s32   # 4. each model through the browser path
+build/venv-nn/bin/python -B -m nn.distill pick                    # 5. speed, samples, and the smallest within tolerance
+</code></pre>
+<ol>
+<li><strong>Targets</strong> - sequence-level distillation in parameter space. The teacher speaks (tokens, speaker, style) to its
+durations (pauses included) and its 32 synthesizer parameters every 5 ms, as inference does, with no audio
+rendered. The inputs are the training utterances with their own speakers and styles, and every sentence of the
+Project Gutenberg books in <code>build/nn/g2p/books/</code> (tokenized by <code>nn/frontend.py</code>, split into sentences as inference
+splits text) spoken twice, each time by a random reader (8% an emotional-corpus actor, 10% a blend of two readers)
+in a neutral or, 30% of the time, an emotional style at a random intensity. The set goes to
+<code>build/nn/distill/targets/</code> (frames as float16).</li>
+<li><strong>Students</strong> - the same <code>MultiModel</code> with smaller widths and depths. They share the teacher's conditioning: its
+speaker, style, and channel-equalizer tables are copied and frozen, so a voice designed as a blend of the teacher's
+speakers is the same voice in a student. A student runs with the teacher's durations (teacher forcing on its length
+regulator) and learns L1 on the normalized parameter frames plus the duration losses against the teacher's
+duration outputs. <code>--init-teacher</code> copies every teacher tensor of the same shape; <code>--feature-weight</code> adds
+intermediate-feature matching. Runs go to <code>build/nn/runs/distill-&lt;student&gt;/</code>.</li>
+<li><strong>Polish</strong> - <code>nn/trainmulti.py</code>'s real-audio losses (the spectral loss through the differentiable synthesizer on
+the recordings, the adversarial critic - started from the teacher's - and feature matching) for a short fine-tune.</li>
+<li><strong>Evaluation</strong> - each model is exported (<code>nn/export.py</code>), packaged (<code>nn/package.py</code>, the generated module's bytes
+and gzip bytes), and spoken by <code>nn/js/speak.js</code> on <code>tools/panel-texts.json</code> for six speakers; the renderings are
+scored with UTMOS, Whisper's WER, and the ECAPA speaker similarity to the teacher's rendering of the same speaker.
+<code>pick</code> measures <code>nn/js/speak.js</code>'s real-time factor, renders listening samples to <code>build/nn/distill-samples/</code>, and
+chooses the smallest student within the tolerance - mean UTMOS within 0.05 of the teacher's, WER at most 1 point
+worse, and speaker similarity at least 0.85 - writing <code>build/nn/distill/summary.json</code>. With <code>--against baseline</code>
+(make train's gate) the basis is instead the shipped model - <code>eval baseline=lib/models/voiceModel.js</code> speaks the
+packaged module, as the package loads it (<code>nn/js/unpack.js</code>) - so a new student must be no worse than what ships, and a
+better teacher never fails it.</li>
+</ol>
+<p>Progress lines go to <code>build/nn/distill/</code> (<code>targets.log</code>, <code>students.log</code>, <code>eval.log</code>), which the training dashboard
+follows.</p>
+<p>The first distillation (October 2026), from stage B's best checkpoint (<code>multi-b</code> step 19,000): 294,678 sentence-speaker
+pairs - 40,624 training utterances and 254,054 book sentences - 397 hours of teacher speech, 18.5 GB, made in 9
+minutes on an M3 Max's GPU. Each student trained 20,000 steps (16-35 minutes); polish is 2,000 steps (28-46 minutes,
+the GPU shared). Six speakers by 16 panel texts; the real-time factor is <code>nn/js/speak.js</code>'s at 44.1 kHz (the best of
+three, about +/-15%):</p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th>Parameters</th>
+<th>Module (gzip)</th>
+<th>UTMOS</th>
+<th>WER</th>
+<th>Similarity</th>
+<th>Real time (network / total)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Teacher (dim 128, 3 + 6 layers)</td>
+<td>965,803</td>
+<td>1,447 KB (1,062 KB)</td>
+<td>4.144</td>
+<td>2.37%</td>
+<td>1</td>
+<td>18x / 8.4x</td>
+</tr>
+<tr>
+<td>s96 (dim 96, 3 + 6)</td>
+<td>570,987</td>
+<td>925 KB (666 KB)</td>
+<td>4.147</td>
+<td>1.86%</td>
+<td>0.978</td>
+<td>24x / 8.8x</td>
+</tr>
+<tr>
+<td><strong>s80 + polish (dim 80, 3 + 4) - chosen</strong></td>
+<td>349,547</td>
+<td>614 KB (431 KB)</td>
+<td>4.130</td>
+<td>1.71%</td>
+<td>0.969</td>
+<td>50x / 12.1x</td>
+</tr>
+<tr>
+<td>s80</td>
+<td>349,547</td>
+<td>613 KB (431 KB)</td>
+<td>4.096</td>
+<td>1.91%</td>
+<td>0.966</td>
+<td>48x / 11.5x</td>
+</tr>
+<tr>
+<td>s64 + feature matching + polish</td>
+<td>238,251</td>
+<td>459 KB (313 KB)</td>
+<td>4.076</td>
+<td>1.76%</td>
+<td>0.959</td>
+<td>73x / 13.6x</td>
+</tr>
+<tr>
+<td>s64 + polish</td>
+<td>238,251</td>
+<td>459 KB (313 KB)</td>
+<td>4.070</td>
+<td>1.86%</td>
+<td>0.956</td>
+<td>67x / 12.9x</td>
+</tr>
+<tr>
+<td>s64 + feature matching</td>
+<td>238,251</td>
+<td>457 KB (312 KB)</td>
+<td>4.065</td>
+<td>1.61%</td>
+<td>0.952</td>
+<td>60x / 11.5x</td>
+</tr>
+<tr>
+<td>s64 (dim 64, 3 + 4)</td>
+<td>238,251</td>
+<td>457 KB (312 KB)</td>
+<td>4.045</td>
+<td>2.17%</td>
+<td>0.949</td>
+<td>73x / 13.0x</td>
+</tr>
+<tr>
+<td>s48 (dim 48, 2 + 4)</td>
+<td>127,035</td>
+<td>302 KB (196 KB)</td>
+<td>3.935</td>
+<td>2.32%</td>
+<td>0.924</td>
+<td>147x / 17.6x</td>
+</tr>
+<tr>
+<td>s32 (dim 32, 2 + 3)</td>
+<td>64,683</td>
+<td>209 KB (125 KB)</td>
+<td>3.593</td>
+<td>2.72%</td>
+<td>0.831</td>
+<td>220x / 16.8x</td>
+</tr>
+</tbody>
+</table>
+<p>The polish adds 0.025-0.034 UTMOS, most of it to the package's two ARCTIC voices (bdl and slt), which pure
+distillation loses most; intermediate-feature matching (weight 0.05) adds about 0.02, and the two barely stack.</p>
+<h2>Training the G2P model</h2>
+<p>PicoVox pronounces every word with one small network, <code>lib/models/g2pModel.js</code> (<code>lib/g2p.js</code> runs it;
+<code>nn/g2pmodel.py</code> is its bit-exact Python port, which pronounces the voice model's training data). <code>nn/g2p.py</code> trains
+and exports it, with the recipe in <code>data/nn/train.json</code>'s <code>g2p</code> settings:</p>
+<pre class="prettyprint source lang-sh"><code>build/venv-nn/bin/python -B -m nn.heteronyms --out build/nn/heteronyms  # data/nn/g2p-relabel.json's words (optional)
+build/venv-nn/bin/python -B -m nn.g2p train --out build/nn/g2p-train      # four stages, about 30 minutes on one CPU core
+build/venv-nn/bin/python -B -m nn.g2p export build/nn/g2p-train --out lib/models/g2pModel.js
+build/venv-nn/bin/python -B -m nn.g2p evaluate                            # the book-token error of lib/models/g2pModel.js
+</code></pre>
+<p>The network is an autoregressive encoder-decoder (embedding 32, a bidirectional GRU of 96 over the letters, a GRU
+decoder of 192 with attention; 369,767 parameters). It trains on every word of the CMU Pronouncing Dictionary (its
+first pronunciation) but a 2,000-word monitoring set, sampled half uniformly and half by the square root of the word's
+count in 128 Project Gutenberg books, plus - 30% of the samples - 100,812 words the dictionary lacks, labeled by a
+large teacher ensemble or by the spelling and <code>-s</code> rules where they apply (<code>data/nn/g2p-words.json</code>). A base stage
+(20,000 steps of 512 at learning rate 3e-3) is polished twice with more of the samples on the most frequent words
+(5,000 steps at 1e-3 over the top 20,000 words, then 5,000 at 5e-4 over the top 12,000). The last stage (focus, 3,000
+steps) teaches the readers' pronunciations of 56 words whose dictionary-first pronunciation isn't the usual reading
+(lead L IY1 D, live L IH1 V, wind W IH1 N D, ... - <code>data/nn/g2p-relabel.json</code>; a stage's <code>relabel</code> replaces those
+words' targets, the rule-labeled words derived from them follow, and <code>focusBoost</code> gives them 2% of the samples). The
+export quantizes to 6 bits per weight. Training on the CPU with one thread is deterministic: the recipe reproduces the
+shipped model's weights bit for bit.</p>
+<p><code>nn/heteronyms.py</code> chooses the relabeled words from the LibriTTS-R readers' usage: for each word with several
+dictionary pronunciations, the variant the readers used by the forced alignments; a word is relabeled when the
+readers' majority isn't the first (significant, 3+ speakers), the difference is lexical (not vowel reduction or stress
+alone, not a function word), and the vowel's formants (or the fricative's voicing) agree where measured.</p>
+<h3>Heteronyms</h3>
+<p>Some words have readings their neighbors decide - &quot;I read it yesterday&quot; and &quot;I will read it&quot;, &quot;their lives&quot; and &quot;she
+lives&quot;, &quot;a lead pipe&quot;, the noun/verb stress pairs. The G2P module also holds two small pieces for them (no word list or
+rule at runtime): the G2P takes a reading index (a learned vector added to its decoder's first state; reading 0 is the
+default) and has an ambiguity head (whether the word's reading depends on its context); for an ambiguous word, a context
+network (<code>nn/context.py</code>: a character GRU over the three words and phrase-end marks each side, a bidirectional GRU, and a
+layer gated by the word itself - 47,779 parameters at 6 bits) chooses the reading.</p>
+<pre class="prettyprint source lang-sh"><code>build/venv-nn/bin/python -B -m nn.contextlabels books                                # the recipe's books (by Gutenberg id)
+build/venv-nn/bin/python -B -m nn.contextlabels aligned --out build/nn/context      # readers' readings (MFA alignments)
+build/venv-pos/bin/python -B -m nn.contextlabels tag --out build/nn/context         # part-of-speech tags (spaCy)
+build/venv-nn/bin/python -B -m nn.contextlabels labels --out build/nn/context       # the ambiguous words and examples
+build/venv-nn/bin/python -B -m nn.context train-g2p --labels build/nn/context/labels.json --init build/nn/g2p-train/focus.pt \
+    --out build/nn/context/g2p.pt                                                   # the reading input and ambiguity head
+build/venv-nn/bin/python -B -m nn.context train-context --labels build/nn/context/labels.json --out build/nn/context/context.pt
+build/venv-nn/bin/python -B -m nn.context export --g2p build/nn/context/g2p.pt --context build/nn/context/context.pt
+node tools/heteronyms.js                                                            # the regression set (exit 1 below the gate)
+build/venv-nn/bin/python -B -m nn.context cross-validate --labels build/nn/context/labels.json --out build/nn/context/folds
+</code></pre>
+<p>The settings are <code>data/nn/train.json</code>'s <code>context</code> section. <code>make train</code> runs all of it beside the voice stages (which
+use the committed <code>lib/models/g2pModel.js</code>) and checks its module with <code>nn.context check</code>: identical to the committed
+module below the comment header (the stages are deterministic on the same inputs), else within the recipe's tolerances
+(the regression set, the book error, the top-10K, the monitoring WER) - it never replaces the committed module. A clean
+run reproduces the committed module only while the books are unchanged (Project Gutenberg revises its files).</p>
+<p>The labels (<code>nn/contextlabels.py</code>, with the curated part in <code>data/nn/context-labels.json</code>) come from three sources: the
+LibriTTS-R readers' readings by the forced alignments; part-of-speech tags over the Project Gutenberg books (spaCy,
+training time only - <code>requirements/pos.txt</code>), mapped to readings only for words whose mapping agrees with the aligned
+audio on 95% of 10 or more tokens; and hand-written seed sentences and reviewed collocations for the readings the tags
+can't separate (lead the metal, bass, bow, row, does the deer, house the verb) and the pairs the audio doesn't
+validate. The voice training data (<code>nn.multi build</code>) takes a heteronym token's reading from the alignment where the
+aligner chose another dictionary reading than the front end's (<code>nn/readings.py</code>; <code>python -m nn.readings check</code>) - except
+where the two differ only by S against Z (use, close, excuse): the aligner can't judge word-final voicing, so those keep
+the front end's reading, and the held-out accuracy gate (<code>nn.context gate</code>, <code>folds</code>) leaves them to the regression set.</p>
+<h2>The corpora</h2>
+<p>The training data comes from public corpora, downloaded by <code>tools/corpora.py</code> (make train's first stage) - idempotently
+and sequentially, resuming interrupted downloads; <code>--list</code> shows them; <code>data/corpora/</code> is gitignored and its <code>README.md</code>
+records each corpus's source, license, and size:</p>
+<pre class="prettyprint source lang-sh"><code>make build/venv-analysis.build                                  # build/venv-analysis (tools/corpora.py's environment)
+build/venv-analysis/bin/python -I tools/corpora.py              # download the corpora into data/corpora/
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Corpus</th>
+<th>Speakers</th>
+<th>Download</th>
+<th>License</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="http://festvox.org/cmu_arctic/">CMU ARCTIC</a> 0.95 releases</td>
+<td>bdl, rms (male); slt, clb (female) - 1,132 sentences each, 16 kHz, with phone labels</td>
+<td>460 MB</td>
+<td>CMU ARCTIC free license (any use, keep the notice)</td>
+</tr>
+<tr>
+<td>CMU ARCTIC packed</td>
+<td>aew (male); eey, ljm, lnh (female) - WAV and text only</td>
+<td>260 MB</td>
+<td>CMU ARCTIC free license</td>
+</tr>
+<tr>
+<td><a href="https://www.openslr.org/141/">LibriTTS-R</a></td>
+<td>LibriVox audiobook readers, 24 kHz</td>
+<td></td>
+<td>CC BY 4.0</td>
+</tr>
+<tr>
+<td><a href="https://github.com/kan-bayashi/LibriTTSLabel">LibriTTSLabel</a></td>
+<td>Montreal Forced Aligner phone alignments of LibriTTS</td>
+<td></td>
+<td>none stated - used locally, not redistributed</td>
+</tr>
+<tr>
+<td><a href="https://github.com/CheyneyComputerScience/CREMA-D">CREMA-D</a></td>
+<td>91 actors' emotional speech (<code>nn.cremad fetch</code>)</td>
+<td></td>
+<td>ODbL</td>
+</tr>
+</tbody>
+</table>
+<p>The four labeled ARCTIC speakers' analysis settings (pitch range and formant ceiling, <code>data/targets/arctic-*.json</code>) were
+measured by the rule-based synthesizer's calibration tool, <code>tools/targets.py</code> (removed in commit 33fbfad; see git
+history); <code>nn/data.py</code> featurizes their recordings with them.</p>
+<h2>License</h2>
+<p>PicoVox is distributed under the <a href="LICENSE">MIT License</a>. The CMU Pronouncing Dictionary, the G2P network's training
+labels (in the repository, not the package), is distributed under its own license, in <code>data/LICENSE.cmudict</code>.</p></article>
+    </section>
+
+
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Modules</h3><ul><li><a href="module-picovox.html">picovox</a></li><li><a href="module-picovox_lib_sentences.html">picovox/lib/sentences</a></li></ul>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc/jsdoc">JSDoc 4.0.5</a>
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>
