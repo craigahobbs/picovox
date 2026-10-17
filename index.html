@@ -274,7 +274,7 @@ panel's texts, with a Whisper word error rate under 2% - see <a href="#the-liste
 <h2>How the models are trained</h2>
 <p>Both networks are trained from scratch from public corpora - CMU ARCTIC, LibriTTS-R, CREMA-D, and the CMU Pronouncing
 Dictionary (the G2P network's training labels; it is not used at runtime) - by <code>make train</code>, which rebuilds
-<code>lib/models/g2pModel.js</code> and <code>lib/models/voiceModel.js</code> from a clean checkout in about 2 hours on an M3 Max: a large
+<code>lib/models/g2pModel.js</code> and <code>lib/models/voiceModel.js</code> from a clean checkout in about 65 minutes on an M3 Max: a large
 teacher model trained through a differentiable copy of the synthesizer, distilled to the small student that ships. See
 <a href="#make-train">make train</a> below, and the paper,
 <a href="paper/paper.md">PicoVox: Realistic Neural Speech Synthesis in Under 1 MB of JavaScript</a>, for the methods and results.</p>
@@ -291,8 +291,9 @@ book (Project Gutenberg and Standard Ebooks), read aloud by PicoVox in the brows
 make test        # the package's unit tests (TEST='name' runs one)
 make -C train commit      # the training's gate alone - its unit tests, pylint, and 100% branch coverage
 make -C train test TEST=tests.test_params    # one test module of the training's
-make train       # retrain the models (see below)
-make -j train-g2p   # the G2P chain alone - its stages of make train, for G2P work
+make train       # retrain the voice model (see below)
+make -j train-check # check that the committed G2P and heteronym relabels reproduce (standalone)
+make -j train-g2p   # the G2P chain alone, for G2P work
 </code></pre>
 <p>The training pipeline is a Python package, <code>picovox_train</code> (<code>train/src/picovox_train/</code> - <code>picovox_train/&lt;module&gt;.py</code>
 below), and Node scripts (<code>nn/js/</code>, <code>tools/</code>); they use the package's modules but aren't part of it. <code>train/</code> is a
@@ -310,7 +311,7 @@ node nn/js/speak.js -m data/nn/multi &quot;Hello.&quot; -o out/hello.wav --voice
 node nn/js/unpack.js lib/models/voiceModel.js out/voice                 # a packaged model back to its export
 node nn/js/packagecheck.js lib/models/voiceModel.js out/voice           # check a packaged model against its export
 node nn/js/voicescheck.js [data/nn/multi]                               # check the designed voices
-node tools/heteronyms.js                                                # the heteronym regression set
+node tools/heteronyms.js                                                # the heteronym and names regression sets
 </code></pre>
 <p><code>nn/js/speak.js</code> speaks with an exported model (<code>picovox_train.export CHECKPOINT --voice NAME</code> writes
 <code>data/nn/NAME.json</code> and <code>.bin</code>; <code>data/nn/multi</code> is an export of the multi-speaker model), every word pronounced by the
@@ -522,10 +523,12 @@ checkout, by one recipe, <code>data/nn/train.json</code> (every stage's settings
 </tr>
 </tbody>
 </table>
-<p>The critical path - the readers' data, teacher A (~22 minutes) and B (~60), the targets (~9), the student (~11) and
-its polish (~9), the gate, the package - takes about 2 hours on an M3 Max (the corpora downloaded once before). The
-voice data is built with the committed G2P, so the G2P retrain is off the critical path; its module is checked against
-the committed <code>lib/models/g2pModel.js</code> (identical, else within the recipe's tolerances - it never replaces it). The
+<p>The critical path - the readers' data (7.3 minutes), teacher A (28.6) and B (20.4), the targets (3.6), the student
+(4.9) and its polish (4.4), the gate, the package (2.0) - took 71 minutes from scratch on an M3 Max on full power (94
+W; the corpora downloaded once before), with the G2P chain beside it; without it - make train-check now runs it
+standalone - teacher A takes about 19, so about 62. The voice data is built with the committed G2P; make train-check
+reproduces the G2P and checks its module against the committed <code>lib/models/g2pModel.js</code> (identical, else within the
+recipe's tolerances - it never replaces it), and the heteronym relabeling against <code>data/nn/g2p-relabel.json</code>. The
 package's manifest records its provenance: the commit, the recipe's and the training data's hashes, and the gate's
 scores. <code>python -m picovox_train.smoke</code> runs every stage's entry point for a few steps on the CPU.</p>
 <p>Each training stage's final model - teacher A's last checkpoint (which teacher B starts from), teacher B's best (the
@@ -571,8 +574,9 @@ minutes at once (one fold alone, two threads, took 134). On a quiet M3 Max the c
 network's 30 plus the reading stage and the check (the labels, the context network, and the folds finish beside the
 network).</p>
 <p><code>make train</code> first checks the power (<code>tools/trainpower.sh</code>, macOS laptops): the run keeps the GPU busy for hours, and
-an M3 Max under it draws about 85 W, so on battery or an adapter under 96 W (<code>TRAIN_MIN_WATTS</code>) it says so and, at a
-terminal, waits for Enter - plug in a bigger adapter first (Apple's 96 W or 140 W). <code>TRAIN_POWER_CHECK=0</code> skips it.</p>
+an M3 Max under it draws about 85 W, so on battery or an adapter under 90 W (<code>TRAIN_MIN_WATTS</code>) it says so and, at a
+terminal, waits for Enter - plug in a bigger adapter first (Apple's 96 W or 140 W - a 14-inch MacBook Pro negotiates
+about 94 W from either). <code>TRAIN_POWER_CHECK=0</code> skips it.</p>
 <h2>Distilling the voice model</h2>
 <p>Each retrain of the multi-speaker acoustic model ends the same way: train a big teacher, then distill small students
 from it and ship the smallest one that keeps the teacher's quality. <code>picovox_train/distill.py</code> runs that pipeline, with
@@ -598,7 +602,9 @@ speaker, style, and channel-equalizer tables are copied and frozen, so a voice d
 speakers is the same voice in a student. A student runs with the teacher's durations (teacher forcing on its length
 regulator) and learns L1 on the normalized parameter frames plus the duration losses against the teacher's duration
 outputs. <code>--init-teacher</code> copies every teacher tensor of the same shape; <code>--feature-weight</code> adds intermediate-feature
-matching. Runs go to <code>build/nn/runs/distill-&lt;student&gt;/</code>.</li>
+matching. The training (<code>data/nn/train.json</code>'s <code>distill.train</code>) is 12,000 steps of Muon on the hidden matrices
+(AdamW for the rest) with a warmup-stable-decay schedule - constant, then the last 25% cooled down by 1 - sqrt
+(<code>picovox_train/optim.py</code>). Runs go to <code>build/nn/runs/distill-&lt;student&gt;/</code>.</li>
 <li><strong>Polish</strong> - <code>picovox_train/trainmulti.py</code>'s real-audio losses (the spectral loss through the differentiable
 synthesizer on the recordings, the adversarial critic - started from the teacher's - and feature matching) for a
 short fine-tune.</li>
@@ -750,6 +756,33 @@ shipped model's weights bit for bit.</p>
 dictionary pronunciations, the variant the readers used by the forced alignments; a word is relabeled when the
 readers' majority isn't the first (significant, 3+ speakers), the difference is lexical (not vowel reduction or stress
 alone, not a function word), and the vowel's formants (or the fricative's voicing) agree where measured.</p>
+<h3>The dictionary audit</h3>
+<p>The network learns the dictionary's errors too (HOBBES HH AA1 B IY0 Z - &quot;hobbies&quot; - and, from it, &quot;mobbes&quot; M AA1 B
+IY2 Z), so <code>data/nn/g2p-fixes.json</code> corrects the dictionary's labels where the evidence says they're wrong; <code>g2p.py</code>
+applies it in every stage, before the relabeled words (the rule-labeled words derived from a fixed word follow - HOBBES'S
+HH AA1 B Z IH0 Z). <code>picovox_train/g2paudit.py</code> finds them:</p>
+<pre class="prettyprint source lang-sh"><code>PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2paudit folds --out build/nn/g2paudit -j 5     # 10 screening models (resumable)
+PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2paudit suspects --out build/nn/g2paudit \
+    --books build/nn/books --catalog ../picoshelf/data/catalog.json --heteronyms build/nn/context/labels.json
+HF_HOME=build/nn/cremad/hf PYTHONPATH=train/src build/venv-listeners/bin/python -B -m picovox_train.g2paudit audio --out build/nn/g2paudit
+PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2paudit adjudicate --out build/nn/g2paudit [--extra EXTRA.json]
+</code></pre>
+<p>Two partitions of the dictionary into five folds (a word's possessives in its fold) train ten screening models (the
+recipe's network and sampling, 6,000 steps, no rule- or teacher-labeled words), so every word is held out by two of
+them (held-out accuracy 62% - any pronunciation, stress included; the dictionary is mostly names). A word is a suspect
+when both its models' phones differ from its label (not by stress alone) by a log-probability margin of 3, or both prefer
+another of its variants by that margin: 12,750 of 124,101 words - mostly legitimate irregulars (of, colonel) and
+foreign names. Where 3+ LibriTTS-R readers spoke a suspect, the CTC phoneme recognizer (<code>cremad.py</code>'s) scores the label
+and each alternative (the models' predictions, the dictionary's variants - those that would be a lexical correction: not
+stress or reduction alone, not a consonant dropped, not a merger's vowels, not a function word or a one- or two-letter
+word) on up to 12 of its aligned tokens with their neighbors; a token votes for a candidate 2 (log) more likely than the
+rest, and a confirmed error needs the votes' Wilson 95% lower bound above one half from 3+ speakers. 140 control words
+(both models agree with the label, against a model's second guess) measure the method: no false errors, 1.5% of the
+tokens' votes for the wrong candidate. The audio confirmed 13 errors and 143 labels; the rest have no audio evidence.</p>
+<p>The names regression set (<code>data/nn/names-test.json</code>, run by <code>tools/heteronyms.js</code> as kind <code>names</code>): surnames, first
+names, and place names with verified pronunciations - HOBBES first (the dictionary's own evidence: its second variant,
+HOBBS, and every other -bes word), the audio's confirmed errors and labels, and well-established names. Its minimum is
+the shipped module's score when it was added (63/73), so it can only go up.</p>
 <h3>Heteronyms</h3>
 <p>Some words have readings their neighbors decide - &quot;I read it yesterday&quot; and &quot;I will read it&quot;, &quot;their lives&quot; and &quot;she
 lives&quot;, &quot;a lead pipe&quot;, the noun/verb stress pairs. The G2P module also holds two small pieces for them (no word list or
@@ -769,8 +802,8 @@ node tools/heteronyms.js                                                        
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context cross-validate --labels build/nn/context/labels.json --out build/nn/context/folds -j 10
 </code></pre>
 <p>(<code>aligned</code>, <code>tag</code>, and <code>cross-validate</code> take <code>-j</code>, their worker processes - the results are the same for any count.)</p>
-<p>The settings are <code>data/nn/train.json</code>'s <code>context</code> section. <code>make train</code> runs all of it beside the voice stages (which
-use the committed <code>lib/models/g2pModel.js</code>) and checks its module with <code>picovox_train.context check</code>: identical to the
+<p>The settings are <code>data/nn/train.json</code>'s <code>context</code> section. <code>make train-check</code> runs all of it (the voice stages use the
+committed <code>lib/models/g2pModel.js</code>) and checks its module with <code>picovox_train.context check</code>: identical to the
 committed module below the comment header (the stages are deterministic on the same inputs), else within the recipe's
 tolerances (the regression set, the book error, the top-10K, the monitoring WER) - it never replaces the committed
 module. The books are pinned (<code>data/nn/books.json</code> - see make train), so a clean run reproduces the committed module.</p>
