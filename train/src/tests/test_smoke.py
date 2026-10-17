@@ -22,8 +22,9 @@ from . import helpers
 OUTPUTS = {
     'g2p-train': 'g2p/done.json', 'g2p-export': 'g2pModel.js', 'context-g2p': 'context-g2p.pt', 'context-train': 'context.pt',
     'context-export': 'g2pModel-context.js', 'data-build': 'multi/index.json', 'teacher-a': 'runs/smoke-a/last.pt',
-    'teacher-b': 'runs/smoke-b/last.pt', 'distill-targets': 'targets/index.json', 'distill-train': 'runs/distill-s32/best.pt',
-    'distill-polish': 'runs/distill-s32-polish/best.pt', 'export': 'export/smoke.json', 'package': 'voiceModel.js'
+    'teacher-b': 'runs/smoke-b/last.pt', 'teacher-options': 'runs/smoke-options/ema-best.pt', 'distill-targets': 'targets/index.json',
+    'distill-train': 'runs/distill-s32/best.pt', 'distill-polish': 'runs/distill-s32-polish/best.pt',
+    'distill-options': 'runs/distill-s32-options/ema-best.pt', 'export': 'export/smoke.json', 'package': 'voiceModel.js'
 }
 
 
@@ -105,6 +106,10 @@ class TestSmoke(unittest.TestCase):
                                                         '--steps', '3'])
         self.assertEqual(run.command('context-g2p')[6], os.path.join(run.root, 'build', 'nn', 'context', 'labels.json'))
         self.assertIn('--adversarial-start', run.command('teacher-b'))
+        # (every training step option, in a stage-A run and a student)
+        for name in ('teacher-options', 'distill-options'):
+            self.assertIn(' '.join(smoke.OPTIONS), ' '.join(run.command(name)))
+        self.assertEqual(run.command('teacher-options')[-2:], ['--crop-warmup', '2:1.0'])
         # The distillation's recipe - a short book, few validation items
         with open(os.path.join(run.out, 'train.json'), encoding='utf-8') as file:
             recipe = json.load(file)
@@ -121,7 +126,7 @@ class TestSmoke(unittest.TestCase):
         run = self.smoke_run(failing=['g2p-train', 'teacher-a'])
         status, output = run.main()
         self.assertEqual(status, 1)
-        self.assertEqual(run.names(), ['g2p-train', 'data-build', 'teacher-a'])
+        self.assertEqual(run.names(), ['g2p-train', 'data-build', 'teacher-a', 'teacher-options'])
         self.assertEqual(output.splitlines()[-1], 'smoke: FAILED - g2p-train, teacher-a')
         self.assertIn(f'FAILED g2p-train (0 s) - exit 1, missing [{os.path.join(run.out, "g2p", "done.json")!r}], see '
                       f'{os.path.join(run.out, "g2p-train.log")}', output)
@@ -132,14 +137,14 @@ class TestSmoke(unittest.TestCase):
         status, output = run.main()
         self.assertEqual(status, 1)
         self.assertEqual(run.names(), ['g2p-train', 'g2p-export', 'context-g2p', 'data-build', 'teacher-a', 'teacher-b',
-                                       'distill-targets', 'distill-train'])
+                                       'teacher-options', 'distill-targets', 'distill-train', 'distill-options'])
         self.assertIn('FAILED context-g2p (0 s) - exit 0, missing', output)
 
     def test_later_failures(self):
         run = self.smoke_run(failing=['context-train', 'teacher-b', 'distill-targets'])
         self.assertEqual(run.main()[0], 1)
         self.assertEqual(run.names(), ['g2p-train', 'g2p-export', 'context-g2p', 'context-train', 'data-build', 'teacher-a',
-                                       'teacher-b'])
+                                       'teacher-b', 'teacher-options'])
         run = self.smoke_run(failing=['distill-targets', 'export'])
         self.assertEqual(run.main()[0], 1)
         self.assertEqual(run.names()[-1], 'distill-targets')
@@ -147,7 +152,7 @@ class TestSmoke(unittest.TestCase):
     def test_package_failure(self):
         run = self.smoke_run(failing=['export'])
         self.assertEqual(run.main()[0], 1)
-        self.assertEqual(run.names()[-2:], ['distill-polish', 'export'])
+        self.assertEqual(run.names()[-3:], ['distill-polish', 'distill-options', 'export'])
 
     def test_no_labels(self):
         # No context labels (nn.contextlabels not run) - the context stage is skipped
@@ -163,9 +168,10 @@ class TestSmoke(unittest.TestCase):
         self.assertEqual(run.names(), ['g2p-train', 'g2p-export'])
         self.assertTrue(os.path.exists(os.path.join(run.out, 'old')))
         self.assertEqual(run.main('--only', 'teacher,package', '--keep')[0], 0)
-        self.assertEqual(run.names()[2:], ['teacher-a', 'teacher-b'])
+        self.assertEqual(run.names()[2:], ['teacher-a', 'teacher-b', 'teacher-options'])
         self.assertEqual(run.main('--only', 'distill,package', '--keep')[0], 0)
-        self.assertEqual(run.names()[4:], ['distill-targets', 'distill-train', 'distill-polish', 'export', 'package'])
+        self.assertEqual(run.names()[5:], ['distill-targets', 'distill-train', 'distill-polish', 'distill-options', 'export',
+                                           'package'])
 
     def test_default_out(self):
         parser_default = os.path.join(ROOT, 'build', 'nn', 'smoke')

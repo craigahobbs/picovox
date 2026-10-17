@@ -47,6 +47,9 @@ The network:
   voices) and a style table (emotions scaled by intensity) conditioning the network (FiLM), trained on the American
   reader pool and CREMA-D with an adversarial spectrogram critic (discriminator.py) against the over-smoothing; the
   losses are losses.py's
+- optim.py - the training step's options for trainmulti.py and distill.py (all off by default): the lean gradient
+  clip and AdamW step, Muon for the hidden matrices (batched Newton-Schulz), the flat EMA of the weights, the
+  warmup-stable-decay schedule, and zero-initialized residual projections
 - quant.py - weight quantization at 8-4 bits, per row or per group, shared by export.py (--bits, --group),
   quantization-aware training (trainmulti.py --qat-bits), and lib/model.js
 - distill.py - knowledge distillation of the multi-speaker model into small students (data/nn/train.json's distill)

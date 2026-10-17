@@ -477,6 +477,42 @@ class TestTraining(DistillCase):
             rows = [json.loads(line) for line in file]
         self.assertIn('features', rows[0]['train'])
 
+    def test_train_student_step_options(self):
+        # Every training step option (Muon and the lean step, the EMA, the wsd schedule, zero-initialized projections
+        # past the teacher's tensors); each validation worse than the last - the EMA's best stays the first's
+        validate = distill.validate_student
+        calls = []
+
+        def worse(*args, **kwargs):
+            result = validate(*args, **kwargs)
+            calls.append(result)
+            result['frames'] += len(calls)
+            return result
+        with unittest.mock.patch.object(distill, 'validate_student', side_effect=worse), \
+                unittest.mock.patch.object(distill.optim, 'zero_init_projections', wraps=distill.optim.zero_init_projections) as zero:
+            self.assertEqual(self.run_main(['train', '--config', self.config, '--device', 'cpu', '--targets', self.targets,
+                                            '--name', 'step-options', '--optimizer', 'muon', '--ema', '0.9', '--schedule', 'wsd',
+                                            '--cooldown', '0.5', '--cooldown-shape', '1-sqrt', '--zero-init-proj', '--init-teacher',
+                                            '--max-frames', '3000']), 0)
+        zero.assert_called_once()
+        directory = os.path.join(distill.RUNS_DIR, 'distill-step-options')
+        ema_best = torch.load(os.path.join(directory, 'ema-best.pt'), weights_only=False)
+        ema_last = torch.load(os.path.join(directory, 'ema-last.pt'), weights_only=False)
+        self.assertEqual((ema_best['step'], ema_last['step']), (2, 3))
+        settings = ema_best['args']['settings']
+        self.assertEqual((settings['optimizer'], settings['ema'], settings['schedule'], settings['cooldown'], settings['cooldownShape'],
+                          settings['zeroInitProj'], settings['maxFrames'], settings['leanClip']),
+                         ('muon', 0.9, 'wsd', 0.5, '1-sqrt', True, 3000, False))
+        with open(os.path.join(directory, 'log.jsonl'), encoding='utf-8') as file:
+            rows = [json.loads(line) for line in file]
+        self.assertEqual([list(row)[0] for row in rows], ['emaVal', 'val', 'emaVal', 'val'])
+
+        # The lean step alone, with feature matching's projections
+        self.assertEqual(self.run_main(['train', '--config', self.config, '--device', 'cpu', '--targets', self.targets,
+                                        '--name', 'lean', '--lean-clip', '--feature-weight', '0.5', '--steps', '1']), 0)
+        state = torch.load(os.path.join(distill.RUNS_DIR, 'distill-lean', 'best.pt'), weights_only=False)
+        self.assertTrue(state['args']['settings']['leanClip'])
+
     def test_tee(self):
         first, second = io.StringIO(), io.StringIO()
         tee = distill.Tee(first, second)
@@ -508,6 +544,13 @@ class TestTraining(DistillCase):
             self.assertEqual(self.run_main(['polish', '--config', self.config, '--teacher', self.teacher, '--steps', '1']), 0)
         state = torch.load(os.path.join(distill.RUNS_DIR, 'distill-tiny-polish', 'last.pt'), weights_only=False)
         self.assertEqual(state['step'], 1)
+
+        # trainmulti.py's flags added (--train-args)
+        self.assertEqual(self.run_main(['polish', '--config', self.config, '--init', init, '--device', 'cpu', '--name', 'shine-ema',
+                                        '--train-args', '--ema 0.9 --lean-clip']), 0)
+        state = torch.load(os.path.join(distill.RUNS_DIR, 'distill-shine-ema', 'last.pt'), weights_only=False)
+        self.assertEqual((state['args']['ema'], state['args']['lean_clip']), (0.9, True))
+        self.assertTrue(os.path.exists(os.path.join(distill.RUNS_DIR, 'distill-shine-ema', 'ema-best.pt')))
 
 
 class TestEvaluation(DistillCase):

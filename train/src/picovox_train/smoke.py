@@ -12,8 +12,10 @@ directory, each checked to finish and write its outputs:
 - context - picovox_train.context train-g2p and train-context (3 steps) and export, from the g2p stage (when build/nn/context has the
   context labels - picovox_train.contextlabels)
 - data - picovox_train.multi build --out on a few utterances of two speakers
-- teacher - picovox_train.trainmulti stage A (3 steps), then stage B from it (the critic, the emotional speech)
-- distill - picovox_train.distill targets (32 items, one short book) from the stage-B teacher, train (3 steps), polish (2 steps)
+- teacher - picovox_train.trainmulti stage A (3 steps), then stage B from it (the critic, the emotional speech), and stage A
+  with every training step option (optim.py)
+- distill - picovox_train.distill targets (32 items, one short book) from the stage-B teacher, train (3 steps), polish (2 steps),
+  and train with every training step option
 - package - picovox_train.export and picovox_train.package of the polished student
 
 The voice stages read the training data (build/nn/data/multi and cremad); everything is written under --out (runs go
@@ -33,6 +35,10 @@ from . import ROOT, SOURCE_DIR
 
 PYTHON = sys.executable
 STAGES = ('g2p', 'context', 'data', 'teacher', 'distill', 'package')
+
+# The training step's options (optim.py), all on
+OPTIONS = ['--lean-clip', '--optimizer', 'muon', '--ema', '0.99', '--schedule', 'wsd', '--cooldown', '0.5', '--cooldown-shape', '1-sqrt',
+           '--zero-init-proj']
 
 # A short public-domain text for the distillation targets' book sentences
 BOOK_TEXT = '''Call me Ishmael. Some years ago, never mind how long precisely, having little or no money in my purse, and
@@ -104,6 +110,9 @@ def main(argv=None):
             run('teacher-b', ['picovox_train.trainmulti', '--name', 'smoke-b', '--recipe', 'teacher.b', '--init',
                               os.path.join(runs, 'smoke-a', 'last.pt'), '--steps', '3', '--val-every', '3', '--adversarial-start',
                               '1'] + common, [teacher])
+        run('teacher-options', ['picovox_train.trainmulti', '--name', 'smoke-options', '--recipe', 'teacher.a', '--steps', '3',
+                                '--val-every', '3'] + common + OPTIONS + ['--crop-warmup', '2:1.0'],
+            [os.path.join(runs, 'smoke-options', 'ema-best.pt')])
 
     student = os.path.join(runs, 'distill-s32-polish', 'best.pt')
     if 'distill' in stages and os.path.exists(teacher):
@@ -127,6 +136,9 @@ def main(argv=None):
             if run('distill-train', ['picovox_train.distill', 'train', '--student', 's32', '--steps', '3', '--targets', targets] + distill,
                    [os.path.join(runs, 'distill-s32', 'best.pt')]):
                 run('distill-polish', ['picovox_train.distill', 'polish', '--student', 's32', '--steps', '2'] + distill, [student])
+            run('distill-options', ['picovox_train.distill', 'train', '--student', 's32', '--name', 's32-options', '--steps', '3',
+                                    '--targets', targets] + distill + OPTIONS,
+                [os.path.join(runs, 'distill-s32-options', 'ema-best.pt')])
 
     if 'package' in stages and os.path.exists(student):
         export_dir = os.path.join(out, 'export')

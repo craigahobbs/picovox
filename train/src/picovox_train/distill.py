@@ -41,7 +41,10 @@ The method:
   divergence from the teacher's pause probability), and the paused durations (MSE weighted by the teacher's pause
   probability). Options: --init-teacher (copy every teacher tensor of the same name and shape) and --feature-weight
   (intermediate-feature matching: the student's encoder output and last decoder features, projected to the teacher's
-  widths, against the teacher's).
+  widths, against the teacher's). The training step's options (optim.py; off by default): --lean-clip, --optimizer
+  muon, --ema DECAY (the EMA weights validated beside the raw ones - ema-best.pt), --schedule wsd --cooldown F
+  --cooldown-shape, and --zero-init-proj - or the recipe's train settings leanClip, optimizer, ema, schedule, cooldown,
+  cooldownShape, and zeroInitProj.
 - Polish - an optional short fine-tune with the real-audio losses (trainmulti.py: the multi-resolution spectral
   loss through the differentiable synthesizer on the recordings, and the adversarial critic and feature matching as
   stage B used them, the critic starting from the teacher's).
@@ -53,6 +56,7 @@ The method:
 """
 
 import argparse
+import copy
 import datetime
 import gzip
 import json
@@ -75,7 +79,7 @@ from .export import export, load_model, token_remap, training_token_counts
 from .frontend import pronounce_texts, set_pronunciations, tokenize, vocabulary
 from .model import BOS, FIRST_PHONE, FIXED_NAMES, PAD, STYLE_NAMES, MultiModel, is_boundary, parameter_count
 from .synthesize import sentences
-from . import ROOT, books, panel, params
+from . import ROOT, books, optim, panel, params
 
 
 CONFIG_PATH = os.path.join(ROOT, 'data', 'nn', 'train.json')
@@ -241,10 +245,10 @@ def target_inputs(state, settings, remap, log):
             log(f'books: {number}/{len(paths)} {os.path.basename(path)}: {len(book)} sentences, {kept} kept')
     order = rng.permutation(len(sentence_list))
     val_count = settings['valItems']
-    for copy in range(settings['bookCopies']):
+    for copy_index in range(settings['bookCopies']):
         for rank, index in enumerate(order):
             split = 1 if rank < val_count else 0
-            if split and copy:
+            if split and copy_index:
                 continue
             draw = rng.random()
             blend = 0.0
@@ -644,10 +648,13 @@ def train_student(args):
     """The train subcommand - a student distilled from the teacher's targets"""
     config = load_config(args.config)
     args.student = args.student or config['student']
-    settings = {**config['train']}
-    for key in ('steps', 'batch', 'lr', 'warmup'):
-        if getattr(args, key) is not None:
-            settings[key] = getattr(args, key)
+    settings = {'leanClip': False, 'optimizer': 'adamw', 'ema': 0.0, 'schedule': 'cosine', 'cooldown': 0.0, 'cooldownShape': 'linear',
+                'zeroInitProj': False, **config['train']}
+    for key, setting in (('steps', 'steps'), ('batch', 'batch'), ('lr', 'lr'), ('warmup', 'warmup'), ('max_frames', 'maxFrames'),
+                         ('lean_clip', 'leanClip'), ('optimizer', 'optimizer'), ('ema', 'ema'), ('schedule', 'schedule'),
+                         ('cooldown', 'cooldown'), ('cooldown_shape', 'cooldownShape'), ('zero_init_proj', 'zeroInitProj')):
+        if getattr(args, key, None) is not None:
+            settings[setting] = getattr(args, key)
     name = args.name or args.student
     directory = os.path.join(RUNS_DIR, f'distill-{name}')
     os.makedirs(directory, exist_ok=True)
@@ -658,6 +665,12 @@ def train_student(args):
     teacher, teacher_state = load_model(targets.index['teacher'] if not args.teacher else root_path(args.teacher), device)
     student_cfg = json.loads(args.student_config) if args.student_config else student_config(config, args.student)
     model, copied = build_student(student_cfg, teacher.cpu(), teacher_state, settings['dropout'], args.init_teacher)
+    if settings['zeroInitProj']:
+        # (the projections the teacher's weights didn't initialize)
+        with torch.no_grad():
+            kept = {name: tensor.clone() for name, tensor in model.state_dict().items() if name in copied}
+            optim.zero_init_projections(model)
+            model.load_state_dict(kept, strict=False)
     model = model.to(device)
     teacher = teacher.to(device)
     projections = FeatureProjections(model, teacher).to(device) if args.feature_weight > 0 else None
@@ -665,16 +678,24 @@ def train_student(args):
     if projections is not None:
         trainable += list(projections.parameters())
     fused = device.type in ('mps', 'cuda')
-    optimizer = torch.optim.AdamW(trainable, lr=settings['lr'], weight_decay=settings['weightDecay'], betas=(0.9, 0.98),
-                                  fused=fused or None)
+    # (the lean step - and Muon, which takes its clip - optim.py)
+    lean = settings['leanClip'] or settings['optimizer'] == 'muon'
+    if lean:
+        groups = optim.param_groups(model, projections.parameters() if projections is not None else (),
+                                    muon=settings['optimizer'] == 'muon')
+        optimizer = optim.LeanOptimizer(groups, lr=settings['lr'], weight_decay=settings['weightDecay'], betas=(0.9, 0.98))
+    else:
+        optimizer = torch.optim.AdamW(trainable, lr=settings['lr'], weight_decay=settings['weightDecay'], betas=(0.9, 0.98),
+                                      fused=fused or None)
     steps = settings['steps']
 
     def learning_rate(step):
-        if step < settings['warmup']:
-            return (step + 1) / settings['warmup']
-        progress = (step - settings['warmup']) / max(1, steps - settings['warmup'])
-        return 0.05 + 0.95 * 0.5 * (1 + math.cos(math.pi * min(1.0, progress)))
+        return optim.lr_factor(step, steps, settings['warmup'], settings['schedule'], settings['cooldown'], settings['cooldownShape'])
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, learning_rate)
+    # (the EMA of the weights, and a model to validate it in)
+    ema = optim.FlatEMA(model.parameters(), settings['ema']) if settings['ema'] else None
+    ema_model = copy.deepcopy(model) if ema else None
+    ema_best = math.inf
     column_mask = torch.ones(params.COUNT, device=device)
     for fixed in FIXED_NAMES:
         column_mask[params.INDEX[fixed]] = 0
@@ -720,12 +741,17 @@ def train_student(args):
         losses['total'] = total
         optimizer.zero_grad()
         total.backward()
-        norm = torch.nn.utils.clip_grad_norm_(trainable, 1.0)
-        if fused:
-            optimizer.found_inf = (~torch.isfinite(norm)).float()  # pragma: no cover - (the GPU's fused AdamW only)
-            optimizer.step()  # pragma: no cover
-        elif torch.isfinite(norm):
+        if lean:
             optimizer.step()
+        else:
+            norm = torch.nn.utils.clip_grad_norm_(trainable, 1.0)
+            if fused:
+                optimizer.found_inf = (~torch.isfinite(norm)).float()  # pragma: no cover - (the GPU's fused AdamW only)
+                optimizer.step()  # pragma: no cover
+            elif torch.isfinite(norm):
+                optimizer.step()
+        if ema is not None:
+            ema.update()
         scheduler.step()
         step += 1
         pending.append(torch.stack([value.detach().float() for value in losses.values()]))
@@ -739,6 +765,21 @@ def train_student(args):
             say(' '.join(f'{key} {value:.4g}' if isinstance(value, float) else f'{key} {value}' for key, value in row.items()))
             log.write(json.dumps({'train': row}) + '\n')
             log.flush()
+        if ema is not None and (step % settings['valEvery'] == 0 or step == steps):
+            # The EMA weights' validation (an emaVal row) and checkpoints - ema-best.pt (the lowest total), ema-last.pt
+            ema.copy_to(ema_model.parameters())
+            ema_result = validate_student(ema_model, targets, val_indices, device, column_mask)
+            ema_result['total'] = ema_result['frames'] + settings['durationWeight'] * (
+                ema_result['durPhone'] + ema_result['durPause'] + ema_result['durPaused'])
+            say('  EMA VAL ' + ' '.join(f'{key} {value:.4g}' for key, value in ema_result.items()))
+            log.write(json.dumps({'emaVal': {'step': step, **ema_result}}) + '\n')
+            log.flush()
+            ema_state = checkpoint_state(ema_model, teacher_state, step, args_dict, ema_result,
+                                         {'distill': {'student': student_cfg, 'targets': targets.directory}})
+            if ema_result['total'] < ema_best:
+                ema_best = ema_result['total']
+                torch.save(ema_state, os.path.join(directory, 'ema-best.pt'))
+            torch.save(ema_state, os.path.join(directory, 'ema-last.pt'))
         if step % settings['valEvery'] == 0 or step == steps:
             result = validate_student(model, targets, val_indices, device, column_mask)
             result['total'] = result['frames'] + settings['durationWeight'] * (result['durPhone'] + result['durPause'] +
@@ -804,7 +845,7 @@ def polish(args):
     student_cfg = {key: value for key, value in state['config'].items() if key != 'kind'}
     argv = ['--name', f'distill-{name}', '--recipe-file', args.config, '--recipe', 'distill.polish', '--init', init,
             '--init-critic', teacher,
-            '--config', json.dumps(student_cfg), '--steps', str(settings['steps'])]
+            '--config', json.dumps(student_cfg), '--steps', str(settings['steps'])] + args.train_args.split()
     if args.device:
         argv += ['--device', args.device]
     log_line('students', f'{name}: polishing {init} - {settings["steps"]} steps of the real-audio losses')
@@ -1082,6 +1123,14 @@ def main(argv=None):
     sub.add_argument('--batch', type=int, default=None)
     sub.add_argument('--lr', type=float, default=None)
     sub.add_argument('--warmup', type=int, default=None)
+    sub.add_argument('--max-frames', type=int, default=None, help='the most padded frames in a batch')
+    sub.add_argument('--lean-clip', action='store_true', default=None, help='the lean clip and AdamW step (optim.py)')
+    sub.add_argument('--optimizer', choices=['adamw', 'muon'], default=None, help='muon: Muon for the hidden matrices')
+    sub.add_argument('--ema', type=float, default=None, help='an EMA of the weights at this decay, validated beside them')
+    sub.add_argument('--schedule', choices=['cosine', 'wsd'], default=None, help='the learning rate schedule')
+    sub.add_argument('--cooldown', type=float, default=None, help="wsd: the cooldown's share of the steps")
+    sub.add_argument('--cooldown-shape', choices=['linear', '1-sqrt'], default=None)
+    sub.add_argument('--zero-init-proj', action='store_true', default=None, help='zero-initialize the residual output projections')
     sub.add_argument('--init-teacher', action='store_true', help='copy every teacher tensor of the same name and shape')
     sub.add_argument('--feature-weight', type=float, default=0.0, help='intermediate-feature matching weight (0: none)')
     sub.add_argument('--log-every', type=int, default=50)
@@ -1096,6 +1145,7 @@ def main(argv=None):
     sub.add_argument('--teacher', default=None, help='the critic\'s source (default the targets\' teacher)')
     sub.add_argument('--name', default=None, help='the run name (distill-<name>; default <student>-polish)')
     sub.add_argument('--steps', type=int, default=None)
+    sub.add_argument('--train-args', default='', help="trainmulti.py flags added to the recipe's (e.g. '--ema 0.995 --lean-clip')")
     sub.set_defaults(func=polish)
 
     sub = subparsers.add_parser('eval', help='evaluate models through the browser path')
