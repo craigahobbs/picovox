@@ -307,7 +307,7 @@ def archive_of(texts):
 # The bundle of the pins' texts at a URL - its pin, built by the bundle command from a books directory with the texts
 class TestBundle(BooksCase):
 
-    URL = 'https://github.com/craigahobbs/picovox/releases/download/books-v1/books-v1.tar.xz'
+    URL = 'https://craigahobbs.github.io/picovox/books/books-v1.tar.xz'
 
     def build(self, texts=None):
         # Bundle the texts (default: the pinned pg7) from a separate books directory, returning its bytes
@@ -332,7 +332,7 @@ class TestBundle(BooksCase):
         with captured() as (stdout, _):
             books.main(['--pins', self.pins_path, '--books', os.path.join(self.directory, 'source'), 'bundle', 'books-v1'])
         self.assertTrue(stdout.getvalue().startswith('books: bundled 1 pinned texts as '))
-        self.assertIn(f'publish it as the asset of the picovox repository\'s release books-v1 ({self.URL})', stdout.getvalue())
+        self.assertIn(f'publish it with the site (make gh-pages - {self.URL})', stdout.getvalue())
 
         # A pinned text that isn't in the books directory fails the command
         with captured() as (stdout, stderr), unittest.mock.patch('urllib.request.urlopen', FakeUrls({
@@ -391,3 +391,26 @@ class TestBundle(BooksCase):
             message = str(raised.exception)
             self.assertIn(f'  {self.URL}: ', message)
             self.assertIn(f'  {url}: <urlopen error down>', message)
+
+    def test_publish_command(self):
+        # The bundle into the site's books/ - from the books directory, else downloaded
+        data = self.build()
+        site = os.path.join(self.directory, 'site')
+        urls = FakeUrls({self.URL: data})
+        with unittest.mock.patch('urllib.request.urlopen', urls), captured() as (stdout, _):
+            self.assertEqual(books.main(['--pins', self.pins_path, '--books', self.books, 'publish', site]), 0)
+            self.assertEqual(books.main(['--pins', self.pins_path, '--books', self.books, 'publish', site]), 0)
+        self.assertEqual(urls.requests, [self.URL])
+        self.assertEqual(stdout.getvalue(), f'books: published books-v1.tar.xz in {site}/books\n' * 2)
+        with open(os.path.join(site, 'books', 'books-v1.tar.xz'), 'rb') as file:
+            self.assertEqual(file.read(), data)
+
+        # Not the pinned bundle, or no bundle
+        shutil.rmtree(self.books)
+        with unittest.mock.patch('urllib.request.urlopen', FakeUrls({self.URL: b'tampered'})), captured() as (_, stderr):
+            self.assertEqual(books.main(['--pins', self.pins_path, '--books', self.books, 'publish', site]), 1)
+        self.assertTrue(stderr.getvalue().startswith(f'books: the bundle {self.URL}: sha256 '))
+        self.write_pins({'pg7': pin_of(PINNED)})
+        with captured() as (_, stderr):
+            self.assertEqual(books.main(['--pins', self.pins_path, '--books', self.books, 'publish', site]), 1)
+        self.assertEqual(stderr.getvalue(), f'books: no bundle in {self.pins_path} (python -m picovox_train.books bundle TAG)\n')

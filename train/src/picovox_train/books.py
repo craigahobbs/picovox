@@ -16,14 +16,15 @@ used: the fetch fails with the book, the expected and actual hashes, and how to 
 re-pin deliberately (pin, then retrain: the labels or the distillation set change with the text).
 
 The pins' bundle is our own copy of every pinned text: one xz-compressed tar (deterministic - the texts in name order,
-no times or owners) published as an asset of a GitHub release of the picovox repository, recorded in the pins with its
-SHA-256. It's the fetch's first source - downloaded once into the books directory and verified - so make train
-reproduces its texts even after Gutenberg revises them; the book's source URL and its archived copy are the fallbacks.
-A re-pinned text needs a new bundle (bundle with a new tag, then upload it as that release's asset).
+no times or owners) published with the picovox site (make gh-pages - https://craigahobbs.github.io/picovox/books/),
+recorded in the pins with its SHA-256. It's the fetch's first source - downloaded once into the books directory and
+verified - so make train reproduces its texts even after Gutenberg revises them; the book's source URL and its archived
+copy are the fallbacks. A re-pinned text needs a new bundle (bundle with a new tag, then make gh-pages).
 
     PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.books fetch [NAME ...]   # fetch and verify (default: all)
     PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.books pin NAME           # re-pin to the books directory's copy
     PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.books bundle TAG         # bundle every pinned text as TAG
+    PYTHONPATH=train/src python3 -B -m picovox_train.books publish DIR                          # the bundle into the site (DIR/books/)
 
 A text's name is its file's in the books directory (<name>.txt): pg<id> for a book's revision the labels read, and
 pg<id>-<date> for another revision of the same book (the distillation's pg2554 is a later revision than the labels').
@@ -55,8 +56,8 @@ USER_AGENT = 'voice-synth-train/1.0 (+https://github.com/craigahobbs/voice-synth
 CDX_URL = 'https://web.archive.org/cdx/search/cdx?url={url}&output=json&filter=digest:{digest}&filter=statuscode:200'
 ARCHIVE_URL = 'https://web.archive.org/web/{timestamp}id_/{url}'
 
-# The pins' bundle - a release asset of the picovox repository
-BUNDLE_URL = 'https://github.com/craigahobbs/picovox/releases/download/{tag}/{tag}.tar.xz'
+# The pins' bundle - published with the picovox site (make gh-pages)
+BUNDLE_URL = 'https://craigahobbs.github.io/picovox/books/{tag}.tar.xz'
 
 
 class PinError(Exception):
@@ -287,7 +288,28 @@ def bundle_command(args):
     bundle = {'tag': args.tag, 'url': url, 'sha256': sha256(data), 'bytes': len(data)}
     write_pins(pins, args.pins, bundle)
     print(f'books: bundled {len(names)} pinned texts as {display_path(path)} - sha256 {bundle["sha256"]} ({len(data)} bytes); '
-          f'publish it as the asset of the picovox repository\'s release {args.tag} ({url})')
+          f'publish it with the site (make gh-pages - {url})')
+    return 0
+
+
+def publish_command(args):
+    """Copy the pins' bundle (verified in the books directory - downloaded if missing) into the site's books/"""
+    bundle = load_bundle(args.pins)
+    if bundle is None:
+        print(f'books: no bundle in {display_path(args.pins)} (python -m picovox_train.books bundle TAG)', file=sys.stderr)
+        return 1
+    try:
+        source = bundle_path(args.books, bundle)
+    except (OSError, PinError) as error:
+        print(f'books: the bundle {bundle["url"]}: {error}', file=sys.stderr)
+        return 1
+    directory = os.path.join(args.site, 'books')
+    os.makedirs(directory, exist_ok=True)
+    with open(source, 'rb') as file:
+        data = file.read()
+    with open(os.path.join(directory, os.path.basename(source)), 'wb') as file:
+        file.write(data)
+    print(f'books: published {os.path.basename(source)} in {display_path(directory)}')
     return 0
 
 
@@ -304,9 +326,12 @@ def main(argv=None):
     pin_parser.add_argument('--id', type=int, help='its Project Gutenberg id (default: its pin\'s, else the name\'s)')
     pin_parser.add_argument('--date', help='the date pinned (default today)')
     pin_parser.set_defaults(func=pin_command)
-    bundle_parser = commands.add_parser('bundle', help='bundle every pinned text as a release asset')
-    bundle_parser.add_argument('tag', help='the release tag (e.g. training-books-v1)')
+    bundle_parser = commands.add_parser('bundle', help='bundle every pinned text (published with the site)')
+    bundle_parser.add_argument('tag', help='the bundle\'s name (e.g. training-books-v1)')
     bundle_parser.set_defaults(func=bundle_command)
+    publish_parser = commands.add_parser('publish', help='copy the bundle into the site')
+    publish_parser.add_argument('site', help='the site directory (the bundle goes in its books/)')
+    publish_parser.set_defaults(func=publish_command)
     args = parser.parse_args(argv)
     return args.func(args)
 

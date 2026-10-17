@@ -2,7 +2,8 @@
 # https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 
-# The published site (make gh-pages) - the API documentation (build/doc/) and the paper (paper/, at /paper/)
+# The published site (make gh-pages) - the API documentation (build/doc/), the paper (paper/, at /paper/), and
+# make train's pinned book texts (the bundle data/nn/books.json records, at /books/)
 GHPAGES_SRC := build/site/
 
 
@@ -24,13 +25,14 @@ $(eval $(call WGET, https://craigahobbs.github.io/javascript-build/eslint.config
 include Makefile.base
 
 
-# The site: the documentation, and the paper beside it
+# The site: the documentation, the paper, and the books bundle beside it
 .PHONY: site
 site: doc
 	rm -rf build/site
 	mkdir -p build/site
 	rsync -a build/doc/ build/site/
 	rsync -a paper/ build/site/paper/
+	PYTHONPATH=train/src python3 -B -m picovox_train.books publish build/site
 
 _gh-pages: site
 
