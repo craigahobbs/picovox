@@ -65,9 +65,10 @@
             "feature-matching": 1.0, "adversarial-start": 500, "critic-lr": 0.0002, "critic-precision": "bfloat16", "val-count": 480,
             "seed": 1
         },
-        "a": {"steps": 30000, "stop": 15000, "lr": 0.001, "warmup": 1000, "val-every": 5000, "seed": 1},
+        "a": {"steps": 30000, "stop": 15000, "lr": 0.001, "warmup": 1000, "val-every": 5000, "lean-clip": true, "seed": 1},
         "b": {"steps": 10000, "lr": 0.0005, "warmup": 500, "schedule": "wsd", "cooldown": 0.25, "cooldown-shape": "1-sqrt", "cremad": 0.2,
-              "adversarial": 0.1, "adversarial-start": 1000, "guide-steps": 0.001, "val-from": 7500, "seed": 1}
+              "adversarial": 0.1, "adversarial-start": 1000, "guide-steps": 0.001, "val-from": 7500, "lean-clip": true,
+              "critic-channels": 16, "seed": 1}
     },
     "distill": {
         "description": "Knowledge distillation of the teacher (nn/distill.py) - its distillation set (the targets: the training utterances, and the sentences of the Project Gutenberg books texts - pinned texts, pins (nn/books.py), fetched to books), the student's training (Muon for the hidden matrices with the warmup-stable-decay schedule - constant, then the last 25% cooled down by 1 - sqrt; picovox_train/optim.py), the student ladder, the polish fine-tune, the evaluation (nn/panel.py), and the tolerance (fixed before any student is measured)",
@@ -111,7 +112,7 @@
             {"name": "s32", "config": {"dim": 32, "decoderDim": 32, "encoderLayers": 2, "decoderLayers": 3}}
         ],
         "polish": {"steps": 2000, "lr": 0.0002, "warmup": 200, "cremad": 0.2, "adversarial": 0.1, "feature-matching": 1.0,
-                   "adversarial-start": 200, "guide-steps": 0.001, "val-every": 500, "keep-every": 0},
+                   "adversarial-start": 200, "guide-steps": 0.001, "val-every": 500, "keep-every": 0, "critic-channels": 16},
         "eval": {
             "speakers": [["arctic-slt", "female"], ["libritts-5895", "female"], ["libritts-6345", "female"],
                          ["arctic-bdl", "male"], ["libritts-5750", "male"], ["libritts-2843", "male"]],
