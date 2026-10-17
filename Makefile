@@ -2,6 +2,10 @@
 # https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 
+# The published site (make gh-pages) - the API documentation (build/doc/) and the paper (paper/, at /paper/)
+GHPAGES_SRC := build/site/
+
+
 # Download javascript-build
 JAVASCRIPT_BUILD_DIR ?= ../javascript-build
 define WGET
@@ -18,6 +22,17 @@ $(eval $(call WGET, https://craigahobbs.github.io/javascript-build/eslint.config
 
 # Include javascript-build
 include Makefile.base
+
+
+# The site: the documentation, and the paper beside it
+.PHONY: site
+site: doc
+	rm -rf build/site
+	mkdir -p build/site
+	rsync -a build/doc/ build/site/
+	rsync -a paper/ build/site/paper/
+
+_gh-pages: site
 
 
 # The development tools are linted too; the generated model modules (lib/models/) aren't
