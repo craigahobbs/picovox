@@ -320,6 +320,23 @@ function wait(ms = 1) {
 }
 
 
+// Wait until speak is idle - no new block scheduled across a few event-loop turns (it then waits for playback) - so a
+// test's fake clock never outruns synthesis, however loaded the machine
+async function speakIdle(context) {
+    let count = -1;
+    let quiet = 0;
+    while (quiet < 3) {
+        await wait();
+        if (context.sources.length === count) {
+            quiet += 1;
+        } else {
+            quiet = 0;
+            count = context.sources.length;
+        }
+    }
+}
+
+
 // Play a playback to its end - advancing the context's time a step at a time
 async function playThrough(context, playback, step = 0.5) {
     const state = {'settled': false};
@@ -400,7 +417,7 @@ test('speak, ahead of playback', async () => {
         });
         let steps = 0;
         while (!state.settled) {
-            await wait();
+            await speakIdle(context);
             maxAhead = Math.max(maxAhead, context.ahead());
             context.advance(0.2);
             steps += 1;
