@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" width="960" height="300" font-family="Helvetica, Arial, sans-serif" font-size="13">
+  <title>The speech pipeline, from text to audio</title>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4a5563"/>
+    </marker>
+  </defs>
+  <rect width="960" height="300" fill="#ffffff"/>
+
+  <!-- Front end -->
+  <rect x="20" y="40" width="150" height="74" rx="8" fill="#eef2f7" stroke="#8a97a8"/>
+  <text x="95" y="66" text-anchor="middle" font-weight="bold">Text front end</text>
+  <text x="95" y="86" text-anchor="middle">normalize, CMU</text>
+  <text x="95" y="102" text-anchor="middle">dictionary lookup</text>
+
+  <rect x="20" y="186" width="150" height="74" rx="8" fill="#fff4e5" stroke="#c28a2c"/>
+  <text x="95" y="212" text-anchor="middle" font-weight="bold">G2P network</text>
+  <text x="95" y="232" text-anchor="middle">letters to phonemes</text>
+  <text x="95" y="248" text-anchor="middle">(dictionary misses)</text>
+
+  <rect x="215" y="40" width="150" height="74" rx="8" fill="#eef2f7" stroke="#8a97a8"/>
+  <text x="290" y="66" text-anchor="middle" font-weight="bold">Tokens</text>
+  <text x="290" y="86" text-anchor="middle">78 IDs: phonemes,</text>
+  <text x="290" y="102" text-anchor="middle">words, punctuation</text>
+
+  <!-- Acoustic model -->
+  <rect x="410" y="40" width="170" height="74" rx="8" fill="#e8f1fb" stroke="#2563a8"/>
+  <text x="495" y="66" text-anchor="middle" font-weight="bold">Acoustic network</text>
+  <text x="495" y="86" text-anchor="middle">under 1M parameters</text>
+  <text x="495" y="102" text-anchor="middle">durations, then frames</text>
+
+  <rect x="410" y="186" width="170" height="74" rx="8" fill="#f3eefc" stroke="#7c3aed"/>
+  <text x="495" y="212" text-anchor="middle" font-weight="bold">Speaker and style</text>
+  <text x="495" y="232" text-anchor="middle">embeddings (blends,</text>
+  <text x="495" y="248" text-anchor="middle">emotion x intensity)</text>
+
+  <!-- Synthesizer -->
+  <rect x="625" y="40" width="160" height="74" rx="8" fill="#e9f6ee" stroke="#15803d"/>
+  <text x="705" y="66" text-anchor="middle" font-weight="bold">Source-filter</text>
+  <text x="705" y="86" text-anchor="middle">synthesizer (DSP)</text>
+  <text x="705" y="102" text-anchor="middle">LF pulses + noise</text>
+
+  <rect x="830" y="40" width="110" height="74" rx="8" fill="#eef2f7" stroke="#8a97a8"/>
+  <text x="885" y="72" text-anchor="middle" font-weight="bold">Audio</text>
+  <text x="885" y="92" text-anchor="middle">44.1 kHz</text>
+
+  <!-- Arrows -->
+  <line x1="170" y1="77" x2="213" y2="77" stroke="#4a5563" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <path d="M95,114 L95,184" stroke="#4a5563" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <text x="103" y="152" fill="#4a5563">miss</text>
+  <path d="M170,223 L240,223 L240,116" stroke="#4a5563" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+  <line x1="365" y1="77" x2="408" y2="77" stroke="#4a5563" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="495" y1="186" x2="495" y2="116" stroke="#4a5563" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="580" y1="77" x2="623" y2="77" stroke="#4a5563" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <text x="601" y="134" text-anchor="middle" fill="#4a5563">32 parameters</text>
+  <text x="601" y="150" text-anchor="middle" fill="#4a5563">every 5 ms</text>
+  <line x1="785" y1="77" x2="828" y2="77" stroke="#4a5563" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- Where it runs -->
+  <text x="20" y="22" fill="#4a5563">lib/lexicon.js</text>
+  <text x="410" y="22" fill="#4a5563">lib/model.js</text>
+  <text x="625" y="22" fill="#4a5563">lib/render.js</text>
+  <text x="625" y="212" fill="#4a5563">Everything runs in the browser</text>
+  <text x="625" y="230" fill="#4a5563">(a Web Worker) and in Node,</text>
+  <text x="625" y="248" fill="#4a5563">with no server and no recordings.</text>
+</svg>
