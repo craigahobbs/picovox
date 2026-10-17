@@ -6,11 +6,14 @@
 import base64
 import datetime
 import hashlib
+import io
 import json
+import lzma
 import os
 import runpy
 import shutil
 import sys
+import tarfile
 import tempfile
 import unittest
 import unittest.mock
@@ -288,3 +291,103 @@ class TestCommands(BooksCase):
                 runpy.run_module('picovox_train.books', run_name='__main__')
         self.assertEqual(raised.exception.code, 0)
         self.assertEqual(stdout.getvalue(), f'books: 1 pinned texts in {self.books}\n')
+
+
+# An xz-compressed tar of texts ({name: bytes}) - a hand-made bundle
+def archive_of(texts):
+    tar_bytes = io.BytesIO()
+    with tarfile.open(fileobj=tar_bytes, mode='w') as archive:
+        for name, data in texts.items():
+            info = tarfile.TarInfo(f'{name}.txt')
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    return lzma.compress(tar_bytes.getvalue())
+
+
+# The bundle of the pins' texts at a URL - its pin, built by the bundle command from a books directory with the texts
+class TestBundle(BooksCase):
+
+    URL = 'https://github.com/craigahobbs/picovox/releases/download/books-v1/books-v1.tar.xz'
+
+    def build(self, texts=None):
+        # Bundle the texts (default: the pinned pg7) from a separate books directory, returning its bytes
+        source = os.path.join(self.directory, 'source')
+        os.makedirs(source, exist_ok=True)
+        for name, data in (texts or {'pg7': PINNED}).items():
+            with open(os.path.join(source, f'{name}.txt'), 'wb') as file:
+                file.write(data)
+        with captured():
+            self.assertEqual(books.main(['--pins', self.pins_path, '--books', source, 'bundle', 'books-v1']), 0)
+        with open(os.path.join(source, 'books-v1.tar.xz'), 'rb') as file:
+            return file.read()
+
+    def test_bundle_command(self):
+        # The bundle is deterministic, and recorded in the pins (which keep it when rewritten)
+        data = self.build()
+        self.assertEqual(self.build(), data)
+        bundle = books.load_bundle(self.pins_path)
+        self.assertEqual(bundle, {'tag': 'books-v1', 'url': self.URL, 'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data)})
+        books.write_pins(books.load_pins(self.pins_path), self.pins_path)
+        self.assertEqual(books.load_bundle(self.pins_path), bundle)
+        with captured() as (stdout, _):
+            books.main(['--pins', self.pins_path, '--books', os.path.join(self.directory, 'source'), 'bundle', 'books-v1'])
+        self.assertTrue(stdout.getvalue().startswith('books: bundled 1 pinned texts as '))
+        self.assertIn(f'publish it as the asset of the picovox repository\'s release books-v1 ({self.URL})', stdout.getvalue())
+
+        # A pinned text that isn't in the books directory fails the command
+        with captured() as (stdout, stderr), unittest.mock.patch('urllib.request.urlopen', FakeUrls({
+                'https://www.gutenberg.org/cache/epub/7/pg7.txt': REVISED,
+                pin_of(PINNED)['archive']: REVISED})):
+            self.assertEqual(books.main(['--pins', self.pins_path, '--books', self.books, 'bundle', 'books-v1']), 1)
+        self.assertTrue(stderr.getvalue().startswith('books: book pg7 (Project Gutenberg #7): no source has the pinned text'))
+
+    def test_fetch_from_bundle(self):
+        # A missing text comes from the bundle first - downloaded once, verified, kept in the books directory
+        data = self.build()
+        urls = FakeUrls({self.URL: data})
+        with unittest.mock.patch('urllib.request.urlopen', urls):
+            self.assertEqual(books.pinned_paths(self.books, ['pg7'], self.pins_path), [os.path.join(self.books, 'pg7.txt')])
+            os.remove(os.path.join(self.books, 'pg7.txt'))
+            books.pinned_paths(self.books, ['pg7'], self.pins_path)
+        self.assertEqual(urls.requests, [self.URL])
+        self.assertEqual(self.read_book('pg7'), PINNED)
+        self.assertEqual(sorted(os.listdir(self.books)), ['books-v1.tar.xz', 'pg7.txt'])
+
+        # A corrupt cached bundle is downloaded again
+        with open(os.path.join(self.books, 'books-v1.tar.xz'), 'wb') as file:
+            file.write(b'corrupt')
+        os.remove(os.path.join(self.books, 'pg7.txt'))
+        urls = FakeUrls({self.URL: data})
+        with unittest.mock.patch('urllib.request.urlopen', urls):
+            books.pinned_paths(self.books, ['pg7'], self.pins_path)
+        self.assertEqual(urls.requests, [self.URL])
+        self.assertEqual(self.read_book('pg7'), PINNED)
+
+    def test_bundle_fallbacks(self):
+        # The bundle fails - not the pinned bundle, unreachable, not an archive, without the text, another revision -
+        # the text's URL is next
+        self.build()
+        url = 'https://www.gutenberg.org/cache/epub/7/pg7.txt'
+        for response in (b'tampered', urllib.error.URLError('down')):
+            shutil.rmtree(self.books, ignore_errors=True)
+            urls = FakeUrls({self.URL: response, url: PINNED})
+            with unittest.mock.patch('urllib.request.urlopen', urls):
+                books.pinned_paths(self.books, ['pg7'], self.pins_path)
+            self.assertEqual(urls.requests, [self.URL, url])
+            self.assertEqual(self.read_book('pg7'), PINNED)
+
+        # An archive without the text, or with another revision of it, or not an archive at all (its pin matching)
+        for bundle_bytes in (archive_of({'pg8': PINNED}), archive_of({'pg7': REVISED}), b'not an archive'):
+            with open(self.pins_path, encoding='utf-8') as file:
+                pins = json.load(file)
+            pins['bundle']['sha256'] = hashlib.sha256(bundle_bytes).hexdigest()
+            pins['texts'] = {'pg7': pin_of(PINNED, archive=None)}
+            with open(self.pins_path, 'w', encoding='utf-8') as file:
+                json.dump(pins, file)
+            shutil.rmtree(self.books, ignore_errors=True)
+            urls = FakeUrls({self.URL: bundle_bytes, url: urllib.error.URLError('down')})
+            with unittest.mock.patch('urllib.request.urlopen', urls), self.assertRaises(books.PinError) as raised:
+                books.pinned_paths(self.books, ['pg7'], self.pins_path)
+            message = str(raised.exception)
+            self.assertIn(f'  {self.URL}: ', message)
+            self.assertIn(f'  {url}: <urlopen error down>', message)

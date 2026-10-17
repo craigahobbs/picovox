@@ -15,8 +15,15 @@ the bytes as fetched and stored, which every reader decodes the same way. A text
 used: the fetch fails with the book, the expected and actual hashes, and how to proceed - restore the pinned copy, or
 re-pin deliberately (pin, then retrain: the labels or the distillation set change with the text).
 
+The pins' bundle is our own copy of every pinned text: one xz-compressed tar (deterministic - the texts in name order,
+no times or owners) published as an asset of a GitHub release of the picovox repository, recorded in the pins with its
+SHA-256. It's the fetch's first source - downloaded once into the books directory and verified - so make train
+reproduces its texts even after Gutenberg revises them; the book's source URL and its archived copy are the fallbacks.
+A re-pinned text needs a new bundle (bundle with a new tag, then upload it as that release's asset).
+
     PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.books fetch [NAME ...]   # fetch and verify (default: all)
     PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.books pin NAME           # re-pin to the books directory's copy
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.books bundle TAG         # bundle every pinned text as TAG
 
 A text's name is its file's in the books directory (<name>.txt): pg<id> for a book's revision the labels read, and
 pg<id>-<date> for another revision of the same book (the distillation's pg2554 is a later revision than the labels').
@@ -26,10 +33,13 @@ import argparse
 import base64
 import datetime
 import hashlib
+import io
 import json
+import lzma
 import os
 import re
 import sys
+import tarfile
 import urllib.error
 import urllib.request
 
@@ -44,6 +54,9 @@ USER_AGENT = 'voice-synth-train/1.0 (+https://github.com/craigahobbs/voice-synth
 # The Wayback Machine's capture index (CDX) and a capture's raw bytes
 CDX_URL = 'https://web.archive.org/cdx/search/cdx?url={url}&output=json&filter=digest:{digest}&filter=statuscode:200'
 ARCHIVE_URL = 'https://web.archive.org/web/{timestamp}id_/{url}'
+
+# The pins' bundle - a release asset of the picovox repository
+BUNDLE_URL = 'https://github.com/craigahobbs/picovox/releases/download/{tag}/{tag}.tar.xz'
 
 
 class PinError(Exception):
@@ -62,13 +75,22 @@ def load_pins(path=PINS_PATH):
         return json.load(file)['texts']
 
 
-# Write the pins - data/nn/books.json, one text per line (in name order)
-def write_pins(texts, path=PINS_PATH):
+# The pins' bundle - data/nn/books.json's bundle, {tag, url, sha256, bytes}, or None
+def load_bundle(path=PINS_PATH):
     with open(path, encoding='utf-8') as file:
-        description = json.load(file)['description']
+        return json.load(file).get('bundle')
+
+
+# Write the pins - data/nn/books.json, one text per line (in name order), and its bundle (default: the file's)
+def write_pins(texts, path=PINS_PATH, bundle=None):
+    with open(path, encoding='utf-8') as file:
+        pins = json.load(file)
+    bundle = bundle or pins.get('bundle')
     lines = [f'        {json.dumps(name)}: {json.dumps(texts[name])}' for name in sorted(texts, key=name_key)]
     with open(path + '.tmp', 'w', encoding='utf-8') as file:
-        file.write('{\n    "description": ' + json.dumps(description) + ',\n    "texts": {\n' + ',\n'.join(lines) + '\n    }\n}\n')
+        file.write('{\n    "description": ' + json.dumps(pins['description']) + ',\n' +
+                   (f'    "bundle": {json.dumps(bundle)},\n' if bundle else '') +
+                   '    "texts": {\n' + ',\n'.join(lines) + '\n    }\n}\n')
     os.replace(path + '.tmp', path)
 
 
@@ -99,9 +121,39 @@ def remedy(name, pin, path):
             'committed models byte for byte.')
 
 
-# The path of a pinned text in the books directory - fetched if missing (its source URL, else its archived copy - the
-# first with the pinned bytes) and verified against its pin. PinError if it isn't pinned, or isn't the pinned text.
-def pinned_path(books_dir, name, pins):
+# The bundle's archive in the books directory - downloaded once (its URL) and verified. PinError if the download isn't
+# the pinned bundle.
+def bundle_path(books_dir, bundle):
+    path = os.path.join(books_dir, os.path.basename(bundle['url']))
+    if os.path.exists(path):
+        with open(path, 'rb') as file:
+            if sha256(file.read()) == bundle['sha256']:
+                return path
+    data = fetch_url(bundle['url'])
+    actual = sha256(data)
+    if actual != bundle['sha256']:
+        raise PinError(f'sha256 {actual} ({len(data)} bytes), not the pinned bundle\'s {bundle["sha256"]}')
+    os.makedirs(books_dir, exist_ok=True)
+    with open(path + '.tmp', 'wb') as file:
+        file.write(data)
+    os.replace(path + '.tmp', path)
+    return path
+
+
+# A text's bytes from the bundle's archive, or None if it isn't there
+def bundle_text(path, name):
+    with tarfile.open(path, 'r:xz') as archive:
+        try:
+            member = archive.getmember(f'{name}.txt')
+        except KeyError:
+            return None
+        return archive.extractfile(member).read()
+
+
+# The path of a pinned text in the books directory - fetched if missing (the pins' bundle, else its source URL, else
+# its archived copy - the first with the pinned bytes) and verified against its pin. PinError if it isn't pinned, or
+# isn't the pinned text.
+def pinned_path(books_dir, name, pins, bundle=None):
     path = os.path.join(books_dir, f'{name}.txt')
     pin = pins.get(name)
     if pin is None:
@@ -119,11 +171,15 @@ def pinned_path(books_dir, name, pins):
     os.makedirs(books_dir, exist_ok=True)
     attempts = []
     unpinned = None
-    for url in [pin['url']] + ([pin['archive']] if pin.get('archive') else []):
+    sources = ([bundle['url']] if bundle else []) + [pin['url']] + ([pin['archive']] if pin.get('archive') else [])
+    for url in sources:
         try:
-            data = fetch_url(url)
-        except (urllib.error.URLError, OSError) as error:
+            data = bundle_text(bundle_path(books_dir, bundle), name) if bundle and url == bundle['url'] else fetch_url(url)
+        except (OSError, PinError, tarfile.TarError, lzma.LZMAError) as error:
             attempts.append(f'{url}: {error}')
+            continue
+        if data is None:
+            attempts.append(f'{url}: not in the bundle')
             continue
         actual = sha256(data)
         if actual == pin['sha256']:
@@ -146,8 +202,8 @@ def pinned_path(books_dir, name, pins):
 
 # The paths of pinned texts in the books directory, fetched and verified (pinned_path)
 def pinned_paths(books_dir, names, pins_path=PINS_PATH):
-    pins = load_pins(pins_path)
-    return [pinned_path(books_dir, name, pins) for name in names]
+    pins, bundle = load_pins(pins_path), load_bundle(pins_path)
+    return [pinned_path(books_dir, name, pins, bundle) for name in names]
 
 
 # The Wayback Machine capture of a URL with the bytes' SHA-1 (the CDX index's digest) - its raw URL, or None
@@ -169,11 +225,11 @@ def updated_date(data):
 
 def fetch_command(args):
     """Fetch and verify pinned texts (default: every one) in the books directory"""
-    pins = load_pins(args.pins)
+    pins, bundle = load_pins(args.pins), load_bundle(args.pins)
     names = args.names or sorted(pins, key=name_key)
     try:
         for name in names:
-            pinned_path(args.books, name, pins)
+            pinned_path(args.books, name, pins, bundle)
     except PinError as error:
         print(f'books: {error}', file=sys.stderr)
         return 1
@@ -204,6 +260,37 @@ def pin_command(args):
     return 0
 
 
+def bundle_command(args):
+    """Bundle every pinned text (verified in the books directory) as TAG.tar.xz - a deterministic tar (the texts in
+    name order, no times or owners), xz-compressed - and record it as the pins' bundle"""
+    pins = load_pins(args.pins)
+    names = sorted(pins, key=name_key)
+    try:
+        paths = [pinned_path(args.books, name, pins) for name in names]
+    except PinError as error:
+        print(f'books: {error}', file=sys.stderr)
+        return 1
+    tar_bytes = io.BytesIO()
+    with tarfile.open(fileobj=tar_bytes, mode='w', format=tarfile.USTAR_FORMAT) as archive:
+        for name, path in zip(names, paths):
+            with open(path, 'rb') as file:
+                text = file.read()
+            info = tarfile.TarInfo(f'{name}.txt')
+            info.size = len(text)
+            info.mode = 0o644
+            archive.addfile(info, io.BytesIO(text))
+    data = lzma.compress(tar_bytes.getvalue(), preset=9 | lzma.PRESET_EXTREME)
+    url = BUNDLE_URL.format(tag=args.tag)
+    path = os.path.join(args.books, os.path.basename(url))
+    with open(path, 'wb') as file:
+        file.write(data)
+    bundle = {'tag': args.tag, 'url': url, 'sha256': sha256(data), 'bytes': len(data)}
+    write_pins(pins, args.pins, bundle)
+    print(f'books: bundled {len(names)} pinned texts as {display_path(path)} - sha256 {bundle["sha256"]} ({len(data)} bytes); '
+          f'publish it as the asset of the picovox repository\'s release {args.tag} ({url})')
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='python -m picovox_train.books', description='The pinned book texts')
     parser.add_argument('--pins', default=PINS_PATH, help='the pins (default data/nn/books.json)')
@@ -217,6 +304,9 @@ def main(argv=None):
     pin_parser.add_argument('--id', type=int, help='its Project Gutenberg id (default: its pin\'s, else the name\'s)')
     pin_parser.add_argument('--date', help='the date pinned (default today)')
     pin_parser.set_defaults(func=pin_command)
+    bundle_parser = commands.add_parser('bundle', help='bundle every pinned text as a release asset')
+    bundle_parser.add_argument('tag', help='the release tag (e.g. training-books-v1)')
+    bundle_parser.set_defaults(func=bundle_command)
     args = parser.parse_args(argv)
     return args.func(args)
 
