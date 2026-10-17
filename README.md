@@ -5,6 +5,9 @@
 
 **PicoVox - realistic speech synthesis in pure JavaScript, under 1 MB.**
 
+**The paper:** [Small Voices: Browser Speech Synthesis for Audiobooks](https://github.com/craigahobbs/picovox/blob/main/paper/paper.md) -
+how PicoVox's networks are designed, trained, distilled, and evaluated.
+
 PicoVox speaks English text with natural-sounding male and female voices, entirely on your device - in the browser or
 in Node. There is no recorded speech, no server, no WebAssembly, and no runtime dependencies: a small grapheme-to-phoneme
 network pronounces every word, a small neural network (350K parameters) predicts interpretable source-filter
