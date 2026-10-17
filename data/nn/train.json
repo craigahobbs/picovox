@@ -56,7 +56,7 @@
         }
     },
     "teacher": {
-        "description": "The teacher (nn/trainmulti.py --recipe teacher.a, then teacher.b): stage A on the readers (the 30,000-step schedule, stopped at 15,000), then stage B from A's weights with the emotional speech and the adversarial critic - B's best validation checkpoint (validated every 1,000 steps from step 10,000 - B's score falls through its second half, and before the critic starts it can score lower than the critic's checkpoints) is the teacher; A, whose last checkpoint B starts from, validates every 5,000; the keys are nn/trainmulti.py's flags, defaults every training setting's default",
+        "description": "The teacher (nn/trainmulti.py --recipe teacher.a, then teacher.b): stage A on the readers (the 30,000-step schedule, stopped at 15,000), then stage B from A's weights with the emotional speech and the adversarial critic, 10,000 steps of the warmup-stable-decay schedule (constant, then the last 25% cooled down by 1 - sqrt - picovox_train/optim.py) - B's best validation checkpoint (validated every 1,000 steps through the cooldown, from step 7,500) is the teacher; A, whose last checkpoint B starts from, validates every 5,000; the keys are nn/trainmulti.py's flags, defaults every training setting's default",
         "defaults": {
             "steps": 30000, "batch": 16, "max-frames": 16000, "crop": 2.0, "bucket-ratio": 1.125, "rate": 24000, "max-hz": 10500,
             "cremad": 0.0, "lr": 0.001, "warmup": 1000, "duration-weight": 1.0, "f0-weight": 2.0, "formant-weight": 1.0,
@@ -66,8 +66,8 @@
             "seed": 1
         },
         "a": {"steps": 30000, "stop": 15000, "lr": 0.001, "warmup": 1000, "val-every": 5000, "seed": 1},
-        "b": {"steps": 20000, "lr": 0.0005, "warmup": 500, "cremad": 0.2, "adversarial": 0.1, "adversarial-start": 1000, "guide-steps": 0.001,
-              "val-from": 10000, "seed": 1}
+        "b": {"steps": 10000, "lr": 0.0005, "warmup": 500, "schedule": "wsd", "cooldown": 0.25, "cooldown-shape": "1-sqrt", "cremad": 0.2,
+              "adversarial": 0.1, "adversarial-start": 1000, "guide-steps": 0.001, "val-from": 7500, "seed": 1}
     },
     "distill": {
         "description": "Knowledge distillation of the teacher (nn/distill.py) - its distillation set (the targets: the training utterances, and the sentences of the Project Gutenberg books texts - pinned texts, pins (nn/books.py), fetched to books), the student's training (Muon for the hidden matrices with the warmup-stable-decay schedule - constant, then the last 25% cooled down by 1 - sqrt; picovox_train/optim.py), the student ladder, the polish fine-tune, the evaluation (nn/panel.py), and the tolerance (fixed before any student is measured)",

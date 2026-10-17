@@ -162,7 +162,7 @@ panel's texts, with a Whisper word error rate under 2% - see [the listener panel
 
 Both networks are trained from scratch from public corpora - CMU ARCTIC, LibriTTS-R, CREMA-D, and the CMU Pronouncing
 Dictionary (the G2P network's training labels; it is not used at runtime) - by `make train`, which rebuilds
-`lib/models/g2pModel.js` and `lib/models/voiceModel.js` from a clean checkout in about 2 hours on an M3 Max: a large
+`lib/models/g2pModel.js` and `lib/models/voiceModel.js` from a clean checkout in about 80 minutes on an M3 Max: a large
 teacher model trained through a differentiable copy of the synthesizer, distilled to the small student that ships. See
 [make train](#make-train) below, and the paper,
 [PicoVox: Realistic Neural Speech Synthesis in Under 1 MB of JavaScript](paper/paper.md), for the methods and results.
@@ -330,8 +330,8 @@ checkout, by one recipe, `data/nn/train.json` (every stage's settings and seeds)
 | package - `lib/models/voiceModel.js`, with its provenance | CPU | student-eval (after samples-reference) |
 | samples-reference, samples-teacher-a, -teacher-b, -student, -polish - the listening samples | CPU, under a minute each | the shipped model (after data-multi); each stage's model |
 
-The critical path - the readers' data, teacher A (~22 minutes) and B (~60), the targets (~9), the student (~6) and
-its polish (~9), the gate, the package - takes about 2 hours on an M3 Max (the corpora downloaded once before). The
+The critical path - the readers' data, teacher A (~22 minutes) and B (~28), the targets (~9), the student (~6) and
+its polish (~9), the gate, the package - takes about 80 minutes on an M3 Max (the corpora downloaded once before). The
 voice data is built with the committed G2P, so the G2P retrain is off the critical path; its module is checked against
 the committed `lib/models/g2pModel.js` (identical, else within the recipe's tolerances - it never replaces it). The
 package's manifest records its provenance: the commit, the recipe's and the training data's hashes, and the gate's
