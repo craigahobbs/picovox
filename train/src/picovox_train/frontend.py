@@ -202,6 +202,13 @@ WH_WORDS = set(['who', 'what', 'where', 'when', 'why', 'how', 'which', 'whose', 
 # Abbreviations
 ABBREVIATIONS = {'mr': 'mister', 'mrs': 'missus', 'dr': 'doctor', 'st': 'saint', 'vs': 'versus', 'etc': 'etcetera'}
 
+# Abbreviations only with their period - the months and days (lib/lexicon.js's periodAbbreviations)
+PERIOD_ABBREVIATIONS = {
+    'jan': 'january', 'feb': 'february', 'apr': 'april', 'jun': 'june', 'jul': 'july', 'aug': 'august', 'sep': 'september',
+    'sept': 'september', 'oct': 'october', 'nov': 'november', 'dec': 'december', 'mon': 'monday', 'tue': 'tuesday',
+    'tues': 'tuesday', 'thu': 'thursday', 'thur': 'thursday', 'thurs': 'thursday', 'fri': 'friday'
+}
+
 # Number words
 ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve',
         'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen']
@@ -249,6 +256,8 @@ def text_items(text):
             bare = token[:-1] if token.endswith('.') else token
             if bare in ABBREVIATIONS:
                 items.append((ABBREVIATIONS[bare], offset))
+            elif token.endswith('.') and bare in PERIOD_ABBREVIATIONS:
+                items.append((PERIOD_ABBREVIATIONS[bare], offset))
             else:
                 items.append((bare.strip('\''), offset))
                 if token.endswith('.'):

@@ -2,11 +2,15 @@
  "description": "The CMU Pronouncing Dictionary's corrected labels (nn/g2paudit.py; g2p.py applies them in every stage, before g2p-relabel.json, and the rule-labeled words derived from them follow) - words whose first pronunciation the cross-validated screening models confidently disagree with (fold models trained without the word: every model's phones differ, by a log-probability margin) and whose LibriTTS-R readers' audio confirms the alternative (the CTC phoneme recognizer's likelihood of each candidate on the aligned word with its neighbors: the votes' Wilson 95% lower bound above one half, from 3+ speakers) - or, where noted, the dictionary's own evidence (its derived forms). evidence: was (the dictionary's first), folds ([prediction, margin] per fold model), audio (candidates - the label first - votes and speakers per candidate, tokens, lower), date",
  "fixes": {
   "actual": "AE1 K CH UW2 AH0 L",
+  "auguste": "AH0 G AH1 S T",
+  "basil": "B EY1 S AH0 L",
   "danglars": "D AE1 NG G L ER0 Z",
+  "gough": "G OW1",
   "grandeur": "G R AE1 N D ER0",
   "hobbes": "HH AA1 B Z",
   "inexplicable": "IH2 N EH1 K S P L IH0 K AH0 B AH0 L",
   "leant": "L EH1 N T",
+  "monday": "M AH1 N D EY2",
   "mortification": "M AO2 R T AH0 F AH0 K EY1 SH AH0 N",
   "picturesque": "P IH2 K CH ER0 EH1 S K",
   "rattler": "R AE1 T L ER0",
@@ -14,7 +18,8 @@
   "sancho": "S AE1 N CH OW0",
   "serenely": "S ER0 IY1 N L IY0",
   "superfluous": "S UW2 P ER0 F L UW1 AH0 S",
-  "unreasonable": "AH0 N R IY1 Z AH0 N AH0 B AH0 L"
+  "unreasonable": "AH0 N R IY1 Z AH0 N AH0 B AH0 L",
+  "welsh": "W EH1 L SH"
  },
  "evidence": {
   "actual": {
@@ -50,6 +55,16 @@
     "lower": 0.566
    }
   },
+  "auguste": {
+   "was": "AO1 G AH0 S T",
+   "listener": "the listener (the user) on the no-evidence shortlist: heard the dictionary label and the alternative rendered by the voice; chose the models' AH0 G AH1 S T",
+   "date": "2026-10-17"
+  },
+  "basil": {
+   "was": "B AE1 Z AH0 L",
+   "listener": "the listener (the user) on the no-evidence shortlist: heard the dictionary label and the alternative rendered by the voice; chose the models' B EY1 S AH0 L (BAY-zil)",
+   "date": "2026-10-17"
+  },
   "danglars": {
    "was": "D AH0 NG L AA1 R Z",
    "date": "2026-10-17",
@@ -82,6 +97,11 @@
     "tokens": 12,
     "lower": 0.646
    }
+  },
+  "gough": {
+   "was": "G AO1 F",
+   "listener": "the listener (the user) on the no-evidence shortlist: heard the dictionary label and the alternative rendered by the voice; chose neither of G AO1 F and G AW1 - GOH, rhymes with go",
+   "date": "2026-10-17"
   },
   "grandeur": {
    "was": "G R AE0 N D UW1 R",
@@ -207,6 +227,11 @@
     "lower": 0.51
    },
    "note": "the audio rejected the label (L IY1 N T 6 votes, 6 speakers, against it), but neither candidate was what the readers say - the recognizer's greedy phones were l ɛ n t (3 of 6 tokens; l æ n t, l a n t, m iː n t the others); a third candidate, L EH1 N T, scored the same way (12 tokens chosen, 6 found), wins"
+  },
+  "monday": {
+   "was": "M AH1 N D IY0",
+   "listener": "the listener (the user) on the no-evidence shortlist: heard the dictionary label and the alternative rendered by the voice; chose neither of M AH1 N D IY0 and M AA1 N D EY2 - MUN-day",
+   "date": "2026-10-17"
   },
   "mortification": {
    "was": "M AO1 R T AH0 F K EY2 SH AH0 N",
@@ -450,6 +475,11 @@
     "tokens": 11,
     "lower": 0.61
    }
+  },
+  "welsh": {
+   "was": "W EH1 L CH",
+   "listener": "the listener (the user) on the no-evidence shortlist: heard the dictionary label and the alternative rendered by the voice; chose the models' W EH1 L SH (welsh, not welch)",
+   "date": "2026-10-17"
   }
  }
 }

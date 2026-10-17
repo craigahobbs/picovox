@@ -141,6 +141,12 @@ class TestFrontend(unittest.TestCase):
         self.assertEqual(frontend.text_words(['Mr. Smith, 21.', 'Smith 3.5']),
                          ['mister', 'smith', 'twenty', 'one', 'three', 'point', 'five'])
 
+    def test_text_words_period_abbreviations(self):
+        # The months and days only with their period (as lib/lexicon.js)
+        self.assertEqual(frontend.text_words(['On Mon. Nov. 5, mon ami, Aug. sat.']),
+                         ['on', 'monday', 'november', 'five', 'mon', 'ami', 'august', 'sat'])
+        self.assertEqual(frontend.PERIOD_ABBREVIATIONS['sept'], 'september')
+
     def test_pronounce_texts(self):
         # Without a context network
         fake = FakeG2p()

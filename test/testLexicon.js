@@ -150,6 +150,17 @@ test('lexicon.textToPhrases, period ends a word', () => {
 });
 
 
+test('lexicon.textToPhrases, month and day abbreviations', () => {
+    // With their period, the months and days are spelled out (without ending the phrase); without it, they're words
+    const phrases = textToPhrases('On Mon. Nov. 5 and Fri. Feb. 2, mon ami, Aug. sat on the sun.');
+    assert.deepEqual(phrases.map(wordTexts), [
+        ['on', 'monday', 'november', 'five', 'and', 'friday', 'february', 'two'],
+        ['mon', 'ami'],
+        ['august', 'sat', 'on', 'the', 'sun']
+    ]);
+});
+
+
 test('lexicon.textToPhrases, abbreviations', () => {
     // An abbreviation's period does not end the phrase
     const phrases = textToPhrases('Mr. and Mrs. Smith met Dr. Jones on St. Mark, vs. etc.');
