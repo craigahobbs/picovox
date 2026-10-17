@@ -54,6 +54,7 @@ from .frontend import ROOT, vocabulary
 
 DICTIONARY_PATH = os.path.join(ROOT, 'data', 'cmudict.dict')
 WORDS_PATH = os.path.join(ROOT, 'data', 'nn', 'g2p-words.json')
+FIXES_PATH = os.path.join(ROOT, 'data', 'nn', 'g2p-fixes.json')
 CONFIG_PATH = os.path.join(ROOT, 'data', 'nn', 'train.json')
 MODULE_PATH = g2pmodel.MODULE_PATH
 
@@ -125,9 +126,10 @@ def split_words(words):
     return {'test': shuffled[:test_count], 'validation': shuffled[test_count:test_count + validation_count]}
 
 
-def load_data(relabel=None):
+def load_data(relabel=None, fixes=FIXES_PATH):
     """The data - {first (word: target phones), all (word: every pronunciation), labels (unknown words' phones), stems,
-    evalCounts, weightCounts, monitor, relabeled (the relabeled words)}"""
+    evalCounts, weightCounts, monitor, relabeled (the relabeled words)}; fixes (data/nn/g2p-fixes.json - None for the
+    dictionary as it is) corrects the dictionary's label errors first"""
     pronunciations = read_pronunciations()
     with open(WORDS_PATH, encoding='utf-8') as file:
         words = json.load(file)
@@ -135,18 +137,21 @@ def load_data(relabel=None):
     labels = {word: phones.split() for word, phones in words['labels'].items()}
     stems = words['stems']
 
+    # The dictionary's corrected labels (g2paudit.py) - the corrected pronunciation first, the wrong one dropped
+    if fixes:
+        with open(fixes, encoding='utf-8') as file:
+            corrections = {word: phones.split() for word, phones in json.load(file)['fixes'].items() if word in first}
+        derive_targets(labels, stems, first, corrections)
+        for word, phones in corrections.items():
+            pronunciations[word] = [phones] + [variant for variant in pronunciations[word] if variant not in (phones, first[word])]
+            first[word] = phones
+
     # Other targets for some dictionary words - and the rule-labeled words derived from them
     relabeled = set()
     if relabel:
         with open(relabel, encoding='utf-8') as file:
             targets = {word: phones.split() for word, phones in json.load(file)['relabel'].items()}
-        for word, (stem, kind) in stems.items():
-            old = first.get(stem)
-            if stem in targets and old is not None:
-                if kind == 'spelling' and labels[word] == old:
-                    labels[word] = targets[stem]
-                elif labels[word][:len(old)] == old:
-                    labels[word] = targets[stem] + labels[word][len(old):]
+        derive_targets(labels, stems, first, targets)
         first.update((word, phones) for word, phones in targets.items() if word in first)
         relabeled = set(targets) & set(first)
 
@@ -156,6 +161,31 @@ def load_data(relabel=None):
     random.Random(SPLIT_SEED).shuffle(validation)
     return {'first': first, 'all': pronunciations, 'labels': labels, 'stems': stems, 'evalCounts': eval_counts,
             'weightCounts': weight_counts, 'monitor': sorted(validation[:MONITOR_WORDS]), 'relabeled': relabeled}
+
+
+# The rule-labeled words derived from dictionary words with new targets follow them (in place): a spelling variant
+# takes the target, and a derived form (-s, -'s) the target with its suffix - the -s suffix chosen again by the target's
+# last phone
+def derive_targets(labels, stems, first, targets):
+    for word, (stem, kind) in stems.items():
+        old = first.get(stem)
+        if stem in targets and old is not None:
+            if kind == 'spelling' and labels[word] == old:
+                labels[word] = targets[stem]
+            elif labels[word][:len(old)] == old:
+                suffix = labels[word][len(old):]
+                if suffix in (['S'], ['Z'], ['IH0', 'Z']) and suffix == s_suffix(old):
+                    suffix = s_suffix(targets[stem])
+                labels[word] = targets[stem] + suffix
+
+
+# The -s suffix after a pronunciation's last phone - IH0 Z after a sibilant, S after another voiceless consonant, else Z
+def s_suffix(phones):
+    if phones and phones[-1] in ('S', 'Z', 'SH', 'ZH', 'CH', 'JH'):
+        return ['IH0', 'Z']
+    if phones and phones[-1] in ('P', 'T', 'K', 'F', 'TH'):
+        return ['S']
+    return ['Z']
 
 
 def training_items(data, settings):

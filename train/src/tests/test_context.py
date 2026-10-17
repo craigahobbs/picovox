@@ -376,7 +376,7 @@ class TestContext(unittest.TestCase):
         self.assertEqual(pronounce(['cat']), [python.pronounce('cat')])
         kinds, status = context.heteronym_scores(module_path)
         self.assertEqual(status, 0)
-        self.assertEqual(set(kinds), {'default', 'context', 'missing'})
+        self.assertEqual(set(kinds), {'default', 'context', 'missing', 'names'})
         self.assertTrue(all(right <= total for right, total in kinds.values()))
 
     def test_check(self):

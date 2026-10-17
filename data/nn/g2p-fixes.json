@@ -1,0 +1,455 @@
+{
+ "description": "The CMU Pronouncing Dictionary's corrected labels (nn/g2paudit.py; g2p.py applies them in every stage, before g2p-relabel.json, and the rule-labeled words derived from them follow) - words whose first pronunciation the cross-validated screening models confidently disagree with (fold models trained without the word: every model's phones differ, by a log-probability margin) and whose LibriTTS-R readers' audio confirms the alternative (the CTC phoneme recognizer's likelihood of each candidate on the aligned word with its neighbors: the votes' Wilson 95% lower bound above one half, from 3+ speakers) - or, where noted, the dictionary's own evidence (its derived forms). evidence: was (the dictionary's first), folds ([prediction, margin] per fold model), audio (candidates - the label first - votes and speakers per candidate, tokens, lower), date",
+ "fixes": {
+  "actual": "AE1 K CH UW2 AH0 L",
+  "danglars": "D AE1 NG G L ER0 Z",
+  "grandeur": "G R AE1 N D ER0",
+  "hobbes": "HH AA1 B Z",
+  "inexplicable": "IH2 N EH1 K S P L IH0 K AH0 B AH0 L",
+  "leant": "L EH1 N T",
+  "mortification": "M AO2 R T AH0 F AH0 K EY1 SH AH0 N",
+  "picturesque": "P IH2 K CH ER0 EH1 S K",
+  "rattler": "R AE1 T L ER0",
+  "reverend": "R EH1 V R AH0 N D",
+  "sancho": "S AE1 N CH OW0",
+  "serenely": "S ER0 IY1 N L IY0",
+  "superfluous": "S UW2 P ER0 F L UW1 AH0 S",
+  "unreasonable": "AH0 N R IY1 Z AH0 N AH0 B AH0 L"
+ },
+ "evidence": {
+  "actual": {
+   "was": "AE1 K CH AH0 W AH0 L",
+   "date": "2026-10-17",
+   "folds": [
+    [
+     "AE1 K CH UW2 AH0 L",
+     4.17
+    ],
+    [
+     "AE1 K CH UW2 AH0 L",
+     5.91
+    ]
+   ],
+   "audio": {
+    "candidates": [
+     "AE1 K CH AH0 W AH0 L",
+     "AE1 K CH UW2 AH0 L",
+     "AE1 K SH AH0 L"
+    ],
+    "votes": [
+     0,
+     5,
+     1
+    ],
+    "speakers": [
+     0,
+     5,
+     1
+    ],
+    "tokens": 20,
+    "lower": 0.566
+   }
+  },
+  "danglars": {
+   "was": "D AH0 NG L AA1 R Z",
+   "date": "2026-10-17",
+   "folds": [
+    [
+     "D AE1 NG L ER0 Z",
+     11.87
+    ],
+    [
+     "D AE1 NG G L ER0 Z",
+     6.06
+    ]
+   ],
+   "audio": {
+    "candidates": [
+     "D AH0 NG L AA1 R Z",
+     "D AE1 NG L ER0 Z",
+     "D AE1 NG G L ER0 Z"
+    ],
+    "votes": [
+     0,
+     0,
+     7
+    ],
+    "speakers": [
+     0,
+     0,
+     4
+    ],
+    "tokens": 12,
+    "lower": 0.646
+   }
+  },
+  "grandeur": {
+   "was": "G R AE0 N D UW1 R",
+   "date": "2026-10-17",
+   "folds": [
+    [
+     "G R AE1 N D ER0",
+     5.46
+    ],
+    [
+     "G R AE1 N D ER0",
+     6.93
+    ]
+   ],
+   "audio": {
+    "candidates": [
+     "G R AE0 N D UW1 R",
+     "G R AE1 N D ER0"
+    ],
+    "votes": [
+     0,
+     5
+    ],
+    "speakers": [
+     0,
+     5
+    ],
+    "tokens": 8,
+    "lower": 0.566
+   }
+  },
+  "hobbes": {
+   "was": "HH AA1 B IY0 Z",
+   "folds": [
+    [
+     "HH AA1 B Z",
+     4.81
+    ],
+    [
+     "HH AA1 B Z",
+     5.3
+    ]
+   ],
+   "dictionary": "the dictionary's own evidence (no audio - HOBBES isn't in LibriTTS-R train-clean-100 or dev-clean): its second variant HOBBES(2) HH AA1 B Z, which both fold models prefer to the first; HOBBS HH AA1 B Z; every other -bes word after a consonant ends B Z (COOMBES, ERBES, FORBES, ZIRBES) - HOBBES's first is the only B IY0 Z (= hobbies); and the training data's HOBBESIAN HH AA1 B Z IY0 AH0 N (a teacher label)",
+   "date": "2026-10-17"
+  },
+  "inexplicable": {
+   "was": "IH2 N AH0 K S P L IH1 S AH0 B AH0 L",
+   "date": "2026-10-17",
+   "folds": [
+    [
+     "IH2 N EH1 K S P L IH0 K AH0 B AH0 L",
+     14.83
+    ],
+    [
+     "IH2 N IH0 K S P L IH1 K AH0 B AH0 L",
+     13.41
+    ]
+   ],
+   "audio": {
+    "candidates": [
+     "IH2 N AH0 K S P L IH1 S AH0 B AH0 L",
+     "IH2 N EH1 K S P L IH0 K AH0 B AH0 L"
+    ],
+    "votes": [
+     0,
+     5
+    ],
+    "speakers": [
+     0,
+     5
+    ],
+    "tokens": 5,
+    "lower": 0.566
+   }
+  },
+  "leant": {
+   "was": "L IY1 AH0 N T",
+   "date": "2026-10-17",
+   "folds": [
+    [
+     "L EH1 N T",
+     6.56
+    ],
+    [
+     "L IY1 N T",
+     4.62
+    ]
+   ],
+   "audio": {
+    "candidates": [
+     "L IY1 AH0 N T",
+     "L IY1 N T"
+    ],
+    "votes": [
+     0,
+     6
+    ],
+    "speakers": [
+     0,
+     6
+    ],
+    "tokens": 6,
+    "lower": 0.61
+   },
+   "audio3": {
+    "candidates": [
+     "L IY1 AH0 N T",
+     "L IY1 N T",
+     "L EH1 N T"
+    ],
+    "votes": [
+     0,
+     2,
+     4
+    ],
+    "speakers": [
+     0,
+     2,
+     4
+    ],
+    "tokens": 6,
+    "lower": 0.51
+   },
+   "note": "the audio rejected the label (L IY1 N T 6 votes, 6 speakers, against it), but neither candidate was what the readers say - the recognizer's greedy phones were l ɛ n t (3 of 6 tokens; l æ n t, l a n t, m iː n t the others); a third candidate, L EH1 N T, scored the same way (12 tokens chosen, 6 found), wins"
+  },
+  "mortification": {
+   "was": "M AO1 R T AH0 F K EY2 SH AH0 N",
+   "date": "2026-10-17",
+   "folds": [
+    [
+     "M AO2 R T AH0 F AH0 K EY1 SH AH0 N",
+     23.28
+    ],
+    [
+     "M AO2 R T AH0 F AH0 K EY1 SH AH0 N",
+     24.9
+    ]
+   ],
+   "audio": {
+    "candidates": [
+     "M AO1 R T AH0 F K EY2 SH AH0 N",
+     "M AO2 R T AH0 F AH0 K EY1 SH AH0 N"
+    ],
+    "votes": [
+     0,
+     5
+    ],
+    "speakers": [
+     0,
+     5
+    ],
+    "tokens": 5,
+    "lower": 0.566
+   }
+  },
+  "picturesque": {
+   "was": "P IH1 K CH ER0 AH0 S K",
+   "date": "2026-10-17",
+   "folds": [
+    [
+     "P IH2 K CH ER0 EH1 S K",
+     11.02
+    ],
+    [
+     "P IH2 K CH UW0 R EH1 S K IY0",
+     11.09
+    ]
+   ],
+   "audio": {
+    "candidates": [
+     "P IH1 K CH ER0 AH0 S K",
+     "P IH2 K CH ER0 EH1 S K",
+     "P IH2 K CH UW0 R EH1 S K IY0"
+    ],
+    "votes": [
+     0,
+     14,
+     0
+    ],
+    "speakers": [
+     0,
+     10,
+     0
+    ],
+    "tokens": 15,
+    "lower": 0.785
+   }
+  },
+  "rattler": {
+   "was": "R AE1 T AH0 L ER0",
+   "date": "2026-10-17",
+   "folds": [
+    [
+     "R AE1 T L ER0",
+     3.72
+    ],
+    [
+     "R AE1 T L ER0",
+     3.57
+    ]
+   ],
+   "audio": {
+    "candidates": [
+     "R AE1 T AH0 L ER0",
+     "R AE1 T L ER0"
+    ],
+    "votes": [
+     0,
+     6
+    ],
+    "speakers": [
+     0,
+     3
+    ],
+    "tokens": 6,
+    "lower": 0.61
+   }
+  },
+  "reverend": {
+   "was": "R EH1 V ER0 AH0 N D",
+   "date": "2026-10-17",
+   "folds": [
+    [
+     "R EH1 V ER0 EH2 N D",
+     3.85
+    ],
+    [
+     "R EH1 V ER0 EH2 N D",
+     3.97
+    ]
+   ],
+   "audio": {
+    "candidates": [
+     "R EH1 V ER0 AH0 N D",
+     "R EH1 V R AH0 N D"
+    ],
+    "votes": [
+     0,
+     13
+    ],
+    "speakers": [
+     0,
+     8
+    ],
+    "tokens": 13,
+    "lower": 0.772
+   }
+  },
+  "sancho": {
+   "was": "S AA1 N K OW0",
+   "date": "2026-10-17",
+   "folds": [
+    [
+     "S AE1 N CH OW0",
+     5.61
+    ],
+    [
+     "S AE1 N CH OW0",
+     6.48
+    ]
+   ],
+   "audio": {
+    "candidates": [
+     "S AA1 N K OW0",
+     "S AE1 N CH OW0"
+    ],
+    "votes": [
+     0,
+     15
+    ],
+    "speakers": [
+     0,
+     4
+    ],
+    "tokens": 16,
+    "lower": 0.796
+   }
+  },
+  "serenely": {
+   "was": "S ER0 IY1 N AH0 L IY0",
+   "date": "2026-10-17",
+   "folds": [
+    [
+     "S ER0 IY1 N L IY0",
+     8.1
+    ],
+    [
+     "S ER0 IY1 N L IY0",
+     6.52
+    ]
+   ],
+   "audio": {
+    "candidates": [
+     "S ER0 IY1 N AH0 L IY0",
+     "S ER0 IY1 N L IY0"
+    ],
+    "votes": [
+     0,
+     4
+    ],
+    "speakers": [
+     0,
+     4
+    ],
+    "tokens": 4,
+    "lower": 0.51
+   }
+  },
+  "superfluous": {
+   "was": "S UW1 P ER0 F L W AH2 S",
+   "date": "2026-10-17",
+   "folds": [
+    [
+     "S UW2 P ER0 F L UW1 AH0 S",
+     6.41
+    ],
+    [
+     "S UW2 P ER0 F L UW1 AH0 S",
+     10.19
+    ]
+   ],
+   "audio": {
+    "candidates": [
+     "S UW1 P ER0 F L W AH2 S",
+     "S UW2 P ER0 F L UW1 AH0 S"
+    ],
+    "votes": [
+     0,
+     5
+    ],
+    "speakers": [
+     0,
+     5
+    ],
+    "tokens": 6,
+    "lower": 0.566
+   }
+  },
+  "unreasonable": {
+   "was": "AH0 N R IY1 Z N AH0 B AH0 L",
+   "date": "2026-10-17",
+   "folds": [
+    [
+     "AH0 N R IY1 Z AH0 N AH0 B AH0 L",
+     3.87
+    ],
+    [
+     "AH0 N R IY1 Z AH0 N AH0 B AH0 L",
+     6.62
+    ]
+   ],
+   "audio": {
+    "candidates": [
+     "AH0 N R IY1 Z N AH0 B AH0 L",
+     "AH0 N R IY1 Z AH0 N AH0 B AH0 L"
+    ],
+    "votes": [
+     0,
+     6
+    ],
+    "speakers": [
+     0,
+     6
+    ],
+    "tokens": 11,
+    "lower": 0.61
+   }
+  }
+ }
+}

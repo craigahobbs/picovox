@@ -11,7 +11,8 @@ The front end and the G2P:
 - frontend.py - the token vocabulary (vocab.json) and a Python port of lib/lexicon.js textToPhrases, every word
   pronounced by the app's G2P network (g2pmodel.py - lib/g2p.js's inference, bit for bit, on lib/models/g2pModel.js)
 - g2p.py - the G2P network's training and export, the recipe in data/nn/train.json; heteronyms.py - its relabeled
-  words from readers' usage (data/nn/g2p-relabel.json)
+  words from readers' usage (data/nn/g2p-relabel.json); g2paudit.py - the dictionary's label errors, by cross-validated
+  disagreement and the readers' audio (data/nn/g2p-fixes.json)
 - context.py - the heteronyms by context: the G2P's reading input and ambiguity head, and the context network
   (picovox_train.context export writes lib/models/g2pModel.js); contextlabels.py - their labels (data/nn/context-labels.json);
   readings.py - a heteronym token's reading from the forced alignment, for the voice data

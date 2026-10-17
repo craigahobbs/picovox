@@ -102,7 +102,8 @@ class TestG2p(unittest.TestCase):
         with open(self.config_path, 'w', encoding='utf-8') as file:
             json.dump({'g2p': config}, file)
         self.patches = [unittest.mock.patch.object(g2p, 'WORDS_PATH', self.words_path),
-                        unittest.mock.patch.object(g2p.read_pronunciations, '__defaults__', (self.dictionary_path,))]
+                        unittest.mock.patch.object(g2p.read_pronunciations, '__defaults__', (self.dictionary_path,)),
+                        unittest.mock.patch.object(g2p.load_data, '__defaults__', (None, None))]
         for patch in self.patches:
             patch.start()
 
@@ -157,6 +158,36 @@ class TestG2p(unittest.TestCase):
         self.assertEqual(data['labels']['unknownwords'], ['Y', 'UW1', 'Z'])
         self.assertEqual(data['labels']['doggo'], ['D', 'AO1', 'G', 'OW0'])
         self.assertNotIn('unknownword', data['first'])
+
+    def test_load_data_fixes(self):
+        self.assertEqual(g2p.FIXES_PATH, os.path.join(g2p.ROOT, 'data', 'nn', 'g2p-fixes.json'))
+        fixes_path = os.path.join(self.directory.name, 'g2p-fixes.json')
+        with open(fixes_path, 'w', encoding='utf-8') as file:
+            json.dump({'fixes': {'cat': 'K AE1 T S', 'dog': 'D AA1 G', 'read': 'R EH1 D', 'lead': 'L IY1 D Z', 'zzz': 'Z'}}, file)
+        data = g2p.load_data(fixes=fixes_path)
+
+        # The corrected pronunciation first, the wrong one dropped
+        self.assertEqual(data['first']['dog'], ['D', 'AA1', 'G'])
+        self.assertEqual(data['all']['dog'], [['D', 'AA1', 'G']])
+        self.assertEqual(data['all']['read'], [['R', 'EH1', 'D']])
+        self.assertNotIn('zzz', data['first'])
+
+        # The derived words follow - a spelling variant, and a derived form with its -s suffix chosen again
+        self.assertEqual(data['labels']['catz'], ['K', 'AE1', 'T', 'S', 'IH0', 'Z'])
+        self.assertEqual(data['labels']['doggo'], ['D', 'AA1', 'G', 'OW0'])
+        self.assertEqual(data['labels']['leads'], ['L', 'IY1', 'D', 'Z', 'IH0', 'Z'])
+        self.assertEqual(data['labels']['readin'], ['R', 'EH1', 'D', 'IH0', 'N'])
+
+        # The relabeled targets after the fixes
+        data = g2p.load_data(self.relabel_path, fixes_path)
+        self.assertEqual(data['first']['lead'], ['L', 'EH1', 'D'])
+        self.assertEqual(data['first']['dog'], ['D', 'AA1', 'G'])
+
+    def test_s_suffix(self):
+        self.assertEqual(g2p.s_suffix(['K', 'AE1', 'T']), ['S'])
+        self.assertEqual(g2p.s_suffix(['B', 'AH1', 'S']), ['IH0', 'Z'])
+        self.assertEqual(g2p.s_suffix(['D', 'AO1', 'G']), ['Z'])
+        self.assertEqual(g2p.s_suffix([]), ['Z'])
 
     def test_training_items(self):
         data = g2p.load_data(self.relabel_path)

@@ -213,7 +213,7 @@ node nn/js/speak.js -m data/nn/multi "Hello." -o out/hello.wav --voice narrator-
 node nn/js/unpack.js lib/models/voiceModel.js out/voice                 # a packaged model back to its export
 node nn/js/packagecheck.js lib/models/voiceModel.js out/voice           # check a packaged model against its export
 node nn/js/voicescheck.js [data/nn/multi]                               # check the designed voices
-node tools/heteronyms.js                                                # the heteronym regression set
+node tools/heteronyms.js                                                # the heteronym and names regression sets
 ```
 
 `nn/js/speak.js` speaks with an exported model (`picovox_train.export CHECKPOINT --voice NAME` writes
@@ -488,6 +488,39 @@ shipped model's weights bit for bit.
 dictionary pronunciations, the variant the readers used by the forced alignments; a word is relabeled when the
 readers' majority isn't the first (significant, 3+ speakers), the difference is lexical (not vowel reduction or stress
 alone, not a function word), and the vowel's formants (or the fricative's voicing) agree where measured.
+
+### The dictionary audit
+
+The network learns the dictionary's errors too (HOBBES HH AA1 B IY0 Z - "hobbies" - and, from it, "mobbes" M AA1 B
+IY2 Z), so `data/nn/g2p-fixes.json` corrects the dictionary's labels where the evidence says they're wrong; `g2p.py`
+applies it in every stage, before the relabeled words (the rule-labeled words derived from a fixed word follow - HOBBES'S
+HH AA1 B Z IH0 Z). `picovox_train/g2paudit.py` finds them:
+
+```sh
+PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2paudit folds --out build/nn/g2paudit -j 5     # 10 screening models (resumable)
+PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2paudit suspects --out build/nn/g2paudit \
+    --books build/nn/books --catalog ../picoshelf/data/catalog.json --heteronyms build/nn/context/labels.json
+HF_HOME=build/nn/cremad/hf PYTHONPATH=train/src build/venv-listeners/bin/python -B -m picovox_train.g2paudit audio --out build/nn/g2paudit
+PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2paudit adjudicate --out build/nn/g2paudit [--extra EXTRA.json]
+```
+
+Two partitions of the dictionary into five folds (a word's possessives in its fold) train ten screening models (the
+recipe's network and sampling, 6,000 steps, no rule- or teacher-labeled words), so every word is held out by two of
+them (held-out accuracy 62% - any pronunciation, stress included; the dictionary is mostly names). A word is a suspect
+when both its models' phones differ from its label (not by stress alone) by a log-probability margin of 3, or both prefer
+another of its variants by that margin: 12,750 of 124,101 words - mostly legitimate irregulars (of, colonel) and
+foreign names. Where 3+ LibriTTS-R readers spoke a suspect, the CTC phoneme recognizer (`cremad.py`'s) scores the label
+and each alternative (the models' predictions, the dictionary's variants - those that would be a lexical correction: not
+stress or reduction alone, not a consonant dropped, not a merger's vowels, not a function word or a one- or two-letter
+word) on up to 12 of its aligned tokens with their neighbors; a token votes for a candidate 2 (log) more likely than the
+rest, and a confirmed error needs the votes' Wilson 95% lower bound above one half from 3+ speakers. 140 control words
+(both models agree with the label, against a model's second guess) measure the method: no false errors, 1.5% of the
+tokens' votes for the wrong candidate. The audio confirmed 13 errors and 143 labels; the rest have no audio evidence.
+
+The names regression set (`data/nn/names-test.json`, run by `tools/heteronyms.js` as kind `names`): surnames, first
+names, and place names with verified pronunciations - HOBBES first (the dictionary's own evidence: its second variant,
+HOBBS, and every other -bes word), the audio's confirmed errors and labels, and well-established names. Its minimum is
+the shipped module's score when it was added (63/73), so it can only go up.
 
 ### Heteronyms
 
