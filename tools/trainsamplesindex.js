@@ -36,7 +36,7 @@ export function sampleFile(stage, speaker, text) {
 }
 
 
-// UTMOS scores from tools/listeners.py's output (JSON lines) - {file name: mos}
+// UTMOS scores from picovox_train/listeners.py's output (JSON lines) - {file name: mos}
 export function parseScores(output) {
     const scores = {};
     for (const line of output.split('\n')) {

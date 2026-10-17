@@ -1806,7 +1806,7 @@ async function loadTrain() {
     const end = status === 'finished' ? Math.max(...counted.map((state) => state.end)) : null;
     const samples = utilResult === null ? [] : trainModel.parseUtilLog(utilResult.text, Number.isFinite(start) ? start : now);
 
-    // The gates' results - the evaluations (nn.distill eval and pick) and the checks in the logs
+    // The gates' results - the evaluations (picovox_train.distill eval and pick) and the checks in the logs
     const [teacherResult, studentResult, summaryResult] = await Promise.all(['distill/eval/teacher/result.json',
         'distill/eval/student/result.json', 'distill/summary.json'].map((path) => fetchText(new URL(path, dirUrl))));
     const parse = (result) => {
@@ -1867,7 +1867,7 @@ const trainHelp = {
     'gates': 'The checks make train must pass: the heteronym relabeling reproduces data/nn/g2p-relabel.json; the ' +
         'retrained G2P is identical to the committed lib/models/g2pModel.js (else within the recipe\'s tolerances) with ' +
         'its held-out context accuracy; the teacher and the student through the listener panel (UTMOS - naturalness, ' +
-        '1-5; Whisper\'s word error rate; the speaker similarity to the teacher); and the gate, nn.distill pick - the ' +
+        '1-5; Whisper\'s word error rate; the speaker similarity to the teacher); and the gate, picovox_train.distill pick - the ' +
         'student within the tolerance of the teacher.'
 };
 for (const [id, key] of [['trainTitle', 'summary'], ['utilTitle', 'util'], ['stagesTitle', 'stages'], ['trainRunsTitle', 'runs'],
@@ -1988,7 +1988,8 @@ function buildTrain(manifest) {
         {'key': 'g2p', 'title': 'G2P check - the retrained context G2P against lib/models/g2pModel.js', 'stage': 'g2p'},
         {'key': 'teacher', 'title': 'The teacher on the listener panel', 'stage': 'teacher-eval'},
         {'key': 'student', 'title': 'The student on the listener panel', 'stage': 'student-eval'},
-        {'key': 'pick', 'title': 'The gate - nn.distill pick: the student within the teacher\'s tolerance', 'stage': 'student-eval'}
+        {'key': 'pick', 'title': 'The gate - picovox_train.distill pick: the student within the teacher\'s tolerance',
+            'stage': 'student-eval'}
     ];
     const gates = new Map();
     document.getElementById('trainGates').replaceChildren(...gateSpecs.map((spec) => {

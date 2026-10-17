@@ -39,9 +39,18 @@ _gh-pages: site
 ESLINT_ARGS := $(ESLINT_ARGS) tools/ nn/js/ --ignore-pattern 'lib/models/**'
 
 
-# Python virtual environments for the analysis tools - build/venv-<name> from requirements/<name>.txt (for example,
-# build/venv-listeners.build for the listener-model panel, tools/listeners.py). PYTHON_VENV is the Python that creates
-# them (3.12 through 3.14 are known to work).
+# The training package (train/ - a python-build package, picovox_train): make commit runs its gate too (its unit tests,
+# pylint, and 100% branch coverage - make -C train commit), and make clean cleans it
+.PHONY: commit-train
+commit: commit-train
+commit-train:
+	$(MAKE) -C train commit
+
+
+# Python virtual environments for make train - build/venv-<name> from requirements/<name>.txt (for example,
+# build/venv-listeners.build for the listener-model panel, train/src/picovox_train/listeners.py); they run the training
+# package from its source (PYTHONPATH=train/src - TRAIN_SRC). PYTHON_VENV is the Python that creates them (3.12 through
+# 3.14 are known to work).
 PYTHON_VENV ?= python3
 
 build/venv-%.build: requirements/%.txt
@@ -57,13 +66,15 @@ listeners: build/venv-listeners.build
 
 # make train - every generated model (lib/models/g2pModel.js and voiceModel.js) from a clean checkout, by the recipe
 # data/nn/train.json. Each stage is a stamp in TRAIN_DIR; make -j train runs the independent stages at once - the GPU
-# stages one at a time (nn/gpulock.py: two at once each run at about half speed), the CPU stages beside them (the
+# stages one at a time (picovox_train/gpulock.py: two at once each run at about half speed), the CPU stages beside them (the
 # G2P retrain and the heteronym relabeling - each checked against the committed file it reproduces - the data
 # builds, and the evaluations). The voice data is built with the committed G2P; the G2P stages retrain it beside the
 # voice stages and check the result against it (they never replace it).
 TRAIN_DIR ?= build/train
-NN_PYTHON := build/venv-nn/bin/python -B
-LISTENERS_PYTHON := build/venv-listeners/bin/python -B
+TRAIN_SRC := $(CURDIR)/train/src
+NN_PYTHON := env PYTHONPATH=$(TRAIN_SRC) build/venv-nn/bin/python -B
+LISTENERS_PYTHON := env PYTHONPATH=$(TRAIN_SRC) build/venv-listeners/bin/python -B
+POS_PYTHON := env PYTHONPATH=$(TRAIN_SRC) build/venv-pos/bin/python -B
 TRAIN_ENV := NN_DATA_DIR=$(TRAIN_DIR)/data NN_RUNS_DIR=$(TRAIN_DIR)/runs NN_DISTILL_DIR=$(TRAIN_DIR)/distill
 
 # The CPU stages that run beside a GPU stage (the G2P chain, the heteronym check, the teacher's evaluation, the
@@ -72,7 +83,7 @@ TRAIN_ENV := NN_DATA_DIR=$(TRAIN_DIR)/data NN_RUNS_DIR=$(TRAIN_DIR)/runs NN_DIST
 BESIDE := taskpolicy -c utility
 # (the GPU stages hold the GPU lock and use two CPU threads - more don't speed a step, and the CPU stages beside them
 # would oversubscribe the cores)
-GPU := OMP_NUM_THREADS=2 $(NN_PYTHON) -m nn.gpulock $(TRAIN_DIR)/gpu.lock --
+GPU := OMP_NUM_THREADS=2 $(NN_PYTHON) -m picovox_train.gpulock $(TRAIN_DIR)/gpu.lock --
 TRAIN_RUNS := $(TRAIN_DIR)/runs
 
 # The bookkeeping, for the training dashboard (tools/dashboard/): each stage's start, end, and failure in
@@ -104,8 +115,8 @@ train-clean:
 # The corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D (downloads, once)
 $(TRAIN_DIR)/corpora.done: | build/venv-analysis.build build/venv-nn.build
 	@$(STAGE) start
-	$(STAGE) -- build/venv-analysis/bin/python -I tools/corpora.py
-	$(STAGE) -- $(NN_PYTHON) -m nn.cremad fetch
+	$(STAGE) -- build/venv-analysis/bin/python -I train/src/picovox_train/corpora.py
+	$(STAGE) -- $(NN_PYTHON) -m picovox_train.cremad fetch
 	@$(STAGE) end
 	@mkdir -p $(@D) && touch $@
 
@@ -116,36 +127,36 @@ $(TRAIN_DIR)/corpora.done: | build/venv-analysis.build build/venv-nn.build
 # The G2P (CPU) - a check beside the voice stages, which use the committed lib/models/g2pModel.js: the network's four
 # stages (one core, deterministic), the heteronym context labels (the books fetched by id; part-of-speech tags in
 # build/venv-pos), the reading stage and the context network (two threads each), the export to $(TRAIN_DIR), the
-# held-out accuracy gate (the context network cross-validated over the aligned speakers), and nn.context check: identical
+# held-out accuracy gate (the context network cross-validated over the aligned speakers), and picovox_train.context check: identical
 # to the committed module, else within the recipe's tolerances (the committed module is kept either way - make train
 # never replaces it)
 $(TRAIN_DIR)/g2p-network.done: data/nn/train.json data/nn/g2p-words.json data/nn/g2p-relabel.json data/cmudict.dict | build/venv-nn.build
 	@$(STAGE) start
-	$(STAGE) -- $(NN_PYTHON) -m nn.g2p train --out $(TRAIN_DIR)/g2p
+	$(STAGE) -- $(NN_PYTHON) -m picovox_train.g2p train --out $(TRAIN_DIR)/g2p
 	@$(STAGE) end
 	@mkdir -p $(@D) && touch $@
 
 $(TRAIN_DIR)/context-labels.done: $(TRAIN_DIR)/corpora.done data/nn/train.json data/nn/context-labels.json \
 		data/nn/heteronyms-test.json | build/venv-nn.build build/venv-pos.build $(TRAIN_DIR)/data-multi.done
 	@$(STAGE) start
-	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m nn.contextlabels books
-	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m nn.contextlabels aligned --out $(TRAIN_DIR)/context -j 3
-	$(STAGE) -- $(BESIDE) build/venv-pos/bin/python -B -m nn.contextlabels tag --out $(TRAIN_DIR)/context -j 2
-	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m nn.contextlabels labels --out $(TRAIN_DIR)/context
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.contextlabels books
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.contextlabels aligned --out $(TRAIN_DIR)/context -j 3
+	$(STAGE) -- $(BESIDE) $(POS_PYTHON) -m picovox_train.contextlabels tag --out $(TRAIN_DIR)/context -j 2
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.contextlabels labels --out $(TRAIN_DIR)/context
 	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/g2p.done: $(TRAIN_DIR)/g2p-network.done $(TRAIN_DIR)/context-labels.done
 	@$(STAGE) start
-	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m nn.context train-g2p --labels $(TRAIN_DIR)/context/labels.json --init $(TRAIN_DIR)/g2p/focus.pt \
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context train-g2p --labels $(TRAIN_DIR)/context/labels.json --init $(TRAIN_DIR)/g2p/focus.pt \
 		--out $(TRAIN_DIR)/context/g2p.pt --log $(TRAIN_DIR)/context/train.log
-	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m nn.context train-context --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/context.pt \
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context train-context --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/context.pt \
 		--log $(TRAIN_DIR)/context/train.log
-	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m nn.context export --g2p $(TRAIN_DIR)/context/g2p.pt --context $(TRAIN_DIR)/context/context.pt \
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context export --g2p $(TRAIN_DIR)/context/g2p.pt --context $(TRAIN_DIR)/context/context.pt \
 		--out $(TRAIN_DIR)/g2pModel.js
-	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m nn.context cross-validate --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/folds \
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context cross-validate --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/folds \
 		--log $(TRAIN_DIR)/context/train.log
-	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m nn.context check $(TRAIN_DIR)/g2pModel.js
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context check $(TRAIN_DIR)/g2pModel.js
 	@$(STAGE) end
 	touch $@
 
@@ -153,7 +164,7 @@ $(TRAIN_DIR)/g2p.done: $(TRAIN_DIR)/g2p-network.done $(TRAIN_DIR)/context-labels
 # The heteronym relabeling (CPU) - it must reproduce data/nn/g2p-relabel.json's words
 $(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/corpora.done | $(TRAIN_DIR)/data-multi.done
 	@$(STAGE) start
-	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m nn.heteronyms --out $(TRAIN_DIR)/heteronyms -j 4 --check data/nn/g2p-relabel.json
+	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.heteronyms --out $(TRAIN_DIR)/heteronyms -j 4 --check data/nn/g2p-relabel.json
 	@$(STAGE) end
 	touch $@
 
@@ -161,19 +172,19 @@ $(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/corpora.done | $(TRAIN_DIR)/data-mult
 # the emotional speech (its alignment on the GPU)
 $(TRAIN_DIR)/data-multi.done: $(TRAIN_DIR)/corpora.done lib/models/g2pModel.js data/nn/speakers.json
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.multi build --out $(TRAIN_DIR)/data/multi --pool data/nn/speakers.json
+	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m picovox_train.multi build --out $(TRAIN_DIR)/data/multi --pool data/nn/speakers.json
 	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/cremad-align.done: $(TRAIN_DIR)/corpora.done | build/venv-listeners.build
 	@$(STAGE) start
-	$(STAGE) -- $(GPU) $(LISTENERS_PYTHON) -m nn.cremad align
+	$(STAGE) -- $(GPU) $(LISTENERS_PYTHON) -m picovox_train.cremad align
 	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/data-cremad.done: $(TRAIN_DIR)/cremad-align.done lib/models/g2pModel.js
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.cremad build --out $(TRAIN_DIR)/data/cremad
+	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m picovox_train.cremad build --out $(TRAIN_DIR)/data/cremad
 	@$(STAGE) end
 	touch $@
 
@@ -181,20 +192,20 @@ $(TRAIN_DIR)/data-cremad.done: $(TRAIN_DIR)/cremad-align.done lib/models/g2pMode
 $(TRAIN_DIR)/teacher-a.done: $(TRAIN_DIR)/data-multi.done $(TRAIN_DIR)/data-cremad.done data/nn/train.json
 	@$(STAGE) start
 	$(STAGE) --log $(TRAIN_RUNS)/teacher-a/train.log -- \
-		$(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m nn.trainmulti --name teacher-a --recipe teacher.a --resume
+		$(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m picovox_train.trainmulti --name teacher-a --recipe teacher.a --resume
 	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/teacher-b.done: $(TRAIN_DIR)/teacher-a.done
 	@$(STAGE) start
 	$(STAGE) --log $(TRAIN_RUNS)/teacher-b/train.log -- \
-		$(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m nn.trainmulti --name teacher-b --recipe teacher.b --init $(TRAIN_RUNS)/teacher-a/last.pt --resume
+		$(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m picovox_train.trainmulti --name teacher-b --recipe teacher.b --init $(TRAIN_RUNS)/teacher-a/last.pt --resume
 	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/teacher-eval.done: $(TRAIN_DIR)/teacher-b.done
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(BESIDE) $(NN_PYTHON) -m nn.distill eval teacher=$(TRAIN_RUNS)/teacher-b/best.pt --whisper-workers 3
+	$(STAGE) -- $(TRAIN_ENV) $(BESIDE) $(NN_PYTHON) -m picovox_train.distill eval teacher=$(TRAIN_RUNS)/teacher-b/best.pt --whisper-workers 3
 	@$(STAGE) end
 	touch $@
 
@@ -203,28 +214,28 @@ $(TRAIN_DIR)/teacher-eval.done: $(TRAIN_DIR)/teacher-b.done
 # to the teacher's; a better teacher never fails it)
 $(TRAIN_DIR)/targets.done: $(TRAIN_DIR)/teacher-b.done
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m nn.distill targets --teacher $(TRAIN_RUNS)/teacher-b/best.pt
+	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m picovox_train.distill targets --teacher $(TRAIN_RUNS)/teacher-b/best.pt
 	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/student.done: $(TRAIN_DIR)/targets.done
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m nn.distill train --name student
+	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m picovox_train.distill train --name student
 	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/polish.done: $(TRAIN_DIR)/student.done
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m nn.distill polish --init $(TRAIN_RUNS)/distill-student/best.pt --name student-polish \
+	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m picovox_train.distill polish --init $(TRAIN_RUNS)/distill-student/best.pt --name student-polish \
 		--teacher $(TRAIN_RUNS)/teacher-b/best.pt
 	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/student-eval.done: $(TRAIN_DIR)/polish.done $(TRAIN_DIR)/teacher-eval.done
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.distill eval student=$(TRAIN_RUNS)/distill-student-polish/best.pt \
+	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m picovox_train.distill eval student=$(TRAIN_RUNS)/distill-student-polish/best.pt \
 		baseline=lib/models/voiceModel.js --whisper-workers 3
-	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.distill pick --no-samples --against baseline
+	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m picovox_train.distill pick --no-samples --against baseline
 	@$(STAGE) end
 	touch $@
 
@@ -232,8 +243,8 @@ $(TRAIN_DIR)/student-eval.done: $(TRAIN_DIR)/polish.done $(TRAIN_DIR)/teacher-ev
 # the reference samples, which hear the module it replaces
 $(TRAIN_DIR)/package.done: $(TRAIN_DIR)/student-eval.done | $(TRAIN_DIR)/samples-reference.done
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.export $(TRAIN_RUNS)/distill-student-polish/best.pt --voice multi --out $(TRAIN_DIR)/export
-	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m nn.package $(TRAIN_DIR)/export/multi -o lib/models/voiceModel.js --provenance --recipe data/nn/train.json \
+	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m picovox_train.export $(TRAIN_RUNS)/distill-student-polish/best.pt --voice multi --out $(TRAIN_DIR)/export
+	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m picovox_train.package $(TRAIN_DIR)/export/multi -o lib/models/voiceModel.js --provenance --recipe data/nn/train.json \
 		--data $(TRAIN_DIR)/data/multi $(TRAIN_DIR)/data/cremad --scores $(TRAIN_DIR)/distill/eval/student/result.json
 	@$(STAGE) end
 	touch $@
@@ -279,3 +290,4 @@ $(TRAIN_DIR)/samples-polish.done: $(TRAIN_DIR)/polish.done | build/venv-listener
 
 clean:
 	rm -rf Makefile.base jsdoc.json eslint.config.js
+	$(MAKE) -C train clean

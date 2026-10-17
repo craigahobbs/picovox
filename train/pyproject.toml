@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "picovox-train"
+version = "1.0.0"
+description = "PicoVox's training pipeline - the G2P and voice models of the picovox npm package"
+license = "MIT"
+authors = [
+    {name = "Craig A. Hobbs", email = "craigahobbs@gmail.com"}
+]
+requires-python = ">=3.12"
+# The training environment's packages that the package imports, pinned as ../requirements/nn.txt pins them (a unit
+# test checks they match) - the unit tests run with exactly the training's versions
+dependencies = [
+    "numpy == 2.5.4",
+    "praat-parselmouth == 0.4.7",
+    "soundfile == 0.14.0",
+    "soxr == 1.1.0",
+    "torch == 2.14.1"
+]
+
+[project.urls]
+Homepage = "https://github.com/craigahobbs/picovox"
+
+[tool.setuptools]
+include-package-data = false
+package-dir = {"" = "src"}
+packages = ["picovox_train"]
+
+[tool.setuptools.package-data]
+picovox_train = ["vocab.json"]

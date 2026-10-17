@@ -7,7 +7,7 @@ import test from 'node:test';
 
 
 test('params', () => {
-    // The parameter set (generated from nn/params.py)
+    // The parameter set (generated from picovox_train/params.py)
     assert.equal(FRAME_RATE, 200);
     assert.equal(REF_RATE, 44100);
     assert.equal(EQ_BAND_COUNT, 24);

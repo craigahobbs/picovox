@@ -8,7 +8,7 @@ import test from 'node:test';
 
 
 test('lf.lfTiming', () => {
-    // nn/lf.py's lf_timing
+    // picovox_train/lf.py's lf_timing
     assert.deepEqual(lfTiming(1), {'tp': 0.4843626347650026, 'te': 0.6500146558546335, 'ta': 0.038});
 
     // Rd is clamped to 0.3 - 2.7
@@ -45,7 +45,7 @@ test('lf.lfHarmonics', () => {
     assert.equal(LF_RD_COUNT, 241);
     assert.equal(LF_RD_COUNT, Math.round((LF_RD_MAX - LF_RD_MIN) / 0.01) + 1);
 
-    // nn/lf.py's harmonic_table (Rd 1.0 - grid index 70)
+    // picovox_train/lf.py's harmonic_table (Rd 1.0 - grid index 70)
     const row = lfHarmonics(70);
     assert.equal(row.re.length, LF_HARMONICS);
     assert.equal(row.im.length, LF_HARMONICS);

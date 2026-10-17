@@ -14,7 +14,7 @@ async function deflate(bytes) {
 }
 
 
-// Base64 of bytes, in lines (as nn/package.py wraps them)
+// Base64 of bytes, in lines (as picovox_train/package.py wraps them)
 function base64Lines(bytes) {
     return Buffer.from(bytes).toString('base64').replace(/.{1,8}/g, '$&\n');
 }

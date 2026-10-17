@@ -85,8 +85,8 @@ test('train.parseMakeLog', () => {
 test('train.parseUtilLog', () => {
     const text = [
         'time cpu_busy% gpu% stage',
-        '23:59:40 50 90 nn.trainmulti',
-        '00:00:10 60 80 nn.trainmulti',
+        '23:59:40 50 90 picovox_train.trainmulti',
+        '00:00:10 60 80 picovox_train.trainmulti',
         'garbage',
         'time cpu_busy% gpu% mem_used% stages',
         '2026-10-17T00:00:40 70 0 40.5 teacher',

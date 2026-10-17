@@ -1,8 +1,8 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-// Unpack a packaged model module (nn/package.py's generated JavaScript, e.g. lib/models/voiceModel.js) back into its
-// export - the manifest (OUT.json) and the weights (OUT.bin) - so the export's tools (nn/js/speak.js, nn/panel.py) can
+// Unpack a packaged model module (picovox_train/package.py's generated JavaScript, e.g. lib/models/voiceModel.js) back into its
+// export - the manifest (OUT.json) and the weights (OUT.bin) - so the export's tools (nn/js/speak.js, picovox_train/panel.py) can
 // speak the shipped model as packaged:
 //
 //     node nn/js/unpack.js lib/models/voiceModel.js OUT

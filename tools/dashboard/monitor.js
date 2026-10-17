@@ -52,7 +52,7 @@ export function parseElapsed(text) {
 }
 
 
-// A process's step label from its command - the module or script and its subcommand (e.g. "nn.multi build")
+// A process's step label from its command - the module or script and its subcommand (e.g. "picovox_train.multi build")
 export function commandLabel(command) {
     const tokens = command.replace(/\\012/g, ' ').trim().split(/\s+/);
     let index = 1;
@@ -310,7 +310,7 @@ function writeSamplesIndex(index) {
 // Score WAV files with UTMOS on the CPU - {file name: mos}
 async function scoreSamples(files) {
     const python = join(repository, 'build/venv-listeners/bin/python');
-    const args = ['-I', 'tools/listeners.py', '--device', 'cpu', '--no-embedding', '--no-emotion', ...files];
+    const args = ['-I', 'train/src/picovox_train/listeners.py', '--device', 'cpu', '--no-embedding', '--no-emotion', ...files];
     const env = {...process.env, 'OMP_NUM_THREADS': '4'};
     const {stdout} = await execFileAsync(python, args, {'cwd': repository, env, 'maxBuffer': 16 * 1024 * 1024});
     const scores = {};
@@ -337,8 +337,8 @@ async function renderSamples(config, checkpoint, prefix) {
             await execFileAsync('node', ['nn/js/speak.js', '-m', voice.model, config.text, '-o', output], {'cwd': repository, env});
         } else {
             const python = join(repository, 'build/venv-nn/bin/python');
-            const args = ['-B', '-m', 'nn.synthesize', checkpoint, config.text, '-o', output, '--speaker', voice.key];
-            await execFileAsync(python, args, {'cwd': repository, env});
+            const args = ['-B', '-m', 'picovox_train.synthesize', checkpoint, config.text, '-o', output, '--speaker', voice.key];
+            await execFileAsync(python, args, {'cwd': repository, 'env': {...env, 'PYTHONPATH': join(repository, 'train/src')}});
         }
         return name;
     }));

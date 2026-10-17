@@ -1,7 +1,7 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-// Check a packaged model (nn/package.py's generated module) against its export (the .json manifest and .bin weights):
+// Check a packaged model (picovox_train/package.py's generated module) against its export (the .json manifest and .bin weights):
 // the package and the loader import with no Node built-ins (any node: import from them fails, and
 // process.getBuiltinModule is hidden while they load, as in a browser), every tensor loads bit-identically, the model
 // speaks the same frames, and the same import works in a worker thread (as in a Web Worker).
@@ -100,7 +100,7 @@ async function main() {
         }
         tensors++;
     }
-    // (the manifest as exported - nn/package.py --provenance adds only its provenance record)
+    // (the manifest as exported - picovox_train/package.py --provenance adds only its provenance record)
     const packagedManifest = {...packaged.manifest};
     delete packagedManifest.provenance;
     if (Object.keys(packaged.tensors).length !== tensors || JSON.stringify(packagedManifest) !== JSON.stringify(exported.manifest)) {

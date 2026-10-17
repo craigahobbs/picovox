@@ -3,7 +3,7 @@
 
 // Tokenize texts with lib/tokens.js, every word pronounced by the package's G2P network (lib/g2p.js with
 // lib/models/g2pModel.js) - one JSON string per input line in, one JSON line of {tokens, ids, words} out (used by
-// `python -m nn.data verify-tokens` to compare with the Python front end)
+// `python -m picovox_train.multi verify-tokens` to compare with the Python front end)
 //
 //     node nn/js/tokenizeLines.js < texts.jsonl > tokens.jsonl
 
@@ -25,8 +25,8 @@ for await (const chunk of process.stdin) {
     chunks.push(chunk);
 }
 
-// Tokenize each line with the training vocabulary (nn/vocab.json)
-const vocabulary = JSON.parse(readFileSync(new URL('../vocab.json', import.meta.url), 'utf8')).tokens;
+// Tokenize each line with the training vocabulary (picovox_train/vocab.json)
+const vocabulary = JSON.parse(readFileSync(new URL('../../train/src/picovox_train/vocab.json', import.meta.url), 'utf8')).tokens;
 const lines = Buffer.concat(chunks).toString('utf8').split('\n').filter((line) => line.trim() !== '');
 const output = lines.map((line) => JSON.stringify(tokenize(JSON.parse(line), vocabulary)));
 process.stdout.write(output.join('\n') + (output.length ? '\n' : ''));

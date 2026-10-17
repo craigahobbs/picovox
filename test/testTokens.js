@@ -13,8 +13,8 @@ const phones = {'hello': ['HH', 'AH0', 'L', 'OW1'], 'world': ['W', 'ER1', 'L', '
 setPronouncer((word) => phones[word]);
 
 
-// The training vocabulary (nn/vocab.json)
-const vocabulary = JSON.parse(readFileSync(new URL('../nn/vocab.json', import.meta.url), 'utf8')).tokens;
+// The training vocabulary (picovox_train/vocab.json)
+const vocabulary = JSON.parse(readFileSync(new URL('../train/src/picovox_train/vocab.json', import.meta.url), 'utf8')).tokens;
 
 
 test('tokenize', () => {

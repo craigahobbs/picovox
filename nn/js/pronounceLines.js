@@ -2,7 +2,7 @@
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 // Pronounce words with a G2P module as the package does (lib/g2p.js) - one word per input line in, one line of its phones
-// (space-separated) out (used by `python -m nn.context check` to measure a module on the book words)
+// (space-separated) out (used by `python -m picovox_train.context check` to measure a module on the book words)
 //
 //     node nn/js/pronounceLines.js lib/models/g2pModel.js < words.txt > phones.txt
 

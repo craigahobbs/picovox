@@ -1,11 +1,11 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-// make train's listening samples - a training stage's final model (a checkpoint, exported by nn.export as the package
+// make train's listening samples - a training stage's final model (a checkpoint, exported by picovox_train.export as the package
 // stage exports the student) or a packaged model (the shipped lib/models/voiceModel.js, the reference) speaking
 // data/nn/train.json's samples texts in its speakers' voices exactly as the package speaks a sentence (lib/synthesis.js
 // sentenceBlocks, every word pronounced by the G2P network), each scored with UTMOS on the CPU
-// (tools/listeners.py - the GPU is left to training). The WAV files are OUT/<stage>-<speaker>-<text>.wav, and
+// (picovox_train/listeners.py - the GPU is left to training). The WAV files are OUT/<stage>-<speaker>-<text>.wav, and
 // OUT/index.json lists every stage's samples - [{stage, run, checkpoint, step, label, sex, speaker, text, file, seconds,
 // mos}] - updated under a lock and replaced atomically, so sample stages finishing at once keep each other's entries.
 //
@@ -57,8 +57,9 @@ async function main() {
         const copy = join(work, 'checkpoint.pt');
         copyFileSync(args.checkpoint, copy);
         const python = join(repository, 'build/venv-nn/bin/python');
-        execFileSync(python, ['-B', '-m', 'nn.export', copy, '--voice', 'model', '--out', work],
-            {'cwd': repository, 'stdio': ['ignore', 'ignore', 'inherit']});
+        execFileSync(python, ['-B', '-m', 'picovox_train.export', copy, '--voice', 'model', '--out', work],
+            {'cwd': repository, 'env': {...process.env, 'PYTHONPATH': join(repository, 'train/src')},
+                'stdio': ['ignore', 'ignore', 'inherit']});
         const bytes = readFileSync(join(work, 'model.bin'));
         model = loadModel(JSON.parse(readFileSync(join(work, 'model.json'), 'utf8')),
             bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
@@ -94,9 +95,9 @@ async function main() {
 
     // UTMOS on the CPU
     const listeners = join(repository, 'build/venv-listeners/bin/python');
-    const output = execFileSync(listeners, ['-I', 'tools/listeners.py', '--device', 'cpu', '--no-embedding', '--no-emotion',
-        ...samples.map((sample) => join(work, sample.file))], {'cwd': repository, 'encoding': 'utf8', 'maxBuffer': 16 * 1024 * 1024,
-        'stdio': ['ignore', 'pipe', 'inherit']});
+    const output = execFileSync(listeners, ['-I', 'train/src/picovox_train/listeners.py', '--device', 'cpu', '--no-embedding',
+        '--no-emotion', ...samples.map((sample) => join(work, sample.file))], {'cwd': repository, 'encoding': 'utf8',
+        'maxBuffer': 16 * 1024 * 1024, 'stdio': ['ignore', 'pipe', 'inherit']});
     const scores = parseScores(output);
     for (const sample of samples) {
         sample.mos = Number.isFinite(scores[sample.file]) ? Math.round(scores[sample.file] * 1000) / 1000 : null;

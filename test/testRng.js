@@ -7,7 +7,7 @@ import test from 'node:test';
 
 
 test('rng.streamSeed', () => {
-    // nn/rng.py's stream_seed
+    // picovox_train/rng.py's stream_seed
     assert.equal(streamSeed(1, 1), 1278455945);
     assert.equal(streamSeed(1000, 2), 2545871315);
     assert.equal(streamSeed(5, 3), 2274654832);
@@ -24,7 +24,7 @@ test('rng.streamSeed', () => {
 
 
 test('rng.uniformAt', () => {
-    // nn/rng.py's uniform
+    // picovox_train/rng.py's uniform
     assert.deepEqual([0, 1, 2, 3, 4, 5].map((index) => uniformAt(7, index)), [
         0.011704753153026104, 0.06195825757458806, 0.97690763277933, 0.6990287057124078, 0.5214452685322613, 0.4055216880515218
     ]);
@@ -42,7 +42,7 @@ test('rng.uniformAt', () => {
 
 
 test('rng.gaussAt', () => {
-    // nn/rng.py's gauss
+    // picovox_train/rng.py's gauss
     assert.equal(gaussAt(7, 0), -0.4574043168616386);
     assert.equal(gaussAt(123, 45), -1.1194866375645351);
     assert.deepEqual([10, 11, 12].map((index) => gaussAt(42, index)), [-0.7347769063645522, -0.1463601602974729, 1.3256268005328773]);
