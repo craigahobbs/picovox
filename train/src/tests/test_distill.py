@@ -313,9 +313,7 @@ class TestTraining(DistillCase):
         batch = prefetcher.next()
         self.assertIn('unit', batch)
         # (the queue full - the thread waits on it)
-        deadline = time.time() + 5
-        while not prefetcher.queue.full() and time.time() < deadline:
-            time.sleep(0.01)
+        self.assertTrue(helpers.wait_until(prefetcher.queue.full))
         time.sleep(0.3)
         prefetcher.close()
         self.assertFalse(prefetcher.thread.is_alive())
@@ -338,14 +336,9 @@ class TestTraining(DistillCase):
         targets = distill.Targets(self.targets)
         prefetcher = distill.BatchPrefetcher(targets, targets.split(0), 4, 10 ** 6, numpy.random.default_rng(0), depth=1)
         # (wait until the thread has tried to put into the full queue - deterministic, however loaded the machine)
-        deadline = time.time() + 120
-        while not prefetcher.queue.full() and time.time() < deadline:
-            time.sleep(0.01)
-        self.assertTrue(prefetcher.queue.full())
+        self.assertTrue(helpers.wait_until(prefetcher.queue.full))
         with unittest.mock.patch.object(prefetcher.queue, 'put', wraps=prefetcher.queue.put) as put:
-            while put.call_count < 2 and time.time() < deadline:
-                time.sleep(0.01)
-            self.assertGreaterEqual(put.call_count, 2)
+            self.assertTrue(helpers.wait_until(lambda: put.call_count >= 2))
             prefetcher.stopping.set()
             prefetcher.thread.join()
         prefetcher.thread.join()

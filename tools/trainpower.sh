@@ -4,13 +4,13 @@
 
 # make train's power check (macOS laptops): the training run keeps the GPU busy for hours, drawing more than a small
 # power adapter supplies (an M3 Max measured ~85 W), so a run on battery or a low-wattage adapter drains the battery and
-# the machine slows down. If the adapter is under MIN_WATTS (default 96, TRAIN_MIN_WATTS), say so - and, at a terminal,
+# the machine slows down. If the adapter is under MIN_WATTS (default 90, TRAIN_MIN_WATTS), say so - and, at a terminal,
 # wait for Enter (plug in a bigger adapter first, then Enter re-checks). TRAIN_POWER_CHECK=0 skips the check.
 #
 # tools/trainpower.sh [MIN_WATTS]
 
 set -u
-min_watts=${1:-${TRAIN_MIN_WATTS:-96}}
+min_watts=${1:-${TRAIN_MIN_WATTS:-90}}
 [ "${TRAIN_POWER_CHECK:-1}" = 0 ] && exit 0
 
 # The adapter's watts (0 on battery); no battery (a desktop Mac, or not macOS) - nothing to check

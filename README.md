@@ -384,8 +384,9 @@ network's 30 plus the reading stage and the check (the labels, the context netwo
 network).
 
 `make train` first checks the power (`tools/trainpower.sh`, macOS laptops): the run keeps the GPU busy for hours, and
-an M3 Max under it draws about 85 W, so on battery or an adapter under 96 W (`TRAIN_MIN_WATTS`) it says so and, at a
-terminal, waits for Enter - plug in a bigger adapter first (Apple's 96 W or 140 W). `TRAIN_POWER_CHECK=0` skips it.
+an M3 Max under it draws about 85 W, so on battery or an adapter under 90 W (`TRAIN_MIN_WATTS`) it says so and, at a
+terminal, waits for Enter - plug in a bigger adapter first (Apple's 96 W or 140 W - a 14-inch MacBook Pro negotiates
+about 94 W from either). `TRAIN_POWER_CHECK=0` skips it.
 
 
 ## Distilling the voice model
