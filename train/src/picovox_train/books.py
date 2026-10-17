@@ -141,14 +141,20 @@ def bundle_path(books_dir, bundle):
     return path
 
 
-# A text's bytes from the bundle's archive, or None if it isn't there
-def bundle_text(path, name):
+# Unpack the bundle's pinned texts into the books directory - in one pass, each verified against its pin (a text the
+# directory has, or that isn't pinned or isn't the pinned text, is skipped)
+def unpack_bundle(books_dir, path, pins):
     with tarfile.open(path, 'r:xz') as archive:
-        try:
-            member = archive.getmember(f'{name}.txt')
-        except KeyError:
-            return None
-        return archive.extractfile(member).read()
+        for member in archive:
+            pin = pins.get(member.name[:-len('.txt')]) if member.name.endswith('.txt') else None
+            target = os.path.join(books_dir, os.path.basename(member.name))
+            if pin is None or os.path.exists(target):
+                continue
+            data = archive.extractfile(member).read()
+            if sha256(data) == pin['sha256']:
+                with open(target + '.tmp', 'wb') as file:
+                    file.write(data)
+                os.replace(target + '.tmp', target)
 
 
 # The path of a pinned text in the books directory - fetched if missing (the pins' bundle, else its source URL, else
@@ -175,12 +181,15 @@ def pinned_path(books_dir, name, pins, bundle=None):
     sources = ([bundle['url']] if bundle else []) + [pin['url']] + ([pin['archive']] if pin.get('archive') else [])
     for url in sources:
         try:
-            data = bundle_text(bundle_path(books_dir, bundle), name) if bundle and url == bundle['url'] else fetch_url(url)
+            if bundle and url == bundle['url']:
+                unpack_bundle(books_dir, bundle_path(books_dir, bundle), pins)
+                if os.path.exists(path):
+                    return path
+                attempts.append(f'{url}: no pinned copy in the bundle')
+                continue
+            data = fetch_url(url)
         except (OSError, PinError, tarfile.TarError, lzma.LZMAError) as error:
             attempts.append(f'{url}: {error}')
-            continue
-        if data is None:
-            attempts.append(f'{url}: not in the bundle')
             continue
         actual = sha256(data)
         if actual == pin['sha256']:

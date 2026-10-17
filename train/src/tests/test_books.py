@@ -293,12 +293,12 @@ class TestCommands(BooksCase):
         self.assertEqual(stdout.getvalue(), f'books: 1 pinned texts in {self.books}\n')
 
 
-# An xz-compressed tar of texts ({name: bytes}) - a hand-made bundle
+# An xz-compressed tar of texts ({name: bytes} - name.txt, or a file name with its extension) - a hand-made bundle
 def archive_of(texts):
     tar_bytes = io.BytesIO()
     with tarfile.open(fileobj=tar_bytes, mode='w') as archive:
         for name, data in texts.items():
-            info = tarfile.TarInfo(f'{name}.txt')
+            info = tarfile.TarInfo(name if '.' in name else f'{name}.txt')
             info.size = len(data)
             archive.addfile(info, io.BytesIO(data))
     return lzma.compress(tar_bytes.getvalue())
@@ -414,3 +414,16 @@ class TestBundle(BooksCase):
         with captured() as (_, stderr):
             self.assertEqual(books.main(['--pins', self.pins_path, '--books', self.books, 'publish', site]), 1)
         self.assertEqual(stderr.getvalue(), f'books: no bundle in {self.pins_path} (python -m picovox_train.books bundle TAG)\n')
+
+    def test_unpack_bundle(self):
+        # One pass over the bundle: the pinned texts the directory lacks, verified - not other files, unpinned texts, texts
+        # the directory has, or other revisions
+        pins = {'pg7': pin_of(PINNED), 'pg8': pin_of(PINNED), 'pg9': pin_of(PINNED)}
+        bundle = os.path.join(self.directory, 'bundle.tar.xz')
+        with open(bundle, 'wb') as file:
+            file.write(archive_of({'pg7': PINNED, 'pg8': PINNED, 'pg9': REVISED, 'pg10': PINNED, 'README.md': b'x'}))
+        self.write_book('pg8', b'kept')
+        books.unpack_bundle(self.books, bundle, pins)
+        self.assertEqual(sorted(os.listdir(self.books)), ['pg7.txt', 'pg8.txt'])
+        self.assertEqual(self.read_book('pg7'), PINNED)
+        self.assertEqual(self.read_book('pg8'), b'kept')
