@@ -70,7 +70,7 @@
               "val-from": 10000, "seed": 1}
     },
     "distill": {
-        "description": "Knowledge distillation of the teacher (nn/distill.py) - its distillation set (the targets: the training utterances, and the sentences of the Project Gutenberg books texts - pinned texts, pins (nn/books.py), fetched to books), the student ladder, the polish fine-tune, the evaluation (nn/panel.py), and the tolerance (fixed before any student is measured)",
+        "description": "Knowledge distillation of the teacher (nn/distill.py) - its distillation set (the targets: the training utterances, and the sentences of the Project Gutenberg books texts - pinned texts, pins (nn/books.py), fetched to books), the student's training (Muon for the hidden matrices with the warmup-stable-decay schedule - constant, then the last 25% cooled down by 1 - sqrt; picovox_train/optim.py), the student ladder, the polish fine-tune, the evaluation (nn/panel.py), and the tolerance (fixed before any student is measured)",
         "teacher": "build/nn/runs/multi-b/best.pt",
         "targets": {
             "books": "build/nn/books",
@@ -88,11 +88,15 @@
             "seed": 1
         },
         "train": {
-            "steps": 20000,
+            "steps": 12000,
             "batch": 48,
             "maxFrames": 24000,
             "lr": 0.0015,
             "warmup": 500,
+            "optimizer": "muon",
+            "schedule": "wsd",
+            "cooldown": 0.25,
+            "cooldownShape": "1-sqrt",
             "durationWeight": 0.25,
             "dropout": 0.05,
             "weightDecay": 0.0001,

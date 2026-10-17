@@ -15,7 +15,7 @@
         {"stage": "teacher-b", "group": "Teacher", "title": "Teacher stage B with the critic (picovox_train.trainmulti --recipe teacher.b - 20,000 steps)", "on": "gpu", "minutes": 60, "needs": ["teacher-a"], "run": "teacher-b", "recipe": "teacher.b"},
         {"stage": "teacher-eval", "group": "Teacher", "title": "The teacher through the listener panel (picovox_train.distill eval)", "on": "cpu", "minutes": 3, "needs": ["teacher-b"]},
         {"stage": "targets", "group": "Student", "title": "The distillation targets (picovox_train.distill targets)", "on": "gpu", "minutes": 9, "needs": ["teacher-b"]},
-        {"stage": "student", "group": "Student", "title": "The distilled student (picovox_train.distill train)", "on": "gpu", "minutes": 11, "needs": ["targets"], "run": "distill-student"},
+        {"stage": "student", "group": "Student", "title": "The distilled student (picovox_train.distill train)", "on": "gpu", "minutes": 6, "needs": ["targets"], "run": "distill-student"},
         {"stage": "polish", "group": "Student", "title": "The student's polish on real audio (picovox_train.distill polish)", "on": "gpu", "minutes": 9, "needs": ["student"], "run": "distill-student-polish"},
         {"stage": "student-eval", "group": "Student", "title": "The student through the panel, and the gate (picovox_train.distill pick: within the teacher's tolerance)", "on": "cpu", "minutes": 3, "needs": ["polish", "teacher-eval"]},
         {"stage": "package", "group": "Package", "title": "lib/models/voiceModel.js with its provenance (picovox_train.export, picovox_train.package)", "on": "cpu", "minutes": 1, "needs": ["student-eval"], "after": ["samples-reference"]},

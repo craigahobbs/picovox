@@ -330,7 +330,7 @@ checkout, by one recipe, `data/nn/train.json` (every stage's settings and seeds)
 | package - `lib/models/voiceModel.js`, with its provenance | CPU | student-eval (after samples-reference) |
 | samples-reference, samples-teacher-a, -teacher-b, -student, -polish - the listening samples | CPU, under a minute each | the shipped model (after data-multi); each stage's model |
 
-The critical path - the readers' data, teacher A (~22 minutes) and B (~60), the targets (~9), the student (~11) and
+The critical path - the readers' data, teacher A (~22 minutes) and B (~60), the targets (~9), the student (~6) and
 its polish (~9), the gate, the package - takes about 2 hours on an M3 Max (the corpora downloaded once before). The
 voice data is built with the committed G2P, so the G2P retrain is off the critical path; its module is checked against
 the committed `lib/models/g2pModel.js` (identical, else within the recipe's tolerances - it never replaces it). The
@@ -416,7 +416,9 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill pick  
    speakers is the same voice in a student. A student runs with the teacher's durations (teacher forcing on its length
    regulator) and learns L1 on the normalized parameter frames plus the duration losses against the teacher's duration
    outputs. `--init-teacher` copies every teacher tensor of the same shape; `--feature-weight` adds intermediate-feature
-   matching. Runs go to `build/nn/runs/distill-<student>/`.
+   matching. The training (`data/nn/train.json`'s `distill.train`) is 12,000 steps of Muon on the hidden matrices
+   (AdamW for the rest) with a warmup-stable-decay schedule - constant, then the last 25% cooled down by 1 - sqrt
+   (`picovox_train/optim.py`). Runs go to `build/nn/runs/distill-<student>/`.
 3. **Polish** - `picovox_train/trainmulti.py`'s real-audio losses (the spectral loss through the differentiable
    synthesizer on the recordings, the adversarial critic - started from the teacher's - and feature matching) for a
    short fine-tune.
