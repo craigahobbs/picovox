@@ -703,9 +703,11 @@ critic only every second step did not hold: it weakened the critic and widened t
 over-smoothing the critic is there to fix. Outside the trainer, the readers' data build became 6.6 times faster when we
 found it rebuilt a 1.7-second table for every utterance (Python's `setdefault` evaluates its default on every call).
 
-A port of the trainer to Apple's MLX framework was also built and timed against the optimized PyTorch trainer (the
-record: "1.6-1.8x over the optimized PyTorch trainer"); it was dropped, and the PyTorch trainer was kept and optimized
-instead.
+A port of the trainer to Apple's MLX framework was also built: its quality matched, and in a fair A/B against the
+optimized PyTorch trainer (interleaved, the same code, the same GPU load) it was 1.78x faster from a fresh start and 1.60x
+warm - well short of an earlier, unfair 4x comparison against older PyTorch code under contention - with a memory
+problem of its own (about 43 GB). The gain didn't justify maintaining two trainers, so the MLX port was dropped and the
+PyTorch trainer kept and optimized instead.
 
 ### 11.2 The stage graph
 
