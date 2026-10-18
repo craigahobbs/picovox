@@ -10,13 +10,13 @@
   <!-- Front end -->
   <rect x="20" y="40" width="150" height="74" rx="8" fill="#eef2f7" stroke="#8a97a8"/>
   <text x="95" y="66" text-anchor="middle" font-weight="bold">Text front end</text>
-  <text x="95" y="86" text-anchor="middle">normalize, CMU</text>
-  <text x="95" y="102" text-anchor="middle">dictionary lookup</text>
+  <text x="95" y="86" text-anchor="middle">normalize numbers,</text>
+  <text x="95" y="102" text-anchor="middle">abbreviations</text>
 
   <rect x="20" y="186" width="150" height="74" rx="8" fill="#fff4e5" stroke="#c28a2c"/>
   <text x="95" y="212" text-anchor="middle" font-weight="bold">G2P network</text>
-  <text x="95" y="232" text-anchor="middle">letters to phonemes</text>
-  <text x="95" y="248" text-anchor="middle">(dictionary misses)</text>
+  <text x="95" y="232" text-anchor="middle">every word; context</text>
+  <text x="95" y="248" text-anchor="middle">net for heteronyms</text>
 
   <rect x="215" y="40" width="150" height="74" rx="8" fill="#eef2f7" stroke="#8a97a8"/>
   <text x="290" y="66" text-anchor="middle" font-weight="bold">Tokens</text>
@@ -26,7 +26,7 @@
   <!-- Acoustic model -->
   <rect x="410" y="40" width="170" height="74" rx="8" fill="#e8f1fb" stroke="#2563a8"/>
   <text x="495" y="66" text-anchor="middle" font-weight="bold">Acoustic network</text>
-  <text x="495" y="86" text-anchor="middle">under 1M parameters</text>
+  <text x="495" y="86" text-anchor="middle">350K parameters</text>
   <text x="495" y="102" text-anchor="middle">durations, then frames</text>
 
   <rect x="410" y="186" width="170" height="74" rx="8" fill="#f3eefc" stroke="#7c3aed"/>
@@ -42,12 +42,12 @@
 
   <rect x="830" y="40" width="110" height="74" rx="8" fill="#eef2f7" stroke="#8a97a8"/>
   <text x="885" y="72" text-anchor="middle" font-weight="bold">Audio</text>
-  <text x="885" y="92" text-anchor="middle">44.1 kHz</text>
+  <text x="885" y="92" text-anchor="middle">24 kHz</text>
 
   <!-- Arrows -->
   <line x1="170" y1="77" x2="213" y2="77" stroke="#4a5563" stroke-width="1.6" marker-end="url(#arrow)"/>
-  <path d="M95,114 L95,184" stroke="#4a5563" stroke-width="1.6" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
-  <text x="103" y="152" fill="#4a5563">miss</text>
+  <path d="M95,114 L95,184" stroke="#4a5563" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+  <text x="103" y="152" fill="#4a5563">words</text>
   <path d="M170,223 L240,223 L240,116" stroke="#4a5563" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
   <line x1="365" y1="77" x2="408" y2="77" stroke="#4a5563" stroke-width="1.6" marker-end="url(#arrow)"/>
   <line x1="495" y1="186" x2="495" y2="116" stroke="#4a5563" stroke-width="1.6" marker-end="url(#arrow)"/>
@@ -57,7 +57,7 @@
   <line x1="785" y1="77" x2="828" y2="77" stroke="#4a5563" stroke-width="1.6" marker-end="url(#arrow)"/>
 
   <!-- Where it runs -->
-  <text x="20" y="22" fill="#4a5563">lib/lexicon.js</text>
+  <text x="20" y="22" fill="#4a5563">lib/lexicon.js, lib/g2p.js</text>
   <text x="410" y="22" fill="#4a5563">lib/model.js</text>
   <text x="625" y="22" fill="#4a5563">lib/render.js</text>
   <text x="625" y="212" fill="#4a5563">Everything runs in the browser</text>
