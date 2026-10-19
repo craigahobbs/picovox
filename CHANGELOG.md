@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0 (2026-10-19)
+
+- [c35e39d](https://github.com/craigahobbs/picovox/commit/c35e39d) - a smaller voice network - the d64 student, a 64-wide decoder (305,035 parameters, 385 KB gzipped - was 433 KB): its network 1.24x faster on an iPhone without a JIT, UTMOS within 0.02 of the 80-wide decoder's and a lower word error rate
+
+- [3271126](https://github.com/craigahobbs/picovox/commit/3271126) - the renderer 1.2x faster on an iPhone without a JIT, and nearer the training synthesizer - synthesis 2.6x real time in one worker there (was 2.0x)
+
 ## 1.1.0 (2026-10-19)
 
 - [24a8fc9](https://github.com/craigahobbs/picovox/commit/24a8fc9) - faster playback, most of all for JavaScript engines without a JIT - on an iPhone whose Safari interprets JavaScript, the renderer is 1.8x faster and synthesis runs at 2.0x real time (was 1.4x); 52x real time on an M3 Max (was 40x)

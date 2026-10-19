@@ -2,7 +2,7 @@
 
 Craig A. Hobbs, with Claude (Anthropic)
 
-October 2026 - a working paper, updated as the work it describes finishes; this version describes picovox 1.1.0.
+October 2026 - a working paper, updated as the work it describes finishes; this version describes picovox 1.2.0.
 Sections marked *in progress* report interim results.
 
 
@@ -14,7 +14,7 @@ WebAssembly, and no runtime dependencies. A small neural network predicts the 32
 source-filter synthesizer every 5 ms, trained end to end through a differentiable copy of the synthesizer; a
 rule-based version of the same synthesizer, calibrated against measurements of 43 human speakers, had been rated 1-2
 out of 5 for naturalness. A multi-speaker, multi-style teacher of 966K parameters, trained on 237 American audiobook
-readers and 7,442 emotional clips, is distilled to a student of 350K parameters that scores 4.17 on an automatic
+readers and 7,442 emotional clips, is distilled to a student of 305K parameters that scores 4.15 on an automatic
 naturalness predictor (UTMOS; human recordings score 3.8-4.4 on it) with a 1.1% Whisper word error rate, and runs
 about 52 times faster than real time in Node and about 2.7 times real time on an iPhone whose browser runs
 JavaScript without a JIT. Every word is pronounced by a
@@ -59,7 +59,7 @@ minutes; and Section 12, the package (picovox on npm) and the audiobook player b
 2. **Phonemes to tokens** (`lib/tokens.js`). A fixed table maps phonemes and prosodic cues to 78 token IDs: the
    phonemes, word boundaries, a start marker, and punctuation tokens (comma, period, question, wh-question, exclamation)
    that tell the network how a phrase should rise, fall, or pause.
-3. **Tokens to synthesizer parameters** (`lib/model.js`). The acoustic network (349,547 parameters) predicts each
+3. **Tokens to synthesizer parameters** (`lib/model.js`). The acoustic network (305,035 parameters) predicts each
    token's duration and then, every 5 ms, 32 synthesizer parameters. A speaker embedding and a style embedding condition
    it. Its decoder streams: it runs a chunk of frames at a time, so speech starts before the sentence is decoded.
 4. **Parameters to audio** (`lib/render.js`). A source-filter synthesizer - Liljencrants-Fant (LF) glottal pulses and
@@ -400,6 +400,22 @@ of the UTMOS that 4-bit weights lose, at a 45% smaller module; the shipped voice
 The student's training was later changed - Muon on its hidden matrices with a warmup-stable-decay schedule, 12,000
 steps instead of 20,000 of AdamW and a cosine (Section 11.4) - and that change, not a new size, is most of the
 difference between picovox 1.0.0's voice and 1.0.1's (Section 12.5).
+
+**A decoder rung.** On a phone without a JIT (Section 12.4), the decoder - per frame, unlike the encoder's per token -
+was over half the voice network's time, so the ladder gained rungs that shrink only it, keeping s80's encoder (each on
+one teacher, polished, through the panel):
+
+| Student (s80's encoder, dim 80, 3 layers) | Parameters | Module (gzip) | UTMOS | WER | Similarity |
+| --- | --- | --- | --- | --- | --- |
+| s80 - decoder 80 wide, 4 layers (two seeds) | 349,547 | 432 KB | 4.144, 4.165 | 1.46%, 1.26% | 0.977, 0.973 |
+| **d64 - decoder 64 wide, 4 layers (three runs) - chosen** | 305,035 | 385 KB | 4.147, 4.126, 4.135 | 1.06%, 1.41%, 1.26% | 0.972, 0.968, 0.972 |
+| L3 - decoder 80 wide, 3 layers | 317,947 | 397 KB | 4.136 | 1.56% | 0.974 |
+| d64-L3 - decoder 64 wide, 3 layers | 283,851 | 361 KB | 4.095 | 1.76% | 0.964 |
+
+d64 averages 0.02 UTMOS below s80 - about the seed spread - with a lower word error rate, and its voice network runs
+1.24 times faster on that iPhone; it ships in picovox 1.2.0. (Its third run is the recipe's own student, retrained to
+check the recipe: the same losses through step 1,000 and within 0.02% at the end, but not bitwise the same weights - the
+voice's training on the GPU is not bit-reproducible, which the model's export and packaging, from a checkpoint, are.)
 
 
 ## 9. Grapheme-to-phoneme conversion without a dictionary
@@ -841,16 +857,16 @@ current browsers and in Node 22 or later, and has no dependencies:
 
 The options are the voice, the speaking rate (0.5-2), the noise seed, and the sample rate (24 kHz by default); the
 output is bit-for-bit deterministic in browsers and Node. The package's audio is bit-identical to the audiobook
-player's own synthesis path, from which it was extracted (76 cases). Version 1.0.1's tarball holds 21 files, 806,430
-bytes compressed and 1,217,609 unpacked; its two generated model modules are 419,535 bytes (the G2P and context
-networks, 316 KB gzipped) and 616,790 bytes (the voice, 433 KB gzipped), the rest is code and the README. "Under 1 MB"
+player's own synthesis path, from which it was extracted (76 cases). Version 1.2.0's tarball holds 21 files, 766,214
+bytes compressed and 1,180,611 unpacked; its two generated model modules are 419,575 bytes (the G2P and context
+networks, 316 KB gzipped) and 554,315 bytes (the voice, 385 KB gzipped), the rest is code and the README. "Under 1 MB"
 is the package as downloaded, and the two models as a static host serves them gzipped; the raw model modules are
-about 1.04 MB together.
+about 0.97 MB together.
 
 ### 12.2 Speed and streaming
 
-On an M3 Max in Node, the voice network runs about 108 times faster than real time, the renderer about 100 times, and
-synthesis end to end (network and rendering, 24 kHz) about 52 times (in 1.0.2, 94, 65, and 40 - Section 12.4's
+On an M3 Max in Node, the voice network runs about 127 times faster than real time, the renderer about 97 times, and
+synthesis end to end (network and rendering, 24 kHz) about 55 times (in 1.0.2, 94, 65, and 40 - Section 12.4's
 changes for phones without a JIT help with one too); loading both networks takes about 0.1 s, and `stream` yields the first speech in
 about 70 ms. Three changes made it so. The voice network streams: its decoder (per-frame layers and short
 convolutions, no attention) runs a chunk at a time, each layer only half a kernel ahead of the one above, so speech
@@ -900,12 +916,20 @@ made against it and checked on the phone:
   beside each synthesis worker, which streams it frame chunks as the network makes them. Two such pipelines at once
   (four workers) gave 3.7 times real time in all, but each sentence slower; the player uses one.
 
-| On the iPhone, without a JIT | 1.0.2 | 1.1.0 |
-| --- | --- | --- |
-| Voice network | 3.6x real time | 4.1x |
-| Renderer | 2.1x | 3.8x |
-| Synthesis, one worker | 1.4x | 2.0x |
-| Synthesis, network and renderer in two workers | - | 2.7x |
+| On the iPhone, without a JIT | 1.0.2 | 1.1.0 | 1.2.0 |
+| --- | --- | --- | --- |
+| Voice network | 3.6x real time | 4.1x | 5.4x |
+| Renderer | 2.1x | 3.8x | 4.6x |
+| Synthesis, one worker | 1.4x | 2.0x | 2.6x |
+| Synthesis, network and renderer in two workers (warm - the texts three times) | - | 2.9x | 3.1-3.4x |
+
+Version 1.2.0 adds two things. The renderer's voicing tables became 4 points a harmonic with cubic B-spline
+interpolation (each harmonic divided by the B-spline's response, sinc^4, before the table's inverse FFT, so the
+interpolation passes it unchanged): more accurate than 1.1.0's 8 points and Catmull-Rom (SNR 105-110 dB against the
+summed harmonics, against 96-99) with half the table FFTs; the noise's inverse FFT became a real transform (half the
+spectrum, a half-size FFT), and the noise draws and gains a little cheaper - the renderer 1.2 times faster. And the
+voice is the d64 student (Section 8): the network 1.24 times faster. With the two apart in workers, the slower one
+sets the speed, so neither alone moved the pipeline much (with only the renderer faster, it was 3.0x).
 
 In the player, five minutes of a book played through with no stall. Two things measured did not make it: the noise
 filtering at half the overlap (the renderer 1.4 times faster, but the noise itself changed - SNR 25-31 dB against the
@@ -965,10 +989,9 @@ parameters and fewer bits per weight - distillation (Section 8) and, for the G2P
   names regression set and the readers' audio are the only checks on the long tail.
 - **Training time.** Teacher A is now the longest stage (about 19 minutes alone, by estimate); a shorter or
   WSD-scheduled stage A is untested, as is the crop warm-up measured in Section 11.4.
-- **Phones.** Without a JIT, an iPhone synthesizes at about 2.7 times real time with two workers (Section 12.4); the
-  voice network's decoder is now the larger cost (its linear layers about 10 million multiply-adds a second of audio),
-  so a smaller decoder from the distillation ladder is the next step. Why that iPhone's Safari ran without a JIT is
-  unknown; with one, a phone should be many times faster.
+- **Phones.** Without a JIT, an iPhone synthesizes at about 3.1-3.4 times real time with two workers and 2.6 times
+  with one (Section 12.4); the network and the renderer now take about equal time, so each further gain needs both.
+  Why that iPhone's Safari ran without a JIT is unknown; with one, a phone should be many times faster.
 - **The designed voices.** The ten voices with emotional styles (Section 7) are specified but not shipped; the package
   has two.
 - The voices are American English only, by design.

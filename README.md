@@ -147,11 +147,11 @@ that runs its own synthesis loop (PicoShelf's worker does):
 
 | | |
 | --- | --- |
-| The package (`npm pack`) | 803 KB packed, 1.2 MB unpacked - the G2P network 419 KB and the voice network 616 KB of it, as base64 |
-| The voice network | 349,547 parameters, 8-bit weights - 432 KB gzipped |
+| The package (`npm pack`) | 766 KB packed, 1.2 MB unpacked - the G2P network 420 KB and the voice network 554 KB of it, as base64 |
+| The voice network | 305,035 parameters, 8-bit weights - 385 KB gzipped |
 | The G2P network | 373,256 parameters (and the heteronym context network's 47,779), 6-bit weights |
-| Speed, Apple M3 Max (Node) | The voice network about 108x real time, the renderer about 100x; synthesis end to end (24 kHz) about 52x |
-| Speed, iPhone without a JIT (Safari) | About 2x real time in one worker; about 2.7x with the network and the renderer in two workers (`sentenceFrames` and `createSentenceRenderer`) |
+| Speed, Apple M3 Max (Node) | The voice network about 127x real time, the renderer about 97x; synthesis end to end (24 kHz) about 55x |
+| Speed, iPhone without a JIT (Safari) | About 2.6x real time in one worker; about 3.1-3.4x with the network and the renderer in two workers (`sentenceFrames` and `createSentenceRenderer`) |
 | Startup | About 0.1 s to load both networks (Node, M3 Max) |
 
 The voices score a mean UTMOS (a neural predictor of listeners' naturalness ratings, 1-5) of about 4.1 on the listener
@@ -473,6 +473,20 @@ three, about +/-15%):
 
 The polish adds 0.025-0.034 UTMOS, most of it to the package's two ARCTIC voices (bdl and slt), which pure
 distillation loses most; intermediate-feature matching (weight 0.05) adds about 0.02, and the two barely stack.
+
+The decoder rung (October 2026, picovox 1.2.0): on a phone without a JIT the decoder, per frame, was over half the voice
+network's time, so students that shrink only it - s80's encoder - were trained on one teacher, polished, and scored:
+
+| Student | Parameters | Module (gzip) | UTMOS | WER | Similarity |
+| --- | --- | --- | --- | --- | --- |
+| s80 - decoder 80 wide, 4 layers (two seeds) | 349,547 | 432 KB | 4.144, 4.165 | 1.46%, 1.26% | 0.977, 0.973 |
+| **d64 - decoder 64 wide, 4 layers (three runs) - chosen** | 305,035 | 385 KB | 4.147, 4.126, 4.135 | 1.06%, 1.41%, 1.26% | 0.972, 0.968, 0.972 |
+| L3 - decoder 80 wide, 3 layers | 317,947 | 397 KB | 4.136 | 1.56% | 0.974 |
+| d64-L3 - decoder 64 wide, 3 layers | 283,851 | 361 KB | 4.095 | 1.76% | 0.964 |
+
+d64 is about 0.02 UTMOS below s80 on average (the seed spread) with a lower WER, and its network is 1.24x faster on that
+iPhone. The voice's training on the GPU isn't bit-reproducible - the recipe's d64, retrained, matched its losses but not
+its weights bitwise - though its export and packaging from a checkpoint are.
 
 
 ## Training the G2P model
