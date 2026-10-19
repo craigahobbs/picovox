@@ -22,7 +22,8 @@ from .helpers import captured
 
 
 # The tiny context network's and reading stage's settings
-CONTEXT_TINY = {'steps': 3, 'quantSteps': 2, 'batch': 8, 'embed': 4, 'hidden': 4, 'layer': 4, 'threads': 1, 'warmup': 1}
+CONTEXT_TINY = {'steps': 3, 'quantSteps': 2, 'batch': 8, 'embed': 4, 'hidden': 4, 'layer': 4, 'threads': 1, 'warmup': 1, 'teachers': 1,
+                'itemDropout': 0.0}
 G2P_TINY = {'steps': 3, 'batch': 8, 'threads': 1, 'warmup': 1, 'readingShare': 0.3, 'invariantShare': 0.3}
 
 
@@ -59,7 +60,34 @@ def tiny_labels():
                      'split': 'heldout', 'group': 'pg2'})
     examples.append({'window': window('', 'she', 'will', 'read', '.', '', ''), 'word': 'read', 'slot': 0, 'source': 'seed',
                      'split': 'train', 'group': 'seed'})
-    return {'words': words, 'examples': examples}
+    transfer = [window('', 'we', 'may', 'read', 'more', '.', ''), window('', '', 'their', 'lives', '.', '', '')]
+    return {'words': words, 'examples': examples, 'transfer': transfer}
+
+
+# Whether two models' weights are identical
+def same_weights(model, other):
+    return all(torch.equal(parameter, other_parameter) for parameter, other_parameter in
+               zip(model.state_dict().values(), other.state_dict().values()))
+
+
+# A fake multiprocessing.Pool (run in this process) - each pool made is appended to pools
+def fake_pool(pools):
+    class FakePool:
+        def __init__(self, processes):
+            self.processes = processes
+            self.tasks = None
+            pools.append(self)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def map(self, function, tasks):
+            self.tasks = list(tasks)
+            return list(map(function, self.tasks))
+    return FakePool
 
 
 class TestContext(unittest.TestCase):
@@ -245,6 +273,91 @@ class TestContext(unittest.TestCase):
         # With the reading prior
         model = context.train_context(tiny_labels(), dict(CONTEXT_TINY, prior=0.5, quantSteps=0), lines.append)
         self.assertIn('step 3/3 loss', lines[-1])
+
+        # The options off are the plain training, exactly (no teachers - the transfer windows unused)
+        plain = context.train_context(tiny_labels(), CONTEXT_TINY, lines.append)
+        same = context.train_context(tiny_labels(), dict(CONTEXT_TINY, itemDropout=0.0, distill=0.5, transferShare=0.5), lines.append, [])
+        self.assertTrue(same_weights(plain, same))
+
+        # The context items' dropout - deterministic, and it changes the training
+        dropped = context.train_context(tiny_labels(), dict(CONTEXT_TINY, itemDropout=0.3), lines.append)
+        self.assertTrue(same_weights(dropped, context.train_context(tiny_labels(), dict(CONTEXT_TINY, itemDropout=0.3), lines.append)))
+        self.assertFalse(same_weights(plain, dropped))
+
+        # Teachers - their mean probabilities over the examples, and with transferShare over the transfer windows too
+        torch.manual_seed(0)
+        teachers = [context.build_context(dict(context.CONTEXT_SETTINGS, **CONTEXT_TINY)) for _ in range(2)]
+        lines = []
+        distilled = context.train_context(tiny_labels(), dict(CONTEXT_TINY, distill=0.5, transferShare=0.0), lines.append, teachers)
+        self.assertTrue(lines[0].endswith(', 2 teachers'))
+        self.assertFalse(same_weights(plain, distilled))
+        transferred = context.train_context(tiny_labels(), dict(CONTEXT_TINY, distill=0.5, transferShare=0.5), lines.append, teachers)
+        self.assertFalse(same_weights(distilled, transferred))
+        again = context.train_context(tiny_labels(), dict(CONTEXT_TINY, distill=0.5, transferShare=0.5), lines.append, teachers)
+        self.assertTrue(same_weights(transferred, again))
+
+        # No transfer windows in the labels - the examples alone
+        labels = tiny_labels()
+        del labels['transfer']
+        alone = context.train_context(labels, dict(CONTEXT_TINY, distill=0.5, transferShare=0.5), lines.append, teachers)
+        self.assertTrue(same_weights(distilled, alone))
+
+    def test_teacher_probabilities(self):
+        torch.manual_seed(0)
+        teachers = [context.build_context({'embed': 4, 'hidden': 4, 'layer': 4}) for _ in range(2)]
+        chars, lengths = context.window_arrays([window('', 'i', 'will', 'read', '.', '', '')] * 3)
+        probabilities = context.teacher_probabilities(teachers, chars, lengths, batch_size=2)
+        self.assertEqual(probabilities.shape, (3, context.READINGS))
+        with torch.no_grad():
+            logits = [teacher(torch.from_numpy(chars), torch.from_numpy(lengths)).double() for teacher in teachers]
+            expected = sum(torch.softmax(teacher_logits, -1) for teacher_logits in logits) / 2
+        self.assertTrue(numpy.allclose(probabilities, expected.numpy()))
+        self.assertTrue(numpy.allclose(probabilities.sum(1), 1.0))
+
+    def test_teachers_and_student(self):
+        path = self.write_labels()
+        log_path = self.path('train.log')
+        self.assertEqual(context.teacher_seeds(dict(CONTEXT_TINY, seed=3, teachers=2)), [301, 302])
+        self.assertEqual(context.teacher_seeds(dict(CONTEXT_TINY, teachers=0)), [])
+
+        # A teacher - its seed's network, quantized
+        settings = dict(context.CONTEXT_SETTINGS, **CONTEXT_TINY)
+        state = context.teacher_task((path, None, 301, settings, log_path))
+        teacher = context.train_context(tiny_labels(), dict(settings, seed=301), lambda text: None)
+        context.WeightQuantizer(teacher, context.EXPORT).quantize()
+        self.assertTrue(all(torch.equal(value, teacher.state_dict()[name]) for name, value in state.items()))
+        fold_state = context.teacher_task((path, 1, 301, settings, log_path))
+        fold_teacher = context.train_context(context.fold_labels(tiny_labels(), 1), dict(settings, seed=301), lambda text: None)
+        context.WeightQuantizer(fold_teacher, context.EXPORT).quantize()
+        self.assertTrue(all(torch.equal(value, fold_teacher.state_dict()[name]) for name, value in fold_state.items()))
+        with open(log_path, encoding='utf-8') as file:
+            log = file.read()
+        self.assertIn(' teacher 301: train-context: ', log)
+        self.assertIn(' fold 1: teacher 301: train-context: ', log)
+
+        # The student - no teachers: the plain training; teachers: toward them
+        plain = context.train_student(path, None, dict(CONTEXT_TINY, teachers=0), log_path, [])
+        self.assertTrue(same_weights(plain, context.train_context(tiny_labels(), CONTEXT_TINY, lambda text: None)))
+        student = context.train_student(path, 1, dict(CONTEXT_TINY, distill=0.5, transferShare=0.5), log_path, [fold_state])
+        built = context.build_context(settings)
+        built.load_state_dict(fold_state)
+        expected = context.train_context(context.fold_labels(tiny_labels(), 1), dict(CONTEXT_TINY, distill=0.5, transferShare=0.5),
+                                         lambda text: None, [built])
+        self.assertTrue(same_weights(student, expected))
+        with open(log_path, encoding='utf-8') as file:
+            self.assertIn(' fold 1: train-context: ', file.read())
+
+        # The recipe's network - its teachers (in worker processes or not - the same), then the student
+        distilled = context.train_distilled(path, None, dict(CONTEXT_TINY, teachers=2), log_path)
+        with captured():
+            teachers = [context.teacher_task((path, None, seed, settings, None)) for seed in (101, 102)]
+            student = context.train_student(path, None, dict(CONTEXT_TINY, teachers=2), None, teachers)
+        self.assertTrue(same_weights(distilled, student))
+        pools = []
+        with unittest.mock.patch.object(context.multiprocessing, 'Pool', fake_pool(pools)):
+            pooled = context.train_distilled(path, None, dict(CONTEXT_TINY, teachers=2), log_path, jobs=4)
+        self.assertEqual([pool.processes for pool in pools], [2])
+        self.assertTrue(same_weights(distilled, pooled))
 
     def test_evaluate_context(self):
         labels = tiny_labels()
@@ -473,54 +586,77 @@ class TestContext(unittest.TestCase):
         # A fold held out, the recipe's settings
         with unittest.mock.patch.dict(context.CONTEXT_SETTINGS, CONTEXT_TINY), captured() as (_, stderr):
             self.assertEqual(context.main(['train-context', '--labels', path, '--out', self.path('fold.pt'), '--fold', '1']), 0)
+        self.assertIn('fold 1: teacher 101: train-context:', stderr.getvalue())
         self.assertIn('train-context fold 1:', stderr.getvalue())
+
+        # The teachers in worker processes (-j) - the same network
+        pools = []
+        settings = json.dumps(dict(CONTEXT_TINY, teachers=2))
+        with unittest.mock.patch.object(context.multiprocessing, 'Pool', fake_pool(pools)), captured():
+            self.assertEqual(context.main(['train-context', '--labels', path, '--out', self.path('pooled.pt'), '--settings', settings,
+                                           '-j', '3']), 0)
+            self.assertEqual(context.main(['train-context', '--labels', path, '--out', self.path('sequential.pt'), '--settings', settings]),
+                             0)
+        self.assertEqual([pool.processes for pool in pools], [2])
+        pooled = torch.load(self.path('pooled.pt'), weights_only=False)['state']
+        sequential = torch.load(self.path('sequential.pt'), weights_only=False)['state']
+        self.assertTrue(all(torch.equal(value, sequential[name]) for name, value in pooled.items()))
 
     def test_cross_validate_and_folds(self):
         path = self.write_labels()
         out = self.path('folds')
         os.makedirs(out)
-        done = {'words': {'aligned/read': {'right': 2, 'total': 2, 'majority': 1}}, 'sources': {}}
+        with unittest.mock.patch.dict(context.CONTEXT_SETTINGS, CONTEXT_TINY):
+            digest = context.fold_digest(path)
+        done = {'words': {'aligned/read': {'right': 2, 'total': 2, 'majority': 1}}, 'sources': {}, 'digest': digest}
         with open(os.path.join(out, 'fold-0.json'), 'w', encoding='utf-8') as file:
             json.dump(done, file)
         with unittest.mock.patch.dict(context.CONTEXT_SETTINGS, CONTEXT_TINY), unittest.mock.patch.object(context, 'FOLDS', 2), \
                 captured() as (stdout, stderr):
             status = context.main(['cross-validate', '--labels', path, '--out', out])
         self.assertIn(status, (0, 1))
+        self.assertIn('fold 1: teacher 101: train-context:', stderr.getvalue())
         self.assertIn('fold 1: train-context:', stderr.getvalue())
         self.assertNotIn('fold 0:', stderr.getvalue())
-        self.assertTrue(os.path.exists(os.path.join(out, 'fold-1.json')))
+        with open(os.path.join(out, 'fold-1.json'), encoding='utf-8') as file:
+            self.assertEqual(json.load(file)['digest'], digest)
         self.assertTrue(stdout.getvalue().startswith('2 folds: held-out aligned'))
 
-        # The folds at once (-j - worker processes of one thread each): the same results as one after another
-        class FakePool:
-            def __init__(self, processes):
-                self.processes = processes
-                self.tasks = None
-                pools.append(self)
+        # A fold's results from other inputs (the labels or the settings) are retrained
+        with unittest.mock.patch.dict(context.CONTEXT_SETTINGS, CONTEXT_TINY), unittest.mock.patch.object(context, 'FOLDS', 2):
+            self.assertTrue(context.fold_done(os.path.join(out, 'fold-1.json'), digest))
+            self.assertFalse(context.fold_done(os.path.join(out, 'fold-2.json'), digest))
+            with unittest.mock.patch.dict(context.CONTEXT_SETTINGS, {'lr': 0.5}):
+                self.assertNotEqual(context.fold_digest(path), digest)
+            with unittest.mock.patch.dict(context.CONTEXT_SETTINGS, {'threads': 7}):
+                self.assertEqual(context.fold_digest(path), digest)
+        stale = dict(done, digest='other')
+        with open(os.path.join(out, 'fold-0.json'), 'w', encoding='utf-8') as file:
+            json.dump(stale, file)
+        with unittest.mock.patch.dict(context.CONTEXT_SETTINGS, CONTEXT_TINY), unittest.mock.patch.object(context, 'FOLDS', 2), \
+                captured() as (_, stderr):
+            context.main(['cross-validate', '--labels', path, '--out', out])
+        self.assertIn('fold 0: train-context:', stderr.getvalue())
+        self.assertNotIn('fold 1:', stderr.getvalue())
 
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-            def imap_unordered(self, function, tasks):
-                self.tasks = list(tasks)
-                return map(function, reversed(self.tasks))
+        # In worker processes (-j): every fold's teachers, then every fold's network, each one thread - the same results
         pools = []
         parallel = self.path('parallel')
         with unittest.mock.patch.dict(context.CONTEXT_SETTINGS, CONTEXT_TINY), unittest.mock.patch.object(context, 'FOLDS', 2), \
-                unittest.mock.patch.object(context.multiprocessing, 'Pool', FakePool), captured() as (stdout, _):
+                unittest.mock.patch.object(context.multiprocessing, 'Pool', fake_pool(pools)), captured() as (stdout, _):
             self.assertEqual(context.main(['cross-validate', '--labels', path, '--out', parallel, '-j', '4']), status)
-        self.assertEqual([pool.processes for pool in pools], [2])
-        self.assertEqual([(fold, settings) for _, fold, _, _, settings in pools[0].tasks], [(0, {'threads': 1}), (1, {'threads': 1})])
+        self.assertEqual([pool.processes for pool in pools], [2, 2])
+        self.assertEqual([(fold, seed, settings['threads']) for _, fold, seed, settings, _ in pools[0].tasks], [(0, 101, 1), (1, 101, 1)])
+        self.assertEqual([(fold, len(states)) for _, fold, _, _, _, states in pools[1].tasks], [(0, 1), (1, 1)])
         with open(os.path.join(out, 'fold-1.json'), encoding='utf-8') as sequential_file, \
                 open(os.path.join(parallel, 'fold-1.json'), encoding='utf-8') as parallel_file:
             self.assertEqual(parallel_file.read(), sequential_file.read())
         self.assertTrue(stdout.getvalue().startswith('2 folds: held-out aligned'))
 
         # The folds' gate - aligned results only, pooled
-        results = [os.path.join(out, 'fold-0.json'), self.path('more.json')]
+        results = [self.path('done.json'), self.path('more.json')]
+        with open(results[0], 'w', encoding='utf-8') as file:
+            json.dump(done, file)
         with open(results[1], 'w', encoding='utf-8') as file:
             json.dump({'words': {'aligned/read': {'right': 1, 'total': 1, 'majority': 0},
                                  'aligned/lives': {'right': 3, 'total': 3, 'majority': 0},

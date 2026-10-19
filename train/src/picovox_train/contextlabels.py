@@ -30,6 +30,9 @@ The label sources (data/nn/context-labels.json is the curated part):
 
 Held out: the regression set's sentences (data/nn/heteronyms-test.json), 10% of the aligned speakers (by a hash), and
 two books. The settings are data/nn/train.json's context.labels.
+
+The transfer windows - unlabeled: the ambiguous words' other windows in the books (not the held-out books), up to
+"maxTransfer" a word - are where the context network's teachers' mean probabilities are distilled into it (context.py).
 """
 
 import argparse
@@ -83,6 +86,10 @@ HELD_OUT_PERCENT = SETTINGS['heldOutPercent']
 
 # The most silver examples of a word kept (the most frequent words have thousands)
 MAX_SILVER = SETTINGS['maxSilver']
+
+# The most transfer windows of a word kept - unlabeled windows of the ambiguous words in the books (not the held-out
+# books), for the context network's distillation (context.py)
+MAX_TRANSFER = SETTINGS['maxTransfer']
 
 # The part-of-speech tag groups of the families' mappings
 NOUN_TAGS = {'NN', 'NNS'}
@@ -487,9 +494,16 @@ def labels_command(args):
     silver = collections.Counter()
     collocations = {word: [(re.compile(pattern), variant) for pattern, variant in entries]
                     for word, entries in spec['collocations'].items()}
+    transfer = collections.defaultdict(dict)
     with open(os.path.join(args.out, 'books.jsonl'), encoding='utf-8') as file:
         for record in map(json.loads, file):
             split = 'heldout' if record['book'] in HELD_OUT_BOOKS else 'train'
+            if split == 'train' and MAX_TRANSFER:
+                sequence = context_sequence(text_items(record['text']))
+                for index, item in enumerate(sequence):
+                    if isinstance(item, str) and item in words:
+                        window = context_window(sequence, index)
+                        transfer[item][hashlib.sha1(json.dumps(window).encode('utf-8')).hexdigest()] = window
             labeled, colloc = [], []
             previous = previous_items(record['text'])
             for item, offset in text_items(record['text']):
@@ -553,12 +567,21 @@ def labels_command(args):
         if entry is not None:
             labeled.append({'window': example['window'], 'word': example['word'], 'slot': entry['order'].index(example['reading']),
                             'source': example['source'], 'split': example['split'], 'group': example['group']})
+    # The transfer windows - each ambiguous word's book windows that aren't examples (or the regression set's), the first
+    # MAX_TRANSFER by a hash order
+    known = held_out | {tuple(example['window']) for example in examples}
+    transfer_windows = []
+    for word in sorted(ambiguous):
+        windows = [transfer[word][key] for key in sorted(transfer[word]) if tuple(transfer[word][key]) not in known]
+        transfer_windows.extend(windows[:MAX_TRANSFER])
     validation = {'words': {word: by_word[word] for word in sorted(by_word)}, 'families': by_family}
     with open(os.path.join(args.out, 'labels.json'), 'w', encoding='utf-8') as file:
-        json.dump({'words': ambiguous, 'validation': validation, 'valid': sorted(valid), 'examples': labeled}, file)
+        json.dump({'words': ambiguous, 'validation': validation, 'valid': sorted(valid), 'examples': labeled,
+                   'transfer': transfer_windows}, file)
     sources = collections.Counter((example['source'], example['split']) for example in labeled)
     print(f'labels: {len(ambiguous)} ambiguous words ({len(words)} candidates, {len(valid)} with a validated mapping), '
-          f'{len(labeled)} examples: ' + ', '.join(f'{source} {split} {count}' for (source, split), count in sorted(sources.items())))
+          f'{len(labeled)} examples: ' + ', '.join(f'{source} {split} {count}' for (source, split), count in sorted(sources.items())) +
+          f'; {len(transfer_windows)} transfer windows')
     print('families (aligned agreement): ' +
           ', '.join(f'{family} {counts["agree"]}/{counts["total"]}' for family, counts in sorted(by_family.items())))
     return 0

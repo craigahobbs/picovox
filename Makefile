@@ -179,7 +179,7 @@ $(TRAIN_DIR)/context-labels.done: $(TRAIN_DIR)/corpora.done data/nn/train.json d
 $(TRAIN_DIR)/context-network.done: $(TRAIN_DIR)/context-labels.done
 	@$(STAGE) start
 	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context train-context --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/context.pt \
-		--log $(TRAIN_DIR)/context/train.log
+		--log $(TRAIN_DIR)/context/train.log -j $(G2P_JOBS)
 	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context cross-validate --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/folds \
 		--log $(TRAIN_DIR)/context/train.log -j $(G2P_JOBS)
 	@$(STAGE) end

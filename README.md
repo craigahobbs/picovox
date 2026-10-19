@@ -384,7 +384,7 @@ before: the tags are made by book in worker processes, not by spaCy's worker poo
 minutes at once (one fold alone, two threads, took 134). On a quiet M3 Max the chain was 59 minutes - the G2P network
 30, then the reading stage, the context network, and the folds one after another (23 minutes) - and is now about the
 network's 30 plus the reading stage and the check (the labels, the context network, and the folds finish beside the
-network).
+network - with the context network's four teachers, each fold's too, they took 26 minutes standalone).
 
 `make train` first checks the power (`tools/trainpower.sh`, macOS laptops): the run keeps the GPU busy for hours, and
 an M3 Max under it draws about 85 W, so on battery or an adapter under 90 W (`TRAIN_MIN_WATTS`) it says so and, at a
@@ -535,6 +535,13 @@ default) and has an ambiguity head (whether the word's reading depends on its co
 network (`picovox_train/context.py`: a character GRU over the three words and phrase-end marks each side, a
 bidirectional GRU, and a layer gated by the word itself - 47,779 parameters at 6 bits) chooses the reading.
 
+The context network is distilled from an ensemble, for steadiness: one network's choices where its labels are thin
+depend on its seed (October 2026: five seeds of the same labels differed on 14% of unlabeled book windows and 9 of the
+regression set's cases a pair, and adding a few seeds for one word flipped others). So four teacher networks (their
+own seeds) are trained first, and the shipped network - the same size - is trained toward their mean probabilities on
+its examples and on unlabeled transfer windows (the ambiguous words' other windows in the books), with context words
+dropped at random (`itemDropout`).
+
 ```sh
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.contextlabels books                                # the recipe's books (pinned texts)
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.contextlabels aligned --out build/nn/context      # readers' readings (MFA alignments)
@@ -542,13 +549,15 @@ PYTHONPATH=train/src build/venv-pos/bin/python -B -m picovox_train.contextlabels
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.contextlabels labels --out build/nn/context       # the ambiguous words and examples
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context train-g2p --labels build/nn/context/labels.json --init build/nn/g2p-train/focus.pt \
     --out build/nn/context/g2p.pt                                                   # the reading input and ambiguity head
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context train-context --labels build/nn/context/labels.json --out build/nn/context/context.pt
+PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context train-context --labels build/nn/context/labels.json --out build/nn/context/context.pt -j 4
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context export --g2p build/nn/context/g2p.pt --context build/nn/context/context.pt
 node tools/heteronyms.js                                                            # the regression set (exit 1 below the gate)
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context cross-validate --labels build/nn/context/labels.json --out build/nn/context/folds -j 10
 ```
 
-(`aligned`, `tag`, and `cross-validate` take `-j`, their worker processes - the results are the same for any count.)
+(`aligned`, `tag`, `train-context` - its teachers - and `cross-validate` take `-j`, their worker processes - the results
+are the same for any count. `cross-validate` keeps a fold's results only when they are from the same labels and
+settings.)
 
 The settings are `data/nn/train.json`'s `context` section. `make train-check` runs all of it (the voice stages use the
 committed `lib/models/g2pModel.js`) and checks its module with `picovox_train.context check`: identical to the

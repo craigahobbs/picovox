@@ -395,7 +395,10 @@ class TestContextLabels(unittest.TestCase):
         books = [
             {'book': 'pg1', 'text': 'He had read the lead pipes, the bass.', 'tags': {'7': 'VBD', '16': 'NN', '32': 'NN'}},
             {'book': 'pg2', 'text': 'He had read it. A lead balloon.', 'tags': {'7': 'VBD'}},
-            {'book': 'pg1', 'text': 'They read.', 'tags': {}}
+            {'book': 'pg1', 'text': 'They read.', 'tags': {}},
+            {'book': 'pg1', 'text': 'We read. They lead the way. The bass.', 'tags': {}},
+            {'book': 'pg1', 'text': 'They lead the way.', 'tags': {}},
+            {'book': 'pg2', 'text': 'You read.', 'tags': {}}
         ]
         self.write(os.path.join(out, 'books.jsonl'), ''.join(json.dumps(record) + '\n' for record in books))
         spec = {'exclude': ['excluded'], 'collocations': {'lead': [['\\blead pipes?\\b', 'L EH1 D'], ['\\bwhite lead\\b', 'L EH1 D']]},
@@ -411,6 +414,7 @@ class TestContextLabels(unittest.TestCase):
                 unittest.mock.patch.object(contextlabels, 'MIN_VALIDATE', 3), \
                 unittest.mock.patch.object(contextlabels, 'MIN_ALTERNATE', 1), \
                 unittest.mock.patch.object(contextlabels, 'MAX_SILVER', 1), \
+                unittest.mock.patch.object(contextlabels, 'MAX_TRANSFER', 2), \
                 unittest.mock.patch.object(contextlabels, 'HELD_OUT_BOOKS', {'pg2'}), \
                 captured() as (stdout, _):
             self.assertEqual(contextlabels.main(['labels', '--out', out]), 0)
@@ -430,8 +434,13 @@ class TestContextLabels(unittest.TestCase):
         self.assertIn(('lead', 'seed', 'train', 0), sources)
         self.assertNotIn(('lead', 'collocation', 'heldout', 1), sources)
         self.assertEqual(sum(1 for example in labels['examples'] if example['word'] == 'lead' and example['source'] == 'seed'), 1)
+        # The transfer windows - the ambiguous words' book windows that aren't examples or the regression set's (they lead
+        # the way), not the held-out books', MAX_TRANSFER a word
+        self.assertEqual(labels['transfer'], [['read', '.', 'they', 'lead', 'the', 'way', '.'], ['', '', 'we', 'read', '.', 'they', 'lead'],
+                                              ['', '', 'they', 'read', '.', '', '']])
         lines = stdout.getvalue().split('\n')
         self.assertTrue(lines[0].startswith('labels: 2 ambiguous words (7 candidates, 1 with a validated mapping), '))
+        self.assertTrue(lines[0].endswith('; 3 transfer windows'))
         self.assertEqual(lines[1], 'families (aligned agreement): ')
 
     def test_main_module(self):

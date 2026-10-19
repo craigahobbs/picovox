@@ -467,6 +467,20 @@
    ]
   },
   {
+   "word": "read",
+   "phones": "R IY1 D",
+   "texts": [
+    "Please read this aloud.",
+    "Please read it to me again.",
+    "Read the letter aloud, please.",
+    "Please read the next page.",
+    "Read me the story before bed.",
+    "Please read the notice on the door.",
+    "Do read it to us.",
+    "Read it slowly and carefully."
+   ]
+  },
+  {
    "word": "lead",
    "phones": "L IY1 D",
    "texts": [
@@ -501,7 +515,15 @@
     "The lead ship of the fleet hoisted its signal.",
     "The lead engineer approved the design.",
     "He took the lead position in the column.",
-    "The lead paragraph sets out the whole story."
+    "The lead paragraph sets out the whole story.",
+    "Follow my lead and say nothing.",
+    "We followed her lead and kept quiet.",
+    "The others followed his lead and sat down.",
+    "I will follow your lead in this matter.",
+    "The younger officers followed the colonel's lead.",
+    "She followed the lead of her elder sister.",
+    "Take your lead from the captain.",
+    "The town soon followed their lead."
    ]
   },
   {
@@ -590,7 +612,13 @@
     "We must bow to the will of the people.",
     "Every head will bow before the king.",
     "A sailor stood watch in the bow.",
-    "He returned her bow with grave politeness."
+    "He returned her bow with grave politeness.",
+    "The bow of the boat cut through the waves.",
+    "Spray flew over the bow of the ship.",
+    "The ship's bow rose and fell in the swell.",
+    "He stood in the bow of the ship and looked ahead.",
+    "The bow of the vessel struck the rock.",
+    "They lashed the cargo near the bow of the ship."
    ]
   },
   {
@@ -705,7 +733,55 @@
     "The farmer sold his sow at the fair.",
     "The sow and her litter slept in the straw.",
     "A wild sow charged out of the bushes.",
-    "They fed the sow on acorns."
+    "They fed the sow on acorns.",
+    "The sow farrowed in the spring.",
+    "A sow with nine piglets lay in the barn.",
+    "The old sow grunted in her sty.",
+    "He fattened the sow for the market.",
+    "The sow rooted in the mud for acorns.",
+    "Our sow broke out of the pen again.",
+    "The sow suckled her young in the shade.",
+    "A huge sow lay sprawled across the path.",
+    "The farmer's wife fed the sow and the hens.",
+    "The sow squealed when they shut the gate.",
+    "They bought a young sow at the market.",
+    "The sow and the boar were kept apart.",
+    "A black sow wandered into the yard.",
+    "The butcher killed the sow in November."
+   ]
+  },
+  {
+   "word": "produce",
+   "phones": "P R OW1 D UW0 S",
+   "texts": [
+    "Fresh produce came in from the farms each morning.",
+    "The market was full of fresh produce.",
+    "She bought fresh produce from the stall.",
+    "The farm's produce was sent to the city.",
+    "The produce of the orchard was sold in town.",
+    "They lived on the produce of their garden.",
+    "The cart was loaded with garden produce.",
+    "Farm produce fetched a good price that year.",
+    "The produce was weighed and packed into crates.",
+    "Local produce filled the stalls in the square.",
+    "He traded his produce for salt and cloth.",
+    "The grocer set out his produce on the pavement.",
+    "All the produce of the estate went to the landlord.",
+    "The dairy produce was sent to town by rail.",
+    "They exported wool and other produce.",
+    "The soil yielded little produce that summer."
+   ]
+  },
+  {
+   "word": "produce",
+   "phones": "P R AH0 D UW1 S",
+   "texts": [
+    "The factories produce cloth and iron.",
+    "These vines produce excellent grapes.",
+    "He could not produce the letter.",
+    "The soil will produce a fine crop.",
+    "She was asked to produce her papers.",
+    "Hard work will produce results."
    ]
   },
   {

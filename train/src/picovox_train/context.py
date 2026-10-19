@@ -9,7 +9,7 @@ chooses, and the G2P pronounces the word in that reading. The commands (python i
 PYTHONPATH=train/src build/venv-nn/bin/python -B):
 
     python -m picovox_train.context train-g2p --labels DIR/labels.json --init G2P.pt --out DIR/g2p.pt
-    python -m picovox_train.context train-context --labels DIR/labels.json --out DIR/context.pt
+    python -m picovox_train.context train-context --labels DIR/labels.json --out DIR/context.pt [-j N]
     python -m picovox_train.context export --g2p DIR/g2p.pt --context DIR/context.pt [--out lib/models/g2pModel.js]
     python -m picovox_train.context gate --labels DIR/labels.json [MODULE]                           # held-out accuracy (one split)
     python -m picovox_train.context cross-validate --labels DIR/labels.json --out DIR/folds [-j N]   # the gate, 10 folds
@@ -38,8 +38,15 @@ layer of the word's own vector - so a word can flip a shared context feature (a 
 word and 1 for another) - gives the reading slots' logits. Slot k is the G2P's reading k, so the network is
 word-independent - the word's spelling is part of its input. Trained with cross entropy on the labels (words balanced -
 a word's share of the samples grows as its examples ** "balance"; optionally ("prior"), a reading's share within a word
-follows its count in running text; dropout, weight decay), then "quantSteps" of
-quantization-aware training at the export's bits.
+follows its count in running text; dropout, weight decay, and "itemDropout" - context items dropped as beyond the text),
+then "quantSteps" of quantization-aware training at the export's bits.
+
+Distilled from an ensemble, for steadiness: a single network's choices in contexts its labels don't cover depend on its
+seed (five seeds of the same data differed on 14% of unlabeled book windows and 9 of the regression set's cases a
+pair). So "teachers" networks are trained first (each its own seed - 100 * seed + 1, 2, ...; quantized as exported),
+and the network (the same size - the only one exported) is trained toward their mean probabilities ("distill" of the
+loss, the rest the labels' cross entropy) on its examples and on the labels' transfer windows (unlabeled - the ambiguous
+words' other windows in the books, contextlabels.py), "transferShare" of a batch's size added to each batch.
 """
 
 import argparse
@@ -441,8 +448,22 @@ def fold_labels(labels, fold):
     return {**labels, 'examples': [{**example, 'split': split(example)} for example in labels['examples']]}
 
 
-def train_context(labels, settings, log):
-    """Train the context network on the labels' training examples - the model"""
+# The teachers' mean reading probabilities of windows (chars, lengths - window_arrays) - [count, slots] float64
+def teacher_probabilities(teachers, chars, lengths, batch_size=1024):
+    import torch  # pylint: disable=import-outside-toplevel
+    total = numpy.zeros((chars.shape[0], teachers[0].config['slots']))
+    with torch.no_grad():
+        for teacher in teachers:
+            teacher.eval()
+            for start in range(0, chars.shape[0], batch_size):
+                logits = teacher(torch.from_numpy(chars[start:start + batch_size]), torch.from_numpy(lengths[start:start + batch_size]))
+                total[start:start + batch_size] += torch.softmax(logits.double(), -1).numpy()
+    return total / len(teachers)
+
+
+def train_context(labels, settings, log, teachers=None):
+    """Train the context network on the labels' training examples - the model (with teachers, trained toward their mean
+    probabilities too - "distill" of the loss - on the examples and the labels' transfer windows)"""
     import torch  # pylint: disable=import-outside-toplevel
     settings = {**CONTEXT_SETTINGS, **settings}
     torch.set_num_threads(int(settings['threads']))
@@ -469,9 +490,19 @@ def train_context(labels, settings, log):
     probabilities = weights / weights.sum()
     chars, lengths = window_arrays([example['window'] for example in examples])
     slots = numpy.array([example['slot'] for example in examples])
+    soft = teacher_probabilities(teachers, chars, lengths) if teachers else None
+    # The transfer windows (unlabeled - the teachers' probabilities only), "transferShare" of a batch's size added to it
+    transfer = labels.get('transfer', []) if teachers else []
+    transfer_count = int(int(settings['batch']) * float(settings['transferShare'])) if transfer else 0
+    if transfer_count:
+        transfer_chars, transfer_lengths = window_arrays(transfer)
+        transfer_soft = teacher_probabilities(teachers, transfer_chars, transfer_lengths)
+    distill = float(settings['distill'])
+    item_dropout = float(settings['itemDropout'])
     model = build_context(settings)
     parameters = sum(parameter.numel() for parameter in model.parameters())
-    log(f'train-context: {len(examples)} examples ({len(counts)} words), {parameters} parameters')
+    log(f'train-context: {len(examples)} examples ({len(counts)} words), {parameters} parameters'
+        f'{f", {len(teachers)} teachers" if teachers else ""}')
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(settings['lr']), weight_decay=float(settings['weightDecay']))
     steps, quant_steps, batch_size = int(settings['steps']), int(settings['quantSteps']), int(settings['batch'])
     quantizer = WeightQuantizer(model, EXPORT)
@@ -486,10 +517,24 @@ def train_context(labels, settings, log):
         for group in optimizer.param_groups:
             group['lr'] = rate
         batch = rng.choice(len(examples), size=batch_size, p=probabilities)
+        batch_chars, batch_lengths = chars[batch], lengths[batch]
+        if transfer_count:
+            extra = rng.integers(len(transfer), size=transfer_count)
+            batch_chars = numpy.concatenate([batch_chars, transfer_chars[extra]])
+            batch_lengths = numpy.concatenate([batch_lengths, transfer_lengths[extra]])
+        if item_dropout:
+            # The context items dropped (as beyond the text), never the word itself
+            dropped = rng.random(batch_lengths.shape) < item_dropout
+            dropped[:, WINDOW] = False
+            batch_lengths = numpy.where(dropped, 0, batch_lengths)
         if quantizing:
             quantizer.quantize()
-        logits = model(torch.from_numpy(chars[batch]), torch.from_numpy(lengths[batch]))
-        loss = torch.nn.functional.cross_entropy(logits, torch.from_numpy(slots[batch]))
+        logits = model(torch.from_numpy(batch_chars), torch.from_numpy(batch_lengths))
+        loss = torch.nn.functional.cross_entropy(logits[:batch_size], torch.from_numpy(slots[batch]))
+        if soft is not None:
+            targets = soft[batch] if not transfer_count else numpy.concatenate([soft[batch], transfer_soft[extra]])
+            soft_loss = -(torch.from_numpy(targets).float() * torch.log_softmax(logits, -1)).sum(-1).mean()
+            loss = (1 - distill) * loss + distill * soft_loss
         optimizer.zero_grad()
         loss.backward()
         if quantizing:
@@ -504,6 +549,57 @@ def train_context(labels, settings, log):
             window_loss, window_start = 0.0, time.time()
     model.eval()
     return model
+
+
+# The labels of a fold (None - all the labels' splits as they are)
+def labels_of(labels_path, fold):
+    labels = load_labels(labels_path)
+    return labels if fold is None else fold_labels(labels, fold)
+
+
+# The teachers' seeds - "teachers" of them, 100 * seed + 1, 2, ...
+def teacher_seeds(settings):
+    settings = {**CONTEXT_SETTINGS, **settings}
+    return [100 * int(settings['seed']) + index + 1 for index in range(int(settings['teachers']))]
+
+
+# One teacher (a worker task) - (labels path, fold or None, seed, settings, log path): the context network trained with
+# that seed (no teachers of its own) - its state, quantized as exported
+def teacher_task(task):
+    labels_path, fold, seed, settings, log = task
+    prefix = '' if fold is None else f'fold {fold}: '
+    teacher = train_context(labels_of(labels_path, fold), {**settings, 'seed': seed},
+                            lambda text: log_line(log, f'{prefix}teacher {seed}: {text}'))
+    WeightQuantizer(teacher, EXPORT).quantize()
+    return teacher.state_dict()
+
+
+# Worker tasks' results in order - in jobs worker processes when more than one (the same results either way)
+def run_tasks(function, tasks, jobs):
+    if jobs > 1 and len(tasks) > 1:
+        with multiprocessing.Pool(min(jobs, len(tasks))) as pool:
+            return pool.map(function, tasks)
+    return [function(task) for task in tasks]
+
+
+def train_student(labels_path, fold, settings, log, states):
+    """The context network trained on a fold's labels toward the teachers' mean probabilities (teachers' states - none,
+    the plain training) - the model"""
+    settings = {**CONTEXT_SETTINGS, **settings}
+    teachers = []
+    for state in states:
+        teacher = build_context(settings)
+        teacher.load_state_dict(state)
+        teachers.append(teacher)
+    prefix = '' if fold is None else f'fold {fold}: '
+    return train_context(labels_of(labels_path, fold), settings, lambda text: log_line(log, f'{prefix}{text}'), teachers)
+
+
+def train_distilled(labels_path, fold, settings, log, jobs=1):
+    """The recipe's context network - its teachers ("teachers" of them, each its own seed; in jobs worker processes),
+    then the network distilled from them (train_student) - the model"""
+    tasks = [(labels_path, fold, seed, {**CONTEXT_SETTINGS, **settings}, log) for seed in teacher_seeds(settings)]
+    return train_student(labels_path, fold, settings, log, run_tasks(teacher_task, tasks, jobs))
 
 
 def evaluate_context(slot_of, labels, split='heldout'):
@@ -826,13 +922,11 @@ def command_train_g2p(args):
 
 
 def command_train_context(args):
-    """Train the context network - <out> (a checkpoint)"""
+    """Train the context network (its teachers first - in -j worker processes) - <out> (a checkpoint)"""
     import torch  # pylint: disable=import-outside-toplevel
-    labels = load_labels(args.labels)
-    if args.fold is not None:
-        labels = fold_labels(labels, args.fold)
+    labels = labels_of(args.labels, args.fold)
     overrides = json.loads(args.settings) if args.settings else {}
-    model = train_context(labels, overrides, lambda text: log_line(args.log, text))
+    model = train_distilled(args.labels, args.fold, overrides, args.log, args.jobs)
     torch.save({'config': model.config, 'state': model.state_dict(), 'settings': {**CONTEXT_SETTINGS, **overrides}}, args.out)
     quantizer = WeightQuantizer(model, EXPORT)
     quantizer.quantize()
@@ -844,14 +938,32 @@ def command_train_context(args):
     return 0
 
 
-# One fold of the cross-validation (a worker task) - (labels path, fold, results path, log path, settings): the context
-# network trained without the fold's aligned speakers, and its held-out results written to the results path
+# The digest of a cross-validation's inputs - the labels file and the context network's settings (less the threads)
+def fold_digest(labels_path):
+    digest = hashlib.sha256()
+    with open(labels_path, 'rb') as file:
+        digest.update(file.read())
+    digest.update(json.dumps({key: value for key, value in CONTEXT_SETTINGS.items() if key != 'threads'}, sort_keys=True).encode('utf-8'))
+    return digest.hexdigest()[:16]
+
+
+# Whether a fold's results exist from the same inputs (the digest)
+def fold_done(path, digest):
+    if not os.path.exists(path):
+        return False
+    with open(path, encoding='utf-8') as file:
+        return json.load(file).get('digest') == digest
+
+
+# One fold of the cross-validation (a worker task) - (labels path, fold, results path, log path, settings, the fold's
+# teachers' states): the context network trained without the fold's aligned speakers, and its held-out results (with the
+# inputs' digest) written to the results path
 def fold_task(task):
-    labels_path, fold, path, log, settings = task
-    fold_set = fold_labels(load_labels(labels_path), fold)
-    model = train_context(fold_set, settings, lambda text: log_line(log, f'fold {fold}: {text}'))
+    labels_path, fold, path, log, settings, states = task
+    fold_set = labels_of(labels_path, fold)
+    model = train_student(labels_path, fold, settings, log, states)
     WeightQuantizer(model, EXPORT).quantize()
-    result = evaluate_context(lambda windows: context_predict(model, windows), fold_set)
+    result = {**evaluate_context(lambda windows: context_predict(model, windows), fold_set), 'digest': fold_digest(labels_path)}
     with open(path + '.tmp', 'w', encoding='utf-8') as file:
         json.dump(result, file, indent=1)
     os.replace(path + '.tmp', path)
@@ -860,19 +972,19 @@ def fold_task(task):
 
 def command_cross_validate(args):
     """Train the context network once per fold of the aligned speakers - each fold's held-out results to
-    <out>/fold-<k>.json (resumable: a fold with results is skipped) - then the cross-validated gate (command_folds). The
-    folds are independent: -j trains that many at once, each in a worker process of one thread (the results are the
-    same as one fold after another)"""
+    <out>/fold-<k>.json (resumable: a fold with results from the same labels and settings is skipped - one from other
+    inputs is retrained) - then the cross-validated gate (command_folds). Every fold's teachers, then every fold's
+    network: -j trains that many at once, each in a worker process, and every training is one thread (the results are the
+    same for any -j)"""
     os.makedirs(args.out, exist_ok=True)
     paths = [os.path.join(args.out, f'fold-{fold}.json') for fold in range(FOLDS)]
-    tasks = [(args.labels, fold, path, args.log, {}) for fold, path in enumerate(paths) if not os.path.exists(path)]
-    if args.jobs > 1 and len(tasks) > 1:
-        with multiprocessing.Pool(min(args.jobs, len(tasks))) as pool:
-            for _ in pool.imap_unordered(fold_task, [(*task[:4], {'threads': 1}) for task in tasks]):
-                pass
-    else:
-        for task in tasks:
-            fold_task(task)
+    digest = fold_digest(args.labels)
+    folds = [fold for fold, path in enumerate(paths) if not fold_done(path, digest)]
+    settings = {**CONTEXT_SETTINGS, 'threads': 1}
+    seeds = teacher_seeds(settings)
+    states = run_tasks(teacher_task, [(args.labels, fold, seed, settings, args.log) for fold in folds for seed in seeds], args.jobs)
+    run_tasks(fold_task, [(args.labels, fold, paths[fold], args.log, settings, states[index * len(seeds):(index + 1) * len(seeds)])
+                          for index, fold in enumerate(folds)], args.jobs)
     return command_folds(argparse.Namespace(results=paths, labels=args.labels))
 
 
@@ -910,13 +1022,14 @@ def main(argv=None):
     context_parser.add_argument('--out', required=True)
     context_parser.add_argument('--settings', help='JSON settings over CONTEXT_SETTINGS')
     context_parser.add_argument('--fold', type=int, help='hold out this fold of the aligned speakers (0 to FOLDS - 1)')
+    context_parser.add_argument('-j', '--jobs', type=int, default=1, help='teachers at once (worker processes)')
     context_parser.add_argument('--log')
     context_parser.set_defaults(func=command_train_context)
     cross_parser = commands.add_parser('cross-validate', help='train every fold, then the cross-validated gate (resumable)')
     cross_parser.add_argument('--labels', required=True)
     cross_parser.add_argument('--out', required=True, help='the folds\' results directory')
     cross_parser.add_argument('--log')
-    cross_parser.add_argument('-j', '--jobs', type=int, default=1, help='folds at once (worker processes, one thread each)')
+    cross_parser.add_argument('-j', '--jobs', type=int, default=1, help='trainings at once (worker processes, one thread each)')
     cross_parser.set_defaults(func=command_cross_validate)
     folds_parser = commands.add_parser('folds', help='the cross-validated gate over the folds\' held-out results')
     folds_parser.add_argument('results', nargs='+')
