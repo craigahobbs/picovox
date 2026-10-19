@@ -150,8 +150,8 @@ that runs its own synthesis loop (PicoShelf's worker does):
 | The package (`npm pack`) | 803 KB packed, 1.2 MB unpacked - the G2P network 419 KB and the voice network 616 KB of it, as base64 |
 | The voice network | 349,547 parameters, 8-bit weights - 432 KB gzipped |
 | The G2P network | 373,256 parameters (and the heteronym context network's 47,779), 6-bit weights |
-| Speed, Apple M3 Max (Node) | The voice network about 94x real time; synthesis end to end (network and rendering, 24 kHz) about 40x |
-| Speed, iPhone (Safari) | About 1.18x real time - fast enough for continuous playback |
+| Speed, Apple M3 Max (Node) | The voice network about 108x real time, the renderer about 100x; synthesis end to end (24 kHz) about 52x |
+| Speed, iPhone without a JIT (Safari) | About 2x real time in one worker; about 2.7x with the network and the renderer in two workers (`sentenceFrames` and `createSentenceRenderer`) |
 | Startup | About 0.1 s to load both networks (Node, M3 Max) |
 
 The voices score a mean UTMOS (a neural predictor of listeners' naturalness ratings, 1-5) of about 4.1 on the listener
@@ -216,6 +216,17 @@ node nn/js/packagecheck.js lib/models/voiceModel.js out/voice           # check 
 node nn/js/voicescheck.js [data/nn/multi]                               # check the designed voices
 node tools/heteronyms.js                                                # the heteronym and names regression sets
 ```
+
+The performance lab, `tools/perf/`, times the playback pipeline on a phone: `node tools/perf/server.js` serves the
+repository on the local network (open the printed URL on the phone, which then polls for commands), and `node
+tools/perf/send.js COMMAND '{options}'` runs one there and prints its result - `timing` (the network, the renderer, and
+the streaming pipeline, stage by stage, in a worker as an app runs them), `parallel` and `pipeline` (several workers, or
+network and render workers in pairs, at once), `bench` (fixed workloads - whether the JavaScript engine compiles them;
+an iPhone's Safari can run without a JIT), and `reload`. A variant of `lib/` to try a change in is
+`tools/perf/variant.sh NAME` (`build/perf/variants/NAME/lib`, which the lab's commands take as `lib`);
+`tools/perf/compare.js NAME` compares its output with `lib/`'s (identical, else the SNR), and `tools/perf/speed.js lib
+NAME` times each under Node without a JIT (`--jitless` - the phone's speed within about 20%). `--root DIR` serves
+another app (PicoShelf, with its `?timing&log=URL` timeline posted to `build/perf/devlog.jsonl`).
 
 `nn/js/speak.js` speaks with an exported model (`picovox_train.export CHECKPOINT --voice NAME` writes
 `data/nn/NAME.json` and `.bin`; `data/nn/multi` is an export of the multi-speaker model), every word pronounced by the

@@ -36,9 +36,10 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   `smoke.py`, `stepcheck.py`).
   `picovox_train/__init__.py` documents each module. `make train` runs it from its source (`PYTHONPATH=train/src`) in
   the training environments (`build/venv-nn`, `venv-listeners`, `venv-pos`, `venv-analysis` - `requirements/*.txt`).
-- `tools/` - the training dashboard (`dashboard/`), `heteronyms.js` (the heteronym and names regression sets), make
-  train's bookkeeping (`trainstage.sh`, `trainutil.sh` - the stage events and logs, the utilization samples,
-  `trainpower.sh`) and listening samples (`trainsamples.js`, `trainsamplesindex.js`), and the panel's texts
+- `tools/` - the training dashboard (`dashboard/`), the performance lab (`perf/` - the playback pipeline timed on a
+  phone, and under Node without a JIT), `heteronyms.js` (the heteronym and names regression sets), make train's
+  bookkeeping (`trainstage.sh`, `trainutil.sh` - the stage events and logs, the utilization samples, `trainpower.sh`)
+  and listening samples (`trainsamples.js`, `trainsamplesindex.js`), and the panel's texts
   (`panel-texts.json`).
 - `test/` - unit tests (`node:test`), one `test<Module>.js` per `lib/` module (`testIndex.js` for the API - including
   `speak` with a fake AudioContext, and the package's browser safety and exports), and the dashboard's and make train's
