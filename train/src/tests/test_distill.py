@@ -102,7 +102,7 @@ class TestDistillSettings(DistillCase):
 
     def test_load_config(self):
         self.assertEqual(distill.load_config(self.config)['student'], 'tiny')
-        self.assertEqual(distill.load_config()['student'], 's80')
+        self.assertEqual(distill.load_config()['student'], 'd64')
 
     def test_root_path(self):
         self.assertEqual(distill.root_path('/a/b'), '/a/b')

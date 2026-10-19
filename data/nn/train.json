@@ -104,10 +104,11 @@
             "weightDecay": 0.0001,
             "valEvery": 1000
         },
-        "student": "s80",
+        "student": "d64",
         "students": [
             {"name": "s96", "config": {"dim": 96, "decoderDim": 96, "encoderLayers": 3, "decoderLayers": 6}},
             {"name": "s80", "config": {"dim": 80, "decoderDim": 80, "encoderLayers": 3, "decoderLayers": 4}},
+            {"name": "d64", "config": {"dim": 80, "decoderDim": 64, "encoderLayers": 3, "decoderLayers": 4}},
             {"name": "s64", "config": {"dim": 64, "decoderDim": 64, "encoderLayers": 3, "decoderLayers": 4}},
             {"name": "s48", "config": {"dim": 48, "decoderDim": 48, "encoderLayers": 2, "decoderLayers": 4}},
             {"name": "s32", "config": {"dim": 32, "decoderDim": 32, "encoderLayers": 2, "decoderLayers": 3}}
