@@ -257,11 +257,11 @@ that runs its own synthesis loop (PicoShelf's worker does):</p>
 </tr>
 <tr>
 <td>Speed, Apple M3 Max (Node)</td>
-<td>The voice network about 94x real time; synthesis end to end (network and rendering, 24 kHz) about 40x</td>
+<td>The voice network about 108x real time, the renderer about 100x; synthesis end to end (24 kHz) about 52x</td>
 </tr>
 <tr>
-<td>Speed, iPhone (Safari)</td>
-<td>About 1.18x real time - fast enough for continuous playback</td>
+<td>Speed, iPhone without a JIT (Safari)</td>
+<td>About 2x real time in one worker; about 2.7x with the network and the renderer in two workers (<code>sentenceFrames</code> and <code>createSentenceRenderer</code>)</td>
 </tr>
 <tr>
 <td>Startup</td>
@@ -313,6 +313,14 @@ node nn/js/packagecheck.js lib/models/voiceModel.js out/voice           # check 
 node nn/js/voicescheck.js [data/nn/multi]                               # check the designed voices
 node tools/heteronyms.js                                                # the heteronym and names regression sets
 </code></pre>
+<p>The performance lab, <code>tools/perf/</code>, times the playback pipeline on a phone: <code>node tools/perf/server.js</code> serves the
+repository on the local network (open the printed URL on the phone, which then polls for commands), and <code>node tools/perf/send.js COMMAND '{options}'</code> runs one there and prints its result - <code>timing</code> (the network, the renderer, and
+the streaming pipeline, stage by stage, in a worker as an app runs them), <code>parallel</code> and <code>pipeline</code> (several workers, or
+network and render workers in pairs, at once), <code>bench</code> (fixed workloads - whether the JavaScript engine compiles them;
+an iPhone's Safari can run without a JIT), and <code>reload</code>. A variant of <code>lib/</code> to try a change in is
+<code>tools/perf/variant.sh NAME</code> (<code>build/perf/variants/NAME/lib</code>, which the lab's commands take as <code>lib</code>);
+<code>tools/perf/compare.js NAME</code> compares its output with <code>lib/</code>'s (identical, else the SNR), and <code>tools/perf/speed.js lib NAME</code> times each under Node without a JIT (<code>--jitless</code> - the phone's speed within about 20%). <code>--root DIR</code> serves
+another app (PicoShelf, with its <code>?timing&amp;log=URL</code> timeline posted to <code>build/perf/devlog.jsonl</code>).</p>
 <p><code>nn/js/speak.js</code> speaks with an exported model (<code>picovox_train.export CHECKPOINT --voice NAME</code> writes
 <code>data/nn/NAME.json</code> and <code>.bin</code>; <code>data/nn/multi</code> is an export of the multi-speaker model), every word pronounced by the
 G2P network as the package pronounces (<code>-r</code> rate, <code>-s</code> seed, <code>--params</code> the parameter frames, <code>--batch</code> a list of
