@@ -213,7 +213,7 @@ node nn/js/speak.js -m data/nn/slt "Hello, world." -o out/hello.wav    # an expo
 node nn/js/speak.js -m data/nn/multi "Hello." -o out/hello.wav --voice narrator-f   # a designed voice (data/nn/voices.json)
 node nn/js/unpack.js lib/models/voiceModel.js out/voice                 # a packaged model back to its export
 node nn/js/packagecheck.js lib/models/voiceModel.js out/voice           # check a packaged model against its export
-node nn/js/voicescheck.js [data/nn/multi]                               # check the designed voices
+node nn/js/voicescheck.js [lib/models/voiceModel.js]                    # check the designed voices
 node tools/heteronyms.js                                                # the heteronym and names regression sets
 ```
 

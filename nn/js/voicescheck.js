@@ -6,7 +6,9 @@
 // (streamVoice) equals its whole-text frames (speakVoice); voiceOptions composes the rates and transforms; bad ids
 // throw; and the single-speaker voices (data/nn/slt, data/nn/bdl) still load and speak.
 //
-//     node nn/js/voicescheck.js [data/nn/multi] [data/nn/voices.json]
+//     node nn/js/voicescheck.js [lib/models/voiceModel.js] [data/nn/voices.json]
+//
+// The model is a packaged module (the package's voice by default) or an export (data/nn/<name>, its .json and .bin).
 //
 // It prints one JSON line - the checks run - and exits non-zero on the first failure.
 
@@ -17,8 +19,11 @@ import {loadModel, speakFrames} from '../../lib/model.js';
 import assert from 'node:assert/strict';
 import {g2pModel} from '../../lib/models/g2pModel.js';
 import {loadG2p} from '../../lib/g2p.js';
+import {loadPackagedModel} from '../../lib/package.js';
+import {pathToFileURL} from 'node:url';
 import process from 'node:process';
 import {readFileSync} from 'node:fs';
+import {resolve} from 'node:path';
 import {setPronouncer} from '../../lib/lexicon.js';
 
 
@@ -30,9 +35,15 @@ function load(path) {
 }
 
 
-function main() {
-    const [modelPath = 'data/nn/multi', voicesPath = 'data/nn/voices.json'] = process.argv.slice(2);
-    const model = load(modelPath);
+// Load a voice model - a packaged module (a .js path) or an export
+async function loadVoice(path) {
+    return path.endsWith('.js') ? loadPackagedModel(await import(pathToFileURL(resolve(path)).href)) : load(path);
+}
+
+
+async function main() {
+    const [modelPath = 'lib/models/voiceModel.js', voicesPath = 'data/nn/voices.json'] = process.argv.slice(2);
+    const model = await loadVoice(modelPath);
     const voices = JSON.parse(readFileSync(voicesPath, 'utf8'));
     const speakers = new Map(model.manifest.speakers.map((speaker) => [speaker.key, speaker]));
     const text = 'It was the best of times. "Was it?" she asked.';
@@ -119,4 +130,4 @@ function main() {
 
 // Every word pronounced by the G2P network, as the package pronounces
 setPronouncer(await loadG2p(g2pModel));
-main();
+await main();
