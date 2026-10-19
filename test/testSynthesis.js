@@ -2,8 +2,8 @@
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 import {
-    blockSize, defaultSampleRate, defaultVoice, modelLoader, outputGain, paragraphPause, sentenceBlocks, sentencePause, softLimit,
-    textBlocks, voiceSpeaker, voiceTable
+    blockSize, createSentenceRenderer, defaultSampleRate, defaultVoice, modelLoader, outputGain, paragraphPause, sentenceBlocks,
+    sentenceFrames, sentencePause, softLimit, textBlocks, voiceSpeaker, voiceTable
 } from '../lib/synthesis.js';
 import {speechText, splitSentences} from '../lib/sentences.js';
 import {strict as assert} from 'node:assert';
@@ -163,6 +163,33 @@ test('sentenceBlocks, streaming', () => {
 
     // An empty sentence is only its pause
     assert.deepEqual([...sentenceBlocks(model, '', options)].map((block) => block.length), [Math.round(defaultSampleRate * sentencePause)]);
+});
+
+
+test('sentenceFrames and createSentenceRenderer', () => {
+    // The network and the renderer apart - the frames' chunks pushed to the sentence's renderer - are sentenceBlocks
+    const text = 'The birch canoe slid on the smooth planks.';
+    const options = {'speaker': voiceSpeaker(model, 'female'), 'rate': 0.9, 'seed': 4, 'pause': sentencePause};
+    const {chunks, eq} = sentenceFrames(model, text, options);
+    assert.equal(eq.length, 24);
+    const blocks = [];
+    const renderer = createSentenceRenderer({'onBlock': (block) => blocks.push(block), eq, ...options});
+    assert.equal(blocks.length, 1);
+    assert.equal(blocks[0].length, Math.round(defaultSampleRate * sentencePause / 0.9));
+    for (const chunk of chunks) {
+        renderer.push(chunk);
+    }
+    renderer.end();
+    assert.deepEqual(concat(blocks), concat([...sentenceBlocks(model, text, options)]));
+
+    // The defaults - no pause, seed 1, normal speed, no equalizer
+    const plain = [];
+    const plainRenderer = createSentenceRenderer({'onBlock': (block) => plain.push(block)});
+    assert.equal(plain.length, 0);
+    plainRenderer.push(speakFrames(model, 'Hello.').frames);
+    plainRenderer.end();
+    assert(plain.length > 0);
+    assert.equal([...sentenceFrames(model, 'Hello.').chunks].flat().length, speakFrames(model, 'Hello.').frames.length);
 });
 
 
