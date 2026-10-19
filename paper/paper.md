@@ -2,7 +2,7 @@
 
 Craig A. Hobbs, with Claude (Anthropic)
 
-October 2026 - a working paper, updated as the work it describes finishes; this version describes picovox 1.0.1.
+October 2026 - a working paper, updated as the work it describes finishes; this version describes picovox 1.0.2.
 Sections marked *in progress* report interim results.
 
 
@@ -584,7 +584,7 @@ The book and frequent-word errors fell and the names rose, at a small held-out c
 seeds, but outside `make train`'s reproduction tolerance (0.5 points of monitoring WER), so the author adopted the
 retrained module over the check; the names minimum rose to 0.91.
 
-### 9.9 "The lead story" (*in progress*)
+### 9.9 "The lead story" and a steadier context network
 
 The listener heard "They read the lead story" with the metal. The fix was in the labels: 20 hand-labeled seeds of
 lead's leading sense before a noun (lead story, role, singer, actor, article, ...) and 4 more of the metal
@@ -593,9 +593,53 @@ lead story, role, singer, and article as L IY1 D while the metal stays L EH1 D; 
 50/52 and the context readings from 47/54 to 48/54, with the book measures unchanged. But two other cases flipped (fresh
 produce, the sow), and more seeds for those destabilized the network: a retrain with 19 more seeds fell to 45/52 on the
 default readings, below the gate. The small context network is unstable - its readings can move when unrelated labels
-change; the shipped module carries the lead fix without the produce and sow seeds.
+change; picovox 1.0.1 carries the lead fix without the produce and sow seeds.
 
-[Context-network stability: in progress - see build/ctxsteady]
+The instability was the training's seed, not the data. Trained with five seeds on the same labels (with the produce and
+sow seeds), the network's choices differed, a pair of seeds, on 11.0% of the ambiguous words' 805 windows in the two
+held-out books and on 12.8 of the regression set's cases; the default readings ranged from 47 to 51 of 52. The seeds
+worked - "fresh produce" and "the sow" were right in all five - but each run drew its own borderline cases. Label
+smoothing, dropping context words at random, a moving average of the weights, stronger regularization, and distillation
+from an ensemble on the training examples alone each moved the churn little (screened on 6,650 windows of the
+training books: 12.7-14.9% a pair, against 13.9%) - on its own examples the ensemble agrees with the labels, so its
+soft targets add nothing there.
+
+What steadied it was distillation on unlabeled text. Four teacher networks, each its own seed, are trained first; the
+shipped network - the same 47,779 parameters, the only one exported - is trained toward their mean probabilities (80%
+of the loss; the rest, the labels' cross entropy) on its examples and on 27,997 unlabeled transfer windows (the
+ambiguous words' other windows in the training books, up to 3,000 a word), half a batch of them in each batch, with
+context words dropped at random (15%). Five seeds each:
+
+| Context network (five seeds) | Churn, held-out books | Churn, regression cases | Default (of 52) | Context (of 54) | Held-out examples (of 805) |
+| --- | --- | --- | --- | --- | --- |
+| Trained alone | 11.0% | 12.8 | 48.6 | 45.4 | 764.2 |
+| Distilled (four teachers) | 5.0% | 3.8 | 50.2 | 48.8 | 773.6 |
+| A full batch of transfer windows | 4.8% | 3.0 | 51.0 | 48.8 | 769.6 |
+| Eight teachers | 4.9% | 4.2 | 50.2 | 48.2 | 772.4 |
+
+(Means over the seeds; churn is per pair of seeds.) The variants were no steadier, and eight teachers cost twice the
+training, so the recipe keeps four and half a batch. The steadier network also made the labels' gaps readable: two
+cases it got wrong in four of five seeds - "Please read the letter aloud" and "They followed his lead" - and "The bow of
+the ship", wrong in the build's seed, were cases 1.0.1 had right by its seed's luck. Seeds for them (22 sentences:
+read's imperative, lead's following sense, a ship's bow) put all three right in all five seeds, with the default
+readings 51.4 and the context readings 50.2 on average and a churn of 5.6% and 3.2 cases.
+
+Retrained with `make train-g2p` (the G2P network and its reading stage unchanged), the module is picovox 1.0.2's:
+
+| Measure | picovox 1.0.1 | picovox 1.0.2 |
+| --- | --- | --- |
+| Default readings | 50/52 | 52/52 |
+| Context readings | 48/54 | 50/54 |
+| Missing readings, names | 3/3, 67/73 | 3/3, 67/73 |
+| Cross-validated gate ("read", "lives") | 89.3% | 90.7% |
+| Held-out examples | 763/805 | 769/805 |
+| Book-token error, top-10K wrong | 0.062%, 9 | 0.062%, 9 |
+| Module | 419,535 bytes | 419,575 bytes (8 more gzipped) |
+
+Four cases changed, all to right - fresh produce, the sow, "the muscles contract", "a bass in the lake" - and none
+broke. (The gate's 89.3% for 1.0.1 is from fresh folds: the cross-validation had kept earlier folds' results whatever
+their inputs, and now keeps a fold only when its labels and settings are the same.) The cost is training time: the
+teachers, each fold's too, make the context stage 25 minutes instead of 6 - still beside the 30-minute G2P network.
 
 
 ## 10. Reproducible training: `make train`
@@ -783,7 +827,8 @@ that run has not yet been made.
 ### 12.1 picovox
 
 The package is [picovox on npm](https://www.npmjs.com/package/picovox) - 1.0.0 and 1.0.1 were both published on
-2026-10-17 (UTC). It is ESM-only, runs in current browsers and in Node 22 or later, and has no dependencies:
+2026-10-17 (UTC), and 1.0.2, with the steadier context network (Section 9.9), on 2026-10-19. It is ESM-only, runs in
+current browsers and in Node 22 or later, and has no dependencies:
 
 | API | |
 | --- | --- |
@@ -837,7 +882,7 @@ pauses between sentences rather than mid-word.
 The new voice has the same architecture, size (349,547 parameters, 433 KB gzipped), and speed (the network 79 times real
 time, old and new alike, in the gate's own measurement); it comes from the second from-scratch run (Section 10.4), with
 the voice data pronounced by the corrected G2P (Section 9.8). Version 1.0.1 also ships the corrected G2P with the lead
-fix and the spelled-out month and day abbreviations.
+fix and the spelled-out month and day abbreviations; 1.0.2 changes only the context network (Section 9.9).
 
 ### 12.5 PicoShelf
 
@@ -870,8 +915,9 @@ parameters and fewer bits per weight - distillation (Section 8) and, for the G2P
   not compare across teachers.
 - The source-filter synthesizer bounds the achievable quality (Section 5.4); neural vocoders avoid that bound at
   hundreds of times the size.
-- **The context network's stability.** Its readings can change with unrelated labels and with the training run
-  (Section 9.9); a steadier training of it is the next G2P step.
+- **The context network's remaining errors.** Distilled from four teachers it is steadier (Section 9.9), but four
+  context cases stay wrong ("prices increase", "a minute amount", "the talks progress", "he tears the page"), and its
+  choices still move between seeds most for polish, lead, row, and bow - words whose labels are thin.
 - **The dictionary audit is partial.** Most of the 12,750 suspects had no audio evidence; the listener heard 58. The
   names regression set and the readers' audio are the only checks on the long tail.
 - **Training time.** Teacher A is now the longest stage (about 19 minutes alone, by estimate); a shorter or
