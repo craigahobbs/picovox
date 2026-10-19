@@ -128,6 +128,30 @@ test('render, onBlock', () => {
 });
 
 
+test('render, voicing onsets and offsets', () => {
+    // A frame's voicing table is made with its pair's (frames 2n and 2n + 1) - voicing starting and stopping at either
+    // frame of a pair, streamed a frame at a time or whole, the same samples
+    for (const onset of [10, 11]) {
+        const frames = Array.from({'length': 60}, (_value, ix) => (ix >= onset && ix < onset + 30 ? vowel(ix) : {'av': FLOOR_DB}));
+        const whole = render(frames, {'sampleRate': 24000});
+        const renderer = createRenderer({'sampleRate': 24000, 'onBlock': (block) => blocks.push(block.slice())});
+        const blocks = [];
+        for (const frame of frames) {
+            renderer.push(frame);
+        }
+        renderer.end();
+        const streamed = new Float32Array(whole.length);
+        blocks.reduce((offset, block) => {
+            streamed.set(block, offset);
+            return offset + block.length;
+        }, 0);
+        assert.deepEqual(streamed, whole);
+        const energy = (start, end) => whole.slice(start, end).reduce((sum, value) => sum + value * value, 0);
+        assert(energy(120 * (onset + 2), 120 * (onset + 28)) > 1e-2);
+    }
+});
+
+
 test('render, silence', () => {
     // Long silence - no voicing, no noise - renders exact zeros
     const frames = new Array(300).fill({'av': FLOOR_DB, 'ah': -200, 'af': -200});
