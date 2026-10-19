@@ -95,8 +95,11 @@ TRAIN_RUNS := $(TRAIN_DIR)/runs
 # expected times are data/nn/train-stages.json's (test/testTrainStages.js checks it against these targets).
 STAGE = tools/trainstage.sh $(TRAIN_DIR) $(basename $(@F))
 
-# Record a make target's run in stages.jsonl (the training dashboard shows its stages)
-TRAIN_TARGET = @mkdir -p $(TRAIN_DIR) && printf '{"event": "target", "target": "%s", "time": %s}\n' $(1) "$$(date +%s)" >> $(TRAIN_DIR)/stages.jsonl
+# Record a make target's run in stages.jsonl (the training dashboard shows its stages), and keep the Mac awake while make
+# runs: macOS's caffeinate until make exits - finished, failed, or interrupted - on AC power with the lid closed too (-s;
+# idle sleep paused one run's teacher B for 28 minutes); elsewhere, nothing
+TRAIN_TARGET = @mkdir -p $(TRAIN_DIR) && printf '{"event": "target", "target": "%s", "time": %s}\n' $(1) "$$(date +%s)" >> $(TRAIN_DIR)/stages.jsonl; \
+	if command -v caffeinate >/dev/null; then nohup caffeinate -i -s -w $$PPID >/dev/null 2>&1 & fi
 
 .PHONY: train train-stages train-util train-clean
 train:

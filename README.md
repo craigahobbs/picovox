@@ -400,7 +400,9 @@ network - with the context network's four teachers, each fold's too, they took 2
 `make train` first checks the power (`tools/trainpower.sh`, macOS laptops): the run keeps the GPU busy for hours, and
 an M3 Max under it draws about 85 W, so on battery or an adapter under 90 W (`TRAIN_MIN_WATTS`) it says so and, at a
 terminal, waits for Enter - plug in a bigger adapter first (Apple's 96 W or 140 W - a 14-inch MacBook Pro negotiates
-about 94 W from either). `TRAIN_POWER_CHECK=0` skips it.
+about 94 W from either). `TRAIN_POWER_CHECK=0` skips it. `make train`, `train-check`, and `train-g2p` keep the Mac awake
+until they exit (`caffeinate -i -s` - on AC power, with the lid closed too): idle sleep once paused a run's teacher B
+for 28 minutes.
 
 
 ## Distilling the voice model
