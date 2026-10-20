@@ -49,11 +49,11 @@
 <p><strong>PicoVox - realistic speech synthesis in pure JavaScript, under 1 MB.</strong></p>
 <p><strong>The paper:</strong> <a href="https://craigahobbs.github.io/picovox/paper/">PicoVox: Realistic Neural Speech Synthesis in Under 1 MB of JavaScript</a> -
 how PicoVox's networks are designed, trained, distilled, and evaluated.</p>
-<p>PicoVox speaks English text with natural-sounding male and female voices, entirely on your device - in the browser or
-in Node. There is no recorded speech, no server, no WebAssembly, and no runtime dependencies: a small grapheme-to-phoneme
-network pronounces every word, a small neural network (350K parameters) predicts interpretable source-filter
-synthesizer parameters every 5 ms, and a JavaScript synthesizer with an LF glottal source renders them. The whole
-package - code and both networks - is under 1 MB.</p>
+<p>PicoVox speaks English text with twelve natural-sounding male and female voices, entirely on your device - in the
+browser or in Node. There is no recorded speech, no server, no WebAssembly, and no runtime dependencies: a small
+grapheme-to-phoneme network pronounces every word, a small neural network (305K parameters) predicts interpretable
+source-filter synthesizer parameters every 5 ms, and a JavaScript synthesizer with an LF glottal source renders them.
+The whole package - code and both networks - is under 1 MB.</p>
 <p><a href="https://craigahobbs.github.io/picoshelf/">PicoShelf</a>, every public-domain book read aloud right in your browser, is
 built on PicoVox.</p>
 <h2>Installation</h2>
@@ -106,13 +106,14 @@ block at a time between the page's other work; for long texts, use <code>stream<
 <code>options.context</code> is an <code>AudioContext</code> to play in (by default, a new one, closed when the playback ends). Under Node,
 <code>speak</code> throws an error - there is no Web Audio; use <code>synthesize</code> and <code>toWav</code>.</p>
 <h3><code>voices()</code></h3>
-<p>The built-in voices - <code>[{key, label, sex}]</code>:</p>
+<p>The built-in voices - <code>[{key, label, sex, description}]</code>, the default first:</p>
 <table>
 <thead>
 <tr>
 <th>Key</th>
 <th>Label</th>
 <th>Sex</th>
+<th>Character</th>
 </tr>
 </thead>
 <tbody>
@@ -120,14 +121,79 @@ block at a time between the page's other work; for long texts, use <code>stream<
 <td><code>male</code> (the default)</td>
 <td>Male</td>
 <td>male</td>
+<td>A clear, steady American male voice - one reader of the model's speakers.</td>
 </tr>
 <tr>
 <td><code>female</code></td>
 <td>Female</td>
 <td>female</td>
+<td>A clear, steady American female voice - one reader of the model's speakers.</td>
+</tr>
+<tr>
+<td><code>sarah</code></td>
+<td>Sarah</td>
+<td>female</td>
+<td>A warm, unhurried storyteller with a mid-low, rounded tone - an easy companion for a long novel.</td>
+</tr>
+<tr>
+<td><code>helen</code></td>
+<td>Helen</td>
+<td>female</td>
+<td>A mature, composed voice, lower and slower, with quiet authority for weighty books.</td>
+</tr>
+<tr>
+<td><code>amy</code></td>
+<td>Amy</td>
+<td>female</td>
+<td>A young, bright, lively voice, higher and quicker, for younger readers and light-hearted stories.</td>
+</tr>
+<tr>
+<td><code>kate</code></td>
+<td>Kate</td>
+<td>female</td>
+<td>A brisk, clear, articulate voice with a crisp tone that keeps facts and arguments moving.</td>
+</tr>
+<tr>
+<td><code>grace</code></td>
+<td>Grace</td>
+<td>female</td>
+<td>A gentle, soft, slow voice with a dark, quiet tone for winding down.</td>
+</tr>
+<tr>
+<td><code>james</code></td>
+<td>James</td>
+<td>male</td>
+<td>A warm, relaxed storyteller with a mid-low, rounded tone for long-form fiction.</td>
+</tr>
+<tr>
+<td><code>robert</code></td>
+<td>Robert</td>
+<td>male</td>
+<td>A mature, deep, deliberate voice with a grave authority for serious and older books.</td>
+</tr>
+<tr>
+<td><code>michael</code></td>
+<td>Michael</td>
+<td>male</td>
+<td>A young, bright, energetic voice, higher and quicker, for younger readers and adventure.</td>
+</tr>
+<tr>
+<td><code>david</code></td>
+<td>David</td>
+<td>male</td>
+<td>A brisk, clear, matter-of-fact voice with a crisp tone for explanation and reportage.</td>
+</tr>
+<tr>
+<td><code>thomas</code></td>
+<td>Thomas</td>
+<td>male</td>
+<td>A gentle, soft, slow voice with a dark, calm tone for poetry and quiet evenings.</td>
 </tr>
 </tbody>
 </table>
+<p>The ten designed voices (<code>data/nn/voices.json</code>) are blends of two to four of the model's audiobook readers, with mild
+pitch, vocal-tract, and effort adjustments and their own speaking rate (the <code>rate</code> option multiplies it); on the
+listener panel's texts they score UTMOS 4.09-4.28 (the package's two voices 4.08 and 4.18).</p>
 <h3><code>toWav(samples, sampleRate)</code></h3>
 <p>Encode samples (a <code>Float32Array</code>, or an array of numbers, -1 to 1 - values beyond are clipped) as a 16-bit PCM mono WAV
 file - a <code>Uint8Array</code> of the file's bytes.</p>
@@ -310,7 +376,7 @@ runs the package from its source (<code>PYTHONPATH=train/src</code>) in the trai
 node nn/js/speak.js -m data/nn/multi &quot;Hello.&quot; -o out/hello.wav --voice narrator-f   # a designed voice (data/nn/voices.json)
 node nn/js/unpack.js lib/models/voiceModel.js out/voice                 # a packaged model back to its export
 node nn/js/packagecheck.js lib/models/voiceModel.js out/voice           # check a packaged model against its export
-node nn/js/voicescheck.js [data/nn/multi]                               # check the designed voices
+node nn/js/voicescheck.js [lib/models/voiceModel.js]                    # check the designed voices
 node tools/heteronyms.js                                                # the heteronym and names regression sets
 </code></pre>
 <p>The performance lab, <code>tools/perf/</code>, times the playback pipeline on a phone: <code>node tools/perf/server.js</code> serves the
