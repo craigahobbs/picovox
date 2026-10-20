@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.1 (2026-10-20)
+
+- [a34ba7c](https://github.com/craigahobbs/picovox/commit/a34ba7c) - better pronunciation of names and rarer words, Don Quixote's in particular (Quixote, Rocinante, Cide Hamete; goatherd, shouldst); accented letters read as their base letters (señor, Doña, Amadís were split into pieces); fix synthesize throwing on any text containing "constructor"; heteronyms read right in more contexts (he tears the page, prices increase, talks progress)
+
 ## 1.3.0 (2026-10-19)
 
 - [5f89016](https://github.com/craigahobbs/picovox/commit/5f89016) - twelve voices - add Sarah, Helen, Amy, Kate, and Grace; James, Robert, Michael, David, and Thomas (blends of the model's audiobook readers, each with its own pitch, tone, and pace) beside male and female; voices() gives each voice's description
