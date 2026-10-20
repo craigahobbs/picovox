@@ -3,10 +3,12 @@
 
 import {
     blockSize, createSentenceRenderer, defaultSampleRate, defaultVoice, modelLoader, outputGain, paragraphPause, sentenceBlocks,
-    sentenceFrames, sentencePause, softLimit, textBlocks, voiceSpeaker, voiceTable
+    sentenceFrames, sentencePause, softLimit, textBlocks, voiceSettings, voiceSpeaker, voiceTable
 } from '../lib/synthesis.js';
 import {speechText, splitSentences} from '../lib/sentences.js';
+import {applyTransforms} from '../lib/transforms.js';
 import {strict as assert} from 'node:assert';
+import {readFileSync} from 'node:fs';
 import {render} from '../lib/render.js';
 import {speakFrames} from '../lib/model.js';
 import test from 'node:test';
@@ -50,15 +52,26 @@ test('synthesis, constants', () => {
     assert.equal(sentencePause, 0.24);
     assert.equal(paragraphPause, 0.4);
     assert.equal(defaultVoice, 'male');
-    assert.deepEqual(voiceTable.map((voice) => voice.key), ['male', 'female']);
+    assert.deepEqual(voiceTable.map((voice) => voice.key), [
+        'male', 'female', 'sarah', 'helen', 'amy', 'kate', 'grace', 'james', 'robert', 'michael', 'david', 'thomas'
+    ]);
 
-    // Each voice's speaker is a reader of its sex in the model's speaker table
+    // Each voice's speakers are readers of its sex in the model's speaker table
+    const speakers = new Map(model.manifest.speakers.map((speaker) => [speaker.key, speaker]));
     for (const voice of voiceTable) {
-        const speaker = model.manifest.speakers[voiceSpeaker(model, voice.key)];
-        assert.equal(speaker.key, voice.speaker);
-        assert.equal(speaker.sex, voice.sex);
-        assert.equal(speaker.role, 'reader');
+        assert(voice.label && voice.description, voice.key);
+        for (const key of Object.keys(voice.blend ?? {[voice.speaker]: 1})) {
+            assert.equal(speakers.get(key).sex, voice.sex, `${voice.key}'s ${key}`);
+            assert.equal(speakers.get(key).role, 'reader', `${voice.key}'s ${key}`);
+        }
     }
+
+    // The designed voices are data/nn/voices.json's - its names, sexes, descriptions, blends, adjustments, and rates
+    const designed = JSON.parse(readFileSync('data/nn/voices.json', 'utf8')).voices;
+    assert.deepEqual(voiceTable.slice(2), designed.map((voice) => ({
+        'key': voice.name.toLowerCase(), 'label': voice.name, 'sex': voice.sex, 'rate': voice.rate, 'blend': voice.blend,
+        'adjust': voice.adjust, 'description': voice.description
+    })));
 });
 
 
@@ -112,9 +125,56 @@ test('voiceSpeaker', () => {
     assert.equal(voiceSpeaker(model, 'female'), 0);
     assert.equal(voiceSpeaker(model, 'male'), 1);
 
+    // A designed voice's speaker is its blend, by speaker id
+    const ids = new Map(model.manifest.speakers.map((speaker) => [speaker.key, speaker.id]));
+    const sarah = voiceTable.find((voice) => voice.key === 'sarah');
+    const blend = Object.fromEntries(Object.entries(sarah.blend).map(([key, share]) => [ids.get(key), share]));
+    assert.deepEqual(voiceSpeaker(model, 'sarah'), blend);
+
     // A model without the voice's speaker
     const other = {'manifest': {'speakers': [{'id': 0, 'key': 'arctic-slt'}]}};
     assert.throws(() => voiceSpeaker(other, 'male'), {'message': 'The male voice\'s speaker (arctic-bdl) isn\'t in the model'});
+    assert.throws(() => voiceSpeaker(other, 'sarah'), {'message': 'The sarah voice\'s speaker (libritts-1462) isn\'t in the model'});
+});
+
+
+test('voiceSettings', () => {
+    // A package voice - its speaker, no rate or adjustments
+    assert.deepEqual(voiceSettings(model, 'male'), {'speaker': 1, 'rate': 1, 'transforms': []});
+
+    // A designed voice - its blend, rate, and adjustments as transforms (identity values omitted)
+    const helen = voiceSettings(model, 'helen');
+    assert.deepEqual(helen.speaker, voiceSpeaker(model, 'helen'));
+    assert.equal(helen.rate, 0.9);
+    assert.deepEqual(helen.transforms, [{'pitchScale': 0.95}, {'tractScale': 0.98}]);
+    assert.deepEqual(voiceSettings(model, 'grace').transforms, [{'effort': -2}]);
+    assert.deepEqual(voiceSettings(model, 'david').transforms, []);
+    assert.throws(() => voiceSettings(model, 'nobody'), {'message': 'Unknown voice "nobody"'});
+});
+
+
+test('sentenceFrames, voices', () => {
+    // A voice's frames are its blend spoken at its rate times the listener's, with its adjustments (as nn/js/voices.js's
+    // designed voices speak)
+    const text = 'The birch canoe slid on the smooth planks.';
+    for (const key of ['helen', 'david']) {
+        const {chunks, eq} = sentenceFrames(model, text, {'voice': key, 'rate': 1.1});
+        const {speaker, rate, transforms} = voiceSettings(model, key);
+        const expected = speakFrames(model, text, {speaker, 'rate': 1 / (1.1 * rate)});
+        assert.deepEqual([...chunks].flat().map((frame) => Array.from(frame)),
+            applyTransforms(expected.frames, transforms).map((frame) => Array.from(frame)), key);
+        assert.deepEqual(eq, expected.eq);
+    }
+
+    // A package voice is its speaker, exactly
+    const voiced = sentenceFrames(model, text, {'voice': 'female'});
+    const spoken = sentenceFrames(model, text, {'speaker': voiceSpeaker(model, 'female')});
+    assert.deepEqual([...voiced.chunks].flat(), [...spoken.chunks].flat());
+
+    // sentenceBlocks and textBlocks take the voice too
+    assert.deepEqual(concat([...sentenceBlocks(model, text, {'voice': 'female', 'seed': 2})]),
+        concat([...sentenceBlocks(model, text, {'speaker': voiceSpeaker(model, 'female'), 'seed': 2})]));
+    assert(concat([...textBlocks(model, 'Hello there.', {'voice': 'amy'})]).some((value) => value !== 0));
 });
 
 

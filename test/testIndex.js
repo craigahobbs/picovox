@@ -36,10 +36,12 @@ const text = 'It was the best of times. "Was it?" she asked.\n\nNobody answered.
 
 
 test('voices', () => {
-    assert.deepEqual(voices(), [
-        {'key': 'male', 'label': 'Male', 'sex': 'male'},
-        {'key': 'female', 'label': 'Female', 'sex': 'female'}
+    assert.deepEqual(voices().map(({key, label, sex}) => [key, label, sex]), [
+        ['male', 'Male', 'male'], ['female', 'Female', 'female'], ['sarah', 'Sarah', 'female'], ['helen', 'Helen', 'female'],
+        ['amy', 'Amy', 'female'], ['kate', 'Kate', 'female'], ['grace', 'Grace', 'female'], ['james', 'James', 'male'],
+        ['robert', 'Robert', 'male'], ['michael', 'Michael', 'male'], ['david', 'David', 'male'], ['thomas', 'Thomas', 'male']
     ]);
+    assert(voices().every((voice) => voice.description.length > 20));
 
     // Each call's voices are its own
     voices()[0].key = 'other';
@@ -129,11 +131,16 @@ test('stream, early stop', async () => {
 });
 
 
+// The invalid-voice error's list of the voices
+const voiceList = 'the voices are "male", "female", "sarah", "helen", "amy", "kate", "grace", "james", "robert", "michael", ' +
+    '"david", "thomas"';
+
+
 test('stream, invalid', () => {
     // The text and options are checked at once
     assert.throws(() => stream(42), {'name': 'TypeError', 'message': 'The text must be a string, not 42'});
     assert.throws(() => stream('Hi', {'voice': 'robot'}), {
-        'name': 'RangeError', 'message': 'Unknown voice "robot" - the voices are "male", "female"'
+        'name': 'RangeError', 'message': `Unknown voice "robot" - ${voiceList}`
     });
 });
 
@@ -154,8 +161,8 @@ test('synthesize, invalid', async () => {
     await invalid('The options must be an object, not "fast"', 'TypeError', 'Hi', 'fast');
     await invalid('Unknown option "speed" - the options are "voice", "rate", "seed", "sampleRate"', 'TypeError', 'Hi', {'speed': 2});
     await invalid('Unknown option "context" - the options are "voice", "rate", "seed", "sampleRate"', 'TypeError', 'Hi', {'context': {}});
-    await invalid('Unknown voice 1 - the voices are "male", "female"', 'RangeError', 'Hi', {'voice': 1});
-    await invalid('Unknown voice "Male" - the voices are "male", "female"', 'RangeError', 'Hi', {'voice': 'Male'});
+    await invalid(`Unknown voice 1 - ${voiceList}`, 'RangeError', 'Hi', {'voice': 1});
+    await invalid(`Unknown voice "Male" - ${voiceList}`, 'RangeError', 'Hi', {'voice': 'Male'});
     await invalid('The rate must be a number from 0.5 to 2, not 3', 'RangeError', 'Hi', {'rate': 3});
     await invalid('The rate must be a number from 0.5 to 2, not 0.4', 'RangeError', 'Hi', {'rate': 0.4});
     await invalid('The rate must be a number from 0.5 to 2, not NaN', 'RangeError', 'Hi', {'rate': NaN});

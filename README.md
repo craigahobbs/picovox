@@ -8,11 +8,11 @@
 **The paper:** [PicoVox: Realistic Neural Speech Synthesis in Under 1 MB of JavaScript](https://craigahobbs.github.io/picovox/paper/) -
 how PicoVox's networks are designed, trained, distilled, and evaluated.
 
-PicoVox speaks English text with natural-sounding male and female voices, entirely on your device - in the browser or
-in Node. There is no recorded speech, no server, no WebAssembly, and no runtime dependencies: a small grapheme-to-phoneme
-network pronounces every word, a small neural network (350K parameters) predicts interpretable source-filter
-synthesizer parameters every 5 ms, and a JavaScript synthesizer with an LF glottal source renders them. The whole
-package - code and both networks - is under 1 MB.
+PicoVox speaks English text with twelve natural-sounding male and female voices, entirely on your device - in the
+browser or in Node. There is no recorded speech, no server, no WebAssembly, and no runtime dependencies: a small
+grapheme-to-phoneme network pronounces every word, a small neural network (305K parameters) predicts interpretable
+source-filter synthesizer parameters every 5 ms, and a JavaScript synthesizer with an LF glottal source renders them.
+The whole package - code and both networks - is under 1 MB.
 
 [PicoShelf](https://craigahobbs.github.io/picoshelf/), every public-domain book read aloud right in your browser, is
 built on PicoVox.
@@ -91,12 +91,26 @@ block at a time between the page's other work; for long texts, use `stream` in a
 
 ### `voices()`
 
-The built-in voices - `[{key, label, sex}]`:
+The built-in voices - `[{key, label, sex, description}]`, the default first:
 
-| Key | Label | Sex |
-| --- | --- | --- |
-| `male` (the default) | Male | male |
-| `female` | Female | female |
+| Key | Label | Sex | Character |
+| --- | --- | --- | --- |
+| `male` (the default) | Male | male | A clear, steady American male voice - one reader of the model's speakers. |
+| `female` | Female | female | A clear, steady American female voice - one reader of the model's speakers. |
+| `sarah` | Sarah | female | A warm, unhurried storyteller with a mid-low, rounded tone - an easy companion for a long novel. |
+| `helen` | Helen | female | A mature, composed voice, lower and slower, with quiet authority for weighty books. |
+| `amy` | Amy | female | A young, bright, lively voice, higher and quicker, for younger readers and light-hearted stories. |
+| `kate` | Kate | female | A brisk, clear, articulate voice with a crisp tone that keeps facts and arguments moving. |
+| `grace` | Grace | female | A gentle, soft, slow voice with a dark, quiet tone for winding down. |
+| `james` | James | male | A warm, relaxed storyteller with a mid-low, rounded tone for long-form fiction. |
+| `robert` | Robert | male | A mature, deep, deliberate voice with a grave authority for serious and older books. |
+| `michael` | Michael | male | A young, bright, energetic voice, higher and quicker, for younger readers and adventure. |
+| `david` | David | male | A brisk, clear, matter-of-fact voice with a crisp tone for explanation and reportage. |
+| `thomas` | Thomas | male | A gentle, soft, slow voice with a dark, calm tone for poetry and quiet evenings. |
+
+The ten designed voices (`data/nn/voices.json`) are blends of two to four of the model's audiobook readers, with mild
+pitch, vocal-tract, and effort adjustments and their own speaking rate (the `rate` option multiplies it); on the
+listener panel's texts they score UTMOS 4.09-4.28 (the package's two voices 4.08 and 4.18).
 
 ### `toWav(samples, sampleRate)`
 

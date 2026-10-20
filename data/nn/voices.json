@@ -4,7 +4,7 @@
  "voices": [
   {
    "id": "narrator-f",
-   "name": "Hearthside",
+   "name": "Sarah",
    "sex": "female",
    "archetype": "warm literary narrator",
    "description": "A warm, unhurried storyteller with a mid-low, rounded tone - an easy companion for a long novel.",
@@ -26,7 +26,7 @@
   },
   {
    "id": "mature-f",
-   "name": "Silver Birch",
+   "name": "Helen",
    "sex": "female",
    "archetype": "mature, authoritative",
    "description": "A mature, composed voice, lower and slower, with quiet authority for weighty books.",
@@ -50,7 +50,7 @@
   },
   {
    "id": "bright-f",
-   "name": "Bluebell",
+   "name": "Amy",
    "sex": "female",
    "archetype": "young and bright",
    "description": "A young, bright, lively voice, higher and quicker, for younger readers and light-hearted stories.",
@@ -72,7 +72,7 @@
   },
   {
    "id": "brisk-f",
-   "name": "Clearwater",
+   "name": "Kate",
    "sex": "female",
    "archetype": "brisk and clear",
    "description": "A brisk, clear, articulate voice with a crisp tone that keeps facts and arguments moving.",
@@ -95,7 +95,7 @@
   },
   {
    "id": "gentle-f",
-   "name": "Moonlit",
+   "name": "Grace",
    "sex": "female",
    "archetype": "gentle and soft",
    "description": "A gentle, soft, slow voice with a dark, quiet tone for winding down.",
@@ -119,7 +119,7 @@
   },
   {
    "id": "narrator-m",
-   "name": "Fireside",
+   "name": "James",
    "sex": "male",
    "archetype": "warm literary narrator",
    "description": "A warm, relaxed storyteller with a mid-low, rounded tone for long-form fiction.",
@@ -141,7 +141,7 @@
   },
   {
    "id": "mature-m",
-   "name": "Granite",
+   "name": "Robert",
    "sex": "male",
    "archetype": "mature, authoritative",
    "description": "A mature, deep, deliberate voice with a grave authority for serious and older books.",
@@ -165,7 +165,7 @@
   },
   {
    "id": "bright-m",
-   "name": "Skylark",
+   "name": "Michael",
    "sex": "male",
    "archetype": "young and bright",
    "description": "A young, bright, energetic voice, higher and quicker, for younger readers and adventure.",
@@ -188,7 +188,7 @@
   },
   {
    "id": "brisk-m",
-   "name": "Compass",
+   "name": "David",
    "sex": "male",
    "archetype": "brisk and clear",
    "description": "A brisk, clear, matter-of-fact voice with a crisp tone for explanation and reportage.",
@@ -209,7 +209,7 @@
   },
   {
    "id": "gentle-m",
-   "name": "Driftwood",
+   "name": "Thomas",
    "sex": "male",
    "archetype": "gentle and soft",
    "description": "A gentle, soft, slow voice with a dark, calm tone for poetry and quiet evenings.",
