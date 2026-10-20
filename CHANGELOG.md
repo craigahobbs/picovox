@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.0 (2026-10-20)
+
+- [7f422d3](https://github.com/craigahobbs/picovox/commit/7f422d3) - speaking styles - the style option of synthesize, stream, and speak, and styles(): neutral, angry, happy, sad, fearful, disgusted, whisper, soft, and shouting, with any voice
+
 ## 1.3.1 (2026-10-20)
 
 - [a34ba7c](https://github.com/craigahobbs/picovox/commit/a34ba7c) - better pronunciation of names and rarer words, Don Quixote's in particular (Quixote, Rocinante, Cide Hamete; goatherd, shouldst); accented letters read as their base letters (señor, Doña, Amadís were split into pieces); fix synthesize throwing on any text containing "constructor"; heteronyms read right in more contexts (he tears the page, prices increase, talks progress)
