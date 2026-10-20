@@ -3,7 +3,7 @@
 
 import {modelLoader, textBlocks, voiceSpeaker} from '../lib/synthesis.js';
 import {readFileSync, readdirSync} from 'node:fs';
-import {speak, stream, synthesize, toWav, voices} from '../lib/index.js';
+import {speak, stream, styles, synthesize, toWav, voices} from '../lib/index.js';
 import {strict as assert} from 'node:assert';
 import {encodeWav} from '../lib/wav.js';
 import test from 'node:test';
@@ -33,6 +33,32 @@ async function streamBlocks(text, options) {
 
 // A text of two paragraphs
 const text = 'It was the best of times. "Was it?" she asked.\n\nNobody answered.';
+
+
+test('styles', () => {
+    assert.deepEqual(styles().map(({key, kind}) => `${key}:${kind}`), [
+        'neutral:emotion', 'angry:emotion', 'happy:emotion', 'sad:emotion', 'fearful:emotion', 'disgusted:emotion', 'whisper:mode',
+        'soft:mode', 'shouting:mode'
+    ]);
+    assert(styles().every((style) => style.label && style.description));
+
+    // Each call's styles are its own
+    styles()[0].key = 'other';
+    assert.equal(styles()[0].key, 'neutral');
+});
+
+
+test('synthesize, styles', async () => {
+    // A style changes the audio; neutral is the default
+    const line = 'Get out!';
+    const plain = await synthesize(line, {'voice': 'james'});
+    assert.deepEqual((await synthesize(line, {'voice': 'james', 'style': 'neutral'})).samples, plain.samples);
+    assert.notDeepEqual((await synthesize(line, {'voice': 'james', 'style': 'whisper'})).samples, plain.samples);
+    await assert.rejects(synthesize(line, {'style': 'bored'}), {
+        'name': 'RangeError', 'message': 'Unknown style "bored" - the styles are "neutral", "angry", "happy", "sad", "fearful", ' +
+            '"disgusted", "whisper", "soft", "shouting"'
+    });
+});
 
 
 test('voices', () => {
@@ -159,8 +185,9 @@ test('synthesize, invalid', async () => {
     await invalid('The options must be an object, not null', 'TypeError', 'Hi', null);
     await invalid('The options must be an object, not an array', 'TypeError', 'Hi', []);
     await invalid('The options must be an object, not "fast"', 'TypeError', 'Hi', 'fast');
-    await invalid('Unknown option "speed" - the options are "voice", "rate", "seed", "sampleRate"', 'TypeError', 'Hi', {'speed': 2});
-    await invalid('Unknown option "context" - the options are "voice", "rate", "seed", "sampleRate"', 'TypeError', 'Hi', {'context': {}});
+    const optionList = 'the options are "voice", "style", "rate", "seed", "sampleRate"';
+    await invalid(`Unknown option "speed" - ${optionList}`, 'TypeError', 'Hi', {'speed': 2});
+    await invalid(`Unknown option "context" - ${optionList}`, 'TypeError', 'Hi', {'context': {}});
     await invalid(`Unknown voice 1 - ${voiceList}`, 'RangeError', 'Hi', {'voice': 1});
     await invalid(`Unknown voice "Male" - ${voiceList}`, 'RangeError', 'Hi', {'voice': 'Male'});
     await invalid('The rate must be a number from 0.5 to 2, not 3', 'RangeError', 'Hi', {'rate': 3});
@@ -373,7 +400,7 @@ test('speak, Node', () => {
         'name': 'TypeError', 'message': 'The context must be an AudioContext, not "audio"'
     });
     assert.throws(() => speak('Hi', {'speed': 1}), {
-        'name': 'TypeError', 'message': 'Unknown option "speed" - the options are "voice", "rate", "seed", "sampleRate", "context"'
+        'name': 'TypeError', 'message': 'Unknown option "speed" - the options are "voice", "style", "rate", "seed", "sampleRate", "context"'
     });
 });
 
@@ -548,7 +575,7 @@ test('package, browser-safe', () => {
 test('package, exports', async () => {
     // The package's entry and its modules, by the package's name
     const picovox = await import('picovox');
-    assert.deepEqual(Object.keys(picovox).sort(), ['speak', 'stream', 'synthesize', 'toWav', 'voices']);
+    assert.deepEqual(Object.keys(picovox).sort(), ['speak', 'stream', 'styles', 'synthesize', 'toWav', 'voices']);
     assert.equal(picovox.synthesize, synthesize);
     const {splitSentences} = await import('picovox/lib/sentences.js');
     assert.equal(splitSentences('One. Two.').length, 2);

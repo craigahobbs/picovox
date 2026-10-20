@@ -3,7 +3,7 @@
 
 import {
     blockSize, createSentenceRenderer, defaultSampleRate, defaultVoice, modelLoader, outputGain, paragraphPause, sentenceBlocks,
-    sentenceFrames, sentencePause, softLimit, textBlocks, voiceSettings, voiceSpeaker, voiceTable
+    sentenceFrames, sentencePause, softLimit, styleSettings, styleTable, textBlocks, voiceSettings, voiceSpeaker, voiceTable
 } from '../lib/synthesis.js';
 import {speechText, splitSentences} from '../lib/sentences.js';
 import {applyTransforms} from '../lib/transforms.js';
@@ -150,6 +150,60 @@ test('voiceSettings', () => {
     assert.deepEqual(voiceSettings(model, 'grace').transforms, [{'effort': -2}]);
     assert.deepEqual(voiceSettings(model, 'david').transforms, []);
     assert.throws(() => voiceSettings(model, 'nobody'), {'message': 'Unknown voice "nobody"'});
+});
+
+
+test('styles', () => {
+    // The styles are data/nn/voices.json's - their keys, labels, kinds, emotions, transforms, rates, and descriptions
+    const designed = JSON.parse(readFileSync('data/nn/voices.json', 'utf8')).styles;
+    assert.deepEqual(styleTable.map((style) => style.key), designed.map((style) => style.id));
+    for (const [style, entry] of styleTable.map((item, index) => [item, designed[index]])) {
+        assert.deepEqual([style.label, style.kind, style.description], [entry.label, entry.kind, entry.description]);
+        assert.deepEqual([style.emotion, style.transforms, style.rate], [entry.model, entry.transform, entry.rate]);
+    }
+
+    // A style's settings - neutral is nothing; an emotion, transforms, and a rate
+    assert.deepEqual(styleSettings(), {'emotion': undefined, 'rate': 1, 'transforms': []});
+    assert.deepEqual(styleSettings('fearful'), {
+        'emotion': {'emotion': 'fearful', 'intensity': 0.6}, 'rate': 1.08,
+        'transforms': [{'whisper': 0.15}, {'pitchScale': 1.1}, {'level': 2}, {'frication': 2}]
+    });
+    assert.deepEqual(styleSettings('whisper'), {
+        'emotion': undefined, 'rate': 1, 'transforms': [{'whisper': 1}, {'level': 5}, {'frication': 5}]
+    });
+    assert.throws(() => styleSettings('bored'), {'message': 'Unknown style "bored"'});
+});
+
+
+test('sentenceFrames, styles', () => {
+    // A styled voice's frames are its emotion's, at the voice's and the style's rates, with the voice's transforms and
+    // then the style's (as nn/js/voices.js's designed voices speak)
+    const text = 'Get out of my house!';
+    for (const [voice, style] of [['helen', 'fearful'], ['male', 'whisper'], ['david', 'angry']]) {
+        const {chunks, eq} = sentenceFrames(model, text, {voice, style, 'rate': 1.2});
+        const voiced = voiceSettings(model, voice);
+        const styled = styleSettings(style);
+        const options = {'speaker': voiced.speaker, 'style': styled.emotion, 'rate': 1 / (1.2 * voiced.rate * styled.rate)};
+        const expected = speakFrames(model, text, options);
+        const frames = applyTransforms(expected.frames, [...voiced.transforms, ...styled.transforms]);
+        const spoken = [...chunks].flat().map((frame) => Array.from(frame));
+        assert.deepEqual(spoken, frames.map((frame) => Array.from(frame)), `${voice} ${style}`);
+        assert.deepEqual(eq, expected.eq);
+    }
+
+    // A speaker with a style, and neutral as no style at all
+    const speaker = voiceSpeaker(model, 'female');
+    const shouted = sentenceFrames(model, text, {speaker, 'style': 'shouting'});
+    const loud = applyTransforms(speakFrames(model, text, {speaker}).frames, styleSettings('shouting').transforms);
+    assert.deepEqual([...shouted.chunks].flat(), loud);
+    const neutral = sentenceFrames(model, text, {speaker, 'style': 'neutral'});
+    assert.deepEqual([...neutral.chunks].flat(), [...sentenceFrames(model, text, {speaker}).chunks].flat());
+
+    // sentenceBlocks and textBlocks take the style too
+    assert.deepEqual(concat([...sentenceBlocks(model, text, {'voice': 'amy', 'style': 'sad', 'seed': 2})]),
+        concat([...sentenceBlocks(model, text, {'voice': 'amy', 'style': 'sad', 'seed': 2})]));
+    assert.notDeepEqual(concat([...textBlocks(model, 'Hello there.', {'voice': 'amy', 'style': 'happy'})]),
+        concat([...textBlocks(model, 'Hello there.', {'voice': 'amy'})]));
 });
 
 

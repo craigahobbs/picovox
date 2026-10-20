@@ -2,7 +2,7 @@
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 import {DEFAULTS, FLOOR_DB, NAMES, TRACT_FREQUENCIES} from '../lib/params.js';
-import {applyTransforms, bandwidthScale, effort, pitchScale, tractScale, whisper} from '../lib/transforms.js';
+import {applyTransforms, bandwidthScale, effort, frication, level, pitchScale, press, tractScale, whisper} from '../lib/transforms.js';
 import {strict as assert} from 'node:assert';
 import test from 'node:test';
 
@@ -93,6 +93,38 @@ test('transforms.effort', () => {
 });
 
 
+test('transforms.press', () => {
+    // Effort's voice quality without its loudness - brighter and more pressed, the levels unchanged
+    const [pressed] = press([frame()], 6);
+    assert.deepEqual(changes(frame(), pressed), {'shelf': [0, 3], 'rd': [1, 0.98 ** 6]});
+
+    // Rd stays in 0.3 - 2.7
+    assert.equal(press([frame({'rd': 0.31})], 30)[0][IX.rd], 0.3);
+    assert.equal(press([frame({'rd': 2.6})], -30)[0][IX.rd], 2.7);
+    const [custom] = press([frame()], 2, {'shelfPerDb': 1, 'rdPerDb': 0});
+    assert.deepEqual([custom[IX.shelf], custom[IX.rd]], [2, 1]);
+});
+
+
+test('transforms.level', () => {
+    // Every source louder or quieter (not the frication filter's gains), a silent source silent, nothing below the floor
+    const before = frame({'af': FLOOR_DB, 'ab': -50});
+    const [quieter] = level([before], -6);
+    assert.deepEqual(changes(before, quieter), {'av': [-6, -12], 'ah': [-40, -46]});
+    assert.equal(level([frame({'ah': FLOOR_DB + 2})], -10)[0][IX.ah], FLOOR_DB);
+    assert.deepEqual(changes(frame({'af': -30}), level([frame({'af': -30})], 3)[0]), {'av': [-6, -3], 'ah': [-40, -37], 'af': [-30, -27]});
+});
+
+
+test('transforms.frication', () => {
+    // The frication noise louder or quieter, a silent frication silent, nothing below the floor
+    const before = frame({'af': -30});
+    assert.deepEqual(changes(before, frication([before], 4)[0]), {'af': [-30, -26]});
+    assert.deepEqual(changes(frame(), frication([frame()], 4)[0]), {});
+    assert.equal(frication([frame({'af': FLOOR_DB + 2})], -10)[0][IX.af], FLOOR_DB);
+});
+
+
 test('transforms.applyTransforms', () => {
     const frames = [frame(), frame({'f0': 200})];
 
@@ -100,9 +132,12 @@ test('transforms.applyTransforms', () => {
     assert.equal(applyTransforms(frames), frames);
     assert.equal(applyTransforms(frames, []), frames);
 
-    // Each in turn, in a transform's fixed order (bandwidth, pitch, tract, whisper, effort)
-    const expected = effort(whisper(tractScale(pitchScale(bandwidthScale(frames, 0.8), 1.1), 0.9), {'intensity': 0.5}), 3);
-    const applied = applyTransforms(frames, [{'effort': 3, 'whisper': 0.5, 'tractScale': 0.9, 'pitchScale': 1.1, 'bandwidthScale': 0.8}]);
+    // Each in turn, in a transform's fixed order (bandwidth, pitch, tract, whisper, effort, press, level, frication)
+    const shaped = whisper(tractScale(pitchScale(bandwidthScale(frames, 0.8), 1.1), 0.9), {'intensity': 0.5});
+    const expected = frication(level(press(effort(shaped, 3), 2), -4), 1);
+    const applied = applyTransforms(frames, [
+        {'frication': 1, 'level': -4, 'press': 2, 'effort': 3, 'whisper': 0.5, 'tractScale': 0.9, 'pitchScale': 1.1, 'bandwidthScale': 0.8}
+    ]);
     assert.deepEqual(applied.map((item) => Array.from(item)), expected.map((item) => Array.from(item)));
     const listed = applyTransforms(frames, [{'pitchScale': 1.1}, {'pitchScale': 1.1}]);
     assert.deepEqual(listed.map((item) => item[IX.f0]), [120 * 1.1 * 1.1, 200 * 1.1 * 1.1]);

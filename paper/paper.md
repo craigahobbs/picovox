@@ -908,12 +908,13 @@ current browsers and in Node 22 or later, and has no dependencies:
 | `stream(text, options)` | an async iterable of sample blocks, a sentence and a fraction of a second at a time; concatenated, exactly `synthesize`'s samples |
 | `speak(text, options)` | Web Audio playback in a browser, `{stop(), finished}` |
 | `voices()` | the twelve voices - male and female, and the ten designed voices (1.3.0) |
+| `styles()` | the nine speaking styles - neutral, angry, happy, sad, fearful, disgusted, whisper, soft, shouting (1.4.0) |
 | `toWav(samples, sampleRate)` | a 16-bit WAV file |
 
-The options are the voice, the speaking rate (0.5-2), the noise seed, and the sample rate (24 kHz by default); the
-output is bit-for-bit deterministic in browsers and Node. The package's audio is bit-identical to the audiobook
-player's own synthesis path, from which it was extracted (76 cases). Version 1.3.1's tarball holds 21 files, 768,940
-bytes compressed and 1,189,320 unpacked; its two generated model modules are 419,475 bytes (the G2P and context
+The options are the voice, the speaking style, the speaking rate (0.5-2), the noise seed, and the sample rate (24 kHz
+by default); the output is bit-for-bit deterministic in browsers and Node. The package's audio is bit-identical to the
+audiobook player's own synthesis path, from which it was extracted (76 cases). Version 1.4.0's tarball holds 21 files,
+770,871 bytes compressed and 1,197,693 unpacked; its two generated model modules are 419,475 bytes (the G2P and context
 networks, 316 KB gzipped) and 554,315 bytes (the voice, 385 KB gzipped), the rest is code and the README. "Under 1 MB"
 is the package as downloaded, and the two models as a static host serves them gzipped; the raw model modules are
 about 0.97 MB together.

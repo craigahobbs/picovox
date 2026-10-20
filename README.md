@@ -112,6 +112,29 @@ The ten designed voices (`data/nn/voices.json`) are blends of two to four of the
 pitch, vocal-tract, and effort adjustments and their own speaking rate (the `rate` option multiplies it); on the
 listener panel's texts they score UTMOS 4.09-4.28 (the package's two voices 4.08 and 4.18).
 
+### `styles()`
+
+The speaking styles - `[{key, label, kind, description}]`, neutral (the default) first. Any style goes with any voice:
+
+| Key | Kind | |
+| --- | --- | --- |
+| `neutral` (the default) | emotion | The voice as designed - plain narration |
+| `angry` | emotion | A pressed, raised, louder voice |
+| `happy` | emotion | The voice model's happy embedding, a little brighter, higher, and louder |
+| `sad` | emotion | The sad embedding - lower, slower, and darker |
+| `fearful` | emotion | The fearful embedding, a little breathy, higher, and quicker |
+| `disgusted` | emotion | The disgusted embedding, a little pressed, lower, and slower |
+| `whisper` | mode | No voicing - the breath only |
+| `soft` | mode | A quieter voice, a little slower |
+| `shouting` | mode | A pressed, bright, raised voice, a little louder |
+
+The embeddings are emotions the voice model learned from CREMA-D's actors; the rest of each style transforms the
+synthesizer's parameters (a pressed or relaxed glottal pulse, pitch, whisper, level). The styles were tuned by ear in
+two voices and measured: on the listener panel's texts every style stays intelligible (Whisper's word error rate
+0.6-2.7%, whispering 2.4-3.6%), UTMOS - a judge of plain read speech - scores angry, soft, shouting, and disgusted
+4.05-4.22 (neutral 4.15-4.18) and the other emotions 3.6-4.0, and can't score a whisper; and every style but whisper
+(6-10 dB quieter) and soft (5 dB) is within 3.5 dB of neutral's loudness.
+
 ### `toWav(samples, sampleRate)`
 
 Encode samples (a `Float32Array`, or an array of numbers, -1 to 1 - values beyond are clipped) as a 16-bit PCM mono WAV
@@ -124,6 +147,7 @@ file - a `Uint8Array` of the file's bytes.
 | Option | Default | |
 | --- | --- | --- |
 | `voice` | `'male'` | The voice's key - see `voices()` |
+| `style` | `'neutral'` | The speaking style's key - see `styles()` |
 | `rate` | `1` | The speaking speed, from 0.5 to 2 (1.2 is 20% faster) |
 | `seed` | `1000` | The noise seed (an integer) - sentence *i* of the text is rendered with seed + *i* |
 | `sampleRate` | `24000` | The output sample rate (Hz), from 8000 to 96000 - 24 kHz is the voices' own rate |
@@ -161,7 +185,7 @@ that runs its own synthesis loop (PicoShelf's worker does):
 
 | | |
 | --- | --- |
-| The package (`npm pack`) | 769 KB packed, 1.2 MB unpacked - the G2P network 419 KB and the voice network 554 KB of it, as base64 |
+| The package (`npm pack`) | 771 KB packed, 1.2 MB unpacked - the G2P network 419 KB and the voice network 554 KB of it, as base64 |
 | The voice network | 305,035 parameters, 8-bit weights - 385 KB gzipped |
 | The G2P network | 373,256 parameters (and the heteronym context network's 47,779), 6-bit weights |
 | Speed, Apple M3 Max (Node) | The voice network about 127x real time, the renderer about 97x; synthesis end to end (24 kHz) about 55x |

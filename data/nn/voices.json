@@ -243,16 +243,21 @@
    "id": "angry",
    "label": "Angry",
    "kind": "emotion",
-   "model": {
-    "emotion": "angry",
-    "intensity": 1.0
-   },
    "transform": [
     {
-     "effort": 4
+     "press": 6
+    },
+    {
+     "pitchScale": 1.05
+    },
+    {
+     "level": 3
+    },
+    {
+     "frication": 3
     }
    ],
-   "description": "The angry style embedding, with more vocal effort."
+   "description": "A pressed, raised, louder voice - angry without the angry embedding, which sounded muffled."
   },
   {
    "id": "happy",
@@ -260,17 +265,23 @@
    "kind": "emotion",
    "model": {
     "emotion": "happy",
-    "intensity": 0.85
+    "intensity": 0.7
    },
    "transform": [
     {
-     "effort": 2
+     "press": 2
     },
     {
-     "pitchScale": 1.08
+     "pitchScale": 1.04
+    },
+    {
+     "level": 2
+    },
+    {
+     "frication": 2
     }
    ],
-   "description": "The happy style embedding, a little brighter and higher."
+   "description": "The happy style embedding, a little brighter, higher, and louder."
   },
   {
    "id": "sad",
@@ -280,6 +291,14 @@
     "emotion": "sad",
     "intensity": 0.6
    },
+   "transform": [
+    {
+     "level": 2.5
+    },
+    {
+     "frication": 2.5
+    }
+   ],
    "description": "The sad style embedding (lower, slower, and darker)."
   },
   {
@@ -292,14 +311,20 @@
    },
    "transform": [
     {
-     "whisper": 0.3
+     "whisper": 0.15
     },
     {
      "pitchScale": 1.1
+    },
+    {
+     "level": 2
+    },
+    {
+     "frication": 2
     }
    ],
    "rate": 1.08,
-   "description": "The fearful style embedding, breathier, higher, and quicker."
+   "description": "The fearful style embedding, a little breathy, higher, and quicker."
   },
   {
    "id": "disgusted",
@@ -307,18 +332,24 @@
    "kind": "emotion",
    "model": {
     "emotion": "disgusted",
-    "intensity": 0.6
+    "intensity": 0.5
    },
    "transform": [
     {
-     "effort": 2
+     "press": 2
     },
     {
-     "pitchScale": 0.92
+     "pitchScale": 0.95
+    },
+    {
+     "level": 1
+    },
+    {
+     "frication": 1
     }
    ],
    "rate": 0.9,
-   "description": "The disgusted style embedding, lower, more pressed, and slower."
+   "description": "The disgusted style embedding, a little pressed, lower, and slower."
   },
   {
    "id": "whisper",
@@ -327,6 +358,12 @@
    "transform": [
     {
      "whisper": 1
+    },
+    {
+     "level": 5
+    },
+    {
+     "frication": 5
     }
    ],
    "description": "No voicing - the breath (aspiration) only."
@@ -337,11 +374,14 @@
    "kind": "mode",
    "transform": [
     {
-     "effort": -6
+     "level": -5
+    },
+    {
+     "frication": -5
     }
    ],
    "rate": 0.95,
-   "description": "Less vocal effort - quieter, darker, breathier voicing - a little slower."
+   "description": "A quieter voice, a little slower."
   },
   {
    "id": "shouting",
@@ -349,13 +389,19 @@
    "kind": "mode",
    "transform": [
     {
-     "effort": 10
+     "press": 10
     },
     {
-     "pitchScale": 1.2
+     "pitchScale": 1.15
+    },
+    {
+     "level": 1
+    },
+    {
+     "frication": 1
     }
    ],
-   "description": "More vocal effort - louder, brighter, pressed voicing - and a raised pitch."
+   "description": "A pressed, bright, raised voice, a little louder - its consonants with it."
   }
  ]
 }
