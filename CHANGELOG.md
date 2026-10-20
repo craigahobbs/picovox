@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.0 (2026-10-19)
+
+- [5f89016](https://github.com/craigahobbs/picovox/commit/5f89016) - twelve voices - add Sarah, Helen, Amy, Kate, and Grace; James, Robert, Michael, David, and Thomas (blends of the model's audiobook readers, each with its own pitch, tone, and pace) beside male and female; voices() gives each voice's description
+
 ## 1.2.0 (2026-10-19)
 
 - [c35e39d](https://github.com/craigahobbs/picovox/commit/c35e39d) - a smaller voice network - the d64 student, a 64-wide decoder (305,035 parameters, 385 KB gzipped - was 433 KB): its network 1.24x faster on an iPhone without a JIT, UTMOS within 0.02 of the 80-wide decoder's and a lower word error rate
