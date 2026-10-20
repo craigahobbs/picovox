@@ -161,7 +161,8 @@ train-g2p:
 	$(call TRAIN_TARGET,train-g2p)
 	@$(MAKE) --no-print-directory G2P_STANDALONE=1 G2P_JOBS=$(G2P_STANDALONE_JOBS) BESIDE= $(TRAIN_DIR)/g2p.done
 
-$(TRAIN_DIR)/g2p-network.done: data/nn/train.json data/nn/g2p-words.json data/nn/g2p-relabel.json data/nn/g2p-fixes.json data/cmudict.dict \
+$(TRAIN_DIR)/g2p-network.done: data/nn/train.json data/nn/g2p-words.json data/nn/g2p-relabel.json data/nn/g2p-fixes.json data/nn/g2p-books.json \
+		data/cmudict.dict \
 		| build/venv-nn.build
 	@$(STAGE) start
 	$(STAGE) -- $(NN_PYTHON) -m picovox_train.g2p train --out $(TRAIN_DIR)/g2p
@@ -169,7 +170,7 @@ $(TRAIN_DIR)/g2p-network.done: data/nn/train.json data/nn/g2p-words.json data/nn
 	@mkdir -p $(@D) && touch $@
 
 $(TRAIN_DIR)/context-labels.done: $(TRAIN_DIR)/corpora.done data/nn/train.json data/nn/books.json data/nn/context-labels.json \
-		data/nn/g2p-fixes.json \
+		data/nn/g2p-fixes.json data/nn/g2p-books.json \
 		data/nn/heteronyms-test.json | build/venv-nn.build build/venv-pos.build $(if $(G2P_STANDALONE),,$(TRAIN_DIR)/data-multi.done)
 	@$(STAGE) start
 	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.contextlabels books

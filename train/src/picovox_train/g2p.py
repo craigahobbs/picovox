@@ -8,6 +8,7 @@ every word; g2pmodel.py is its Python port). The recipe is data/nn/train.json's 
     PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p train --out build/nn/g2p-train   # every stage (resumable)
     PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p export build/nn/g2p-train --out lib/models/g2pModel.js
     PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p evaluate [lib/models/g2pModel.js | CHECKPOINT]
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p book TEXT --name NAME --title TITLE --url URL
 
 The data:
 
@@ -21,6 +22,11 @@ The data:
 - in a stage with "relabel" (a JSON file {"relabel": {word: "PH ON ES"}} - data/nn/g2p-relabel.json, heteronyms.py)
   other targets for some dictionary words - the rule-labeled words derived from them follow - and ("focusBoost":
   {"share"}) a share of the samples uniform over them
+- the words of the books listeners hear (data/nn/g2p-books.json - "book" counts a book's words): labels for its words
+  the dictionary lacks or has wrong (names - Rocinante, Cide Hamete - and archaic words), each a dictionary word in
+  training (a corrected dictionary word's rule-labeled forms following), its possessives the dictionary lacks (the
+  stem's target with its -s suffix), and its word counts, which join the frequency weights (the monitoring set is drawn
+  without them, then loses the books' words)
 
 Each stage trains from the previous one's weights (AdamW, linear warmup then cosine decay to 2%, gradient clipping at
 1) with its own seed, learning rate, and sampling ("topBoost": {"share", "count"} - a share of the dictionary samples
@@ -48,13 +54,14 @@ import zlib
 
 import numpy
 
-from . import g2pmodel
+from . import frontend, g2pmodel
 from .frontend import ROOT, vocabulary
 
 
 DICTIONARY_PATH = os.path.join(ROOT, 'data', 'cmudict.dict')
 WORDS_PATH = os.path.join(ROOT, 'data', 'nn', 'g2p-words.json')
 FIXES_PATH = os.path.join(ROOT, 'data', 'nn', 'g2p-fixes.json')
+BOOKS_PATH = os.path.join(ROOT, 'data', 'nn', 'g2p-books.json')
 CONFIG_PATH = os.path.join(ROOT, 'data', 'nn', 'train.json')
 MODULE_PATH = g2pmodel.MODULE_PATH
 
@@ -126,10 +133,11 @@ def split_words(words):
     return {'test': shuffled[:test_count], 'validation': shuffled[test_count:test_count + validation_count]}
 
 
-def load_data(relabel=None, fixes=FIXES_PATH):
+def load_data(relabel=None, fixes=FIXES_PATH, books=BOOKS_PATH):
     """The data - {first (word: target phones), all (word: every pronunciation), labels (unknown words' phones), stems,
     evalCounts, weightCounts, monitor, relabeled (the relabeled words)}; fixes (data/nn/g2p-fixes.json - None for the
-    dictionary as it is) corrects the dictionary's label errors first"""
+    dictionary as it is) corrects the dictionary's label errors first, and books (data/nn/g2p-books.json - None for
+    none) adds the listeners' books' words"""
     pronunciations = read_pronunciations()
     with open(WORDS_PATH, encoding='utf-8') as file:
         words = json.load(file)
@@ -146,6 +154,19 @@ def load_data(relabel=None, fixes=FIXES_PATH):
             pronunciations[word] = [phones] + [variant for variant in pronunciations[word] if variant not in (phones, first[word])]
             first[word] = phones
 
+    # The monitoring set - the dictionary's validation words in none of the books (the 128 books - the listeners' books'
+    # words leave it, so they train)
+    eval_counts, weight_counts = words['evalCounts'], words['weightCounts']
+    validation = sorted(word for word in split_words(first)['validation'] if word not in eval_counts and word not in weight_counts)
+    random.Random(SPLIT_SEED).shuffle(validation)
+    monitor = validation[:MONITOR_WORDS]
+
+    # The books' words - their labels, their possessives, and their counts (weights)
+    if books:
+        book_counts = add_books(books, pronunciations, first, labels, stems)
+        weight_counts = dict(collections.Counter(weight_counts) + collections.Counter(book_counts))
+        monitor = [word for word in monitor if word not in book_counts]
+
     # Other targets for some dictionary words - and the rule-labeled words derived from them
     relabeled = set()
     if relabel:
@@ -155,12 +176,33 @@ def load_data(relabel=None, fixes=FIXES_PATH):
         first.update((word, phones) for word, phones in targets.items() if word in first)
         relabeled = set(targets) & set(first)
 
-    # The monitoring set - validation words in none of the books
-    eval_counts, weight_counts = words['evalCounts'], words['weightCounts']
-    validation = sorted(word for word in split_words(first)['validation'] if word not in eval_counts and word not in weight_counts)
-    random.Random(SPLIT_SEED).shuffle(validation)
     return {'first': first, 'all': pronunciations, 'labels': labels, 'stems': stems, 'evalCounts': eval_counts,
-            'weightCounts': weight_counts, 'monitor': sorted(validation[:MONITOR_WORDS]), 'relabeled': relabeled}
+            'weightCounts': weight_counts, 'monitor': sorted(monitor), 'relabeled': relabeled}
+
+
+# Add the books' words (data/nn/g2p-books.json, in place) - each label (a word the dictionary lacks, or a correction of
+# its label - the rule-labeled words derived from it follow) a dictionary word, and each possessive in the books the
+# dictionary lacks the stem's target with its -s suffix (a teacher's label of the word replaced); returns the books' word
+# counts, summed
+def add_books(path, pronunciations, first, labels, stems):
+    with open(path, encoding='utf-8') as file:
+        books = json.load(file)
+    targets = {word: phones.split() for word, phones in books['labels'].items()}
+    derive_targets(labels, stems, first, {word: phones for word, phones in targets.items() if word in first})
+    for word, phones in targets.items():
+        pronunciations[word] = [phones] + [variant for variant in pronunciations.get(word, []) if variant not in (phones, first.get(word))]
+        first[word] = phones
+        labels.pop(word, None)
+    counts = collections.Counter()
+    for book in books['books'].values():
+        counts.update(book['counts'])
+    for word in sorted(counts):
+        stem = word[:-2]
+        if word.endswith('\'s') and word not in first and stem in first:
+            first[word] = first[stem] + s_suffix(first[stem])
+            pronunciations[word] = [first[word]]
+            labels.pop(word, None)
+    return dict(counts)
 
 
 # The rule-labeled words derived from dictionary words with new targets follow them (in place): a spelling variant
@@ -639,6 +681,35 @@ def command_evaluate(args):
     return 0
 
 
+def command_book(args):
+    """A book's word counts (the front end's words - frontend.text_items) into the books file - the words the network
+    trains on (the dictionary's, the labels', and their possessives)"""
+    with open(args.text, encoding='utf-8') as file:
+        items = frontend.text_items(file.read())
+    with open(args.books, encoding='utf-8') as file:
+        books = json.load(file)
+    known = set(read_pronunciations()) | set(books['labels'])
+    counts = collections.Counter(item for item, _ in items if isinstance(item, str))
+    kept = {word: count for word, count in sorted(counts.items()) if word in known or (word.endswith('\'s') and word[:-2] in known)}
+    books['books'][args.name] = {'title': args.title, 'url': args.url, 'tokens': sum(counts.values()), 'counts': kept}
+    write_books(args.books, books)
+    log_line(None, f'book {args.name}: {sum(counts.values())} tokens, {len(kept)} of its {len(counts)} words kept')
+    return 0
+
+
+# Write the books file - its labels one word a line, and each book's counts on one line
+def write_books(path, books):
+    lines = ['{', f' "description": {json.dumps(books["description"])},', ' "labels": {']
+    lines += [f'  {json.dumps(word)}: {json.dumps(phones)},' for word, phones in sorted(books['labels'].items())]
+    lines[-1] = lines[-1].rstrip(',')
+    lines += [' },', ' "books": {']
+    entries = [f'  {json.dumps(name)}: {json.dumps(book)}' for name, book in sorted(books['books'].items())]
+    lines += [entry + ',' for entry in entries[:-1]] + entries[-1:]
+    lines += [' }', '}']
+    with open(path, 'w', encoding='utf-8') as file:
+        file.write('\n'.join(lines) + '\n')
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='python -m picovox_train.g2p', description='Train and export the G2P network')
     commands = parser.add_subparsers(dest='command', required=True)
@@ -660,6 +731,13 @@ def main(argv=None):
     evaluate_parser.add_argument('--threads', type=int, default=4)
     evaluate_parser.add_argument('--out', help='the measures as JSON')
     evaluate_parser.set_defaults(func=command_evaluate)
+    book_parser = commands.add_parser('book', help='count a listened-to book\'s words into data/nn/g2p-books.json')
+    book_parser.add_argument('text', help='the book\'s text (UTF-8)')
+    book_parser.add_argument('--name', required=True, help='the book\'s name (its key)')
+    book_parser.add_argument('--title', required=True)
+    book_parser.add_argument('--url', required=True, help='the text\'s source')
+    book_parser.add_argument('--books', default=BOOKS_PATH)
+    book_parser.set_defaults(func=command_book)
     args = parser.parse_args(argv)
     return args.func(args)
 

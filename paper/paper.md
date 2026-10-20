@@ -658,6 +658,61 @@ broke. (The gate's 89.3% for 1.0.1 is from fresh folds: the cross-validation had
 their inputs, and now keeps a fold only when its labels and settings are the same.) The cost is training time: the
 teachers, each fold's too, make the context stage 25 minutes instead of 6 - still beside the 30-minute G2P network.
 
+### 9.10 A listener's book: Don Quixote
+
+A listener started Don Quixote (John Ormsby's translation, 457,619 words) and heard it mispronounced. Every word of the
+book through the package's front end and its G2P showed three kinds of fault:
+
+- **The front end.** Its words were letters a to z, so an accented letter split a word: "señor" (511 times) was "se" and
+  "or", "Doña" was "do" and "a", "Amadís" was "amad" and "s". The front end now reads an accented Latin letter as its
+  base letter (á as a, ñ as n) and the ligatures as English says them (Cæsar, Œdipus), a letter for a letter, so the
+  training port's offsets are unchanged; texts without such letters sound bit for bit the same. The same pass found a
+  crash: "constructor" - a word, but also a property every JavaScript object inherits - matched the abbreviations
+  table's lookup, so any text containing it made `synthesize` throw; the lookups now check the table's own keys.
+- **A dictionary word never learned.** "Quixote" (2,188 times, and "Quixote's" 147) was "kwik-SOTE", though the
+  dictionary has K IY0 HH OW1 T IY0: the irregular spelling, against "quixotic" and the rules of English spelling, had
+  only the 23 occurrences of the 128 books to weigh it. Majordomo, Luis, caballero, Galatea, and Malaga were the same.
+- **Words the dictionary lacks.** Rocinante (188 times) was "RAH-sə-nənt", Cide Hamete "side HAM-et", Luscinda
+  "loo-SCHIN-da"; "goatherd" was "goath-erd" and "shouldst" "showldst".
+
+The fixes are data, as the dictionary's were (Section 9.6). A new file, `data/nn/g2p-books.json`, holds the words of
+the books listeners hear: each book's word counts (the front end's words that train - the dictionary's, the labels', and
+their possessives), which join the frequency weights, and labels for its words the dictionary lacks or has wrong -
+61 for Don Quixote, its names as American readers say anglicized Spanish (CMUdict's own convention: QUIXOTE, SENOR) and
+its archaic words' standard pronunciations. A label trains as a dictionary word, weighted by its count (an unknown
+word's teacher label is sampled with a hundred thousand others, too rarely to be learned), and a possessive the
+dictionary lacks takes its stem's target. The monitoring set is drawn as before and loses only the book's seven
+words. The first retrain learned the book's names and pulled six unlabeled words toward Spanish ("wineskins" as
+"WIN-is-kins", Barcelona with a CH); labels for four of them (two are dictionary words) and the retrain put all six
+right.
+
+The same retrain carried the context network's open cases. "Tears" the verb (He tears the page) had 10 seed sentences
+beside 2,899 nouns in the books' tags - below the 2% an alternate reading needs to make a word ambiguous - so the
+network never saw the word; 18 more seeds made it one. "Increase" and "progress" have no tag labels (the audio doesn't
+validate the noun/verb stress mapping), and their verb seeds were infinitives ("began to increase"); 18 seeds of the
+finite verb ("Our troubles increase daily") and 8 of the noun fixed both. A minute amount went to the collocations.
+These seeds cost "a bass in the lake" and "Polish the silver", the network's borderline cases moving with its labels
+(Section 9.9); 12 seeds for them and a collocation (caught a bass) put both right and moved "He spoke Polish at home" to
+the verb. Against the books' part-of-speech tags, on 15 ambiguous words with a clear tag mapping (30,180 tokens), the
+module reads 96.97% of the tokens the tag's way (picovox 1.3.0: 96.82%) - "tears" 2,495 of 2,497 (2,464), "increase"
+406 of 462 (391) - and "read" and "lives" (4,407 tokens) the same.
+
+| Measure | picovox 1.3.0 | picovox 1.3.1 |
+| --- | --- | --- |
+| Default readings | 52/52 | 52/52 |
+| Context readings | 50/54 | 52/54 |
+| Missing readings, names | 3/3, 71/86 | 3/3, 80/86 |
+| Cross-validated gate ("read", "lives") | 90.7% | 88.8% |
+| Book-token error, distinct words, top-10K wrong | 0.062%, 636, 9 | 0.058%, 600, 10 |
+| Don Quixote's labeled words (tokens) | 3 of 61 (43 of 1,780) | 48 of 61 (1,592 of 1,780) |
+| Module | 419,575 bytes | 419,475 bytes |
+
+(The names include 13 of Don Quixote's, which 1.3.0 had 3 of right; the gate's drop, 4 of its 215 aligned tokens, is
+within its fold-to-fold spread, and the books' tags read "read" and "lives" the same.) The thirteen labels not learned
+are rare names - Maritornes, Clemencín, Benengeli, at most 31 times each - a small network's limit. Of the book's
+457,642 spoken tokens 7,412 changed: Quixote, Rocinante, and the other labels, the dictionary words now as the
+dictionary has them, and the stress of a few unlabeled names.
+
 
 ## 10. Reproducible training: `make train`
 
@@ -852,13 +907,13 @@ current browsers and in Node 22 or later, and has no dependencies:
 | `synthesize(text, options)` | a Promise of `{samples, sampleRate}` |
 | `stream(text, options)` | an async iterable of sample blocks, a sentence and a fraction of a second at a time; concatenated, exactly `synthesize`'s samples |
 | `speak(text, options)` | Web Audio playback in a browser, `{stop(), finished}` |
-| `voices()` | the two voices, male and female |
+| `voices()` | the twelve voices - male and female, and the ten designed voices (1.3.0) |
 | `toWav(samples, sampleRate)` | a 16-bit WAV file |
 
 The options are the voice, the speaking rate (0.5-2), the noise seed, and the sample rate (24 kHz by default); the
 output is bit-for-bit deterministic in browsers and Node. The package's audio is bit-identical to the audiobook
-player's own synthesis path, from which it was extracted (76 cases). Version 1.2.0's tarball holds 21 files, 766,214
-bytes compressed and 1,180,611 unpacked; its two generated model modules are 419,575 bytes (the G2P and context
+player's own synthesis path, from which it was extracted (76 cases). Version 1.3.1's tarball holds 21 files, 768,940
+bytes compressed and 1,189,320 unpacked; its two generated model modules are 419,475 bytes (the G2P and context
 networks, 316 KB gzipped) and 554,315 bytes (the voice, 385 KB gzipped), the rest is code and the README. "Under 1 MB"
 is the package as downloaded, and the two models as a static host serves them gzipped; the raw model modules are
 about 0.97 MB together.

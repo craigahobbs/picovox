@@ -30,6 +30,7 @@ import multiprocessing
 import os
 import re
 import sys
+import unicodedata
 
 from . import ROOT, g2pmodel
 
@@ -215,6 +216,9 @@ ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 
 TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety']
 
 TOKEN_REGEX = re.compile(r"[a-z][a-z']*\.?|\d+(?:\.\d+)?|[.,;:!?]", re.ASCII)
+ACCENTED_REGEX = re.compile('[\u00c0-\u024f]')
+MARKS_REGEX = re.compile('[\u0300-\u036f]')
+PLAIN_LETTERS = {'æ': 'e', 'Æ': 'E', 'œ': 'e', 'Œ': 'E', 'ø': 'o', 'Ø': 'O', 'ł': 'l', 'Ł': 'L', 'đ': 'd', 'Đ': 'D', 'ß': 's'}
 PHONE_REGEX = re.compile(r'^([A-Z]+)(\d)?$')
 
 
@@ -234,6 +238,16 @@ def number_words(value):
 PHRASE_MARKS = {'comma': ',', 'period': '.', 'question': '?', 'exclamation': '!'}
 
 
+# A text's accented Latin letters without their accents - á as a, Ñ as N, and the ligatures as English says them
+# (Cæsar, Œdipus) - each letter one letter, so the text keeps its length (plainLetters)
+def plain_letters(text):
+    def plain(match):
+        char = match.group(0)
+        return PLAIN_LETTERS.get(char) or MARKS_REGEX.sub('', unicodedata.normalize('NFD', char))
+
+    return ACCENTED_REGEX.sub(plain, text)
+
+
 # The front end's items of a text, in order (textToPhrases' first pass) - [(item, offset)]: a word (its text after
 # numbers and abbreviations are spelled out) or a phrase end ({'end': name}, only after a word), and the offset of its
 # source token in the text. The context sequence is the items with the phrase ends as PHRASE_MARKS.
@@ -244,7 +258,7 @@ def text_items(text):
         if items and isinstance(items[-1][0], str):
             items.append(({'end': end}, offset))
 
-    for match in TOKEN_REGEX.finditer(text.lower().replace('‘', '\'').replace('’', '\'')):
+    for match in TOKEN_REGEX.finditer(plain_letters(text).lower().replace('‘', '\'').replace('’', '\'')):
         token, offset = match.group(0), match.start()
         if '0' <= token[0] <= '9':
             whole, _, fraction = token.partition('.')

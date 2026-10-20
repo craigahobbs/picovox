@@ -104,7 +104,7 @@ def train_fold(task):
     if os.path.exists(path + '.json'):
         return path
     config = g2p.load_config()
-    data = g2p.load_data(fixes=None)
+    data = g2p.load_data(fixes=None, books=None)
     folds = partition(sorted(data['first']), repeat)
     data['monitor'] = sorted(word for word, index in folds.items() if index == fold)
     settings = {key: value for key, value in config.items() if key not in ('stages', 'export')}
@@ -280,7 +280,7 @@ def command_suspects(args):
     guess"""
     import torch  # pylint: disable=import-outside-toplevel
     torch.set_num_threads(args.threads)
-    data = g2p.load_data(fixes=None)
+    data = g2p.load_data(fixes=None, books=None)
     first, every = data['first'], data['all']
     labels = {word: ' '.join(phones) for word, phones in first.items()}
     scores = collections.defaultdict(list)

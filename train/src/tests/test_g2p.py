@@ -103,7 +103,7 @@ class TestG2p(unittest.TestCase):
             json.dump({'g2p': config}, file)
         self.patches = [unittest.mock.patch.object(g2p, 'WORDS_PATH', self.words_path),
                         unittest.mock.patch.object(g2p.read_pronunciations, '__defaults__', (self.dictionary_path,)),
-                        unittest.mock.patch.object(g2p.load_data, '__defaults__', (None, None))]
+                        unittest.mock.patch.object(g2p.load_data, '__defaults__', (None, None, None))]
         for patch in self.patches:
             patch.start()
 
@@ -182,6 +182,60 @@ class TestG2p(unittest.TestCase):
         data = g2p.load_data(self.relabel_path, fixes_path)
         self.assertEqual(data['first']['lead'], ['L', 'EH1', 'D'])
         self.assertEqual(data['first']['dog'], ['D', 'AA1', 'G'])
+
+    def test_load_data_books(self):
+        self.assertEqual(g2p.BOOKS_PATH, os.path.join(g2p.ROOT, 'data', 'nn', 'g2p-books.json'))
+        monitored = g2p.load_data()['monitor'][0]
+        books_path = os.path.join(self.directory.name, 'g2p-books.json')
+        with open(books_path, 'w', encoding='utf-8') as file:
+            json.dump({'description': 'books', 'labels': {'cat': 'K AA1 T', 'doggo': 'D AA1 G OW2', 'zork': 'Z AO1 R K'},
+                       'books': {'one': {'counts': {'zork': 7, 'zork\'s': 2, 'cat': 3, 'cat\'s': 1}},
+                                 'two': {'counts': {'mat\'s': 1, 'dog\'s': 1, 'nope\'s': 1, monitored: 1}}}}, file)
+        with open(self.dictionary_path, 'a', encoding='utf-8') as file:
+            file.write('dog\'s D AO1 G Z\n')
+        data = g2p.load_data(books=books_path)
+
+        # The labels - a dictionary word's corrected (its derived words follow), and new words, a teacher's label replaced
+        self.assertEqual(data['first']['cat'], ['K', 'AA1', 'T'])
+        self.assertEqual(data['all']['cat'], [['K', 'AA1', 'T']])
+        self.assertEqual(data['labels']['catz'], ['K', 'AA1', 'T', 'S'])
+        self.assertEqual(data['first']['zork'], ['Z', 'AO1', 'R', 'K'])
+        self.assertEqual(data['first']['doggo'], ['D', 'AA1', 'G', 'OW2'])
+        self.assertNotIn('doggo', data['labels'])
+
+        # The possessives the dictionary lacks - the stem's target with its -s suffix (a dictionary possessive kept)
+        self.assertEqual(data['first']['zork\'s'], ['Z', 'AO1', 'R', 'K', 'S'])
+        self.assertEqual(data['first']['cat\'s'], ['K', 'AA1', 'T', 'S'])
+        self.assertEqual(data['first']['mat\'s'], ['M', 'AE1', 'T', 'S'])
+        self.assertEqual(data['first']['dog\'s'], ['D', 'AO1', 'G', 'Z'])
+        self.assertNotIn('nope\'s', data['first'])
+
+        # The counts join the weights, and the books' words leave the monitoring set
+        self.assertEqual(data['weightCounts']['zork'], 7)
+        self.assertEqual(data['weightCounts']['mat'], 2)
+        self.assertEqual(data['weightCounts']['mat\'s'], 1)
+        self.assertNotIn(monitored, data['monitor'])
+
+    def test_command_book(self):
+        books_path = os.path.join(self.directory.name, 'g2p-books.json')
+        with open(books_path, 'w', encoding='utf-8') as file:
+            json.dump({'description': 'The books', 'labels': {'zork': 'Z AO1 R K', 'cattish': 'K AE1 T IH0 SH'},
+                       'books': {'other': {'title': 'Other', 'url': 'u', 'tokens': 1, 'counts': {'a': 1}}}}, file)
+        text_path = os.path.join(self.directory.name, 'book.txt')
+        with open(text_path, 'w', encoding='utf-8') as file:
+            file.write('The cat’s zork, the Zork’s dog. Señor Blorp sat.')
+        with captured() as (_, stderr):
+            argv = ['book', text_path, '--name', 'tale', '--title', 'A Tale', '--url', 'https://x', '--books', books_path]
+            self.assertEqual(g2p.main(argv), 0)
+        self.assertIn('book tale: 9 tokens, 6 of its 8 words kept', stderr.getvalue())
+        with open(books_path, encoding='utf-8') as file:
+            text = file.read()
+        self.assertEqual(text.splitlines()[:5], ['{', ' "description": "The books",', ' "labels": {',
+                                                 '  "cattish": "K AE1 T IH0 SH",', '  "zork": "Z AO1 R K"'])
+        books = json.loads(text)
+        self.assertEqual(books['books']['tale'], {'title': 'A Tale', 'url': 'https://x', 'tokens': 9, 'counts': {
+            'cat\'s': 1, 'dog': 1, 'sat': 1, 'the': 2, 'zork': 1, 'zork\'s': 1}})
+        self.assertEqual(list(books['books']), ['other', 'tale'])
 
     def test_s_suffix(self):
         self.assertEqual(g2p.s_suffix(['K', 'AE1', 'T']), ['S'])

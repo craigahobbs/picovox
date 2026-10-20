@@ -71,5 +71,18 @@
     {"word": "africa", "text": "He had been to Africa.", "occurrence": 1, "kind": "names", "accept": ["AE1 F R AH0 K AH0", "AE1 F R IH0 K AH0", "AE1 F R AH0 K AA0"], "reject": ["AH0 F R IY1 K AH0"]},
     {"word": "windsor", "text": "The queen was at Windsor.", "occurrence": 1, "kind": "names", "accept": ["W IH1 N Z ER0", "W IH1 N D Z ER0"], "reject": ["W AY1 N D Z AO2 R"]},
     {"word": "constantinople", "text": "The ship reached Constantinople.", "occurrence": 1, "kind": "names", "accept": ["K AA2 N S T AE0 N T AH0 N OW1 P AH0 L"], "reject": ["K AH0 N S T AE1 N T AH0 N AH0 P AH0 L"]},
-    {"word": "florida", "text": "They wintered in Florida.", "occurrence": 1, "kind": "names", "accept": ["F L AO1 R AH0 D AH0"], "reject": ["F L AO0 R IY1 D AH0"]}
+    {"word": "florida", "text": "They wintered in Florida.", "occurrence": 1, "kind": "names", "accept": ["F L AO1 R AH0 D AH0"], "reject": ["F L AO0 R IY1 D AH0"]},
+    {"word": "quixote's", "text": "Don Quixote's horse was lean.", "occurrence": 1, "kind": "names", "accept": ["K IY0 HH OW1 T IY0 Z"], "reject": ["K W IH0 K S OW1 T S"]},
+    {"word": "rocinante", "text": "He saddled Rocinante at dawn.", "occurrence": 1, "kind": "names", "accept": ["R OW2 S IH0 N AA1 N T EY0", "R OW2 S IH0 N AA1 N T IY0", "R OW2 S AH0 N AE1 N T IY0"], "reject": ["R AA1 S AH0 N AH0 N T"]},
+    {"word": "rocinante's", "text": "Rocinante's ribs showed.", "occurrence": 1, "kind": "names", "accept": ["R OW2 S IH0 N AA1 N T EY0 Z", "R OW2 S IH0 N AA1 N T IY0 Z", "R OW2 S AH0 N AE1 N T IY0 Z"], "reject": ["R AA1 S AH0 N AH0 N T S"]},
+    {"word": "mancha", "text": "A village of La Mancha.", "occurrence": 1, "kind": "names", "accept": ["M AA1 N CH AH0"], "reject": ["M AA1 N K AH0"]},
+    {"word": "dulcinea", "text": "Dulcinea del Toboso is the fairest.", "occurrence": 1, "kind": "names", "accept": ["D AH2 L S IH0 N IY1 AH0", "D UH2 L S IH0 N EY1 AH0"], "reject": ["D AH1 L S IH0 N IY0 AH0"]},
+    {"word": "cardenio", "text": "Cardenio told his story.", "occurrence": 1, "kind": "names", "accept": ["K AA0 R D EY1 N IY0 OW0", "K AA0 R D IY1 N IY0 OW0"], "reject": ["K AA1 R D AH0 N Y OW0"]},
+    {"word": "luscinda", "text": "Luscinda wept.", "occurrence": 1, "kind": "names", "accept": ["L UW0 S IY1 N D AH0", "L UW0 S IH1 N D AH0"], "reject": ["L UW0 S CH IY1 N D AH0"]},
+    {"word": "zoraida", "text": "Zoraida came down the stairs.", "occurrence": 1, "kind": "names", "accept": ["Z AO0 R AY1 D AH0"], "reject": ["Z AO0 R EY1 D AH0"]},
+    {"word": "cide", "text": "Cide Hamete Benengeli wrote it.", "occurrence": 1, "kind": "names", "accept": ["S IY1 D EY0"], "reject": ["S AY1 D"]},
+    {"word": "sanchica", "text": "Sanchica ran to her mother.", "occurrence": 1, "kind": "names", "accept": ["S AA0 N CH IY1 K AH0"], "reject": ["S AA0 NG K IY1 K AH0"]},
+    {"word": "senor", "text": "Señor, said Sancho, be patient.", "occurrence": 1, "kind": "names", "accept": ["S IY2 N Y AO1 R", "S EY2 N Y AO1 R", "S EH2 N Y AO1 R"], "reject": ["S IY1"]},
+    {"word": "dona", "text": "Doña Rodriguez curtsied.", "occurrence": 1, "kind": "names", "accept": ["D OW1 N Y AH0", "D OW1 N AH0"], "reject": ["D OW1"]},
+    {"word": "amadis", "text": "Amadis of Gaul was the best of knights.", "occurrence": 1, "kind": "names", "accept": ["AE1 M AH0 D IH0 S", "AA2 M AA0 D IY1 S"], "reject": ["AA0 M AA1 D IH0 S"]}
 ]

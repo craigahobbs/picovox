@@ -401,6 +401,10 @@
    [
     "\\b(sea|striped|black|rock) bass\\b",
     "B AE1 S"
+   ],
+   [
+    "\\b(caught|catch|catching|catches|hooked|landed) (a |the |two |three |several |some )?(\\w+ )?bass\\b",
+    "B AE1 S"
    ]
   ],
   "row": [
@@ -425,7 +429,7 @@
   ],
   "minute": [
    [
-    "\\bminute (details?|particles?|examination|description|account|inquiry|investigation|accuracy|attention|observation|portion|quantity|fraction|differences?|care|study|specks?|grains?)\\b",
+    "\\bminute (details?|particles?|examination|description|account|inquiry|investigation|accuracy|attention|observation|portion|quantity|fraction|differences?|care|study|specks?|grains?|amounts?|traces?|fragments?|drops?|creatures?|insects?|organisms?|points?|parts?|scales?)\\b",
     "M AY0 N UW1 T"
    ],
    [
@@ -1307,6 +1311,104 @@
     "He tears the bread into pieces.",
     "The machine tears the cloth.",
     "The child tears pages from the book."
+   ]
+  },
+  {
+   "word": "tears",
+   "phones": "T EH1 R Z",
+   "texts": [
+    "He tears the seal from the letter.",
+    "She tears a strip from her petticoat.",
+    "The bramble tears his sleeve.",
+    "Every gust tears another shingle loose.",
+    "He tears up the contract without reading it.",
+    "The hawk tears at its prey.",
+    "She tears the page out and hands it to me.",
+    "The current tears the boat from its mooring.",
+    "He never tears his clothes.",
+    "The beast tears the gate from its hinges.",
+    "She tears through the house looking for the key.",
+    "Grief tears at her heart.",
+    "He tears himself away from the window.",
+    "The plough tears the sod.",
+    "The boy tears down the hill on his sled.",
+    "Nothing tears him from his books.",
+    "The gale tears the flag to ribbons.",
+    "My dog tears every newspaper it finds."
+   ]
+  },
+  {
+   "word": "increase",
+   "phones": "IH2 N K R IY1 S",
+   "texts": [
+    "Our troubles increase daily.",
+    "Their numbers increase every spring.",
+    "The shadows increase as the sun sinks.",
+    "Rents increase whenever the harvest fails.",
+    "The dangers increase with every mile.",
+    "As the days pass, his debts increase.",
+    "Profits increase when the roads are open.",
+    "Her fears increase at every sound.",
+    "Wages seldom increase so quickly.",
+    "The flocks increase and the farm prospers."
+   ]
+  },
+  {
+   "word": "increase",
+   "phones": "IH1 N K R IY2 S",
+   "texts": [
+    "Their increase was rapid.",
+    "The yearly increase pleased the owners.",
+    "Each increase brought new taxes.",
+    "We saw no increase that year."
+   ]
+  },
+  {
+   "word": "progress",
+   "phones": "P R AH0 G R EH1 S",
+   "texts": [
+    "Our plans progress slowly.",
+    "The repairs progress well.",
+    "Things progress quickly now.",
+    "Matters progress as we hoped.",
+    "The negotiations progress day by day.",
+    "As the hours progress, the light fades.",
+    "The works progress steadily.",
+    "His studies progress beyond all expectation."
+   ]
+  },
+  {
+   "word": "progress",
+   "phones": "P R AA1 G R EH2 S",
+   "texts": [
+    "Our progress was slow.",
+    "Their progress halted in the hills.",
+    "The progress we made was small.",
+    "Such progress pleased the master."
+   ]
+  },
+  {
+   "word": "polish",
+   "phones": "P AA1 L IH0 SH",
+   "texts": [
+    "Polish your boots before the visit.",
+    "Polish the brass until it shines.",
+    "Polish each glass with a soft cloth.",
+    "Polish them well, and put them away.",
+    "Polish the floor after supper.",
+    "Polish it again tomorrow."
+   ]
+  },
+  {
+   "word": "bass",
+   "phones": "B AE1 S",
+   "texts": [
+    "I caught a bass this morning.",
+    "A bass took the bait at once.",
+    "He landed a fine bass.",
+    "The bass were biting in the pond.",
+    "We hooked a bass near the dock.",
+    "The boy caught a small bass and let it go."
    ]
   }
  ]

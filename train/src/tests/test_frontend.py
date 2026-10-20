@@ -25,7 +25,8 @@ TEXTS = [
     'Who read the book? He wound the clock, and lead the way.',
     '‘Tis the season’s end: what do you think?',
     ', Leading comma. 21 22 30 100 101 1000',
-    'Dr. Who vs. St. Ives etc.'
+    'Dr. Who vs. St. Ives etc.',
+    'Señor Amadís and Doña Œdipus saw Cæsar in Łódź - Straße, ñ, ŋ.'
 ]
 
 
@@ -193,6 +194,14 @@ class TestFrontend(unittest.TestCase):
         self.assertEqual(frontend.text_items('Two . words'), [('two', 0), ({'end': 'period'}, 4), ('words', 6),
                                                               ({'end': 'period'}, 11)])
         self.assertEqual(frontend.text_items(''), [])
+
+    def test_text_items_accents(self):
+        # Accented letters lose their accents and the ligatures read as English says them, the offsets unchanged
+        self.assertEqual(frontend.text_items('Señor Amadís, Œdipus Cæsar Straße ŋa'), [
+            ('senor', 0), ('amadis', 6), ({'end': 'comma'}, 12), ('edipus', 14), ('cesar', 21), ('strase', 27), ('a', 35),
+            ({'end': 'period'}, 36)
+        ])
+        self.assertEqual(frontend.plain_letters('ÀÉÎÕÜÑçøÆœŁđ'), 'AEIOUNcoEeLd')
 
     def test_context_sequence(self):
         self.assertEqual(frontend.context_sequence(frontend.text_items('Hi, there! Ok? Yes.')),

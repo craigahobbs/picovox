@@ -183,6 +183,24 @@ test('lexicon.textToPhrases, apostrophes', () => {
 });
 
 
+test('lexicon.textToPhrases, object property names', () => {
+    // Words that name an object's inherited properties are words, not abbreviations
+    const [phrase] = textToPhrases('The constructor. Constructor tostring valueof');
+    assert.deepEqual(wordTexts(phrase), ['the', 'constructor']);
+    assert.deepEqual(wordTexts(textToPhrases('Constructor tostring valueof')[0]), ['constructor', 'tostring', 'valueof']);
+});
+
+
+test('lexicon.textToPhrases, accents', () => {
+    // Accented letters lose their accents, and the ligatures read as English says them (Cæsar, Œdipus)
+    const [phrase] = textToPhrases('Señor Amadís, ');
+    assert.deepEqual(wordTexts(phrase), ['senor', 'amadis']);
+    assert.deepEqual(wordPhones(phrase)[0], 'S IY2 N Y AO1 R');
+    assert.deepEqual(wordTexts(textToPhrases('Œdipus Cæsar Straße in Łódź, Søren, ŋa')[0]),
+        ['edipus', 'cesar', 'strase', 'in', 'lodz']);
+});
+
+
 test('lexicon.textToPhrases, numbers', () => {
     assert.deepEqual(wordTexts(textToPhrases('7 ships')[0]), ['seven', 'ships']);
     assert.deepEqual(wordTexts(textToPhrases('612')[0]), ['six', 'hundred', 'twelve']);

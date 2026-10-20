@@ -61,8 +61,8 @@ export function scoreHeteronyms(items) {
 
 // The gate's minimums - the default reading, the context-dependent readings (when the module has a context network; a
 // context-free G2P gives one reading per word), and the names (the shipped module's score - raised to 0.91 with the
-// dictionary fixes, 67/73)
-export const minimums = {'default': 0.9, 'context': 0.85, 'missing': 0, 'names': 0.91};
+// dictionary fixes, 67/73, and to 0.93 with Don Quixote's names, 80/86)
+export const minimums = {'default': 0.9, 'context': 0.85, 'missing': 0, 'names': 0.93};
 
 
 // The one-line result - kinds' scores against their minimums, and whether any is below
