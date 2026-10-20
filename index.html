@@ -194,6 +194,70 @@ block at a time between the page's other work; for long texts, use <code>stream<
 <p>The ten designed voices (<code>data/nn/voices.json</code>) are blends of two to four of the model's audiobook readers, with mild
 pitch, vocal-tract, and effort adjustments and their own speaking rate (the <code>rate</code> option multiplies it); on the
 listener panel's texts they score UTMOS 4.09-4.28 (the package's two voices 4.08 and 4.18).</p>
+<h3><code>styles()</code></h3>
+<p>The speaking styles - <code>[{key, label, kind, description}]</code>, neutral (the default) first. Any style goes with any voice:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Kind</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>neutral</code> (the default)</td>
+<td>emotion</td>
+<td>The voice as designed - plain narration</td>
+</tr>
+<tr>
+<td><code>angry</code></td>
+<td>emotion</td>
+<td>A pressed, raised, louder voice</td>
+</tr>
+<tr>
+<td><code>happy</code></td>
+<td>emotion</td>
+<td>The voice model's happy embedding, a little brighter, higher, and louder</td>
+</tr>
+<tr>
+<td><code>sad</code></td>
+<td>emotion</td>
+<td>The sad embedding - lower, slower, and darker</td>
+</tr>
+<tr>
+<td><code>fearful</code></td>
+<td>emotion</td>
+<td>The fearful embedding, a little breathy, higher, and quicker</td>
+</tr>
+<tr>
+<td><code>disgusted</code></td>
+<td>emotion</td>
+<td>The disgusted embedding, a little pressed, lower, and slower</td>
+</tr>
+<tr>
+<td><code>whisper</code></td>
+<td>mode</td>
+<td>No voicing - the breath only</td>
+</tr>
+<tr>
+<td><code>soft</code></td>
+<td>mode</td>
+<td>A quieter voice, a little slower</td>
+</tr>
+<tr>
+<td><code>shouting</code></td>
+<td>mode</td>
+<td>A pressed, bright, raised voice, a little louder</td>
+</tr>
+</tbody>
+</table>
+<p>The embeddings are emotions the voice model learned from CREMA-D's actors; the rest of each style transforms the
+synthesizer's parameters (a pressed or relaxed glottal pulse, pitch, whisper, level). The styles were tuned by ear in
+two voices and measured: on the listener panel's texts every style stays intelligible (Whisper's word error rate
+0.6-2.7%, whispering 2.4-3.6%), UTMOS - a judge of plain read speech - scores angry, soft, shouting, and disgusted
+4.05-4.22 (neutral 4.15-4.18) and the other emotions 3.6-4.0, and can't score a whisper; and every style but whisper
+(6-10 dB quieter) and soft (5 dB) is within 3.5 dB of neutral's loudness.</p>
 <h3><code>toWav(samples, sampleRate)</code></h3>
 <p>Encode samples (a <code>Float32Array</code>, or an array of numbers, -1 to 1 - values beyond are clipped) as a 16-bit PCM mono WAV
 file - a <code>Uint8Array</code> of the file's bytes.</p>
@@ -212,6 +276,11 @@ file - a <code>Uint8Array</code> of the file's bytes.</p>
 <td><code>voice</code></td>
 <td><code>'male'</code></td>
 <td>The voice's key - see <code>voices()</code></td>
+</tr>
+<tr>
+<td><code>style</code></td>
+<td><code>'neutral'</code></td>
+<td>The speaking style's key - see <code>styles()</code></td>
 </tr>
 <tr>
 <td><code>rate</code></td>
@@ -311,7 +380,7 @@ that runs its own synthesis loop (PicoShelf's worker does):</p>
 <tbody>
 <tr>
 <td>The package (<code>npm pack</code>)</td>
-<td>769 KB packed, 1.2 MB unpacked - the G2P network 419 KB and the voice network 554 KB of it, as base64</td>
+<td>771 KB packed, 1.2 MB unpacked - the G2P network 419 KB and the voice network 554 KB of it, as base64</td>
 </tr>
 <tr>
 <td>The voice network</td>
