@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.0 (2026-10-21)
+
+- [27c79d1](https://github.com/craigahobbs/picovox/commit/27c79d1) - drop the style network: no classifier chose a quotation's emotion precisely enough (Section 12.7 of the paper). Style "auto" is the dialogue and paragraph beats, its audio unchanged; lib/style.js keeps autoStyles (now autoStyles(sentences)) and paragraphBeats, without loadStyleModel and the classifier's functions; the package is 774 KB again
+
 ## 1.5.0 (2026-10-21)
 
 - [c1b38e8](https://github.com/craigahobbs/picovox/commit/c1b38e8) - expressive reading - style "auto": the quotations in the new dialogue style (a little higher, brighter, and quicker than the narration) and each paragraph read as one arc (its first sentence lifted, its last slower); a style network (93 KB, loaded only for "auto") reads a quotation angry, shouting, or fearful only where it's provably confident - in this release, none yet
