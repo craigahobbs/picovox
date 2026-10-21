@@ -64,6 +64,171 @@
     
 
     
+    <h4 class="name" id=".quoteSpans"><span class="type-signature">(static) </span>quoteSpans<span class="signature">(sentences)</span><span class="type-signature"> &rarr; {Array.&lt;Array.&lt;SentenceSpan>>}</span></h4>
+    
+
+    
+
+
+
+<div class="description">
+    <p>Sentences' spans - each sentence split at its double quotation marks (curly or straight) into quoted and unquoted
+spans, the quotations numbered. A quotation runs across sentences until it closes, and a paragraph starts outside one</p>
+<ul>
+<li>unless its first quotation mark closes one; a speech's paragraph left open continues in the next paragraph's
+opening quotation (one speaker's quotation). Single quotation marks aren't quotations (the closing one is the
+apostrophe).</li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+
+    <h5>Parameters:</h5>
+    
+
+<table class="params">
+    <thead>
+    <tr>
+        
+        <th>Name</th>
+        
+
+        <th>Type</th>
+
+        
+
+        
+
+        <th class="last">Description</th>
+    </tr>
+    </thead>
+
+    <tbody>
+    
+
+        <tr>
+            
+                <td class="name"><code>sentences</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">Array.&lt;Sentence></span>
+
+
+            
+            </td>
+
+            
+
+            
+
+            <td class="description last"><p>The sentences (splitSentences)</p></td>
+        </tr>
+
+    
+    </tbody>
+</table>
+
+
+
+
+
+
+<dl class="details">
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+    <dt class="tag-source">Source:</dt>
+    <dd class="tag-source"><ul class="dummy"><li>
+        <a href="sentences.js.html">sentences.js</a>, <a href="sentences.js.html#line136">line 136</a>
+    </li></ul></dd>
+    
+
+    
+
+    
+
+    
+</dl>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<h5>Returns:</h5>
+
+        
+<div class="param-desc">
+    <p>Each sentence's spans, in order</p>
+</div>
+
+
+
+<dl>
+    <dt>
+        Type
+    </dt>
+    <dd>
+        
+<span class="param-type">Array.&lt;Array.&lt;SentenceSpan>></span>
+
+
+    </dd>
+</dl>
+
+    
+
+
+
+
+
+        
+            
+
+    
+
+    
     <h4 class="name" id=".speechText"><span class="type-signature">(static) </span>speechText<span class="signature">(text)</span><span class="type-signature"> &rarr; {string}</span></h4>
     
 
@@ -166,7 +331,7 @@ Roman-numeral headings as numbers ('Chapter IV' to 'Chapter 4')</p>
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        <a href="sentences.js.html">sentences.js</a>, <a href="sentences.js.html#line113">line 113</a>
+        <a href="sentences.js.html">sentences.js</a>, <a href="sentences.js.html#line198">line 198</a>
     </li></ul></dd>
     
 
@@ -585,6 +750,199 @@ letter or a digit isn't a sentence.</p>
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
         <a href="sentences.js.html">sentences.js</a>, <a href="sentences.js.html#line21">line 21</a>
+    </li></ul></dd>
+    
+
+    
+
+    
+
+    
+</dl>
+
+
+
+
+
+
+            
+                
+<h4 class="name" id="~SentenceSpan">SentenceSpan</h4>
+
+
+
+
+<div class="description">
+    <p>A span of a sentence, from quoteSpans</p>
+</div>
+
+
+
+    <h5>Type:</h5>
+    <ul>
+        <li>
+            
+<span class="param-type">Object</span>
+
+
+        </li>
+    </ul>
+
+
+
+
+
+    <h5 class="subsection-title">Properties:</h5>
+
+    
+
+<table class="props">
+    <thead>
+    <tr>
+        
+        <th>Name</th>
+        
+
+        <th>Type</th>
+
+        
+        <th>Attributes</th>
+        
+
+        
+
+        <th class="last">Description</th>
+    </tr>
+    </thead>
+
+    <tbody>
+    
+
+        <tr>
+            
+                <td class="name"><code>text</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">string</span>
+
+
+            
+            </td>
+
+            
+                <td class="attributes">
+                
+
+                
+                </td>
+            
+
+            
+
+            <td class="description last"><p>The span's text, trimmed (a quoted span with its quotation marks)</p></td>
+        </tr>
+
+    
+
+        <tr>
+            
+                <td class="name"><code>quoted</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">boolean</span>
+
+
+            
+            </td>
+
+            
+                <td class="attributes">
+                
+
+                
+                </td>
+            
+
+            
+
+            <td class="description last"><p>Whether the span is inside a quotation</p></td>
+        </tr>
+
+    
+
+        <tr>
+            
+                <td class="name"><code>quotation</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">number</span>
+
+
+            
+            </td>
+
+            
+                <td class="attributes">
+                
+
+                
+                    &lt;nullable><br>
+                
+                </td>
+            
+
+            
+
+            <td class="description last"><p>The quotation's index in the text's quotations (null for an unquoted span) - a
+quotation's spans are its quoted spans, in one sentence or across several</p></td>
+        </tr>
+
+    
+    </tbody>
+</table>
+
+
+
+
+<dl class="details">
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+    <dt class="tag-source">Source:</dt>
+    <dd class="tag-source"><ul class="dummy"><li>
+        <a href="sentences.js.html">sentences.js</a>, <a href="sentences.js.html#line106">line 106</a>
     </li></ul></dd>
     
 

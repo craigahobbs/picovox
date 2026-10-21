@@ -33,10 +33,15 @@
 
 import {defaultSampleRate, defaultStyle, defaultVoice, modelLoader, styleTable, textBlocks, voiceTable} from './synthesis.js';
 import {encodeWav} from './wav.js';
+import {styleLoader} from './style.js';
 
 
 // The models - loaded on first use, once
 const loadModel = modelLoader(() => import('./models/g2pModel.js'), () => import('./models/voiceModel.js'));
+
+
+// The style network (style "auto") - loaded on first use, once
+const loadStyle = styleLoader(() => import('./models/styleModel.js'));
 
 
 // The speaking rate range, the default noise seed (the first sentence's - PicoShelf's), and the sample rate range (Hz)
@@ -103,7 +108,9 @@ export function styles() {
  *
  * @typedef {Object} SynthesisOptions
  * @property {string} [voice = "male"] - The voice's key (see {@link voices})
- * @property {string} [style = "neutral"] - The speaking style's key (see {@link styles})
+ * @property {string} [style = "neutral"] - The speaking style's key (see {@link styles}), or "auto" - the quotations' words
+ *     angry, shouting, or fearful where the style network is confident, the other quotations "dialogue", the narration neutral,
+ *     and each paragraph read as one arc (its first sentence lifted, its pitch settling, its last sentence slower)
  * @property {number} [rate = 1] - The speaking speed, from 0.5 to 2 (1 is normal, 1.2 is 20% faster)
  * @property {number} [seed = 1000] - The noise seed, an integer - sentence i of the text is rendered with seed + i
  * @property {number} [sampleRate = 24000] - The output sample rate (Hz), an integer from 8000 to 96000
@@ -129,8 +136,8 @@ function synthesisOptions(text, options, allowed = []) {
         const keys = voiceTable.map((item) => `"${item.key}"`).join(', ');
         throw new RangeError(`Unknown voice ${describe(voice)} - the voices are ${keys}`);
     }
-    if (!styleTable.some((item) => item.key === style)) {
-        const keys = styleTable.map((item) => `"${item.key}"`).join(', ');
+    if (style !== 'auto' &amp;&amp; !styleTable.some((item) => item.key === style)) {
+        const keys = [...styleTable.map((item) => `"${item.key}"`), '"auto"'].join(', ');
         throw new RangeError(`Unknown style ${describe(style)} - the styles are ${keys}`);
     }
     if (typeof rate !== 'number' || !(rate >= minRate &amp;&amp; rate &lt;= maxRate)) {
@@ -174,7 +181,8 @@ function nextTask() {
 // Speak text - an async iterator of the blocks (Float32Array)
 async function* speakBlocks(text, {voice, style, rate, seed, sampleRate}) {
     const model = await loadModel();
-    yield* textBlocks(model, text, {voice, style, rate, seed, sampleRate});
+    const styleModel = style === 'auto' ? await loadStyle() : undefined;
+    yield* textBlocks(model, text, {voice, style, styleModel, rate, seed, sampleRate});
 }
 
 
@@ -254,7 +262,9 @@ export function toWav(samples, sampleRate) {
  *
  * @typedef {Object} SpeakOptions
  * @property {string} [voice = "male"] - The voice's key (see {@link voices})
- * @property {string} [style = "neutral"] - The speaking style's key (see {@link styles})
+ * @property {string} [style = "neutral"] - The speaking style's key (see {@link styles}), or "auto" - the quotations' words
+ *     angry, shouting, or fearful where the style network is confident, the other quotations "dialogue", the narration neutral,
+ *     and each paragraph read as one arc (its first sentence lifted, its pitch settling, its last sentence slower)
  * @property {number} [rate = 1] - The speaking speed, from 0.5 to 2
  * @property {number} [seed = 1000] - The noise seed, an integer
  * @property {number} [sampleRate = 24000] - The synthesis sample rate (Hz)
