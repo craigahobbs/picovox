@@ -1,9 +1,11 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
+import {autoStyles, loadStyleModel, paragraphBeats} from '../lib/style.js';
 import {
     blockSize, createSentenceRenderer, defaultSampleRate, defaultVoice, modelLoader, outputGain, paragraphPause, sentenceBlocks,
-    sentenceFrames, sentencePause, softLimit, styleSettings, styleTable, textBlocks, voiceSettings, voiceSpeaker, voiceTable
+    sentenceFrames, sentencePause, softLimit, spanFrames, styleSettings, styleTable, textBlocks, voiceSettings, voiceSpeaker,
+    voiceTable
 } from '../lib/synthesis.js';
 import {speechText, splitSentences} from '../lib/sentences.js';
 import {applyTransforms} from '../lib/transforms.js';
@@ -204,6 +206,49 @@ test('sentenceFrames, styles', () => {
         concat([...sentenceBlocks(model, text, {'voice': 'amy', 'style': 'sad', 'seed': 2})]));
     assert.notDeepEqual(concat([...textBlocks(model, 'Hello there.', {'voice': 'amy', 'style': 'happy'})]),
         concat([...textBlocks(model, 'Hello there.', {'voice': 'amy'})]));
+});
+
+
+test('sentenceFrames, beat', () => {
+    // A beat's transforms follow the voice's and the style's, its rate times theirs
+    const text = 'The birch canoe slid on the smooth planks.';
+    const beat = {'transforms': [{'pitchScale': 1.08}, {'level': 2}], 'rate': 0.93};
+    const {chunks} = sentenceFrames(model, text, {'voice': 'helen', 'style': 'soft', 'rate': 1.1, beat});
+    const voiced = voiceSettings(model, 'helen');
+    const styled = styleSettings('soft');
+    const expected = speakFrames(model, text, {'speaker': voiced.speaker, 'rate': 1 / (1.1 * voiced.rate * styled.rate * beat.rate)});
+    const frames = applyTransforms(expected.frames, [...voiced.transforms, ...styled.transforms, ...beat.transforms]);
+    assert.deepEqual([...chunks].flat().map((frame) => Array.from(frame)), frames.map((frame) => Array.from(frame)));
+
+    // Spans take the beat in every span; sentenceBlocks passes it on
+    const spans = [{'text': 'She said,', 'style': 'neutral'}, {'text': 'hello.', 'style': 'dialogue'}];
+    const spanned = spanFrames(model, spans, {'voice': 'helen', beat});
+    const first = sentenceFrames(model, 'She said,', {'voice': 'helen', beat});
+    assert.deepEqual([...spanned.chunks][0], [...first.chunks][0]);
+    assert.deepEqual(concat([...sentenceBlocks(model, text, {'voice': 'helen', beat})]),
+        concat([...sentenceBlocks(model, text, {'voice': 'helen', beat})]));
+    assert.notDeepEqual(concat([...sentenceBlocks(model, text, {'voice': 'helen', beat})]),
+        concat([...sentenceBlocks(model, text, {'voice': 'helen'})]));
+});
+
+
+test('textBlocks, auto', async () => {
+    // Style "auto" - each sentence in its auto spans (a quotation left neutral in the dialogue style) with its paragraph
+    // beat; the narration's sentences unspanned
+    const styleModel = loadStyleModel(await import('../lib/models/styleModel.js'));
+    const text = 'It was late. "Who is there?" she asked.\n\nNobody answered.';
+    const sentences = splitSentences(text);
+    const auto = autoStyles(styleModel, sentences);
+    const beats = paragraphBeats(sentences);
+    assert.deepEqual([auto.spans(0), auto.spans(1).map((span) => span.style)], [null, ['dialogue']]);
+    const expected = sentences.map((sentence) => {
+        const spans = auto.spans(sentence.index)?.map((span) => ({'text': speechText(span.text), 'style': span.style}));
+        return concat([...sentenceBlocks(model, speechText(sentence.text), {
+            'voice': 'kate', spans, 'beat': beats[sentence.index], 'seed': 3 + sentence.index,
+            'pause': sentence.paragraphStart ? paragraphPause : sentencePause
+        })]);
+    });
+    assert.deepEqual(concat([...textBlocks(model, text, {'voice': 'kate', 'style': 'auto', styleModel, 'seed': 3})]), concat(expected));
 });
 
 

@@ -38,7 +38,7 @@ const text = 'It was the best of times. "Was it?" she asked.\n\nNobody answered.
 test('styles', () => {
     assert.deepEqual(styles().map(({key, kind}) => `${key}:${kind}`), [
         'neutral:emotion', 'angry:emotion', 'happy:emotion', 'sad:emotion', 'fearful:emotion', 'disgusted:emotion', 'whisper:mode',
-        'soft:mode', 'shouting:mode'
+        'soft:mode', 'shouting:mode', 'dialogue:mode'
     ]);
     assert(styles().every((style) => style.label && style.description));
 
@@ -54,9 +54,15 @@ test('synthesize, styles', async () => {
     const plain = await synthesize(line, {'voice': 'james'});
     assert.deepEqual((await synthesize(line, {'voice': 'james', 'style': 'neutral'})).samples, plain.samples);
     assert.notDeepEqual((await synthesize(line, {'voice': 'james', 'style': 'whisper'})).samples, plain.samples);
+
+    // Auto - the quotations in their styles (the style network loaded once), each paragraph's beat
+    const dialogue = '"Get out!" he said.\n\nShe left.';
+    const auto = await synthesize(dialogue, {'voice': 'james', 'style': 'auto'});
+    assert.notDeepEqual(auto.samples, (await synthesize(dialogue, {'voice': 'james'})).samples);
+    assert.deepEqual((await synthesize(dialogue, {'voice': 'james', 'style': 'auto'})).samples, auto.samples);
     await assert.rejects(synthesize(line, {'style': 'bored'}), {
         'name': 'RangeError', 'message': 'Unknown style "bored" - the styles are "neutral", "angry", "happy", "sad", "fearful", ' +
-            '"disgusted", "whisper", "soft", "shouting"'
+            '"disgusted", "whisper", "soft", "shouting", "dialogue", "auto"'
     });
 });
 

@@ -16,6 +16,9 @@ The front end and the G2P:
 - context.py - the heteronyms by context: the G2P's reading input and ambiguity head, and the context network
   (picovox_train.context export writes lib/models/g2pModel.js); contextlabels.py - their labels (data/nn/context-labels.json);
   readings.py - a heteronym token's reading from the forced alignment, for the voice data
+- style.py - the style network (the package's style "auto" - a quotation's angry, shouting, or fearful words): the pinned
+  books' quotations, a teacher's labels (data/nn/style-labels.json), the network's training (pretrained on the
+  attributions' words, distilled from the teacher), and its export (lib/models/styleModel.js)
 - lib/tokens.js - the same tokens in JavaScript, from lib/lexicon.js, for browser-side inference
 
 The data:

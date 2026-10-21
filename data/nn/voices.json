@@ -402,6 +402,27 @@
     }
    ],
    "description": "A pressed, bright, raised voice, a little louder - its consonants with it."
+  },
+  {
+   "id": "dialogue",
+   "label": "Dialogue",
+   "kind": "mode",
+   "transform": [
+    {
+     "press": 1
+    },
+    {
+     "pitchScale": 1.07
+    },
+    {
+     "level": 1
+    },
+    {
+     "frication": 1
+    }
+   ],
+   "rate": 1.05,
+   "description": "Neutral dialogue - a little higher, brighter, and quicker than the narration (auto's unstyled quotations)."
   }
  ]
 }

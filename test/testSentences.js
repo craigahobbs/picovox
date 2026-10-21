@@ -1,7 +1,7 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-import {speechText, splitSentences} from '../lib/sentences.js';
+import {quoteSpans, speechText, splitSentences} from '../lib/sentences.js';
 import {strict as assert} from 'node:assert';
 import test from 'node:test';
 
@@ -74,6 +74,39 @@ test('splitSentences, whitespace', () => {
     // Runs of whitespace become single spaces; a blank line with spaces or a carriage return is a paragraph break
     assert.deepEqual(sentenceTexts('One\n  two\tthree.\r\n \t\r\nFour.'), [['One two three.', true], ['Four.', true]]);
     assert.deepEqual(sentenceTexts('No end'), [['No end', true]]);
+});
+
+
+test('quoteSpans', () => {
+    // Each sentence's quoted and unquoted spans, the quotations numbered
+    const spans = (text) => quoteSpans(splitSentences(text)).map((sentence) => sentence.map((span) => [span.text, span.quotation]));
+    assert.deepEqual(spans('\u201cMy dear,\u201d said his lady, \u201chave you heard?\u201d'), [
+        [['\u201cMy dear,\u201d', 0], ['said his lady,', null], ['\u201chave you heard?\u201d', 1]]
+    ]);
+
+    // Straight quotation marks - opening after a space, closing before one or punctuation; a quotation ending its sentence
+    assert.deepEqual(spans('"Who is there?" she asked. Nobody answered.'), [[['"Who is there?"', 0]], [['she asked.', null]],
+        [['Nobody answered.', null]]]);
+    assert.deepEqual(spans('He said "go" and left.'), [[['He said', null], ['"go"', 0], ['and left.', null]]]);
+    assert.deepEqual(spans('A "b"c d.'), [[['A', null], ['"b"', 0], ['c d.', null]]]);
+
+    // A quotation across sentences, and a speech left open in its paragraph continuing in the next one's opening quotation
+    assert.deepEqual(spans('\u201cI am going. It is late.\n\n\u201cAnd I am staying,\u201d she said.'), [
+        [['\u201cI am going.', 0]], [['It is late.', 0]], [['\u201cAnd I am staying,\u201d', 0], ['she said.', null]]
+    ]);
+
+    // A paragraph whose first quotation mark closes one starts inside it - curly or straight
+    assert.deepEqual(spans('He began: \u201cIt was dark.\n\nAnd cold,\u201d he said.'), [
+        [['He began:', null], ['\u201cIt was dark.', 0]], [['And cold,\u201d', 1], ['he said.', null]]
+    ]);
+    assert.deepEqual(spans('He began: "It was dark.\n\nAnd cold," he said.'), [
+        [['He began:', null], ['"It was dark.', 0]], [['And cold,"', 1], ['he said.', null]]
+    ]);
+
+    // Single quotation marks aren't quotations; no sentences, no spans
+    assert.deepEqual(spans('It\u2019s \u2018single\u2019 quoted.'), [[['It\u2019s \u2018single\u2019 quoted.', null]]]);
+    assert.deepEqual(quoteSpans([]), []);
+    assert.deepEqual(quoteSpans(splitSentences('\u201c')), []);
 });
 
 
