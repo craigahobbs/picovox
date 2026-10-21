@@ -908,14 +908,14 @@ current browsers and in Node 22 or later, and has no dependencies:
 | `stream(text, options)` | an async iterable of sample blocks, a sentence and a fraction of a second at a time; concatenated, exactly `synthesize`'s samples |
 | `speak(text, options)` | Web Audio playback in a browser, `{stop(), finished}` |
 | `voices()` | the twelve voices - male and female, and the ten designed voices (1.3.0) |
-| `styles()` | the ten speaking styles - neutral, angry, happy, sad, fearful, disgusted, whisper, soft, shouting (1.4.0), and dialogue (1.5.0) |
+| `styles()` | the eleven speaking styles - neutral, angry, happy, sad, fearful, disgusted, whisper, soft, shouting (1.4.0), dialogue (1.5.0), and exclaim (1.6.1) |
 | `toWav(samples, sampleRate)` | a 16-bit WAV file |
 
 The options are the voice, the speaking style (or `'auto'`, expressive reading - Section 12.7), the speaking rate
 (0.5-2), the noise seed, and the sample rate (24 kHz by default); the output is bit-for-bit deterministic in browsers
 and Node. The package's audio is bit-identical to the
-audiobook player's own synthesis path, from which it was extracted (76 cases). Version 1.6.0's tarball holds 22 files,
-774,220 bytes compressed and 1,210,080 unpacked; its two generated model modules are 419,475 bytes (the G2P and context
+audiobook player's own synthesis path, from which it was extracted (76 cases). Version 1.6.1's tarball holds 22 files,
+774,472 bytes compressed and 1,211,095 unpacked; its two generated model modules are 419,475 bytes (the G2P and context
 networks, 316 KB gzipped) and 554,315 bytes (the voice, 385 KB gzipped), the rest is code and the README. "Under 1 MB"
 is the package as downloaded, and the two models as a static host serves them gzipped; the raw model modules are
 about 0.97 MB together.
@@ -1033,7 +1033,8 @@ parameters and fewer bits per weight - distillation (Section 8) and, for the G2P
 
 A narrator does not read a novel in one voice. Style `'auto'` (1.5.0) reads by the text's structure: its quotations
 (lib/sentences.js `quoteSpans` - double quotation marks, curly or straight, a speech left open across paragraphs
-followed into the next) in a *dialogue beat*, and each paragraph as one arc (the *paragraph beat*). Every choice
+followed into the next) in a *dialogue beat*, a quoted sentence ending in "!" in a livelier *exclamation beat*
+(1.6.1), and each paragraph as one arc (the *paragraph beat*). Every choice
 follows the text, never chance, so the reading is deterministic, and without `'auto'` the audio is unchanged, bit for
 bit.
 
@@ -1044,6 +1045,18 @@ Moby-Dick's for the paragraph beat - six paragraphs of narration, where a subtle
 preferred to the flat reading, the stronger slightly). The panel can't hear monotony - it scores sentences - but it
 guards the voice: in four voices the dialogue style's UTMOS is within 0.04 of neutral's (4.13-4.31), its word error
 rate unchanged (0.6-1.5%).
+
+**The exclamation beat.** The voice model already marks an exclamation, but only by pitch: across twelve lines in four
+voices, a sentence ending in "!" is 0.5-1.4 semitones higher than the same sentence ending in ".", yet no louder (at
+most 0.3 dB) and no wider in pitch (its range 0.0-0.8 semitones narrower). So the beat adds energy rather than height:
+the exclaim style is 3 dB louder, a little more pressed (3 dB of press), pitch +9% and its range 20% wider (each frame's
+pitch moved from the sentence's mean in log scale - transforms.js `pitchRange`, the sentence's frames gathered first),
+and 6% quicker. One listener preferred it to the 1.6.0 reading on Treasure Island's "The Last of the Blind Man", a
+mild and a stronger version (a 40% wider range, 5 dB) both, and chose the mild: on the panel, read over whole texts,
+the strong version cost the bright voices most (Amy's UTMOS 0.27, Kate's 0.21), the mild one at most 0.13, every word
+error rate at most 2.1%. It is not shouting - the shouting style is strained (10 dB of press) and high, the right voice
+only for a real shout, which no classifier could find (below); the exclamation beat is the right voice for nearly
+every "!".
 
 **A dead end: choosing a quotation's emotion.** The plan was a third layer - a small network reading a quotation angry,
 shouting, or fearful where it was confident. A 27-billion-parameter chat model (qwen3.8, run locally by Ollama, its

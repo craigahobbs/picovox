@@ -255,6 +255,11 @@ listener panel's texts they score UTMOS 4.09-4.28 (the package's two voices 4.08
 <td>mode</td>
 <td>Neutral dialogue - a little higher, brighter, and quicker than the narration</td>
 </tr>
+<tr>
+<td><code>exclaim</code></td>
+<td>mode</td>
+<td>An exclamation - the dialogue style livelier: louder, wider in pitch, and quicker</td>
+</tr>
 </tbody>
 </table>
 <p>The embeddings are emotions the voice model learned from CREMA-D's actors; the rest of each style transforms the
@@ -268,14 +273,18 @@ two voices and measured: on the listener panel's texts every style stays intelli
 <ul>
 <li><strong>The dialogue beat.</strong> The quotations (between double quotation marks) are read in the <code>dialogue</code> style - a little
 higher, brighter, and quicker than the narration (pitch +7%, pace +5%) - and the narration neutral.</li>
+<li><strong>The exclamation beat.</strong> A quoted sentence ending in &quot;!&quot; is read in the <code>exclaim</code> style - livelier than the
+dialogue beat: 3 dB louder, its pitch range 20% wider, a little more pressed and quicker - excited, not shouted.</li>
 <li><strong>The paragraph beat.</strong> Each paragraph is read as one arc: its first sentence lifted (pitch +8%, 2 dB louder), the
 pitch settling to 4% below the voice's by its last sentence, which is 7% slower.</li>
 </ul>
-<p>Style <code>'auto'</code> needs no model - it reads the text's quotation marks and paragraphs. (A small network that would read a
+<p>Style <code>'auto'</code> needs no model - it reads the text's quotation marks, exclamation marks, and paragraphs. (A small network that would read a
 quotation angry, shouting, or fearful was tried and dropped: even a classifier on a 4-billion-parameter embedding model
 couldn't choose those styles reliably enough - see the paper's Section 12.7.)</p>
-<p>The beats cost nothing measurable on the listener panel: the dialogue style's UTMOS is within 0.04 of neutral's in four
-voices, its word error rate unchanged. The output is deterministic, as every style's; without <code>'auto'</code> the audio is the
+<p>On the listener panel the beats keep the voices intelligible and natural: the dialogue style's UTMOS is within 0.04 of
+neutral's in four voices, its word error rate unchanged; the exclaim style's, read over whole texts in all twelve voices,
+is within 0.13 of neutral's (most voices within 0.06; the bright Amy and Kate the most), its word error rate at most
+2.1%. The output is deterministic, as every style's; without <code>'auto'</code> the audio is the
 same as before, bit for bit.</p>
 <h3><code>toWav(samples, sampleRate)</code></h3>
 <p>Encode samples (a <code>Float32Array</code>, or an array of numbers, -1 to 1 - values beyond are clipped) as a 16-bit PCM mono WAV
