@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.1 (2026-10-21)
+
+- [85010b5](https://github.com/craigahobbs/picovox/commit/85010b5) - the exclamation beat: style "auto" reads a quoted sentence ending in "!" in the new exclaim style - louder, livelier in pitch, and quicker than the dialogue beat (excited, not shouted); the pitchRange transform
+
 ## 1.6.0 (2026-10-21)
 
 - [27c79d1](https://github.com/craigahobbs/picovox/commit/27c79d1) - drop the style network: no classifier chose a quotation's emotion precisely enough (Section 12.7 of the paper). Style "auto" is the dialogue and paragraph beats, its audio unchanged; lib/style.js keeps autoStyles (now autoStyles(sentences)) and paragraphBeats, without loadStyleModel and the classifier's functions; the package is 774 KB again
