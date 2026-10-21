@@ -209,6 +209,23 @@ test('sentenceFrames, styles', () => {
 });
 
 
+test('sentenceFrames, pitch range', () => {
+    // A style with a pitch range - the text's frames gathered, then every transform applied to them at once
+    const text = 'Down with the door!';
+    const voiced = voiceSettings(model, 'james');
+    const styled = styleSettings('exclaim');
+    const {chunks} = sentenceFrames(model, text, {'voice': 'james', 'style': 'exclaim'});
+    const spoken = [...chunks];
+    assert.equal(spoken.length, 1);
+    const expected = speakFrames(model, text, {'speaker': voiced.speaker, 'rate': 1 / (voiced.rate * styled.rate)});
+    const frames = applyTransforms(expected.frames, [...voiced.transforms, ...styled.transforms]);
+    assert.deepEqual(spoken[0].map((frame) => Array.from(frame)), frames.map((frame) => Array.from(frame)));
+
+    // No speech - no chunks
+    assert.deepEqual([...sentenceFrames(model, '--', {'voice': 'james', 'style': 'exclaim'}).chunks], []);
+});
+
+
 test('sentenceFrames, beat', () => {
     // A beat's transforms follow the voice's and the style's, its rate times theirs
     const text = 'The birch canoe slid on the smooth planks.';

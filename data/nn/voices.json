@@ -423,6 +423,30 @@
    ],
    "rate": 1.05,
    "description": "Neutral dialogue - a little higher, brighter, and quicker than the narration (style auto's quotations)."
+  },
+  {
+   "id": "exclaim",
+   "label": "Exclaim",
+   "kind": "mode",
+   "transform": [
+    {
+     "pitchRange": 1.2
+    },
+    {
+     "press": 3
+    },
+    {
+     "pitchScale": 1.09
+    },
+    {
+     "level": 3
+    },
+    {
+     "frication": 3
+    }
+   ],
+   "rate": 1.06,
+   "description": "An exclamation - the dialogue style livelier: louder, wider in pitch, and quicker (style auto's exclaimed quotations)."
   }
  ]
 }

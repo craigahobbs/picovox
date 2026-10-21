@@ -2,7 +2,9 @@
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 import {DEFAULTS, FLOOR_DB, NAMES, TRACT_FREQUENCIES} from '../lib/params.js';
-import {applyTransforms, bandwidthScale, effort, frication, level, pitchScale, press, tractScale, whisper} from '../lib/transforms.js';
+import {
+    applyTransforms, bandwidthScale, effort, frication, level, pitchRange, pitchScale, press, tractScale, whisper
+} from '../lib/transforms.js';
 import {strict as assert} from 'node:assert';
 import test from 'node:test';
 
@@ -53,6 +55,21 @@ test('transforms.bandwidthScale', () => {
 test('transforms.pitchScale', () => {
     const [output] = pitchScale([frame()], 1.25);
     assert.deepEqual(changes(frame(), output), {'f0': [120, 150]});
+});
+
+
+test('transforms.pitchRange', () => {
+    // Every frame's pitch moved from the voiced frames' mean pitch (log scale) - 80 and 180 Hz around 120 Hz; an unvoiced
+    // frame (below -40 dB of voicing) widened too, but not counted
+    const frames = [frame({'f0': 80}), frame({'f0': 180}), frame({'f0': 300, 'av': -60})];
+    const [low, high, unvoiced] = pitchRange(frames, 2).map((item) => item[IX.f0]);
+    assert(Math.abs(low - 80 * 80 / 120) < 1e-9 && Math.abs(high - 180 * 180 / 120) < 1e-9);
+    assert(Math.abs(unvoiced - 300 * 300 / 120) < 1e-9);
+    assert.deepEqual(changes(frames[0], pitchRange(frames, 2)[0]), {'f0': [80, low]});
+
+    // No voiced frames - unchanged
+    const silent = [frame({'av': -90})];
+    assert.deepEqual(pitchRange(silent, 2).map((item) => Array.from(item)), silent.map((item) => Array.from(item)));
 });
 
 
@@ -139,6 +156,8 @@ test('transforms.applyTransforms', () => {
         {'frication': 1, 'level': -4, 'press': 2, 'effort': 3, 'whisper': 0.5, 'tractScale': 0.9, 'pitchScale': 1.1, 'bandwidthScale': 0.8}
     ]);
     assert.deepEqual(applied.map((item) => Array.from(item)), expected.map((item) => Array.from(item)));
+    assert.deepEqual(applyTransforms(frames, [{'pitchRange': 1.5}]).map((item) => Array.from(item)),
+        pitchRange(frames, 1.5).map((item) => Array.from(item)));
     const listed = applyTransforms(frames, [{'pitchScale': 1.1}, {'pitchScale': 1.1}]);
     assert.deepEqual(listed.map((item) => item[IX.f0]), [120 * 1.1 * 1.1, 200 * 1.1 * 1.1]);
     assert.equal(applyTransforms(frames, [{}]), frames);

@@ -128,6 +128,7 @@ The speaking styles - `[{key, label, kind, description}]`, neutral (the default)
 | `soft` | mode | A quieter voice, a little slower |
 | `shouting` | mode | A pressed, bright, raised voice, a little louder |
 | `dialogue` | mode | Neutral dialogue - a little higher, brighter, and quicker than the narration |
+| `exclaim` | mode | An exclamation - the dialogue style livelier: louder, wider in pitch, and quicker |
 
 The embeddings are emotions the voice model learned from CREMA-D's actors; the rest of each style transforms the
 synthesizer's parameters (a pressed or relaxed glottal pulse, pitch, whisper, level). The styles were tuned by ear in
@@ -142,15 +143,19 @@ Style `'auto'` reads a text as a narrator does - its delivery follows the text's
 
 - **The dialogue beat.** The quotations (between double quotation marks) are read in the `dialogue` style - a little
   higher, brighter, and quicker than the narration (pitch +7%, pace +5%) - and the narration neutral.
+- **The exclamation beat.** A quoted sentence ending in "!" is read in the `exclaim` style - livelier than the
+  dialogue beat: 3 dB louder, its pitch range 20% wider, a little more pressed and quicker - excited, not shouted.
 - **The paragraph beat.** Each paragraph is read as one arc: its first sentence lifted (pitch +8%, 2 dB louder), the
   pitch settling to 4% below the voice's by its last sentence, which is 7% slower.
 
-Style `'auto'` needs no model - it reads the text's quotation marks and paragraphs. (A small network that would read a
+Style `'auto'` needs no model - it reads the text's quotation marks, exclamation marks, and paragraphs. (A small network that would read a
 quotation angry, shouting, or fearful was tried and dropped: even a classifier on a 4-billion-parameter embedding model
 couldn't choose those styles reliably enough - see the paper's Section 12.7.)
 
-The beats cost nothing measurable on the listener panel: the dialogue style's UTMOS is within 0.04 of neutral's in four
-voices, its word error rate unchanged. The output is deterministic, as every style's; without `'auto'` the audio is the
+On the listener panel the beats keep the voices intelligible and natural: the dialogue style's UTMOS is within 0.04 of
+neutral's in four voices, its word error rate unchanged; the exclaim style's, read over whole texts in all twelve voices,
+is within 0.13 of neutral's (most voices within 0.06; the bright Amy and Kate the most), its word error rate at most
+2.1%. The output is deterministic, as every style's; without `'auto'` the audio is the
 same as before, bit for bit.
 
 ### `toWav(samples, sampleRate)`

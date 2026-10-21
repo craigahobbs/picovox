@@ -38,7 +38,7 @@ const text = 'It was the best of times. "Was it?" she asked.\n\nNobody answered.
 test('styles', () => {
     assert.deepEqual(styles().map(({key, kind}) => `${key}:${kind}`), [
         'neutral:emotion', 'angry:emotion', 'happy:emotion', 'sad:emotion', 'fearful:emotion', 'disgusted:emotion', 'whisper:mode',
-        'soft:mode', 'shouting:mode', 'dialogue:mode'
+        'soft:mode', 'shouting:mode', 'dialogue:mode', 'exclaim:mode'
     ]);
     assert(styles().every((style) => style.label && style.description));
 
@@ -62,7 +62,7 @@ test('synthesize, styles', async () => {
     assert.deepEqual((await synthesize(dialogue, {'voice': 'james', 'style': 'auto'})).samples, auto.samples);
     await assert.rejects(synthesize(line, {'style': 'bored'}), {
         'name': 'RangeError', 'message': 'Unknown style "bored" - the styles are "neutral", "angry", "happy", "sad", "fearful", ' +
-            '"disgusted", "whisper", "soft", "shouting", "dialogue", "auto"'
+            '"disgusted", "whisper", "soft", "shouting", "dialogue", "exclaim", "auto"'
     });
 });
 
