@@ -66,8 +66,8 @@ build/venv-%.build: requirements/%.txt
 listeners: build/venv-listeners.build
 
 
-# make train - every generated model (lib/models/g2pModel.js, voiceModel.js, and styleModel.js) from a clean checkout,
-# by the recipe data/nn/train.json. Each stage is a stamp in TRAIN_DIR; make -j train runs the independent stages at once - the GPU
+# make train - every generated model (lib/models/g2pModel.js and voiceModel.js) from a clean checkout, by the recipe
+# data/nn/train.json. Each stage is a stamp in TRAIN_DIR; make -j train runs the independent stages at once - the GPU
 # stages one at a time (picovox_train/gpulock.py: two at once each run at about half speed), the CPU stages beside them (the
 # G2P retrain and the heteronym relabeling - each checked against the committed file it reproduces - the data
 # builds, and the evaluations). The voice data is built with the committed G2P; the G2P stages retrain it beside the
@@ -108,7 +108,7 @@ train:
 	@$(MAKE) --no-print-directory train-stages
 
 # (the power check first, alone - its prompt has the terminal - then the stages, in parallel with make -j)
-train-stages: train-util $(TRAIN_DIR)/package.done $(TRAIN_DIR)/style.done $(TRAIN_DIR)/samples-reference.done \
+train-stages: train-util $(TRAIN_DIR)/package.done $(TRAIN_DIR)/samples-reference.done \
 	$(TRAIN_DIR)/samples-teacher-a.done $(TRAIN_DIR)/samples-teacher-b.done $(TRAIN_DIR)/samples-student.done $(TRAIN_DIR)/samples-polish.done
 
 # The utilization sampler - it exits when make does (finished, failed, or interrupted)
@@ -275,19 +275,6 @@ $(TRAIN_DIR)/student-eval.done: $(TRAIN_DIR)/polish.done $(TRAIN_DIR)/teacher-ev
 	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m picovox_train.distill eval student=$(TRAIN_RUNS)/distill-student-polish/best.pt \
 		baseline=lib/models/voiceModel.js --whisper-workers 3
 	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m picovox_train.distill pick --no-samples --against baseline
-	@$(STAGE) end
-	touch $@
-
-# The style network (CPU, beside the GPU stages): the pinned books' quotations (as lib/style.js finds them), the network
-# trained on the committed teacher labels (data/nn/style-labels.json - checked against the quotations' texts),
-# lib/models/styleModel.js, and its measures against the hand labels (data/nn/style-test.json)
-$(TRAIN_DIR)/style.done: $(TRAIN_DIR)/context-labels.done data/nn/train.json data/nn/style-labels.json data/nn/style-test.json \
-		lib/sentences.js lib/style.js nn/js/quoteLines.js | build/venv-nn.build
-	@$(STAGE) start
-	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.style quotations --out $(TRAIN_DIR)/style --log $(TRAIN_DIR)/style/train.log
-	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.style train --out $(TRAIN_DIR)/style --log $(TRAIN_DIR)/style/train.log
-	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.style export $(TRAIN_DIR)/style/style.pt --out lib/models/styleModel.js
-	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.style evaluate lib/models/styleModel.js
 	@$(STAGE) end
 	touch $@
 

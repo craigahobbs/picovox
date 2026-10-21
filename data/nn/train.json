@@ -148,13 +148,5 @@
             {"key": "libritts-5750", "label": "reader 5750", "sex": "male"},
             {"key": "libritts-2843", "label": "reader 2843", "sex": "male"}
         ]
-    },
-    "style": {
-        "description": "The style network (picovox_train/style.py): a quotation's style - neutral, angry, shouting, or fearful - from its words and the narration around it, trained on a teacher's labels (data/nn/style-labels.json) of a sample of the pinned books' quotations (the context labels' books), each style's threshold for the validation precision \"precision\"; the hand-labeled quotations (data/nn/style-test.json) are its test",
-        "teacher": "qwen3.8:27b-mlx",
-        "enrichedCount": 9000, "exclaimedCount": 12000, "plainCount": 2000, "minChars": 8, "maxChars": 600, "seed": 1,
-        "network": {"buckets": 4096, "dim": 16, "hidden": 32},
-        "pretrainEpochs": 50, "pretrainBatch": 512, "pretrainTop": 300,
-        "epochs": 30, "batch": 256, "lr": 0.003, "weightDecay": 0.001, "dropout": 0.2, "weightPower": 0, "folds": 5, "threads": 4, "precision": 0.95
     }
 }

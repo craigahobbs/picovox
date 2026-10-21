@@ -144,11 +144,10 @@ Style `'auto'` reads a text as a narrator does - its delivery follows the text's
   higher, brighter, and quicker than the narration (pitch +7%, pace +5%) - and the narration neutral.
 - **The paragraph beat.** Each paragraph is read as one arc: its first sentence lifted (pitch +8%, 2 dB louder), the
   pitch settling to 4% below the voice's by its last sentence, which is 7% slower.
-- **The style network.** A quotation is read angry, shouting, or fearful only where a small network
-  (`lib/models/styleModel.js` - 69,028 parameters, 8-bit weights, 93 KB) is confident: its words, the narration beside
-  it, and the sentences around it, distilled from a 27-billion-parameter teacher's labels of 24,119 of the pinned books'
-  quotations. A style is used only above a threshold whose precision has a one-sided 95% lower bound of 95% (a wrong
-  style is worse than none) - and in this release no style reaches it, so every quotation reads in the dialogue beat.
+
+Style `'auto'` needs no model - it reads the text's quotation marks and paragraphs. (A small network that would read a
+quotation angry, shouting, or fearful was tried and dropped: even a classifier on a 4-billion-parameter embedding model
+couldn't choose those styles reliably enough - see the paper's Section 12.7.)
 
 The beats cost nothing measurable on the listener panel: the dialogue style's UTMOS is within 0.04 of neutral's in four
 voices, its word error rate unchanged. The output is deterministic, as every style's; without `'auto'` the audio is the
@@ -188,7 +187,7 @@ that runs its own synthesis loop (PicoShelf's worker does):
 | `lib/index.js` | The API |
 | `lib/synthesis.js` | The pipeline - the voices, a sentence's blocks (`sentenceBlocks`), a text's (`textBlocks`), the gain and limiter |
 | `lib/sentences.js` | Text to sentences (`splitSentences`), their quotations (`quoteSpans`), and their speakable text (`speechText`) |
-| `lib/style.js` | Style `'auto'` - the style network's inference (`loadStyleModel`, `quotationStyle`), a text's styles (`autoStyles`), and its paragraph beats (`paragraphBeats`) |
+| `lib/style.js` | Style `'auto'` - a text's quotations in the dialogue style (`autoStyles`) and its paragraph beats (`paragraphBeats`) |
 | `lib/lexicon.js` | Normalization and phrasing (`textToPhrases`), every word pronounced by the pronouncer (`setPronouncer`) |
 | `lib/g2p.js` | The grapheme-to-phoneme network's inference (`loadG2p`) - heteronyms read from their context |
 | `lib/tokens.js` | Phrases to the voice network's tokens |
@@ -198,17 +197,16 @@ that runs its own synthesis loop (PicoShelf's worker does):
 | `lib/transforms.js` | Voice and style transforms of parameter frames (pitch, tract length, bandwidths, whisper, effort) |
 | `lib/package.js` | The generated model modules' loader (`loadPackagedModel`) |
 | `lib/wav.js` | WAV encoding (`encodeWav`) |
-| `lib/models/g2pModel.js`, `lib/models/voiceModel.js`, `lib/models/styleModel.js` | The generated models (`make train`) |
+| `lib/models/g2pModel.js`, `lib/models/voiceModel.js` | The generated models (`make train`) |
 
 
 ## Size and speed
 
 | | |
 | --- | --- |
-| The package (`npm pack`) | 846 KB packed, 1.3 MB unpacked - the G2P network 419 KB, the voice network 554 KB, and the style network 93 KB of it, as base64 |
+| The package (`npm pack`) | 774 KB packed, 1.2 MB unpacked - the G2P network 419 KB and the voice network 554 KB of it, as base64 |
 | The voice network | 305,035 parameters, 8-bit weights - 385 KB gzipped |
 | The G2P network | 373,256 parameters (and the heteronym context network's 47,779), 6-bit weights |
-| The style network | 69,028 parameters, 8-bit weights (loaded only for style `'auto'`) |
 | Speed, Apple M3 Max (Node) | The voice network about 127x real time, the renderer about 97x; synthesis end to end (24 kHz) about 55x |
 | Speed, iPhone without a JIT (Safari) | About 2.6x real time in one worker; about 3.1-3.4x with the network and the renderer in two workers (`sentenceFrames` and `createSentenceRenderer`) |
 | Startup | About 0.1 s to load both networks (Node, M3 Max) |
@@ -219,10 +217,9 @@ panel's texts, with a Whisper word error rate under 2% - see [the listener panel
 
 ## How the models are trained
 
-The networks are trained from scratch from public corpora - CMU ARCTIC, LibriTTS-R, CREMA-D, and the CMU Pronouncing
-Dictionary (the G2P network's training labels; it is not used at runtime), and the style network from a teacher's labels
-of public-domain books' quotations (committed, `data/nn/style-labels.json`) - by `make train`, which rebuilds
-`lib/models/g2pModel.js`, `lib/models/voiceModel.js`, and `lib/models/styleModel.js` from a clean checkout in about 65 minutes on an M3 Max: a large
+Both networks are trained from scratch from public corpora - CMU ARCTIC, LibriTTS-R, CREMA-D, and the CMU Pronouncing
+Dictionary (the G2P network's training labels; it is not used at runtime) - by `make train`, which rebuilds
+`lib/models/g2pModel.js` and `lib/models/voiceModel.js` from a clean checkout in about 65 minutes on an M3 Max: a large
 teacher model trained through a differentiable copy of the synthesizer, distilled to the small student that ships. See
 [make train](#make-train) below, and the paper,
 [PicoVox: Realistic Neural Speech Synthesis in Under 1 MB of JavaScript](paper/paper.md), for the methods and results.
@@ -383,18 +380,16 @@ Speaker similarity: every human pair 0.0-0.48; halves of one human speaker's rec
 
 ## make train
 
-`make train` recreates the generated models - `lib/models/g2pModel.js`, `lib/models/voiceModel.js`, and
-`lib/models/styleModel.js` - from a clean checkout, by one recipe, `data/nn/train.json` (every stage's settings and
-seeds). Each stage is a stamp in `build/train/` (`TRAIN_DIR`), so `make -j train` runs independent stages at once; the
-GPU stages run one at a time (`picovox_train/gpulock.py` - two at once each run at about half speed) while the CPU
-stages run beside them:
+`make train` recreates the generated models - `lib/models/g2pModel.js` and `lib/models/voiceModel.js` - from a clean
+checkout, by one recipe, `data/nn/train.json` (every stage's settings and seeds). Each stage is a stamp in
+`build/train/` (`TRAIN_DIR`), so `make -j train` runs independent stages at once; the GPU stages run one at a time
+(`picovox_train/gpulock.py` - two at once each run at about half speed) while the CPU stages run beside them:
 
 | Stage | Runs on | Needs |
 | --- | --- | --- |
 | corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D | network | |
 | g2p-network, context-labels, context-network, g2p - the G2P retrain (the network; the heteronym labels from the pinned books; the context network and its cross-validation; the reading stage and export), checked to reproduce `lib/models/g2pModel.js` | CPU - the network one core, ~30 min | corpora (the labels) |
 | heteronyms - the relabeled words, checked to reproduce `data/nn/g2p-relabel.json` | CPU, ~6 min | corpora |
-| style - the style network: the pinned books' quotations, the network trained on the committed teacher labels (`data/nn/style-labels.json`), `lib/models/styleModel.js`, and its measures against the hand labels (`data/nn/style-test.json`) | CPU, ~2 min | context-labels (the pinned books) |
 | data-multi - the readers' training data (the pool: `data/nn/speakers.json`) | CPU (every core) | corpora, `lib/models/g2pModel.js` |
 | cremad-align, data-cremad - the emotional speech | GPU 2 min, CPU 1 min | corpora |
 | teacher-a, teacher-b - the teacher (`picovox_train.trainmulti --recipe teacher.a`, `teacher.b`) | GPU | the data |

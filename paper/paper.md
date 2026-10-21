@@ -914,12 +914,11 @@ current browsers and in Node 22 or later, and has no dependencies:
 The options are the voice, the speaking style (or `'auto'`, expressive reading - Section 12.7), the speaking rate
 (0.5-2), the noise seed, and the sample rate (24 kHz by default); the output is bit-for-bit deterministic in browsers
 and Node. The package's audio is bit-identical to the
-audiobook player's own synthesis path, from which it was extracted (76 cases). Version 1.5.0's tarball holds 23 files,
-846,597 bytes compressed and 1,312,581 unpacked; its three generated model modules are 419,475 bytes (the G2P and
-context networks, 316 KB gzipped), 554,315 bytes (the voice, 385 KB gzipped), and 93,445 bytes (the style network,
-68 KB gzipped, loaded only for style `'auto'`), the rest is code and the README. "Under 1 MB" is the package as
-downloaded, and the models as a static host serves them gzipped (769 KB); the raw model modules are about 1.07 MB
-together.
+audiobook player's own synthesis path, from which it was extracted (76 cases). Version 1.6.0's tarball holds 22 files,
+774,220 bytes compressed and 1,210,080 unpacked; its two generated model modules are 419,475 bytes (the G2P and context
+networks, 316 KB gzipped) and 554,315 bytes (the voice, 385 KB gzipped), the rest is code and the README. "Under 1 MB"
+is the package as downloaded, and the two models as a static host serves them gzipped; the raw model modules are
+about 0.97 MB together.
 
 ### 12.2 Speed and streaming
 
@@ -1030,13 +1029,13 @@ only 3-5% (the shipped voice's payload by 3.3%), because quantized weights look 
 1% after the HTTP compression that static hosts apply to JavaScript. Size reductions must therefore come from fewer
 parameters and fewer bits per weight - distillation (Section 8) and, for the G2P, 6-bit weights.
 
-### 12.7 Expressive reading: style `'auto'`
+### 12.7 Expressive reading: style `'auto'`, and a dead end
 
-A narrator does not read a novel in one voice. Version 1.5.0's style `'auto'` reads by the text's structure: its
-quotations (lib/sentences.js `quoteSpans` - double quotation marks, curly or straight, a speech left open across
-paragraphs followed into the next) in a *dialogue beat*, each paragraph as one arc (the *paragraph beat*), and a
-quotation angry, shouting, or fearful only where a small network is confident. Every choice follows the text, never
-chance, so the reading is deterministic, and without `'auto'` the audio is unchanged, bit for bit.
+A narrator does not read a novel in one voice. Style `'auto'` (1.5.0) reads by the text's structure: its quotations
+(lib/sentences.js `quoteSpans` - double quotation marks, curly or straight, a speech left open across paragraphs
+followed into the next) in a *dialogue beat*, and each paragraph as one arc (the *paragraph beat*). Every choice
+follows the text, never chance, so the reading is deterministic, and without `'auto'` the audio is unchanged, bit for
+bit.
 
 **The beats.** The dialogue style is a mild lift of the voice - pitch +7%, pace +5%, a little pressed and 1 dB louder;
 each paragraph's first sentence is lifted (pitch +8%, 2 dB), its pitch settles to -4% by its last sentence, which is
@@ -1046,41 +1045,29 @@ preferred to the flat reading, the stronger slightly). The panel can't hear mono
 guards the voice: in four voices the dialogue style's UTMOS is within 0.04 of neutral's (4.13-4.31), its word error
 rate unchanged (0.6-1.5%).
 
-**The style network.** Which quotations are shouted, angry, or frightened is a judgment of the words and the narration
-around them. A 27-billion-parameter chat model (qwen3.8, run locally by Ollama, its answer constrained to the four
-styles, its probabilities from the answer's log-probabilities) labeled 24,119 quotations of the 132 pinned books'
-236,598, sampled by part: exclamations with a high-energy word nearby (shout, scream, terror - the rare styles'
-examples), other exclamations, and plain quotations, each weighted back to the books' own mix. On 300 hand-labeled
-quotations the teacher's average precision for styled against neutral is 0.86 (chance 0.19). The student - one hashed
-word table (4,096 x 16) over the quotation's words, its attribution's, and its neighboring sentences', each kind's mean
-and max, eight cues (exclamations, capitals, length), a 32-unit tanh layer: 69,028 parameters, 8-bit, 93 KB - reached:
+**A dead end: choosing a quotation's emotion.** The plan was a third layer - a small network reading a quotation angry,
+shouting, or fearful where it was confident. A 27-billion-parameter chat model (qwen3.8, run locally by Ollama, its
+answer constrained to the four styles, its probabilities from the answer's log-probabilities) labeled 24,119 quotations
+of the 132 pinned books' 236,598, sampled by part (exclamations with a high-energy word nearby, other exclamations,
+plain quotations - each weighted back to the books' mix); on 300 hand-labeled quotations its average precision for
+styled against neutral is 0.86 (chance 0.19). A wrong style is worse than none, so the goal was precision, not recall:
+each style's threshold had to show a one-sided 95% lower bound (Wilson's, at the weights' effective count) of 95%
+precision over every label held out once (five folds), at the books' mix. Nothing reached it:
 
-| Student | Hand-set AP |
-| --- | --- |
-| Hashed words, trained on 2,700 teacher labels | 0.37 |
-| The word table pretrained without labels (each quotation's attribution's words - shouted, cried, whispered - from its own words and its context's) | 0.53 |
-| ... the table then fixed while the rest trains on the teacher's labels | 0.57 |
-| One table for every kind of text, mean and max pooling | 0.58 |
-| 19,082 labels; the table fine-tuned slowly; a word-embedding warm-up | 0.64 |
-| Not helping: a 4x table, a separate attribution table, word convolutions, exclamations only | 0.55-0.62 |
+| Classifier | Hand-set AP | Best 95% bound - shouting / angry / fearful |
+| --- | --- | --- |
+| The student - a hashed word table (4,096 x 16) over the quotation, its attribution, and its context, mean and max, eight cues, a 32-unit layer; 69,028 parameters, 93 KB, the table pretrained on the attributions' words | 0.58 | none above 0.5 |
+| ... the attribution taken from the next sentence ('"Help!" he screamed.' - the splitter ends a sentence at the exclamation) | 0.64 | 0.92 / 0.06 / 0.33 |
+| A linear classifier on a 4-billion-parameter embedding model's vectors (qwen3-embedding, 2,560 dimensions) | 0.78 | 0.93 / 0.74 / 0.83 |
+| A 256-unit MLP on the same vectors | 0.77 | 0.91 / 0.74 / 0.89 |
 
-The learning curve was still rising but flattening (0.44 at 1,000 labels, 0.56 at 4,000, 0.62-0.64 at 19,000), and
-pretraining on half the books cost 0.02, a quarter 0.07. A bag of hashed words learned from tens of thousands of
-labels cannot know what a large model knows about how a line is meant.
-
-**A gate that asks for evidence.** A wrong style is worse than none - a shout read as fear, or a calm line shouted - so
-the goal is precision, not recall: a quotation the network leaves alone simply reads in the dialogue beat. Each style's
-threshold is the least probability whose precision, over every label held out once (five folds) and weighted to the
-books' mix, has a one-sided 95% lower bound (Wilson's, at the weights' effective count) of at least 95%. The student's
-most confident picks are mostly right - about 90% for its top one line per book - but too few for that bound (two of
-two right bounds at 0.42; a clean 95% needs about fifty), and at the books' mix it falls to 41% by 30 lines per book. No
-style passes even an 80% bound, so in 1.5.0 the network styles nothing, and style `'auto'` is the two beats; a better
-student switches its styles on with the next `make train`.
-
-**What limits the student, concretely.** The sentence splitter ends a sentence at an exclamation inside a quotation, so
-in "Help! Fire!" he screamed. the attribution "he screamed." is the next sentence - the network sees it as context,
-not attribution, and the pretraining, which learns from attributions, never sees the exclaimed quotations' verbs at
-all. Attaching a lowercase sentence after a quotation to it is the next experiment.
+The embedding probes are a ceiling on any small student that imitates a large encoder, and even they fall short - so
+the network was dropped, with its training and labels (1.6.0; style `'auto'` is the two beats, its audio unchanged).
+Two observations. Shouting came closest because it is signaled on the surface (*he shouted*, *roared the captain*);
+anger and fear live in what a line means, which a bag of words can't read. And the gate measures agreement with the
+teacher, whose own errors cap it: among the student's top shouting picks, the teacher called "Bravo!" *shouted
+Charles* and "The paper! Of course!" *yelled Holmes* neutral. A punctuation rule is no substitute: 81% of the
+quotations ending in "!" are neutral by the teacher, 7% shouted.
 
 
 ## 13. Limitations and future work
@@ -1104,8 +1091,8 @@ all. Attaching a lowercase sentence after a quotation to it is the next experime
   Why that iPhone's Safari ran without a JIT is unknown; with one, a phone should be many times faster.
 - **The designed voices.** The ten voices with emotional styles (Section 7) are specified but not shipped; the package
   has two.
-- **The style network** styles no quotation in 1.5.0: its most confident picks are mostly right, but not provably 95%
-  right (Section 12.7) - so style `'auto'` is the dialogue and paragraph beats alone.
+- **Expressive reading** follows the text's structure only (Section 12.7): no quotation is read angry, shouted, or
+  frightened - a classifier precise enough to choose them was not found, even on a large model's embeddings.
 - The voices are American English only, by design.
 
 

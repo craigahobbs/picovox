@@ -1,7 +1,7 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-import {autoStyles, loadStyleModel, paragraphBeats} from '../lib/style.js';
+import {autoStyles, paragraphBeats} from '../lib/style.js';
 import {
     blockSize, createSentenceRenderer, defaultSampleRate, defaultVoice, modelLoader, outputGain, paragraphPause, sentenceBlocks,
     sentenceFrames, sentencePause, softLimit, spanFrames, styleSettings, styleTable, textBlocks, voiceSettings, voiceSpeaker,
@@ -232,13 +232,12 @@ test('sentenceFrames, beat', () => {
 });
 
 
-test('textBlocks, auto', async () => {
-    // Style "auto" - each sentence in its auto spans (a quotation left neutral in the dialogue style) with its paragraph
-    // beat; the narration's sentences unspanned
-    const styleModel = loadStyleModel(await import('../lib/models/styleModel.js'));
+test('textBlocks, auto', () => {
+    // Style "auto" - each sentence in its auto spans (the quotations in the dialogue style) with its paragraph beat; the
+    // narration's sentences unspanned
     const text = 'It was late. "Who is there?" she asked.\n\nNobody answered.';
     const sentences = splitSentences(text);
-    const auto = autoStyles(styleModel, sentences);
+    const auto = autoStyles(sentences);
     const beats = paragraphBeats(sentences);
     assert.deepEqual([auto.spans(0), auto.spans(1).map((span) => span.style)], [null, ['dialogue']]);
     const expected = sentences.map((sentence) => {
@@ -248,7 +247,7 @@ test('textBlocks, auto', async () => {
             'pause': sentence.paragraphStart ? paragraphPause : sentencePause
         })]);
     });
-    assert.deepEqual(concat([...textBlocks(model, text, {'voice': 'kate', 'style': 'auto', styleModel, 'seed': 3})]), concat(expected));
+    assert.deepEqual(concat([...textBlocks(model, text, {'voice': 'kate', 'style': 'auto', 'seed': 3})]), concat(expected));
 });
 
 

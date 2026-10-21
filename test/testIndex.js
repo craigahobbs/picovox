@@ -55,7 +55,7 @@ test('synthesize, styles', async () => {
     assert.deepEqual((await synthesize(line, {'voice': 'james', 'style': 'neutral'})).samples, plain.samples);
     assert.notDeepEqual((await synthesize(line, {'voice': 'james', 'style': 'whisper'})).samples, plain.samples);
 
-    // Auto - the quotations in their styles (the style network loaded once), each paragraph's beat
+    // Auto - the quotations in the dialogue style, each paragraph's beat
     const dialogue = '"Get out!" he said.\n\nShe left.';
     const auto = await synthesize(dialogue, {'voice': 'james', 'style': 'auto'});
     assert.notDeepEqual(auto.samples, (await synthesize(dialogue, {'voice': 'james'})).samples);
