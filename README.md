@@ -178,7 +178,8 @@ file - a `Uint8Array` of the file's bytes.
 The text is split into sentences (and paragraphs, at blank lines); each sentence starts with a short pause - 0.24
 seconds, or 0.4 before a paragraph (so the text's first sentence starts with one). Numbers (four-digit numbers as years,
 1972 as "nineteen seventy-two"; ordinals, 1st; decades, 1970s; percentages; money, $1.50 and $5 million; times, 10:30
-a.m.), common abbreviations, dashes, ellipses, and Roman numerals (Chapter IV, World War II) are spoken as words. An invalid text or option throws a `TypeError` or a
+a.m.), common abbreviations, dashes, ellipses, and Roman numerals (Chapter IV, World War II) are spoken as words, and
+an aside's parentheses pause as a comma does. An invalid text or option throws a `TypeError` or a
 `RangeError` with a message saying what's wrong (`stream` and `speak` throw at once; `synthesize` rejects).
 
 The output is bit-for-bit deterministic: the same text and options give the same samples, in the browser and in Node.

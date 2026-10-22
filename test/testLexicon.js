@@ -135,6 +135,29 @@ test('lexicon.textToPhrases, phrase ends', () => {
 });
 
 
+test('lexicon.textToPhrases, parentheses', () => {
+    // An aside's parentheses are comma breaks - before its opening and after its closing
+    let phrases = textToPhrases('He left the room (quietly, as always) and closed the door.');
+    assert.deepEqual(phrases.map(wordTexts), [
+        ['he', 'left', 'the', 'room'], ['quietly'], ['as', 'always'], ['and', 'closed', 'the', 'door']
+    ]);
+    assert.deepEqual(phrases.map((phrase) => [phrase.end, phrase.major]), [
+        ['comma', false], ['comma', false], ['comma', false], ['period', false]
+    ]);
+
+    // A punctuation mark right after a parenthesis ends the phrase (the parenthesis adds no break)
+    phrases = textToPhrases('She was born (1818), lived (long); and died (old). Was it (really)? (Aside.) The end (truly)');
+    assert.deepEqual(phrases.map(wordTexts), [
+        ['she', 'was', 'born'], ['eighteen', 'eighteen'], ['lived'], ['long'], ['and', 'died'], ['old'], ['was', 'it'], ['really'],
+        ['aside'], ['the', 'end'], ['truly']
+    ]);
+    assert.deepEqual(phrases.map((phrase) => [phrase.end, phrase.major]), [
+        ['comma', false], ['comma', false], ['comma', false], ['comma', true], ['comma', false], ['period', false],
+        ['comma', false], ['question', false], ['period', false], ['comma', false], ['period', false]
+    ]);
+});
+
+
 test('lexicon.textToPhrases, empty phrases', () => {
     assert.deepEqual(textToPhrases(''), []);
     assert.deepEqual(textToPhrases('  ,.;!? -- '), []);

@@ -28,7 +28,8 @@ TEXTS = [
     'Dr. Who vs. St. Ives etc.',
     'Señor Amadís and Doña Œdipus saw Cæsar in Łódź - Straße, ñ, ŋ.',
     'In 1972, 1905, 1900, and 2001 - the 1970s and 80\'s - the 1st, 22nd, 3rd, and 12th of 23,000,000 (12,3456).',
-    'At 10:30 a.m., 9:00 p.m., or 6pm, I am paying 50% - $1,234.56, $0.50, $5 million, £1.50, and €20 - in the a.m.'
+    'At 10:30 a.m., 9:00 p.m., or 6pm, I am paying 50% - $1,234.56, $0.50, $5 million, £1.50, and €20 - in the a.m.',
+    'He left the room (quietly, as always) and closed the door (1818); (Aside.) The end (truly)'
 ]
 
 
@@ -286,6 +287,14 @@ class TestFrontend(unittest.TestCase):
         self.assertEqual(frontend.text_items('$5 million 50% 6pm a.m. am'), [
             ('five', 0), ('million', 0), ('dollars', 0), ('fifty', 11), ('percent', 11), ('six', 15), ('pee', 15), ('em', 15),
             ('ay', 19), ('em', 19), ('am', 24), ({'end': 'period'}, 26)
+        ])
+
+    def test_text_items_parentheses(self):
+        # An aside's parentheses are comma breaks, unless a punctuation mark right after one ends the phrase
+        self.assertEqual(frontend.text_items('Go (now, ok) home (1818); (Aside.) the end (truly)'), [
+            ('go', 0), ({'end': 'comma'}, 3), ('now', 4), ({'end': 'comma'}, 7), ('ok', 9), ({'end': 'comma'}, 11),
+            ('home', 13), ({'end': 'comma'}, 18), ('eighteen', 19), ('eighteen', 19), ({'end': 'comma'}, 24), ('aside', 27),
+            ({'end': 'period'}, 27), ('the', 35), ('end', 39), ({'end': 'comma'}, 43), ('truly', 44), ({'end': 'period'}, 50)
         ])
 
     def test_text_items_accents(self):

@@ -217,7 +217,7 @@ TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eight
 
 # The text's tokens - a.m. or p.m., a word, a time (10:30, 10:30 a.m., 10pm), an amount of money (with its scale - $5
 # million), a number (its thousands grouped by commas or not; with a decimal fraction, a percent sign, or an ordinal or
-# plural suffix), or a punctuation mark (lib/lexicon.js's tokenPattern)
+# plural suffix), or a punctuation mark (a parenthesis too - lib/lexicon.js's tokenPattern)
 DIGITS_PATTERN = r'(?:\d{1,3}(?:,\d{3})+(?!\d)|\d+)'
 MERIDIEM_PATTERN = r'[ap]\.?m\.?(?![a-z])'
 TOKEN_REGEX = re.compile('|'.join([
@@ -226,7 +226,7 @@ TOKEN_REGEX = re.compile('|'.join([
     rf'\d{{1,2}}(?::\d{{2}}(?!\d)(?:[ \t]*{MERIDIEM_PATTERN})?|[ \t]*{MERIDIEM_PATTERN})',
     rf'[$£€]{DIGITS_PATTERN}(?:\.\d+)?(?:[ \t\r\n]+(?:thousand|million|billion|trillion)(?![a-z]))?',
     rf"{DIGITS_PATTERN}(?:\.\d+%?|%|(?:st|nd|rd|th|'?s)(?![a-z]))?",
-    '[.,;:!?]'
+    '[.,;:!?()]'
 ]), re.ASCII)
 NUMBER_REGEX = re.compile(r'^([\d,]+)(?:\.(\d+))?(\D*)$', re.ASCII)
 MONEY_REGEX = re.compile(r'^(\D)([\d,]+)(?:\.(\d+))?(?:\s+([a-z]+))?$', re.ASCII)
@@ -357,14 +357,21 @@ def plain_letters(text):
 
 
 # The front end's items of a text, in order (textToPhrases' first pass) - [(item, offset)]: a word (its text after
-# numbers and abbreviations are spelled out) or a phrase end ({'end': name}, only after a word), and the offset of its
-# source token in the text. The context sequence is the items with the phrase ends as PHRASE_MARKS.
+# numbers and abbreviations are spelled out) or a phrase end ({'end': name}, only after a word - a parenthesis's comma
+# gives way to a punctuation mark right after it), and the offset of its source token in the text. The context sequence
+# is the items with the phrase ends as PHRASE_MARKS.
 def text_items(text):
     items = []
+    parenthesis_end = False
 
-    def end_phrase(end, offset):
+    def end_phrase(end, offset, parenthesis=False):
+        nonlocal parenthesis_end
         if items and isinstance(items[-1][0], str):
             items.append(({'end': end}, offset))
+            parenthesis_end = parenthesis
+        elif parenthesis_end and not parenthesis:
+            items[-1] = ({'end': end}, offset)
+            parenthesis_end = False
 
     for match in TOKEN_REGEX.finditer(plain_letters(text).lower().replace('‘', '\'').replace('’', '\'')):
         token, offset = match.group(0), match.start()
@@ -392,6 +399,8 @@ def text_items(text):
             end_phrase('exclamation', offset)
         elif token == '.':
             end_phrase('period', offset)
+        elif token in '()':
+            end_phrase('comma', offset, True)
         else:
             end_phrase('comma', offset)
     end_phrase('period', len(text))
