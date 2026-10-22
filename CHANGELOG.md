@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.0 (2026-10-22)
+
+- [c7c57e8](https://github.com/craigahobbs/picovox/commit/c7c57e8) - number reading: a four-digit number reads as a year (1972 as "nineteen seventy-two"; 2000 to 2009 as numbers), commas group thousands (23,000,000 as "twenty-three million"), ordinals (1st, 22nd) and decades (1970s, 80's), and Roman numerals in running text (World War II, Henry VIII)
+
 ## 1.6.1 (2026-10-21)
 
 - [85010b5](https://github.com/craigahobbs/picovox/commit/85010b5) - the exclamation beat: style "auto" reads a quoted sentence ending in "!" in the new exclaim style - louder, livelier in pitch, and quicker than the dialogue beat (excited, not shouted); the pitchRange transform
