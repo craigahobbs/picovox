@@ -7,6 +7,7 @@
   "danglars": "D AE1 NG G L ER0 Z",
   "gough": "G OW1",
   "grandeur": "G R AE1 N D ER0",
+  "gravest": "G R EY1 V AH0 S T",
   "hobbes": "HH AA1 B Z",
   "inexplicable": "IH2 N EH1 K S P L IH0 K AH0 B AH0 L",
   "leant": "L EH1 N T",
@@ -133,6 +134,11 @@
     "lower": 0.566
    }
   },
+  "gravest": {
+   "was": "G R AE1 V AH0 S T",
+   "dictionary": "the dictionary's own evidence (a listener heard GRAVEST as \"gravvest\" in the audiobook player; LibriTTS-R train-clean-100 has only 3 tokens, from 3 speakers - too few for the audio's bound): its stem GRAVE G R EY1 V and the stem's other forms GRAVER G R EY1 V ER0, GRAVELY G R EY1 V L IY0, GRAVES G R EY1 V Z, GRAVESTONE G R EY1 V S T OW2 N; and the -est forms of the -ave adjectives, BRAVEST B R EY1 V AH0 S T - GRAVEST's AE1 is GRAVEL's vowel",
+   "date": "2026-10-22"
+  },
   "hobbes": {
    "was": "HH AA1 B IY0 Z",
    "folds": [
@@ -226,7 +232,7 @@
     "tokens": 6,
     "lower": 0.51
    },
-   "note": "the audio rejected the label (L IY1 N T 6 votes, 6 speakers, against it), but neither candidate was what the readers say - the recognizer's greedy phones were l ɛ n t (3 of 6 tokens; l æ n t, l a n t, m iː n t the others); a third candidate, L EH1 N T, scored the same way (12 tokens chosen, 6 found), wins"
+   "note": "the audio rejected the label (L IY1 N T 6 votes, 6 speakers, against it), but neither candidate was what the readers say - the recognizer's greedy phones were l \u025b n t (3 of 6 tokens; l \u00e6 n t, l a n t, m i\u02d0 n t the others); a third candidate, L EH1 N T, scored the same way (12 tokens chosen, 6 found), wins"
   },
   "monday": {
    "was": "M AH1 N D IY0",

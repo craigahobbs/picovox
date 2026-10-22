@@ -154,6 +154,23 @@ test('g2p.loadG2p, readers\' pronunciations', async () => {
 });
 
 
+// A listener's reports - gravest (the dictionary's G R AE1 V AH0 S T, fixed - data/nn/g2p-fixes.json), mindset, and
+// paprika (the dictionary's second, P AH0 P R IY1 K AH0)
+test('g2p.loadG2p, a listener\'s reports', async () => {
+    const pronounce = await loadG2p(g2pModel);
+    const expected = {
+        'gravest': 'G R EY1 V AH0 S T',
+        'graver': 'G R EY1 V ER0',
+        'mindset': 'M AY1 N D S EH2 T',
+        'mindsets': 'M AY1 N D S EH2 T S',
+        'paprika': 'P AH0 P R IY1 K AH0'
+    };
+    for (const [word, phones] of Object.entries(expected)) {
+        assert.equal(pronounce(word).join(' '), phones, word);
+    }
+});
+
+
 // Heteronyms - the ambiguity head picks out the words whose reading the context decides, and the context network chooses
 // the reading the G2P pronounces
 test('g2p.loadG2p, heteronym readings', async () => {

@@ -714,6 +714,40 @@ are rare names - Maritornes, Clemencín, Benengeli, at most 31 times each - a sm
 dictionary has them, and the stress of a few unlabeled names.
 
 
+### 9.11 A listener's reports: gravest, mindset, paprika
+
+A listener heard three words wrong. "Gravest" (G R AE1 V AH0 S T - "gravvest") was the dictionary's error, learned: its
+stem and the stem's other forms have EY1 (GRAVE, GRAVER, GRAVELY, GRAVESTONE), as BRAVEST does, so
+`data/nn/g2p-fixes.json` corrects it on the dictionary's own evidence (LibriTTS-R has three of its tokens, too few for
+the audit's bound). "Mindset" (M IH1 N D S EH2 T) and "paprika" (P AE2 P R IH0 K AA1 AH0) were the network's own errors
+on words the dictionary has right - words the frequency weights barely reach: a dictionary word with no count in the
+128 books is wrong 18.9% of the time (14,074 of 74,332), one counted 6 to 20 times 4.7%, and one counted over 100 times
+almost never. "Mindset" has no count, "paprika" 6.
+
+Retrained with the fix (`make train-g2p`), the module reads all three as the dictionary does - mindset M AY1 N D S EH2
+T, gravest G R EY1 V AH0 S T, paprika the dictionary's second, P AH0 P R IY1 K AH0 - but mindset and paprika came right
+by the retraining's churn, not by a weight of their own: the one changed label moved 740 of the 30,000 most frequent
+words' pronunciations (326 to their targets, 314 from them, mostly a reduced vowel or a secondary stress). The gate
+measures, against the committed module:
+
+| Measure | picovox 1.6.3 | Retrained |
+| --- | --- | --- |
+| Book-token error, distinct words, top-10K wrong | 0.058%, 601, 10 | 0.059%, 604, 9 |
+| Monitoring WER (held out) | 41.75% | 42.25% |
+| Default, context readings; missing, names | 52/52, 52/54; 3/3, 80/86 | 52/52, 51/54; 3/3, 80/86 |
+
+The monitoring WER, ten more of its 2,000 held-out words, is at the reproduction tolerance (0.5 points) - the spread
+between training runs (Section 9.8) - so the check failed by a hair, and the module was adopted over it.
+
+The weights' gap is modern words, and the player reads Wikipedia. On a year of Wikipedia's featured articles and four
+weeks of its most-read (776 articles, 2.9 million dictionary-word tokens), the shipped module's token error is 1.10%
+(the retrained module's 1.05%) - against 0.058% on the books - wrong on putin (P Y UW1 T IH0 N), muslim, psychiatrist,
+debuted, and podcast. Counting Wikipedia's words into the weights as a listeners' "book" fixes most of them - the G2P
+network's stages alone, 0.94% without them, 0.60% with two weeks' articles, 0.36% with the year's (measured on the
+year's) - and paprika exactly (P AE0 P R IY1 K AH0), but costs the books: their book-token error rose from 0.043-0.046%
+to 0.056% and 0.066%, past the gate's tolerance (0.01 points). Taking that trade - and measuring the gate on Wikipedia's
+text too - is left open.
+
 ## 10. Reproducible training: `make train`
 
 ### 10.1 One recipe, one command
