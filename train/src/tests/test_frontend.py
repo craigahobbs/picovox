@@ -27,7 +27,8 @@ TEXTS = [
     ', Leading comma. 21 22 30 100 101 1000',
     'Dr. Who vs. St. Ives etc.',
     'Señor Amadís and Doña Œdipus saw Cæsar in Łódź - Straße, ñ, ŋ.',
-    'In 1972, 1905, 1900, and 2001 - the 1970s and 80\'s - the 1st, 22nd, 3rd, and 12th of 23,000,000 (12,3456).'
+    'In 1972, 1905, 1900, and 2001 - the 1970s and 80\'s - the 1st, 22nd, 3rd, and 12th of 23,000,000 (12,3456).',
+    'At 10:30 a.m., 9:00 p.m., or 6pm, I am paying 50% - $1,234.56, $0.50, $5 million, £1.50, and €20 - in the a.m.'
 ]
 
 
@@ -224,6 +225,46 @@ class TestFrontend(unittest.TestCase):
         self.assertEqual(frontend.number_token_words("80's"), ['eighties'])
         self.assertEqual(frontend.number_token_words('6s'), ['sixes'])
 
+        # Percentages
+        self.assertEqual(frontend.number_token_words('50%'), ['fifty', 'percent'])
+        self.assertEqual(frontend.number_token_words('3.5%'), ['three', 'point', 'five', 'percent'])
+        self.assertEqual(frontend.number_token_words('1972%'), ['one', 'thousand', 'nine', 'hundred', 'seventy', 'two', 'percent'])
+
+    def test_money_words(self):
+        # Dollars and cents
+        self.assertEqual(frontend.money_words('$1,234.56'),
+                         ['one', 'thousand', 'two', 'hundred', 'thirty', 'four', 'dollars', 'and', 'fifty', 'six', 'cents'])
+        self.assertEqual(frontend.money_words('$1.01'), ['one', 'dollar', 'and', 'one', 'cent'])
+        self.assertEqual(frontend.money_words('$1.00'), ['one', 'dollar'])
+        self.assertEqual(frontend.money_words('$0.50'), ['fifty', 'cents'])
+        self.assertEqual(frontend.money_words('$0.00'), ['zero', 'dollars'])
+
+        # Whole amounts, decimals, and scales
+        self.assertEqual(frontend.money_words('$1'), ['one', 'dollar'])
+        self.assertEqual(frontend.money_words('$0'), ['zero', 'dollars'])
+        self.assertEqual(frontend.money_words('$1972'), ['one', 'thousand', 'nine', 'hundred', 'seventy', 'two', 'dollars'])
+        self.assertEqual(frontend.money_words('$1.5'), ['one', 'point', 'five', 'dollars'])
+        self.assertEqual(frontend.money_words('$1 million'), ['one', 'million', 'dollars'])
+        self.assertEqual(frontend.money_words('$2.75\nbillion'), ['two', 'point', 'seven', 'five', 'billion', 'dollars'])
+
+        # Pounds and euros
+        self.assertEqual(frontend.money_words('£1.50'), ['one', 'pound', 'and', 'fifty', 'pence'])
+        self.assertEqual(frontend.money_words('£0.01'), ['one', 'penny'])
+        self.assertEqual(frontend.money_words('€20'), ['twenty', 'euros'])
+
+    def test_time_words(self):
+        self.assertEqual(frontend.time_words('10:30'), ['ten', 'thirty'])
+        self.assertEqual(frontend.time_words('10:05'), ['ten', 'oh', 'five'])
+        self.assertEqual(frontend.time_words('12:00'), ['twelve', "o'clock"])
+        self.assertEqual(frontend.time_words('14:00'), ['fourteen', 'hundred'])
+        self.assertEqual(frontend.time_words('0:00'), ['zero', 'hundred'])
+
+        # With a.m. or p.m.
+        self.assertEqual(frontend.time_words('9:00 p.m.'), ['nine', 'pee', 'em'])
+        self.assertEqual(frontend.time_words('10:30am'), ['ten', 'thirty', 'ay', 'em'])
+        self.assertEqual(frontend.time_words('6pm'), ['six', 'pee', 'em'])
+        self.assertEqual(frontend.time_words('7 a.m'), ['seven', 'ay', 'em'])
+
     def test_text_items(self):
         self.assertEqual(frontend.text_items('Hi, Mr. Lee! 2.5 ‘ok’? ; .'), [
             ('hi', 0), ({'end': 'comma'}, 2), ('mister', 4), ('lee', 8), ({'end': 'exclamation'}, 11), ('two', 13),
@@ -239,6 +280,12 @@ class TestFrontend(unittest.TestCase):
         self.assertEqual(frontend.text_items('1,000,000 1st 4things 12,3456'), [
             ('one', 0), ('million', 0), ('first', 10), ('four', 14), ('things', 15), ('twelve', 22), ({'end': 'comma'}, 24),
             ('thirty', 25), ('four', 25), ('fifty', 25), ('six', 25), ({'end': 'period'}, 29)
+        ])
+
+        # Money, percentages, times, and a.m. - not the word am
+        self.assertEqual(frontend.text_items('$5 million 50% 6pm a.m. am'), [
+            ('five', 0), ('million', 0), ('dollars', 0), ('fifty', 11), ('percent', 11), ('six', 15), ('pee', 15), ('em', 15),
+            ('ay', 19), ('em', 19), ('am', 24), ({'end': 'period'}, 26)
         ])
 
     def test_text_items_accents(self):

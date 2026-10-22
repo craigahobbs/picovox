@@ -51,6 +51,11 @@ test('splitSentences, not sentence ends', () => {
 
     // An abbreviation is case-insensitive; a lone lowercase letter ends a sentence
     assert.deepEqual(sentenceTexts('See VOL. 2. Plan a. Then b.'), [['See VOL. 2.', true], ['Plan a.', false], ['Then b.', false]]);
+
+    // a.m. and p.m. end a sentence only before a word that isn't lowercase
+    assert.deepEqual(sentenceTexts('At 5 p.m. on Monday we met. At 9 a.m. Then 6 P.M. sharp. Go.'), [
+        ['At 5 p.m. on Monday we met.', true], ['At 9 a.m.', false], ['Then 6 P.M. sharp.', false], ['Go.', false]
+    ]);
 });
 
 
@@ -131,4 +136,7 @@ test('speechText', () => {
     assert.equal(speechText('World War II, Henry VIII, and Louis XIV in MDCCCXCII.'), 'World War 2, Henry 8, and Louis 14 in 1892.');
     assert.equal(speechText('I saw DC, CD, MM, and MIX.'), 'I saw DC, CD, MM, and MIX.');
     assert.equal(speechText('IIII, XM, VIVID, Civil, and ii'), 'IIII, XM, VIVID, Civil, and ii');
+
+    // World War I is one, not the pronoun
+    assert.equal(speechText('World War I, WORLD WAR I, and War I'), 'World War 1, WORLD WAR 1, and War I');
 });

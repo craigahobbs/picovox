@@ -1,7 +1,9 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-import {numberTokenWords, numberWords, setPronouncer, textToPhrases, whWords, yearWords} from '../lib/lexicon.js';
+import {
+    moneyWords, numberTokenWords, numberWords, setPronouncer, textToPhrases, timeWords, whWords, yearWords
+} from '../lib/lexicon.js';
 import {strict as assert} from 'node:assert';
 import {g2pModel} from '../lib/models/g2pModel.js';
 import {loadG2p} from '../lib/g2p.js';
@@ -222,6 +224,56 @@ test('lexicon.textToPhrases, numbers', () => {
     assert.deepEqual(textToPhrases('The 1st, 4th of the 1970s').map(wordTexts),
         [['the', 'first'], ['fourth', 'of', 'the', 'nineteen', 'seventies']]);
     assert.deepEqual(wordTexts(textToPhrases('4things 5stars')[0]), ['four', 'things', 'five', 'stars']);
+
+    // Percentages, money (with its scale), and times (the colon isn't a phrase break)
+    assert.deepEqual(wordTexts(textToPhrases('50% of $5 million')[0]), ['fifty', 'percent', 'of', 'five', 'million', 'dollars']);
+    assert.deepEqual(wordTexts(textToPhrases('$5 millions')[0]), ['five', 'dollars', 'millions']);
+    assert.deepEqual(wordTexts(textToPhrases('At 10:30 or 6pm')[0]), ['at', 'ten', 'thirty', 'or', 'six', 'pee', 'em']);
+    assert.deepEqual(textToPhrases('Psalm 119:105').map(wordTexts), [['psalm', 'one', 'hundred', 'nineteen'], ['one', 'hundred', 'five']]);
+
+    // a.m. and p.m. - not the word am, and not inside a word
+    assert.deepEqual(wordTexts(textToPhrases('In the a.m. I am')[0]), ['in', 'the', 'ay', 'em', 'i', 'am']);
+    assert.deepEqual(wordTexts(textToPhrases('At 3 amps')[0]), ['at', 'three', 'amps']);
+    assert.deepEqual(textToPhrases('The a.mile').map(wordTexts), [['the', 'a'], ['mile']]);
+});
+
+
+test('lexicon.moneyWords', () => {
+    // Dollars and cents
+    assert.deepEqual(moneyWords('$1,234.56'),
+        ['one', 'thousand', 'two', 'hundred', 'thirty', 'four', 'dollars', 'and', 'fifty', 'six', 'cents']);
+    assert.deepEqual(moneyWords('$1.01'), ['one', 'dollar', 'and', 'one', 'cent']);
+    assert.deepEqual(moneyWords('$1.00'), ['one', 'dollar']);
+    assert.deepEqual(moneyWords('$0.50'), ['fifty', 'cents']);
+    assert.deepEqual(moneyWords('$0.00'), ['zero', 'dollars']);
+
+    // Whole amounts, decimals, and scales
+    assert.deepEqual(moneyWords('$1'), ['one', 'dollar']);
+    assert.deepEqual(moneyWords('$0'), ['zero', 'dollars']);
+    assert.deepEqual(moneyWords('$1972'), ['one', 'thousand', 'nine', 'hundred', 'seventy', 'two', 'dollars']);
+    assert.deepEqual(moneyWords('$1.5'), ['one', 'point', 'five', 'dollars']);
+    assert.deepEqual(moneyWords('$1 million'), ['one', 'million', 'dollars']);
+    assert.deepEqual(moneyWords('$2.75\nbillion'), ['two', 'point', 'seven', 'five', 'billion', 'dollars']);
+
+    // Pounds and euros
+    assert.deepEqual(moneyWords('£1.50'), ['one', 'pound', 'and', 'fifty', 'pence']);
+    assert.deepEqual(moneyWords('£0.01'), ['one', 'penny']);
+    assert.deepEqual(moneyWords('€20'), ['twenty', 'euros']);
+});
+
+
+test('lexicon.timeWords', () => {
+    assert.deepEqual(timeWords('10:30'), ['ten', 'thirty']);
+    assert.deepEqual(timeWords('10:05'), ['ten', 'oh', 'five']);
+    assert.deepEqual(timeWords('12:00'), ['twelve', 'o\'clock']);
+    assert.deepEqual(timeWords('14:00'), ['fourteen', 'hundred']);
+    assert.deepEqual(timeWords('0:00'), ['zero', 'hundred']);
+
+    // With a.m. or p.m.
+    assert.deepEqual(timeWords('9:00 p.m.'), ['nine', 'pee', 'em']);
+    assert.deepEqual(timeWords('10:30am'), ['ten', 'thirty', 'ay', 'em']);
+    assert.deepEqual(timeWords('6pm'), ['six', 'pee', 'em']);
+    assert.deepEqual(timeWords('7 a.m'), ['seven', 'ay', 'em']);
 });
 
 
@@ -249,6 +301,11 @@ test('lexicon.numberTokenWords', () => {
     assert.deepEqual(numberTokenWords('1900s'), ['nineteen', 'hundreds']);
     assert.deepEqual(numberTokenWords('80\'s'), ['eighties']);
     assert.deepEqual(numberTokenWords('6s'), ['sixes']);
+
+    // Percentages
+    assert.deepEqual(numberTokenWords('50%'), ['fifty', 'percent']);
+    assert.deepEqual(numberTokenWords('3.5%'), ['three', 'point', 'five', 'percent']);
+    assert.deepEqual(numberTokenWords('1972%'), ['one', 'thousand', 'nine', 'hundred', 'seventy', 'two', 'percent']);
 });
 
 

@@ -215,12 +215,25 @@ ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 
         'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen']
 TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety']
 
-# The text's tokens - a word, a number (its thousands grouped by commas or not; with a decimal fraction, or an ordinal or
+# The text's tokens - a.m. or p.m., a word, a time (10:30, 10:30 a.m., 10pm), an amount of money (with its scale - $5
+# million), a number (its thousands grouped by commas or not; with a decimal fraction, a percent sign, or an ordinal or
 # plural suffix), or a punctuation mark (lib/lexicon.js's tokenPattern)
-TOKEN_REGEX = re.compile(r"[a-z][a-z']*\.?|(?:\d{1,3}(?:,\d{3})+(?!\d)|\d+)(?:\.\d+|(?:st|nd|rd|th|'?s)(?![a-z]))?|[.,;:!?]",
-                         re.ASCII)
+DIGITS_PATTERN = r'(?:\d{1,3}(?:,\d{3})+(?!\d)|\d+)'
+MERIDIEM_PATTERN = r'[ap]\.?m\.?(?![a-z])'
+TOKEN_REGEX = re.compile('|'.join([
+    r'[ap]\.m\.?(?![a-z])',
+    r"[a-z][a-z']*\.?",
+    rf'\d{{1,2}}(?::\d{{2}}(?!\d)(?:[ \t]*{MERIDIEM_PATTERN})?|[ \t]*{MERIDIEM_PATTERN})',
+    rf'[$£€]{DIGITS_PATTERN}(?:\.\d+)?(?:[ \t\r\n]+(?:thousand|million|billion|trillion)(?![a-z]))?',
+    rf"{DIGITS_PATTERN}(?:\.\d+%?|%|(?:st|nd|rd|th|'?s)(?![a-z]))?",
+    '[.,;:!?]'
+]), re.ASCII)
 NUMBER_REGEX = re.compile(r'^([\d,]+)(?:\.(\d+))?(\D*)$', re.ASCII)
+MONEY_REGEX = re.compile(r'^(\D)([\d,]+)(?:\.(\d+))?(?:\s+([a-z]+))?$', re.ASCII)
 YEAR_REGEX = re.compile(r'^[1-9]\d{3}$', re.ASCII)
+TIME_REGEX = re.compile(r'^\d+(?::|[ \t]*[ap])', re.ASCII)
+TIME_WORDS_REGEX = re.compile(r'^(\d+)(?::(\d+))?[ \t]*(?:([ap])\.?m\.?)?$', re.ASCII)
+MERIDIEM_REGEX = re.compile(r'^[ap]\.m')
 ACCENTED_REGEX = re.compile('[\u00c0-\u024f]')
 MARKS_REGEX = re.compile('[\u0300-\u036f]')
 PLAIN_LETTERS = {'æ': 'e', 'Æ': 'E', 'œ': 'e', 'Œ': 'E', 'ø': 'o', 'Ø': 'O', 'ł': 'l', 'Ł': 'L', 'đ': 'd', 'Đ': 'D', 'ß': 's'}
@@ -262,19 +275,71 @@ def plural_word(word):
     return f'{word[:-1]}ies' if word.endswith('y') else ('sixes' if word == 'six' else f'{word}s')
 
 
+# A decimal's fraction in words - digit by digit after the point (fractionWords)
+def fraction_words(fraction):
+    return ['point'] + [ONES[int(digit)] for digit in fraction]
+
+
 # A number token's words - its digits (commas grouping its thousands) in words, a four-digit number as a year, a
-# decimal's fraction digit by digit, and an ordinal (1st, 22nd) or a plural (1970s, 70's) as its last word's
-# (numberTokenWords)
+# decimal's fraction digit by digit, a percentage, and an ordinal (1st, 22nd) or a plural (1970s, 70's) as its last
+# word's (numberTokenWords)
 def number_token_words(token):
     digits, fraction, suffix = NUMBER_REGEX.match(token).groups()
     value = int(digits.replace(',', ''))
-    is_ordinal = suffix != '' and not suffix.endswith('s')
-    words = year_words(value) if YEAR_REGEX.match(digits) and fraction is None and not is_ordinal else number_words(value)
+    is_year = YEAR_REGEX.match(digits) and fraction is None and (suffix == '' or suffix.endswith('s'))
+    words = year_words(value) if is_year else number_words(value)
     if fraction is not None:
-        words.extend(['point'] + [ONES[int(digit)] for digit in fraction])
+        words.extend(fraction_words(fraction))
+    if suffix == '%':
+        words.append('percent')
+    elif suffix.endswith('s'):
+        words.append(plural_word(words.pop()))
     elif suffix != '':
-        words.append((ordinal_word if is_ordinal else plural_word)(words.pop()))
+        words.append(ordinal_word(words.pop()))
     return words
+
+
+# The currencies' words - the unit, its plural, the hundredth, its plural (currencies)
+CURRENCIES = {
+    '$': ('dollar', 'dollars', 'cent', 'cents'), '£': ('pound', 'pounds', 'penny', 'pence'), '€': ('euro', 'euros', 'cent', 'cents')
+}
+
+
+# An amount of money's words - $1,234.56 as one thousand two hundred thirty-four dollars and fifty-six cents, $0.50 as
+# fifty cents, $1.5 as one point five dollars, and $5 million as five million dollars (moneyWords)
+def money_words(token):
+    symbol, digits, fraction, scale = MONEY_REGEX.match(token).groups()
+    unit, units, hundredth, hundredths = CURRENCIES[symbol]
+    value = int(digits.replace(',', ''))
+    if fraction is not None and len(fraction) == 2 and scale is None:
+        cents = int(fraction)
+        words = [] if value == 0 and cents != 0 else number_words(value) + [unit if value == 1 else units]
+        if cents != 0:
+            words.extend(([] if not words else ['and']) + number_words(cents) + [hundredth if cents == 1 else hundredths])
+        return words
+    words = number_words(value)
+    if fraction is not None:
+        words.extend(fraction_words(fraction))
+    if scale is not None:
+        words.append(scale)
+    words.append(unit if value == 1 and fraction is None and scale is None else units)
+    return words
+
+
+# The letters of a.m. and p.m. as words (meridiemWords)
+MERIDIEM_WORDS = {'a': ['ay', 'em'], 'p': ['pee', 'em']}
+
+
+# A time's words - 10:30 as ten thirty, 10:05 as ten oh five, 10:00 as ten o'clock (14:00 as fourteen hundred), and
+# with a.m. or p.m. (10:00 p.m. and 10pm as ten pee em) (timeWords)
+def time_words(token):
+    hours, minutes, meridiem = TIME_WORDS_REGEX.match(token).groups()
+    words = number_words(int(hours))
+    if minutes is not None and int(minutes) != 0:
+        words.extend(['oh', ONES[int(minutes)]] if int(minutes) < 10 else number_words(int(minutes)))
+    elif meridiem is None:
+        words.append("o'clock" if 1 <= int(hours) <= 12 else 'hundred')
+    return words if meridiem is None else words + MERIDIEM_WORDS[meridiem]
 
 
 # The context marks of the phrase ends - a phrase end's item in the context sequence (the context network's input)
@@ -303,8 +368,14 @@ def text_items(text):
 
     for match in TOKEN_REGEX.finditer(plain_letters(text).lower().replace('‘', '\'').replace('’', '\'')):
         token, offset = match.group(0), match.start()
-        if '0' <= token[0] <= '9':
+        if TIME_REGEX.match(token):
+            items.extend((word, offset) for word in time_words(token))
+        elif '0' <= token[0] <= '9':
             items.extend((word, offset) for word in number_token_words(token))
+        elif token[0] in CURRENCIES:
+            items.extend((word, offset) for word in money_words(token))
+        elif MERIDIEM_REGEX.match(token):
+            items.extend((word, offset) for word in MERIDIEM_WORDS[token[0]])
         elif 'a' <= token[0] <= 'z':
             bare = token[:-1] if token.endswith('.') else token
             if bare in ABBREVIATIONS:
