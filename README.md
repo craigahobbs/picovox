@@ -249,9 +249,9 @@ make commit      # the package's unit tests (100% coverage), lint, and API docum
 make test        # the package's unit tests (TEST='name' runs one)
 make -C train commit      # the training's gate alone - its unit tests, pylint, and 100% branch coverage
 make -C train test TEST=tests.test_params    # one test module of the training's
-make train       # retrain the voice model (see below)
-make -j train-check # check that the committed G2P and heteronym relabels reproduce (standalone)
-make -j train-g2p   # the G2P chain alone, for G2P work
+make -j train             # train both models - the G2P and the voice - each gated, then installed in lib/models/ (see below)
+make -j train-voice       # the voice alone; make -j train-voice-check - trained and gated, not installed
+make -j train-g2p         # the G2P alone, on every core; make -j train-g2p-check - trained and gated, not installed
 ```
 
 The training pipeline is a Python package, `picovox_train` (`train/src/picovox_train/` - `picovox_train/<module>.py`
@@ -362,8 +362,8 @@ build/venv-listeners/bin/python -I picovox_train/listeners.py [--no-mos] [--no-e
 
 The models load once per run (4-7 s) and then score about 35 seconds of speech a second (6 sentences) on an M3 Max's
 GPU (MPS, the default on Apple silicon - about 3x the CPU, with the same scores). Files longer than 20 s are scored in
-chunks. The models download on first use - about 1.5 GB, into `build/listeners/` (torch.hub, Hugging Face) - and
-later runs need no network.
+chunks. The models download on first use - about 1.5 GB, into `data/listeners/` (torch.hub, Hugging Face; like the corpora,
+`make clean` keeps them) - and later runs need no network.
 
 The environment is built with `python3` (3.14 here; 3.12 also works - `make listeners PYTHON_VENV=python3.12`). Its
 packages are pinned in `requirements/listeners.txt`: PyTorch 2.14, torchaudio 2.11 (resampling, for UTMOS),
@@ -386,30 +386,35 @@ Speaker similarity: every human pair 0.0-0.48; halves of one human speaker's rec
 ## make train
 
 `make train` recreates the generated models - `lib/models/g2pModel.js` and `lib/models/voiceModel.js` - from a clean
-checkout, by one recipe, `data/nn/train.json` (every stage's settings and seeds). Each stage is a stamp in
+checkout, by one recipe, `data/nn/train.json` (every stage's settings and seeds): `make train-g2p` and `make
+train-voice` at once. Each model's training ends in its gate, then its install - `make train-g2p-check` and `make
+train-voice-check` train and gate a model without installing it. The G2P is deterministic, so its gate is that it
+reproduces the committed module (identical below the comment header, else within the recipe's tolerances), and its
+install replaces `lib/models/g2pModel.js` only when it differs; the voice's gate is the listener panel against the
+shipped model. The voice data is built with the committed G2P (a G2P installed that differs makes the next `make train`
+rebuild the voice). Each stage is a stamp in
 `build/train/` (`TRAIN_DIR`), so `make -j train` runs independent stages at once; the GPU stages run one at a time
 (`picovox_train/gpulock.py` - two at once each run at about half speed) while the CPU stages run beside them:
 
 | Stage | Runs on | Needs |
 | --- | --- | --- |
 | corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D | network | |
-| g2p-network, context-labels, context-network, g2p - the G2P retrain (the network; the heteronym labels from the pinned books; the context network and its cross-validation; the reading stage and export), checked to reproduce `lib/models/g2pModel.js` | CPU - the network one core, ~30 min | corpora (the labels) |
-| heteronyms - the relabeled words, checked to reproduce `data/nn/g2p-relabel.json` | CPU, ~6 min | corpora |
 | data-multi - the readers' training data (the pool: `data/nn/speakers.json`) | CPU (every core) | corpora, `lib/models/g2pModel.js` |
 | cremad-align, data-cremad - the emotional speech | GPU 2 min, CPU 1 min | corpora |
 | teacher-a, teacher-b - the teacher (`picovox_train.trainmulti --recipe teacher.a`, `teacher.b`) | GPU | the data |
 | teacher-eval - the teacher through the listener panel | CPU | teacher-b |
 | targets, student, polish - the distilled student (`picovox_train.distill`) | GPU | teacher-b |
-| student-eval - the panel and the gate (`picovox_train.distill pick --against baseline`: no worse than the shipped model) | CPU | polish, teacher-eval |
+| baseline-eval - the shipped model through the panel, beside the student's GPU stages | CPU | teacher-eval |
+| student-eval - the panel and the gate (`picovox_train.distill pick --against baseline`: no worse than the shipped model) | CPU | polish, baseline-eval |
 | package - `lib/models/voiceModel.js`, with its provenance | CPU | student-eval (after samples-reference) |
+| heteronyms - the relabeled words, checked to reproduce `data/nn/g2p-relabel.json` (the G2P network's input) | CPU, ~6 min | corpora (after data-multi) |
+| g2p-network, context-labels, context-network, g2p - the G2P (the network; the heteronym labels from the pinned books; the context network and its cross-validation; the reading stage, the export, and the gate) | CPU - the network one core, ~30 min | corpora (the labels, after data-multi) |
+| g2p-install - `lib/models/g2pModel.js`, when the gated module differs from it | CPU | g2p, heteronyms |
 | samples-reference, samples-teacher-a, -teacher-b, -student, -polish - the listening samples | CPU, under a minute each | the shipped model (after data-multi); each stage's model |
 
 The critical path - the readers' data (7.3 minutes), teacher A (28.6) and B (20.4), the targets (3.6), the student
 (4.9) and its polish (4.4), the gate, the package (2.0) - took 71 minutes from scratch on an M3 Max on full power (94
-W; the corpora downloaded once before), with the G2P chain beside it; without it - make train-check now runs it
-standalone - teacher A takes about 19, so about 62. The voice data is built with the committed G2P; make train-check
-reproduces the G2P and checks its module against the committed `lib/models/g2pModel.js` (identical, else within the
-recipe's tolerances - it never replaces it), and the heteronym relabeling against `data/nn/g2p-relabel.json`. The
+W; the corpora downloaded once before), with the G2P chain beside it (alone, teacher A took about 19). The
 package's manifest records its provenance: the commit, the recipe's and the training data's hashes, and the gate's
 scores. `python -m picovox_train.smoke` runs every stage's entry point for a few steps on the CPU.
 
@@ -446,8 +451,8 @@ retrain (`python -m picovox_train.books pin NAME` records the new text's hash an
 or the distillation set change with it, so make train no longer reproduces the committed models byte for byte). The
 fetch alone, for every pinned text: `python -m picovox_train.books fetch`.
 
-`make -j train-g2p` runs the G2P chain alone - its four stages, without the voice stages or make train's ordering after
-the readers' data build - for G2P work. The chain's independent parts run in `G2P_JOBS` worker processes - the context
+`make -j train-g2p` runs the G2P alone - its stages, without the voice stages or make train's ordering after the
+readers' data build - for G2P work. The chain's independent parts run in `G2P_JOBS` worker processes - the context
 labels' aligned readings (by utterance) and part-of-speech tags (by book), and cross-validate's ten folds (each one
 thread) - and the context network and its cross-validation run beside the G2P network; every output is the same for any
 count. Inside make train the chain runs beside the GPU stages, which CPU work slows (the Makefile's `BESIDE`), so
@@ -462,7 +467,11 @@ network - with the context network's four teachers, each fold's too, they took 2
 `make train` first checks the power (`tools/trainpower.sh`, macOS laptops): the run keeps the GPU busy for hours, and
 an M3 Max under it draws about 85 W, so on battery or an adapter under 90 W (`TRAIN_MIN_WATTS`) it says so and, at a
 terminal, waits for Enter - plug in a bigger adapter first (Apple's 96 W or 140 W - a 14-inch MacBook Pro negotiates
-about 94 W from either). `TRAIN_POWER_CHECK=0` skips it. `make train`, `train-check`, and `train-g2p` keep the Mac awake
+about 94 W from either). `TRAIN_POWER_CHECK=0` skips it. Even on full power, a 14-inch M3 Max throttles: about 2.5
+minutes into a GPU stage at about 70 W, macOS's thermal pressure reaches moderate, then heavy, the system is held near
+40 W, and a teacher step takes about 0.12 s instead of 0.078 (October 2026 - every teacher A, both seeds, from step
+about 2,000). `TRAIN_DIR/util.log` records the system's power and the thermal pressure, and the dashboard shows the time
+throttled. `make train` and its targets (`train-voice`, `train-g2p`, and their `-check`s) keep the Mac awake
 until they exit (`caffeinate -i -s` - on AC power, with the lid closed too): idle sleep once paused a run's teacher B
 for 28 minutes.
 
@@ -648,11 +657,11 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context cross-
 are the same for any count. `cross-validate` keeps a fold's results only when they are from the same labels and
 settings.)
 
-The settings are `data/nn/train.json`'s `context` section. `make train-check` runs all of it (the voice stages use the
-committed `lib/models/g2pModel.js`) and checks its module with `picovox_train.context check`: identical to the
+The settings are `data/nn/train.json`'s `context` section. `make train-g2p` runs all of it (the voice stages use the
+committed `lib/models/g2pModel.js`) and gates its module with `picovox_train.context check`: identical to the
 committed module below the comment header (the stages are deterministic on the same inputs), else within the recipe's
-tolerances (the regression set, the book error, the top-10K, the monitoring WER) - it never replaces the committed
-module. The books are pinned (`data/nn/books.json` - see make train), so a clean run reproduces the committed module.
+tolerances (the regression set, the book error, the top-10K, the monitoring WER) - then `picovox_train.context install`
+replaces the committed module only when it differs (`make train-g2p-check` stops at the gate). The books are pinned (`data/nn/books.json` - see make train), so a clean run reproduces the committed module.
 
 The labels (`picovox_train/contextlabels.py`, with the curated part in `data/nn/context-labels.json`) come from three
 sources: the LibriTTS-R readers' readings by the forced alignments; part-of-speech tags over the Project Gutenberg books

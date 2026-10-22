@@ -253,6 +253,12 @@ async function refreshRuns() {
             'modified': Math.max(jsonLog?.modified || 0, textLog?.modified || 0)
         });
     }
+    // make train's runs (TRAIN_DIR/runs/, loaded by the Train tab - each stopped at its recipe's stop) as "make train/<run>"
+    for (const run of trainRuns.values()) {
+        if (!run.waiting) {
+            runs.set(`make train/${run.name}`, {...run, 'name': `make train/${run.name}`});
+        }
+    }
     // First-seen order - each run's place is fixed when the page first sees it (remembered per browser)
     let changed = false;
     for (const run of runs.values()) {
@@ -279,6 +285,7 @@ async function refreshRuns() {
 // the done ones (finished, stopped, or failed), each newest first by first-seen order (so a run that finishes moves to
 // the done runs, and the others keep their places)
 const runGroupSpecs = [
+    {'title': 'make train', 'prefixes': ['make train/'], 'open': true},
     {'title': 'Multi-speaker voice', 'prefixes': ['multi-'], 'open': true},
     {'title': 'G2P', 'prefixes': ['g2p-'], 'open': false},
     {'title': 'Voice students (distilled and from scratch)', 'prefixes': ['distill-', 'scratch-'], 'open': true},
@@ -330,7 +337,8 @@ function renderRuns() {
     }
     setTabFact('tabFactTraining', trainingFact);
     if (runs.size === 0) {
-        runsElement.replaceChildren(make('p', 'empty', 'No runs yet - training writes to build/nn/runs/<run>/.'));
+        runsElement.replaceChildren(make('p', 'empty',
+            'No runs yet - make train writes to build/train/runs/<run>/, experiments to build/nn/runs/<run>/.'));
         return;
     }
     let groupsOpen = {};
@@ -1640,7 +1648,8 @@ function renderSamples(allFiles) {
 }
 
 
-// make train (the Train tab) - pipeline.json's train: {dir (TRAIN_DIR, default build/train), log (make's output - for a
+// make train (the Train tab) - pipeline.json's train: {dir (TRAIN_DIR, default build/train - the page's ?train=DIR
+// overrides it, for another checkout's or worktree's run, so pipeline.json never names one run), log (make's output - for a
 // run without stage events, its stages are inferred from it and the stamps), logs (other make logs, searched for
 // failures and checks), util (default TRAIN_DIR/util.log), target (the make target, else the log's), manifest (default
 // data/nn/train-stages.json), compare ({run: the reference run in build/nn/runs/ drawn faded behind it})}
@@ -1703,6 +1712,10 @@ async function loadStamps(dirUrl) {
 // null (no stage manifest)
 async function loadTrain() {
     const config = {'dir': 'build/train', ...pipeline?.train};
+    const dirParameter = new URLSearchParams(window.location.search).get('train');
+    if (dirParameter) {
+        config.dir = dirParameter;
+    }
     const dirUrl = new URL(`${config.dir.replace(/\/$/, '')}/`, rootUrl);
     const manifestResult = await fetchText(new URL(config.manifest ?? 'data/nn/train-stages.json', rootUrl));
     if (manifestResult === null) {
@@ -1741,6 +1754,14 @@ async function loadTrain() {
             stageLogs.set(stage.stage, result);
         }
     }));
+    // (a running stage's progress from its log - the manifest's progress)
+    const progress = new Map();
+    await Promise.all(manifest.stages.filter((stage) => stage.progress && events.has(stage.stage)).map(async (stage) => {
+        const result = await fetchText(new URL(stage.progress.log, dirUrl));
+        if (result !== null) {
+            progress.set(stage.stage, trainModel.logProgress(result.text, stage.progress));
+        }
+    }));
     // (a GPU stage waiting for the GPU lock - its last gpulock line is "waiting")
     const queued = new Set([...stageLogs].filter(([, result]) => (
         /^gpulock: waiting/.test(lastMatch([result.text], /^gpulock: /) || '')
@@ -1748,7 +1769,7 @@ async function loadTrain() {
     const utilFresh = utilResult !== null && Date.now() - utilResult.modified < 90000;
     const alive = utilFresh || (makeResult !== null && Date.now() - makeResult.modified < 10 * 60000);
     const extraTexts = extra.filter((result) => result !== null).map((result) => result.text);
-    // (the run's target and start - make train, train-check, or train-g2p records them in stages.jsonl)
+    // (the run's target and start - make train and its targets record them in stages.jsonl)
     const runTarget = eventsResult === null ? null : trainModel.parseRunTarget(eventsResult.text);
     const states = trainModel.stageStates(manifest, {events, stamps, segments, 'errorTexts': extraTexts, alive, queued,
         'target': config.target ?? runTarget?.target, 'started': runTarget?.time});
@@ -1787,7 +1808,7 @@ async function loadTrain() {
             }
         }
         if (started && state.start !== null) {
-            return Math.max(stage.minutes - (now - state.start) / 60000, 1);
+            return trainModel.stageMinutesLeft(stage, state, now, progress.get(stage.stage));
         }
         return stage.minutes;
     };
@@ -1797,7 +1818,11 @@ async function loadTrain() {
     const start = Math.min(segments[0]?.start ?? Infinity, firstEvent, ...starts);
     const counted = [...states.values()].filter((state) => state.status !== 'skipped');
     let status = 'waiting';
-    if (counted.length !== 0 && counted.every((state) => state.status === 'done')) {
+    // (no record at all in TRAIN_DIR - not a run waiting to start, but the wrong directory or no make train yet)
+    const recorded = eventsResult !== null || utilResult !== null || makeResult !== null || stamps.size !== 0;
+    if (!recorded) {
+        status = `no make train record in ${config.dir}/ - start make train, or open the dashboard with ?train=DIR`;
+    } else if (counted.length !== 0 && counted.every((state) => state.status === 'done')) {
         status = 'finished';
     } else if (counted.some((state) => state.status === 'failed')) {
         status = 'failed';
@@ -1810,8 +1835,9 @@ async function loadTrain() {
     const samples = utilResult === null ? [] : trainModel.parseUtilLog(utilResult.text, Number.isFinite(start) ? start : now);
 
     // The gates' results - the evaluations (picovox_train.distill eval and pick) and the checks in the logs
-    const [teacherResult, studentResult, summaryResult] = await Promise.all(['distill/eval/teacher/result.json',
-        'distill/eval/student/result.json', 'distill/summary.json'].map((path) => fetchText(new URL(path, dirUrl))));
+    const [teacherResult, baselineResult, studentResult, summaryResult] = await Promise.all(['distill/eval/teacher/result.json',
+        'distill/eval/baseline/result.json', 'distill/eval/student/result.json', 'distill/summary.json'].
+        map((path) => fetchText(new URL(path, dirUrl))));
     const parse = (result) => {
         try {
             return result === null ? null : JSON.parse(result.text);
@@ -1825,6 +1851,7 @@ async function loadTrain() {
         'g2pCheck': lastMatch(texts('g2p'), /^check: .*g2pModel/),
         'g2pFolds': lastMatch(texts('context-network'), /^\d+ folds: /),
         'teacher': parse(teacherResult),
+        'baseline': parse(baselineResult),
         'student': parse(studentResult),
         'summary': parse(summaryResult)
     };
@@ -1842,7 +1869,7 @@ async function loadTrain() {
         addLog(`logs/${name}.log`, new URL(`logs/${encodeURIComponent(name)}.log`, dirUrl));
     }
     addLog(config.util ?? 'util.log', config.util ? new URL(config.util, rootUrl) : new URL('util.log', dirUrl));
-    return {config, manifest, states, plan, samples, alive, start, end, status, gates, logFiles, now};
+    return {config, manifest, states, plan, samples, alive, start, end, status, gates, logFiles, now, progress};
 }
 
 
@@ -1892,14 +1919,30 @@ function stageProgress(stage, state, data) {
     if (state.status === 'running' || state.status === 'stopped') {
         let fraction = null;
         const entries = run && !run.waiting ? run.entries.train || [] : [];
+        const counted = data.progress.get(stage.stage);
+        let over = false;
         if (entries.length !== 0 && run.info.targetSteps) {
             fraction = Math.min(1, entries[entries.length - 1].step / run.info.targetSteps);
+        } else if (counted && counted.done !== 0) {
+            ({fraction} = counted);
         } else if (state.start !== null) {
+            // (past its expected time with no progress to measure - say so, not "99%")
             fraction = Math.min(0.99, (data.now - state.start) / 60000 / stage.minutes);
+            over = (data.now - state.start) / 60000 > stage.minutes;
         }
         const left = data.plan.finishes.get(stage.stage) - data.now;
-        const percent = fraction === null ? '' : `${Math.round(100 * fraction)}%`;
-        const label = state.status === 'stopped' ? `stopped ${percent}` : `${percent} · ${formatDuration(left / 1000)} left`;
+        let percent = fraction === null ? '' : `${Math.round(100 * fraction)}%`;
+        if (counted) {
+            percent = `${percent} (${counted.done} of ${counted.total})`;
+        } else if (over) {
+            percent = 'over its expected time';
+        }
+        let label = `${percent} · ${formatDuration(left / 1000)} left`;
+        if (state.status === 'stopped') {
+            label = `stopped ${percent}`;
+        } else if (over) {
+            label = percent;
+        }
         return {label, fraction};
     }
     const labels = {'waiting': 'waiting', 'queued': 'queued for the GPU', 'done': 'done', 'failed': 'failed',
@@ -1990,8 +2033,9 @@ function buildTrain(manifest) {
         {'key': 'heteronyms', 'title': 'Heteronym relabeling reproduces data/nn/g2p-relabel.json', 'stage': 'heteronyms'},
         {'key': 'g2p', 'title': 'G2P check - the retrained context G2P against lib/models/g2pModel.js', 'stage': 'g2p'},
         {'key': 'teacher', 'title': 'The teacher on the listener panel', 'stage': 'teacher-eval'},
+        {'key': 'baseline', 'title': 'The shipped model on the listener panel (the gate\'s baseline)', 'stage': 'baseline-eval'},
         {'key': 'student', 'title': 'The student on the listener panel', 'stage': 'student-eval'},
-        {'key': 'pick', 'title': 'The gate - picovox_train.distill pick: the student within the teacher\'s tolerance',
+        {'key': 'pick', 'title': 'The gate - picovox_train.distill pick: the student within the tolerance of the shipped model',
             'stage': 'student-eval'}
     ];
     const gates = new Map();
@@ -2029,7 +2073,7 @@ function gateState(gate, data) {
         const folds = gate.key === 'g2p' && gates.g2pFolds ? ` · held-out context: ${gates.g2pFolds}` : '';
         return {'status': failed ? 'failed' : 'done', 'label': failed ? 'failed' : 'passed', 'line': `${line}${folds}`};
     }
-    if (gate.key === 'teacher' || gate.key === 'student') {
+    if (gate.key === 'teacher' || gate.key === 'baseline' || gate.key === 'student') {
         const result = gates[gate.key];
         return result === null ? waitingFor : {'status': 'done', 'label': 'scored', 'line': panel(result)};
     }
@@ -2126,13 +2170,15 @@ function renderTrain(force = false) {
         const doneCount = members.filter((stage) => states.get(stage.stage).status === 'done').length;
         const active = members.filter((stage) => ['running', 'queued', 'failed', 'stopped'].includes(states.get(stage.stage).status));
         let groupStatus = 'waiting';
-        if (members.length === 0 || doneCount === members.length) {
+        if (members.length === 0) {
+            groupStatus = 'skipped';
+        } else if (doneCount === members.length) {
             groupStatus = 'done';
         } else if (active.length !== 0 || doneCount !== 0) {
             groupStatus = 'running';
         }
         group.element.className = `phase ${groupStatus}`;
-        const groupFraction = total ? done / total : 1;
+        const groupFraction = total ? done / total : 0;
         const groupFacts = `${Math.round(100 * groupFraction)}% of ~${formatDuration(total * 60)}`;
         group.facts.textContent = members.length === 0 ? 'not in this run' : groupFacts;
         group.fill.style.width = `${(100 * groupFraction).toFixed(1)}%`;
@@ -2142,7 +2188,8 @@ function renderTrain(force = false) {
         group.now.title = nowText;
         const all = manifest.stages.filter((stage) => stage.group === group.name).length;
         const skipped = all !== members.length ? ` (${all - members.length} not in this run)` : '';
-        group.count.textContent = `${doneCount} of ${members.length} stages done${skipped}`;
+        group.count.textContent = members.length === 0 ? `${all} stages, none in this run's make target` :
+            `${doneCount} of ${members.length} stages done${skipped}`;
     }
 
     // The gates
@@ -2184,20 +2231,36 @@ function renderUtilization(data, force) {
     if (last) {
         const memory = Number.isFinite(last.mem) ? ` · memory ${Math.round(last.mem)}%` : '';
         const ago = formatDuration((data.now - last.time) / 1000);
-        facts.push(`now CPU ${Math.round(last.cpu)}% · GPU ${Math.round(last.gpu)}%${memory} (${ago} ago)`);
+        let battery = '';
+        if (last.powerIn - last.system >= 5) {
+            battery = ' - charging the battery';
+        } else if (last.system - last.powerIn >= 5) {
+            battery = ' - draining the battery';
+        }
+        let power = Number.isFinite(last.system) ?
+            ` · system ${Math.round(last.system)} W (in ${Math.round(last.powerIn)} W${battery})` : '';
+        if (Number.isFinite(last.thermal)) {
+            power += ` · thermal pressure ${trainModel.thermalLevels[last.thermal] ?? last.thermal}`;
+        }
+        facts.push(`now CPU ${Math.round(last.cpu)}% · GPU ${Math.round(last.gpu)}%${memory}${power} (${ago} ago)`);
         const mean = trainModel.meanUtilization(samples, -Infinity, Infinity);
         // GPU idle time - the intervals between samples starting under 10% (gaps over 3 minutes aren't counted)
+        // (and the time the Mac was throttled - trainModel.throttled)
         let idle = 0;
+        let limited = 0;
         let sampled = 0;
         samples.slice(1).forEach((sample, index) => {
             const interval = sample.time - samples[index].time;
             if (interval <= 180000) {
                 sampled += interval;
                 idle += samples[index].gpu < 10 ? interval : 0;
+                limited += trainModel.throttled(samples[index]) ? interval : 0;
             }
         });
+        const limitedText = limited === 0 ? '' : ` · throttled (thermal pressure moderate or higher - the GPU stages about 50% ` +
+            `slower) ${formatDuration(limited / 1000)}`;
         facts.push(`run mean CPU ${Math.round(mean.cpu)}% · GPU ${Math.round(mean.gpu)}% · GPU idle ${formatDuration(idle / 1000)} of ` +
-            `${formatDuration(sampled / 1000)} sampled`);
+            `${formatDuration(sampled / 1000)} sampled${limitedText}`);
     } else {
         facts.push('no samples yet - make train writes TRAIN_DIR/util.log');
     }

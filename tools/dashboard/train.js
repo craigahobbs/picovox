@@ -34,7 +34,7 @@ export function stageOrder(manifest) {
 
 
 // The stages a make target builds - a stage and every stage it needs, or one of the manifest's targets (make train,
-// train-check, train-g2p: their stages and every stage those need); an unknown target - every stage
+// train-voice, train-g2p, and their -checks: their stages and every stage those need); an unknown target - every stage
 export function targetStages(manifest, target) {
     const byName = new Map(manifest.stages.map((stage) => [stage.stage, stage]));
     const roots = manifest.targets?.[target] ?? (byName.has(target) ? [target] : null);
@@ -51,7 +51,7 @@ export function targetStages(manifest, target) {
 }
 
 
-// The latest make target recorded in stages.jsonl ({"event": "target", ...} - make train, train-check, train-g2p) -
+// The latest make target recorded in stages.jsonl ({"event": "target", ...} - make train or one of its targets) -
 // {target, time (ms)}, or null
 export function parseRunTarget(text) {
     let latest = null;
@@ -126,7 +126,9 @@ export function parseMakeLog(text) {
 
 
 // Parse util.log (tools/trainutil.sh, or an earlier sampler's "HH:MM:SS cpu gpu stages" lines dated from baseTime) -
-// [{time, cpu, gpu, mem}] - each header line names the columns
+// [{time, cpu, gpu, mem, system, powerIn, thermal}] (system and powerIn - the system's power and the power it takes in,
+// watts; thermal - macOS's thermal pressure level, 0 nominal to 4; NaN when not sampled) - each header line names the
+// columns
 export function parseUtilLog(text, baseTime) {
     const samples = [];
     let columns = ['time', 'cpu_busy%', 'gpu%', 'mem_used%'];
@@ -139,8 +141,8 @@ export function parseUtilLog(text, baseTime) {
             continue;
         }
         const header = columns;
-        const indexes = ['cpu_busy%', 'gpu%', 'mem_used%'].map((name) => header.indexOf(name));
-        const [cpu, gpu, mem] = indexes.map((index) => (index === -1 ? NaN : Number(fields[index])));
+        const indexes = ['cpu_busy%', 'gpu%', 'mem_used%', 'system_w', 'power_in_w', 'thermal'].map((name) => header.indexOf(name));
+        const [cpu, gpu, mem, system, powerIn, thermal] = indexes.map((index) => (index === -1 ? NaN : Number(fields[index])));
         let time;
         if (fields[0].includes('T')) {
             time = parseLocalTime(fields[0]);
@@ -157,9 +159,40 @@ export function parseUtilLog(text, baseTime) {
             continue;
         }
         previous = time;
-        samples.push({time, cpu, gpu, mem});
+        samples.push({time, cpu, gpu, mem, system, powerIn, thermal});
     }
     return samples;
+}
+
+
+// macOS's thermal pressure levels (com.apple.system.thermalpressurelevel)
+export const thermalLevels = ['nominal', 'moderate', 'heavy', 'trapping', 'sleeping'];
+
+
+// A sample with the Mac throttled - thermal pressure moderate or higher: the system's power held down (a 14-inch M3 Max
+// from about 70 W to 40 W) and the GPU stages about 50% slower
+export function throttled(sample) {
+    return sample.thermal >= 1;
+}
+
+
+// A stage's progress from its log (the manifest's progress: {log, pattern, total} - the log's lines matching the pattern
+// are its finished parts, of total) - {done, total, fraction}
+export function logProgress(text, progress) {
+    const pattern = new RegExp(progress.pattern);
+    const done = text.split('\n').filter((line) => pattern.test(line)).length;
+    return {done, 'total': progress.total, 'fraction': Math.min(1, done / progress.total)};
+}
+
+
+// A started stage's remaining minutes without a training run's steps - from its progress (its log's finished parts, at
+// its pace so far), else its expected minutes less its time so far; at least a minute while it runs
+export function stageMinutesLeft(stage, state, now, progress) {
+    const elapsed = (now - state.start) / 60000;
+    if (progress && progress.done !== 0) {
+        return Math.max(elapsed * (1 - progress.fraction) / progress.fraction, progress.fraction < 1 ? 1 : 0);
+    }
+    return Math.max(stage.minutes - elapsed, 1);
 }
 
 

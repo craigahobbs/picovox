@@ -64,11 +64,11 @@ Local Makefile overrides:
 - `commit` - also runs the training package's gate (`commit-train`: `make -C train commit`); `make clean` cleans it too
 
 `make commit` (test, lint, doc, cover, and the training's gate) is the gate before committing. `npm pack --dry-run`
-lists the package's files (`package.json` `files`: `lib/`). `make train` rebuilds the generated models from the recipe
-(`data/nn/train.json`, with its book texts pinned in `data/nn/books.json` - a revised text fails the fetch, never trains);
-`make -j train-check` reproduces and checks the committed G2P and heteronym relabels standalone (not part of make
-train - beside its GPU stages they cost teacher A about 9 minutes), `make -j train-g2p` the G2P chain alone
-(`G2P_STANDALONE_JOBS` workers); `PYTHONPATH=train/src
+lists the package's files (`package.json` `files`: `lib/`). `make -j train` trains both generated models from the recipe
+(`data/nn/train.json`, with its book texts pinned in `data/nn/books.json` - a revised text fails the fetch, never trains):
+`make -j train-g2p` (the G2P and the heteronym relabeling, CPU - `G2P_STANDALONE_JOBS` workers alone) and `make -j
+train-voice` at once, each model gated, then installed in `lib/models/` (the G2P only when it differs from the committed
+module); `make -j train-g2p-check` and `train-voice-check` stop at the gate; `PYTHONPATH=train/src
 build/venv-nn/bin/python -B -m picovox_train.smoke` runs every training entry point for a few steps on the CPU.
 
 ## python-build (train/)

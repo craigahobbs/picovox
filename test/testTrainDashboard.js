@@ -3,6 +3,7 @@
 
 import * as train from '../tools/dashboard/train.js';
 import {strict as assert} from 'node:assert';
+import {readFileSync} from 'node:fs';
 import test from 'node:test';
 
 
@@ -124,16 +125,55 @@ test('train.parseUtilLog', () => {
         'garbage',
         'time cpu_busy% gpu% mem_used% stages',
         '2026-10-17T00:00:40 70 0 40.5 teacher',
+        'time cpu_busy% gpu% mem_used% system_w power_in_w thermal stages',
+        '2026-10-17T00:01:00 10 90 41.0 35.3 48.3 2 teacher-a',
+        '2026-10-17T00:01:20 10 90 41.0 - - - teacher-a',
         ''
     ].join('\n');
     const samples = train.parseUtilLog(text, time('08:00:00'));
     assert.deepEqual(samples, [
-        {'time': time('23:59:40'), 'cpu': 50, 'gpu': 90, 'mem': NaN},
-        {'time': time('23:59:40') + 30000, 'cpu': 60, 'gpu': 80, 'mem': NaN},
-        {'time': time('23:59:40') + 60000, 'cpu': 70, 'gpu': 0, 'mem': 40.5}
+        {'time': time('23:59:40'), 'cpu': 50, 'gpu': 90, 'mem': NaN, 'system': NaN, 'powerIn': NaN, 'thermal': NaN},
+        {'time': time('23:59:40') + 30000, 'cpu': 60, 'gpu': 80, 'mem': NaN, 'system': NaN, 'powerIn': NaN, 'thermal': NaN},
+        {'time': time('23:59:40') + 60000, 'cpu': 70, 'gpu': 0, 'mem': 40.5, 'system': NaN, 'powerIn': NaN, 'thermal': NaN},
+        {'time': time('23:59:40') + 80000, 'cpu': 10, 'gpu': 90, 'mem': 41, 'system': 35.3, 'powerIn': 48.3, 'thermal': 2},
+        {'time': time('23:59:40') + 100000, 'cpu': 10, 'gpu': 90, 'mem': 41, 'system': NaN, 'powerIn': NaN, 'thermal': NaN}
     ]);
-    assert.deepEqual(train.meanUtilization(samples, -Infinity, Infinity), {'cpu': 60, 'gpu': 170 / 3, 'count': 3});
+    assert.deepEqual(train.meanUtilization(samples.slice(0, 3), -Infinity, Infinity), {'cpu': 60, 'gpu': 170 / 3, 'count': 3});
     assert.deepEqual(train.meanUtilization(samples, 0, 1), {'cpu': NaN, 'gpu': NaN, 'count': 0});
+});
+
+
+test('train.logProgress', () => {
+    const progress = {'log': 'train.log', 'pattern': 'step (\\d+)/\\1 done', 'total': 4};
+    const text = 'step 5/10\nstep 10/10 done\nfold 1: step 10/10 done\nstep 3/10 done\n';
+    assert.deepEqual(train.logProgress(text, progress), {'done': 2, 'total': 4, 'fraction': 0.5});
+    assert.deepEqual(train.logProgress('', progress), {'done': 0, 'total': 4, 'fraction': 0});
+    assert.equal(train.logProgress('step 1/1 done\n'.repeat(5), progress).fraction, 1);
+});
+
+
+test('train.stageMinutesLeft', () => {
+    const stage = {'stage': 'context', 'minutes': 25};
+    const state = {'status': 'running', 'start': 0, 'end': null};
+    const minutes = 60000;
+    // By its progress - 20 of 55 parts in 40 minutes
+    assert.equal(train.stageMinutesLeft(stage, state, 40 * minutes, {'done': 20, 'total': 55, 'fraction': 20 / 55}), 70);
+    // Done, and nearly done (at least a minute)
+    assert.equal(train.stageMinutesLeft(stage, state, 40 * minutes, {'done': 55, 'total': 55, 'fraction': 1}), 0);
+    assert.equal(train.stageMinutesLeft(stage, state, 40 * minutes, {'done': 54, 'total': 55, 'fraction': 54 / 55}), 1);
+    // No progress yet, or none to measure - its expected minutes less its time so far (at least a minute)
+    assert.equal(train.stageMinutesLeft(stage, state, 10 * minutes, {'done': 0, 'total': 55, 'fraction': 0}), 15);
+    assert.equal(train.stageMinutesLeft(stage, state, 60 * minutes, undefined), 1);
+});
+
+
+test('train.throttled', () => {
+    const sample = (thermal) => ({'time': 0, 'cpu': 10, 'gpu': 90, 'mem': 40, 'system': 40, 'powerIn': 40, thermal});
+    assert.equal(train.throttled(sample(0)), false);
+    assert.equal(train.throttled(sample(1)), true);
+    assert.equal(train.throttled(sample(2)), true);
+    assert.equal(train.throttled(sample(NaN)), false);
+    assert.equal(train.thermalLevels[2], 'heavy');
 });
 
 
@@ -267,4 +307,15 @@ test('train.listenModels', () => {
         {'key': 'teacher', 'stage': null, 'status': 'done', 'samples': [teacher]},
         {'key': 'other', 'stage': null, 'status': 'done', 'samples': [other]}
     ]);
+});
+
+
+test('pipeline.json names no run', () => {
+    // The committed dashboard settings follow make train's default TRAIN_DIR (build/train): a run elsewhere - another
+    // worktree's, an experiment's - is opened with the page's ?train=DIR, never written into pipeline.json, where it
+    // outlives the run and leaves the Train tab waiting on a directory that's gone
+    const pipeline = JSON.parse(readFileSync(new URL('../tools/dashboard/pipeline.json', import.meta.url), 'utf8'));
+    for (const key of ['dir', 'log', 'logs', 'util', 'target']) {
+        assert.equal(pipeline.train?.[key], undefined, key);
+    }
 });

@@ -14,8 +14,10 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B):
     python -m picovox_train.context gate --labels DIR/labels.json [MODULE]                           # held-out accuracy (one split)
     python -m picovox_train.context cross-validate --labels DIR/labels.json --out DIR/folds [-j N]   # the gate, 10 folds
     python -m picovox_train.context folds DIR/folds/fold-*.json --labels DIR/labels.json             # the gate of the folds' results
-    python -m picovox_train.context check NEW.js     # make train: identical to lib/models/g2pModel.js, else the quality
-                                                     # gate (it never replaces the committed module)
+    python -m picovox_train.context check NEW.js     # make train-g2p-check: identical to lib/models/g2pModel.js, else
+                                                     # the quality gate
+    python -m picovox_train.context install NEW.js   # make train-g2p: the checked module as lib/models/g2pModel.js
+                                                     # (kept when identical below its header)
 
 The settings are data/nn/train.json's "context" section (g2p, network, export, gate).
 
@@ -57,6 +59,7 @@ import hashlib
 import json
 import multiprocessing
 import os
+import shutil
 import sys
 import time
 
@@ -858,17 +861,18 @@ def heteronym_scores(module_path):
     return kinds, process.returncode
 
 
+# A generated module's lines below its comment header (its provenance - the checkpoints' digests - differs run to run)
+def module_body(path):
+    with open(path, encoding='utf-8') as file:
+        return [line for line in file.read().split('\n') if not line.startswith('//')]
+
+
 def command_check(args):
-    """make train's G2P check - the retrained module against the committed one: identical (below the comment header),
-    else the quality gate
-    (the regression set - tools/heteronyms.js's minimums, and no kind more than heteronymKindDrop below the committed
-    module's - and g2p.py's book measures within the recipe's tolerances). It never replaces the committed module."""
+    """make train-g2p-check's gate - the retrained module against the committed one: identical (below the comment
+    header), else the quality gate (the regression set - tools/heteronyms.js's minimums, and no kind more than
+    heteronymKindDrop below the committed module's - and g2p.py's book measures within the recipe's tolerances)"""
     from . import g2p  # pylint: disable=import-outside-toplevel
-    # Identical below the comment header (its provenance - the checkpoints' digests - differs run to run)
-    def body(path):
-        with open(path, encoding='utf-8') as file:
-            return [line for line in file.read().split('\n') if not line.startswith('//')]
-    if body(args.model) == body(args.committed):
+    if module_body(args.model) == module_body(args.committed):
         print(f'check: {args.model} is identical to {args.committed} (below the comment header)')
         return 0
     gate = RECIPE['gate']
@@ -892,8 +896,20 @@ def command_check(args):
     kinds = ', '.join(f'{kind} {right}/{total} (committed {old_kinds.get(kind, (0, 0))[0]})' for kind, (right, total) in new_kinds.items())
     print(f'check: {args.model} differs from {args.committed}; regression set {kinds}; {g2p.describe(new_measures)} '
           f'(committed: {g2p.describe(old_measures)}) - ' +
-          (f'FAILED: {"; ".join(failures)}' if failures else f'within the tolerances - {args.committed} kept'))
+          (f'FAILED: {"; ".join(failures)}' if failures else 'within the tolerances'))
     return 1 if failures else 0
+
+
+def command_install(args):
+    """make train-g2p's install - the checked module (command_check) as the committed one, unless it's identical below
+    the comment header (the committed module is kept, its provenance unchanged)"""
+    if module_body(args.model) == module_body(args.committed):
+        print(f'install: {args.model} is identical to {args.committed} (below the comment header) - {args.committed} kept')
+        return 0
+    shutil.copyfile(args.model, args.committed)
+    print(f'install: {args.committed} is now {args.model} - the voice\'s data, built with the earlier G2P, is rebuilt by the next '
+          'make train (or make train-voice)')
+    return 0
 
 
 #
@@ -1046,6 +1062,10 @@ def main(argv=None):
     check_parser.add_argument('model')
     check_parser.add_argument('--committed', default=g2pmodel.MODULE_PATH)
     check_parser.set_defaults(func=command_check)
+    install_parser = commands.add_parser('install', help='make train-g2p\'s install - a checked module as the committed one')
+    install_parser.add_argument('model')
+    install_parser.add_argument('--committed', default=g2pmodel.MODULE_PATH)
+    install_parser.set_defaults(func=command_install)
     gate_parser = commands.add_parser('gate', help='the held-out accuracy of a module\'s context network (exit 1 below the gate)')
     gate_parser.add_argument('model', nargs='?', default=g2pmodel.MODULE_PATH)
     gate_parser.add_argument('--labels', required=True)

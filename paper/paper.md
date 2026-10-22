@@ -735,8 +735,9 @@ lock (two at once each run at about half speed), and the CPU stages run beside t
 | listening samples of each stage's final model and of the shipped model | CPU, under a minute each |
 
 The voice data is built with the committed G2P module. The G2P chain - the network, the heteronym labels, the context
-network, its cross-validation, and the relabeling of Section 9.4 - is its own target, `make train-check`, which
-reproduces the G2P and checks it against the committed module; `make train-g2p` runs the chain alone for G2P work.
+network, its cross-validation, and the relabeling of Section 9.4 - runs beside the voice stages (`make train-g2p`
+alone): it reproduces the G2P, gates it against the committed module, and installs it only when it differs; `make
+train-g2p-check` and `make train-voice-check` stop each model at its gate.
 
 ### 10.2 Gates and provenance
 
@@ -841,13 +842,18 @@ against 0.0771 s for A). Across 20 timed runs, the slow ones were exactly those 
 the system drawing least (39-45 W against 50-89 W in the fast ones): on a 45 W or 60 W adapter the power controller
 caps the system to charge the battery, while a training run draws 64-87 W. An Apple 140 W adapter (which a 14-inch
 MacBook Pro negotiates at about 94 W) removed it; `make train` now checks the adapter first.
+On that adapter a second slow mode remained, and it is heat: about 2.5 minutes into a GPU stage drawing about 70 W,
+macOS's thermal pressure rises to moderate, then heavy, the system is held near 40 W, and teacher A's step goes from
+0.078 to about 0.12 s - at step about 2,000 in every run, for either seed - so the long GPU stages run throttled nearly
+throughout.
 
 **CPU work beside a GPU stage costs memory bandwidth, not cores.** On Apple's unified memory, three single-core compute
 jobs beside teacher B cost nothing measurable, while three memory-bound jobs (large array copies) slowed it 53% at the
 default scheduling priority, 15% at the utility QoS, and 1.3% at the background QoS. In the first run, teacher B ran
 0.22-0.24 s per step beside the heteronym labels' tagging job against 0.153 alone. So the CPU stages beside the GPU run
 at the utility QoS, and the G2P chain moved out of `make train` to `make train-check`: beside teacher A in the second
-run it cost A about 9 minutes.
+run it cost A about 9 minutes. It later moved back, as `make train-g2p`, so that `make train` trains both models (its
+memory-bound stages after the readers' data build).
 
 ### 11.4 Ideas from the NanoGPT speedrun
 
@@ -1129,8 +1135,8 @@ PicoVox is distributed under the MIT License.
 npm install picovox                                             # the package
 make commit                                                     # tests, lint, docs, 100% coverage of lib/ and train/
 make listeners                                                  # the listener panel's environment
-make train                                                      # the voice model from scratch: the corpora, the teacher, the student, the gate
-make -j train-check                                             # reproduce the G2P chain and check it against the committed module
+make -j train                                                   # both models from scratch: the G2P, and the voice - the corpora, the teacher, the student, the gate
+make -j train-g2p-check                                         # reproduce the G2P chain and check it against the committed module
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke    # every training entry point, a few steps on the CPU
 node nn/js/speak.js -m data/nn/slt "Call me Ishmael." -o ishmael.wav   # the single-speaker slt voice of Section 5
 ```

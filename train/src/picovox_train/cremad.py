@@ -199,7 +199,8 @@ def write_readme():
 
 BUILD_DIR = os.path.join(ROOT, 'build', 'nn', 'cremad')
 ALIGNMENTS_PATH = os.path.join(BUILD_DIR, 'alignments.jsonl')
-HF_HOME = os.path.join(BUILD_DIR, 'hf')
+# (the recognizer's download, with the listener models' - data/listeners/, kept by make clean)
+HF_HOME = os.path.join(ROOT, 'data', 'listeners', 'hf')
 
 
 # The CREMA-D clips - [{id, actor, sentence, emotion, intensity, text, wav}], sorted by id

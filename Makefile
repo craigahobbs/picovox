@@ -66,12 +66,17 @@ build/venv-%.build: requirements/%.txt
 listeners: build/venv-listeners.build
 
 
-# make train - every generated model (lib/models/g2pModel.js and voiceModel.js) from a clean checkout, by the recipe
-# data/nn/train.json. Each stage is a stamp in TRAIN_DIR; make -j train runs the independent stages at once - the GPU
-# stages one at a time (picovox_train/gpulock.py: two at once each run at about half speed), the CPU stages beside them (the
-# G2P retrain and the heteronym relabeling - each checked against the committed file it reproduces - the data
-# builds, and the evaluations). The voice data is built with the committed G2P; the G2P stages retrain it beside the
-# voice stages and check the result against it (they never replace it).
+# make train - both generated models (lib/models/g2pModel.js and voiceModel.js) from a clean checkout, by the recipe
+# data/nn/train.json: make train-g2p (the G2P and the heteronym relabeling, CPU) and make train-voice (the voice - its
+# data, teacher, and student, GPU) at once. Each model's training ends in its gate, then its install: make
+# train-g2p-check and make train-voice-check train and gate a model without installing it (the G2P - identical to the
+# committed module below its header, else within the recipe's tolerances; the voice - no worse than the shipped model on
+# the listener panel), and make train-g2p and make train-voice install it too (the G2P only when it differs). Each stage
+# is a stamp in TRAIN_DIR; make -j train runs the independent stages at once - the GPU stages one at a time
+# (picovox_train/gpulock.py: two at once each run at about half speed), the CPU stages beside them (the G2P, the data
+# builds, the evaluations, and the listening samples). The voice data is built with the committed G2P (the G2P is
+# deterministic, so its training reproduces it; a G2P installed that differs makes the next make train rebuild the
+# voice).
 TRAIN_DIR ?= build/train
 TRAIN_SRC := $(CURDIR)/train/src
 NN_PYTHON := env PYTHONPATH=$(TRAIN_SRC) build/venv-nn/bin/python -B
@@ -101,15 +106,40 @@ STAGE = tools/trainstage.sh $(TRAIN_DIR) $(basename $(@F))
 TRAIN_TARGET = @mkdir -p $(TRAIN_DIR) && printf '{"event": "target", "target": "%s", "time": %s}\n' $(1) "$$(date +%s)" >> $(TRAIN_DIR)/stages.jsonl; \
 	if command -v caffeinate >/dev/null; then nohup caffeinate -i -s -w $$PPID >/dev/null 2>&1 & fi
 
-.PHONY: train train-stages train-util train-clean
+# The targets' final stages - the voice's (its gate and listening samples, then its package) and the G2P's (its gate and
+# the heteronym relabeling's, then its install)
+TRAIN_VOICE_CHECK := $(TRAIN_DIR)/student-eval.done $(TRAIN_DIR)/samples-reference.done $(TRAIN_DIR)/samples-teacher-a.done \
+	$(TRAIN_DIR)/samples-teacher-b.done $(TRAIN_DIR)/samples-student.done $(TRAIN_DIR)/samples-polish.done
+TRAIN_VOICE := $(TRAIN_DIR)/package.done $(TRAIN_VOICE_CHECK)
+TRAIN_G2P_CHECK := $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.done
+TRAIN_G2P := $(TRAIN_DIR)/g2p-install.done
+
+# (the power check first, alone - its prompt has the terminal - then the stages, in parallel with make -j)
+.PHONY: train train-voice train-voice-check train-g2p train-g2p-check train-util train-clean
 train:
 	$(call TRAIN_TARGET,train)
 	@tools/trainpower.sh
-	@$(MAKE) --no-print-directory train-stages
+	@$(MAKE) --no-print-directory train-util $(TRAIN_VOICE) $(TRAIN_G2P)
 
-# (the power check first, alone - its prompt has the terminal - then the stages, in parallel with make -j)
-train-stages: train-util $(TRAIN_DIR)/package.done $(TRAIN_DIR)/samples-reference.done \
-	$(TRAIN_DIR)/samples-teacher-a.done $(TRAIN_DIR)/samples-teacher-b.done $(TRAIN_DIR)/samples-student.done $(TRAIN_DIR)/samples-polish.done
+train-voice:
+	$(call TRAIN_TARGET,train-voice)
+	@tools/trainpower.sh
+	@$(MAKE) --no-print-directory train-util $(TRAIN_VOICE)
+
+train-voice-check:
+	$(call TRAIN_TARGET,train-voice-check)
+	@tools/trainpower.sh
+	@$(MAKE) --no-print-directory train-util $(TRAIN_VOICE_CHECK)
+
+# make train-g2p and train-g2p-check - the G2P alone, on every core (G2P_STANDALONE_JOBS workers at the default QoS, not
+# after the readers' data build)
+train-g2p:
+	$(call TRAIN_TARGET,train-g2p)
+	@$(MAKE) --no-print-directory train-util G2P_STANDALONE=1 G2P_JOBS=$(G2P_STANDALONE_JOBS) CONTEXT_JOBS=$(G2P_STANDALONE_JOBS) BESIDE= $(TRAIN_G2P)
+
+train-g2p-check:
+	$(call TRAIN_TARGET,train-g2p-check)
+	@$(MAKE) --no-print-directory train-util G2P_STANDALONE=1 G2P_JOBS=$(G2P_STANDALONE_JOBS) CONTEXT_JOBS=$(G2P_STANDALONE_JOBS) BESIDE= $(TRAIN_G2P_CHECK)
 
 # The utilization sampler - it exits when make does (finished, failed, or interrupted)
 train-util:
@@ -129,37 +159,24 @@ $(TRAIN_DIR)/corpora.done: | build/venv-analysis.build build/venv-nn.build
 	@$(STAGE) end
 	@mkdir -p $(@D) && touch $@
 
-# The CPU-only checks (the G2P chain, the heteronym relabeling) are scheduled after the readers' data build (order-only
-# prerequisites) - into the teacher's GPU-bound hours, when the cores are idle - not competing with the data build on
-# the critical path; the G2P network itself needs no corpora, so it runs during their download.
+# The G2P (CPU): the network's four stages (one core, deterministic), the heteronym context labels (the books - pinned
+# texts, data/nn/books.json - and part-of-speech tags in build/venv-pos), the context network and its held-out accuracy
+# gate (cross-validated over the aligned speakers) beside the G2P network, then the reading stage (two threads), the
+# export to $(TRAIN_DIR), and picovox_train.context check against the committed module; the heteronym relabeling,
+# which must reproduce data/nn/g2p-relabel.json (the G2P network's input); and the install (picovox_train.context
+# install - lib/models/g2pModel.js replaced only when the new module differs below its header).
 #
-# The G2P (CPU) - a check beside the voice stages, which use the committed lib/models/g2pModel.js: the network's four
-# stages (one core, deterministic), the heteronym context labels (the books - pinned texts, data/nn/books.json - and
-# part-of-speech tags in build/venv-pos), the context network and its held-out accuracy gate (cross-validated over the
-# aligned speakers) beside the G2P network, then the reading stage (two threads), the export to $(TRAIN_DIR), and
-# picovox_train.context check: identical to the committed module, else within the recipe's tolerances (the committed
-# module is kept either way - make train never replaces it).
-#
-# G2P_JOBS is the chain's worker processes - the context labels' aligned and tag workers and cross-validate's folds at
-# once (each fold one thread); the outputs are the same for any count. make train runs the chain beside the GPU stages,
-# so its count is low (BESIDE). make -j train-g2p runs the G2P chain alone, for standalone G2P work: G2P_STANDALONE_JOBS
-# workers at the default QoS, and not after the readers' data build.
+# In make train, the G2P's memory-bound stages (the context labels, the relabeling) are scheduled after the readers'
+# data build (order-only prerequisites) - into the teacher's GPU-bound hours, when the cores are idle - not competing
+# with the data build on the critical path; the G2P network itself (one core) starts at once. G2P_JOBS is the chain's
+# worker processes - the context labels' aligned and tag workers and cross-validate's folds at once (each fold one
+# thread); the outputs are the same for any count. make train runs the chain beside the GPU stages, so its count is low
+# (BESIDE) for the memory-bound context labels; the context network's trainings (its four teachers, and each of the ten
+# folds' four teachers and network - one thread each, small and compute-bound) take CONTEXT_JOBS (at 2, the folds
+# outlasted the voice stages by 40 minutes); make train-g2p runs G2P_STANDALONE_JOBS for both.
 G2P_JOBS ?= 2
+CONTEXT_JOBS ?= 6
 G2P_STANDALONE_JOBS ?= 10
-
-# make train-check - the checks that make train's committed inputs reproduce: the G2P chain (the committed
-# lib/models/g2pModel.js, identical below its header, else within the recipe's tolerances) and the heteronym relabeling
-# (data/nn/g2p-relabel.json's words) - standalone, on every core, so they never compete with make train's GPU stages for
-# memory bandwidth (beside teacher A they cost it about 9 minutes). Run it when the G2P's inputs change.
-.PHONY: train-check
-train-check:
-	$(call TRAIN_TARGET,train-check)
-	@$(MAKE) --no-print-directory G2P_STANDALONE=1 G2P_JOBS=$(G2P_STANDALONE_JOBS) BESIDE= $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.done
-
-.PHONY: train-g2p
-train-g2p:
-	$(call TRAIN_TARGET,train-g2p)
-	@$(MAKE) --no-print-directory G2P_STANDALONE=1 G2P_JOBS=$(G2P_STANDALONE_JOBS) BESIDE= $(TRAIN_DIR)/g2p.done
 
 $(TRAIN_DIR)/g2p-network.done: data/nn/train.json data/nn/g2p-words.json data/nn/g2p-relabel.json data/nn/g2p-fixes.json data/nn/g2p-books.json \
 		data/cmudict.dict \
@@ -183,9 +200,9 @@ $(TRAIN_DIR)/context-labels.done: $(TRAIN_DIR)/corpora.done data/nn/train.json d
 $(TRAIN_DIR)/context-network.done: $(TRAIN_DIR)/context-labels.done
 	@$(STAGE) start
 	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context train-context --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/context.pt \
-		--log $(TRAIN_DIR)/context/train.log -j $(G2P_JOBS)
+		--log $(TRAIN_DIR)/context/train.log -j $(CONTEXT_JOBS)
 	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context cross-validate --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/folds \
-		--log $(TRAIN_DIR)/context/train.log -j $(G2P_JOBS)
+		--log $(TRAIN_DIR)/context/train.log -j $(CONTEXT_JOBS)
 	@$(STAGE) end
 	touch $@
 
@@ -199,16 +216,23 @@ $(TRAIN_DIR)/g2p.done: $(TRAIN_DIR)/g2p-network.done $(TRAIN_DIR)/context-labels
 	@$(STAGE) end
 	touch $@
 
+$(TRAIN_DIR)/g2p-install.done: $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.done
+	@$(STAGE) start
+	$(STAGE) -- $(NN_PYTHON) -m picovox_train.context install $(TRAIN_DIR)/g2pModel.js
+	@$(STAGE) end
+	touch $@
+
 
 # The heteronym relabeling (CPU) - it must reproduce data/nn/g2p-relabel.json's words
-$(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/corpora.done
+$(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/corpora.done | $(if $(G2P_STANDALONE),,$(TRAIN_DIR)/data-multi.done)
 	@$(STAGE) start
 	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.heteronyms --out $(TRAIN_DIR)/heteronyms -j 4 --check data/nn/g2p-relabel.json
 	@$(STAGE) end
 	touch $@
 
 # The training data - the readers (CPU, every core; the pool and its analysis settings are data/nn/speakers.json's) and
-# the emotional speech (its alignment on the GPU)
+# the emotional speech (its alignment on the GPU - at the default QoS: at the utility QoS it took twice as long, and
+# teacher A, which needs its speakers, waited 3 minutes for it)
 $(TRAIN_DIR)/data-multi.done: $(TRAIN_DIR)/corpora.done lib/models/g2pModel.js data/nn/speakers.json
 	@$(STAGE) start
 	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m picovox_train.multi build --out $(TRAIN_DIR)/data/multi --pool data/nn/speakers.json
@@ -250,7 +274,8 @@ $(TRAIN_DIR)/teacher-eval.done: $(TRAIN_DIR)/teacher-b.done
 
 # The student - the distillation targets, the student, its polish (GPU), and the gate (CPU: no worse than the shipped
 # lib/models/voiceModel.js - evaluated as packaged, the baseline - within the recipe's tolerance, and its voice similar
-# to the teacher's; a better teacher never fails it)
+# to the teacher's; a better teacher never fails it). The baseline is scored as soon as the teacher's evaluation is done
+# (its similarity is to the teacher's voice), beside the student's GPU stages - not on the critical path after the polish.
 $(TRAIN_DIR)/targets.done: $(TRAIN_DIR)/teacher-b.done
 	@$(STAGE) start
 	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(NN_PYTHON) -m picovox_train.distill targets --teacher $(TRAIN_RUNS)/teacher-b/best.pt
@@ -270,10 +295,15 @@ $(TRAIN_DIR)/polish.done: $(TRAIN_DIR)/student.done
 	@$(STAGE) end
 	touch $@
 
-$(TRAIN_DIR)/student-eval.done: $(TRAIN_DIR)/polish.done $(TRAIN_DIR)/teacher-eval.done
+$(TRAIN_DIR)/baseline-eval.done: $(TRAIN_DIR)/teacher-eval.done
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m picovox_train.distill eval student=$(TRAIN_RUNS)/distill-student-polish/best.pt \
-		baseline=lib/models/voiceModel.js --whisper-workers 3
+	$(STAGE) -- $(TRAIN_ENV) $(BESIDE) $(NN_PYTHON) -m picovox_train.distill eval baseline=lib/models/voiceModel.js --whisper-workers 3
+	@$(STAGE) end
+	touch $@
+
+$(TRAIN_DIR)/student-eval.done: $(TRAIN_DIR)/polish.done $(TRAIN_DIR)/baseline-eval.done
+	@$(STAGE) start
+	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m picovox_train.distill eval student=$(TRAIN_RUNS)/distill-student-polish/best.pt --whisper-workers 3
 	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m picovox_train.distill pick --no-samples --against baseline
 	@$(STAGE) end
 	touch $@

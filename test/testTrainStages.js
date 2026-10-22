@@ -38,6 +38,17 @@ test('trainStages', () => {
         assert.equal(typeof stage.title, 'string');
     }
 
+    // A stage's progress counts its log's finished parts - the context network's trainings: its teachers and itself,
+    // and each fold's
+    for (const stage of manifest.stages.filter((item) => item.progress)) {
+        assert.equal(typeof stage.progress.log, 'string', stage.stage);
+        assert(new RegExp(stage.progress.pattern).test('train-context: step 10000/10000 (quantized) loss 0.0180'), stage.stage);
+        assert(stage.progress.total > 0, stage.stage);
+    }
+    const trainRecipe = JSON.parse(readFileSync(new URL('../data/nn/train.json', import.meta.url), 'utf8'));
+    const contextStage = manifest.stages.find((stage) => stage.stage === 'context-network');
+    assert.equal(contextStage.progress.total, (trainRecipe.context.network.teachers + 1) * (trainRecipe.context.gate.folds + 1));
+
     // The manifest's runs are the training runs its stages write
     assert.deepEqual(manifest.stages.filter((stage) => stage.run).map((stage) => stage.run),
         ['teacher-a', 'teacher-b', 'distill-student', 'distill-student-polish']);
@@ -52,20 +63,33 @@ test('trainStages', () => {
     }
     assert(stages.package.after.includes('samples-reference'));
 
-    // make train's targets, with make train-check's, reach every stage
+    // The manifest's targets are the Makefile's - make train (both models), make train-voice and train-g2p (each model,
+    // installed), and make train-voice-check and train-g2p-check (each model to its gate) - each recording its run and
+    // making its stages
     const joinedMakefile = makefile.replace(/\\\n/g, ' ');
-    const [, stageTargets] = joinedMakefile.match(/^train-stages: ([^\n]*)$/m);
-    const [, checkTargets] = joinedMakefile.match(/^train-check:\n\t[^\n]*\n\t([^\n]*)$/m);
-    const trainTargets = `${stageTargets} ${checkTargets}`;
-
-    // The manifest's targets are the Makefile's: make train's stages, make train-check's, make train-g2p's
     const stampsOf = (text) => [...text.matchAll(/\$\(TRAIN_DIR\)\/([\w-]+)\.done/g)].map((match) => match[1]);
-    const [, g2pTargets] = joinedMakefile.match(/^train-g2p:\n\t[^\n]*\n\t([^\n]*)$/m);
-    assert.deepEqual(manifest.targets, {'train': stampsOf(stageTargets), 'train-check': stampsOf(checkTargets),
-        'train-g2p': stampsOf(g2pTargets)});
-    for (const target of ['train', 'train-check', 'train-g2p']) {
-        assert.match(joinedMakefile, new RegExp(`^${target}:\\n\\t\\$\\(call TRAIN_TARGET,${target}\\)$`, 'm'));
+    const variable = (name) => {
+        const [, value] = joinedMakefile.match(new RegExp(`^${name} := ([^\\n]*)$`, 'm'));
+        return value.replace(/\$\((TRAIN_[A-Z0-9_]+)\)/g, (match, inner) => (inner === 'TRAIN_DIR' ? match : variable(inner)));
+    };
+    const targetStamps = {
+        'train': '$(TRAIN_VOICE) $(TRAIN_G2P)',
+        'train-voice': '$(TRAIN_VOICE)',
+        'train-voice-check': '$(TRAIN_VOICE_CHECK)',
+        'train-g2p': '$(TRAIN_G2P)',
+        'train-g2p-check': '$(TRAIN_G2P_CHECK)'
+    };
+    const expand = (stamps) => stamps.replace(/\$\((TRAIN_[A-Z0-9_]+)\)/g, (match, name) => variable(name));
+    const expected = Object.entries(targetStamps).map(([target, stamps]) => [target, stampsOf(expand(stamps))]);
+    assert.deepEqual(manifest.targets, Object.fromEntries(expected));
+    for (const [target, stamps] of Object.entries(targetStamps)) {
+        const [, body] = joinedMakefile.match(new RegExp(`^${target}:\\n((?:\\t[^\\n]*\\n)*)`, 'm'));
+        assert(body.startsWith(`\t$(call TRAIN_TARGET,${target})\n`), target);
+        assert(body.trimEnd().endsWith(` train-util ${stamps}`) || body.trimEnd().endsWith(` BESIDE= ${stamps}`), target);
     }
+
+    // make train reaches every stage
+    const trainTargets = expand(targetStamps.train);
     const reached = new Set();
     const visit = (stage) => {
         reached.add(stage);

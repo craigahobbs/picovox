@@ -534,6 +534,29 @@ class TestContext(unittest.TestCase):
             status, _ = run({'default': (48, 52)}, 0, dict(measures))
         self.assertEqual(status, 0)
 
+    def test_install(self):
+        # Identical below the comment header - the committed module kept
+        committed = self.path('committed.js')
+        model = self.path('g2pModel.js')
+        with open(committed, 'w', encoding='utf-8') as file:
+            file.write('// The committed provenance\nexport const g2pModel = 1;\n')
+        with open(model, 'w', encoding='utf-8') as file:
+            file.write('// Another provenance\nexport const g2pModel = 1;\n')
+        with captured() as (stdout, _):
+            self.assertEqual(context.main(['install', model, '--committed', committed]), 0)
+        self.assertIn('is identical to', stdout.getvalue())
+        with open(committed, encoding='utf-8') as file:
+            self.assertEqual(file.read(), '// The committed provenance\nexport const g2pModel = 1;\n')
+
+        # A differing module - installed
+        with open(model, 'w', encoding='utf-8') as file:
+            file.write('// Another provenance\nexport const g2pModel = 2;\n')
+        with captured() as (stdout, _):
+            self.assertEqual(context.main(['install', model, '--committed', committed]), 0)
+        self.assertIn('is now', stdout.getvalue())
+        with open(committed, encoding='utf-8') as file:
+            self.assertEqual(file.read(), '// Another provenance\nexport const g2pModel = 2;\n')
+
     def test_train_g2p_command(self):
         items, _ = self.tiny_items()
         data = {'first': dict(items), 'monitor': [], 'weightCounts': {'read': 5, 'cat': 3}, 'evalCounts': {'dog': 2}, 'labels': {},
