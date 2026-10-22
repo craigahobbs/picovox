@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.3 (2026-10-22)
+
+- [ad192ce](https://github.com/craigahobbs/picovox/commit/ad192ce) - money, percentages, and times: $1,234.56 as dollars and cents, $5 million as "five million dollars" (£ and € too), 50% as "fifty percent", 10:30 as "ten thirty" and 9:00 p.m. as "nine pee em"; "5 p.m. on Monday" stays one sentence; World War I as one, not the pronoun
+
 ## 1.6.2 (2026-10-22)
 
 - [c7c57e8](https://github.com/craigahobbs/picovox/commit/c7c57e8) - number reading: a four-digit number reads as a year (1972 as "nineteen seventy-two"; 2000 to 2009 as numbers), commas group thousands (23,000,000 as "twenty-three million"), ordinals (1st, 22nd) and decades (1970s, 80's), and Roman numerals in running text (World War II, Henry VIII)
