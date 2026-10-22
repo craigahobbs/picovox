@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.4 (2026-10-22)
+
+- [a7ed6d6](https://github.com/craigahobbs/picovox/commit/a7ed6d6) - parentheses pause: an aside's opening and closing parentheses are each a comma's phrase break ("He left the room (quietly, as always) and closed the door."), punctuation after a parenthesis keeping its own break
+- [02e7436](https://github.com/craigahobbs/picovox/commit/02e7436) - pronunciation: gravest (the dictionary's "gra-vest" corrected), mindset, and paprika
+
 ## 1.6.3 (2026-10-22)
 
 - [ad192ce](https://github.com/craigahobbs/picovox/commit/ad192ce) - money, percentages, and times: $1,234.56 as dollars and cents, $5 million as "five million dollars" (£ and € too), 50% as "fifty percent", 10:30 as "ten thirty" and 9:00 p.m. as "nine pee em"; "5 p.m. on Monday" stays one sentence; World War I as one, not the pronoun
