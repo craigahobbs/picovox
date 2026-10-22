@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.7.0 (2026-10-22)
+## 1.6.2 (2026-10-22)
 
 - [c7c57e8](https://github.com/craigahobbs/picovox/commit/c7c57e8) - number reading: a four-digit number reads as a year (1972 as "nineteen seventy-two"; 2000 to 2009 as numbers), commas group thousands (23,000,000 as "twenty-three million"), ordinals (1st, 22nd) and decades (1970s, 80's), and Roman numerals in running text (World War II, Henry VIII)
 
