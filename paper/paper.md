@@ -51,11 +51,11 @@ minutes; and Section 12, the package (picovox on npm) and the audiobook player b
 
 ![The speech pipeline, from text to audio](pipeline.svg)
 
-1. **Text to phonemes** (`lib/lexicon.js`, `lib/g2p.js`). The text is normalized (numbers, abbreviations - including the
-   month and day abbreviations, Nov. and Mon. - punctuation), and every word is pronounced by the grapheme-to-phoneme
-   (G2P) network, with phonemes and stress; there is no dictionary at runtime. For a word whose reading depends on its
-   neighbors ("read", "lead", "lives"), the network's ambiguity head says so and a small context network chooses the
-   reading (Section 9).
+1. **Text to phonemes** (`lib/lexicon.js`, `lib/g2p.js`). The text is normalized (numbers - a four-digit number as a
+   year, ordinals, decades, Roman numerals; abbreviations - including the month and day abbreviations, Nov. and Mon. -
+   punctuation), and every word is pronounced by the grapheme-to-phoneme (G2P) network, with phonemes and stress; there
+   is no dictionary at runtime. For a word whose reading depends on its neighbors ("read", "lead", "lives"), the network's
+   ambiguity head says so and a small context network chooses the reading (Section 9).
 2. **Phonemes to tokens** (`lib/tokens.js`). A fixed table maps phonemes and prosodic cues to 78 token IDs: the
    phonemes, word boundaries, a start marker, and punctuation tokens (comma, period, question, wh-question, exclamation)
    that tell the network how a phrase should rise, fall, or pause.

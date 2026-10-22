@@ -26,7 +26,8 @@ TEXTS = [
     '‘Tis the season’s end: what do you think?',
     ', Leading comma. 21 22 30 100 101 1000',
     'Dr. Who vs. St. Ives etc.',
-    'Señor Amadís and Doña Œdipus saw Cæsar in Łódź - Straße, ñ, ŋ.'
+    'Señor Amadís and Doña Œdipus saw Cæsar in Łódź - Straße, ñ, ŋ.',
+    'In 1972, 1905, 1900, and 2001 - the 1970s and 80\'s - the 1st, 22nd, 3rd, and 12th of 23,000,000 (12,3456).'
 ]
 
 
@@ -183,6 +184,45 @@ class TestFrontend(unittest.TestCase):
         self.assertEqual(frontend.number_words(1999), ['one', 'thousand', 'nine', 'hundred', 'ninety', 'nine'])
         self.assertEqual(frontend.number_words(2000000), ['two', 'million'])
         self.assertEqual(frontend.number_words(3000000007), ['three', 'billion', 'seven'])
+        self.assertEqual(frontend.number_words(4 * 10 ** 12 + 2), ['four', 'trillion', 'two'])
+
+    def test_year_words(self):
+        self.assertEqual(frontend.year_words(1972), ['nineteen', 'seventy', 'two'])
+        self.assertEqual(frontend.year_words(1900), ['nineteen', 'hundred'])
+        self.assertEqual(frontend.year_words(1905), ['nineteen', 'oh', 'five'])
+        self.assertEqual(frontend.year_words(1066), ['ten', 'sixty', 'six'])
+        self.assertEqual(frontend.year_words(2024), ['twenty', 'twenty', 'four'])
+
+        # A millennium's first years are numbers
+        self.assertEqual(frontend.year_words(2000), ['two', 'thousand'])
+        self.assertEqual(frontend.year_words(2001), ['two', 'thousand', 'one'])
+        self.assertEqual(frontend.year_words(1009), ['one', 'thousand', 'nine'])
+
+    def test_number_token_words(self):
+        # Four-digit numbers are years; with commas, or with leading zeros, numbers
+        self.assertEqual(frontend.number_token_words('1972'), ['nineteen', 'seventy', 'two'])
+        self.assertEqual(frontend.number_token_words('1,972'), ['one', 'thousand', 'nine', 'hundred', 'seventy', 'two'])
+        self.assertEqual(frontend.number_token_words('0972'), ['nine', 'hundred', 'seventy', 'two'])
+        self.assertEqual(frontend.number_token_words('19720'), ['nineteen', 'thousand', 'seven', 'hundred', 'twenty'])
+        self.assertEqual(frontend.number_token_words('23,000,000'), ['twenty', 'three', 'million'])
+
+        # Decimals
+        self.assertEqual(frontend.number_token_words('3.14'), ['three', 'point', 'one', 'four'])
+        self.assertEqual(frontend.number_token_words('1972.5'),
+                         ['one', 'thousand', 'nine', 'hundred', 'seventy', 'two', 'point', 'five'])
+
+        # Ordinals
+        self.assertEqual(frontend.number_token_words('1st'), ['first'])
+        self.assertEqual(frontend.number_token_words('12th'), ['twelfth'])
+        self.assertEqual(frontend.number_token_words('22nd'), ['twenty', 'second'])
+        self.assertEqual(frontend.number_token_words('40th'), ['fortieth'])
+        self.assertEqual(frontend.number_token_words('1900th'), ['one', 'thousand', 'nine', 'hundredth'])
+
+        # Plurals
+        self.assertEqual(frontend.number_token_words('1970s'), ['nineteen', 'seventies'])
+        self.assertEqual(frontend.number_token_words('1900s'), ['nineteen', 'hundreds'])
+        self.assertEqual(frontend.number_token_words("80's"), ['eighties'])
+        self.assertEqual(frontend.number_token_words('6s'), ['sixes'])
 
     def test_text_items(self):
         self.assertEqual(frontend.text_items('Hi, Mr. Lee! 2.5 ‘ok’? ; .'), [
@@ -194,6 +234,12 @@ class TestFrontend(unittest.TestCase):
         self.assertEqual(frontend.text_items('Two . words'), [('two', 0), ({'end': 'period'}, 4), ('words', 6),
                                                               ({'end': 'period'}, 11)])
         self.assertEqual(frontend.text_items(''), [])
+
+        # Numbers - commas group thousands, suffixes are ordinals and plurals, not words
+        self.assertEqual(frontend.text_items('1,000,000 1st 4things 12,3456'), [
+            ('one', 0), ('million', 0), ('first', 10), ('four', 14), ('things', 15), ('twelve', 22), ({'end': 'comma'}, 24),
+            ('thirty', 25), ('four', 25), ('fifty', 25), ('six', 25), ({'end': 'period'}, 29)
+        ])
 
     def test_text_items_accents(self):
         # Accented letters lose their accents and the ligatures read as English says them, the offsets unchanged

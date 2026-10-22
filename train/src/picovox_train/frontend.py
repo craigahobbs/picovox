@@ -215,7 +215,12 @@ ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 
         'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen']
 TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety']
 
-TOKEN_REGEX = re.compile(r"[a-z][a-z']*\.?|\d+(?:\.\d+)?|[.,;:!?]", re.ASCII)
+# The text's tokens - a word, a number (its thousands grouped by commas or not; with a decimal fraction, or an ordinal or
+# plural suffix), or a punctuation mark (lib/lexicon.js's tokenPattern)
+TOKEN_REGEX = re.compile(r"[a-z][a-z']*\.?|(?:\d{1,3}(?:,\d{3})+(?!\d)|\d+)(?:\.\d+|(?:st|nd|rd|th|'?s)(?![a-z]))?|[.,;:!?]",
+                         re.ASCII)
+NUMBER_REGEX = re.compile(r'^([\d,]+)(?:\.(\d+))?(\D*)$', re.ASCII)
+YEAR_REGEX = re.compile(r'^[1-9]\d{3}$', re.ASCII)
 ACCENTED_REGEX = re.compile('[\u00c0-\u024f]')
 MARKS_REGEX = re.compile('[\u0300-\u036f]')
 PLAIN_LETTERS = {'æ': 'e', 'Æ': 'E', 'œ': 'e', 'Œ': 'E', 'ø': 'o', 'Ø': 'O', 'ł': 'l', 'Ł': 'L', 'đ': 'd', 'Đ': 'D', 'ß': 's'}
@@ -228,10 +233,48 @@ def number_words(value):
         return [ONES[value]]
     if value < 100:
         return [TENS[value // 10]] if value % 10 == 0 else [TENS[value // 10], ONES[value % 10]]
-    size, name = next((size, name) for size, name in ((10 ** 9, 'billion'), (10 ** 6, 'million'), (10 ** 3, 'thousand'),
-                                                       (100, 'hundred')) if value >= size)
+    size, name = next((size, name) for size, name in ((10 ** 12, 'trillion'), (10 ** 9, 'billion'), (10 ** 6, 'million'),
+                                                       (10 ** 3, 'thousand'), (100, 'hundred')) if value >= size)
     rest = value % size
     return number_words(value // size) + [name] + ([] if rest == 0 else number_words(rest))
+
+
+# Spell a year in words - by its hundreds (1972 as nineteen seventy-two, 1900 as nineteen hundred, 1905 as nineteen oh
+# five), but a millennium's first years as a number (2000, 2001 as two thousand one) (yearWords)
+def year_words(value):
+    hundreds, rest = divmod(value, 100)
+    if hundreds % 10 == 0 and rest < 10:
+        return number_words(value)
+    return number_words(hundreds) + (['hundred'] if rest == 0 else (['oh', ONES[rest]] if rest < 10 else number_words(rest)))
+
+
+# A number word as an ordinal (twenty as twentieth) or a plural (twenty as twenties) (ordinalWord, pluralWord)
+ORDINAL_WORDS = {
+    'one': 'first', 'two': 'second', 'three': 'third', 'five': 'fifth', 'eight': 'eighth', 'nine': 'ninth', 'twelve': 'twelfth'
+}
+
+
+def ordinal_word(word):
+    return ORDINAL_WORDS.get(word) or (f'{word[:-1]}ieth' if word.endswith('y') else f'{word}th')
+
+
+def plural_word(word):
+    return f'{word[:-1]}ies' if word.endswith('y') else ('sixes' if word == 'six' else f'{word}s')
+
+
+# A number token's words - its digits (commas grouping its thousands) in words, a four-digit number as a year, a
+# decimal's fraction digit by digit, and an ordinal (1st, 22nd) or a plural (1970s, 70's) as its last word's
+# (numberTokenWords)
+def number_token_words(token):
+    digits, fraction, suffix = NUMBER_REGEX.match(token).groups()
+    value = int(digits.replace(',', ''))
+    is_ordinal = suffix != '' and not suffix.endswith('s')
+    words = year_words(value) if YEAR_REGEX.match(digits) and fraction is None and not is_ordinal else number_words(value)
+    if fraction is not None:
+        words.extend(['point'] + [ONES[int(digit)] for digit in fraction])
+    elif suffix != '':
+        words.append((ordinal_word if is_ordinal else plural_word)(words.pop()))
+    return words
 
 
 # The context marks of the phrase ends - a phrase end's item in the context sequence (the context network's input)
@@ -261,11 +304,7 @@ def text_items(text):
     for match in TOKEN_REGEX.finditer(plain_letters(text).lower().replace('‘', '\'').replace('’', '\'')):
         token, offset = match.group(0), match.start()
         if '0' <= token[0] <= '9':
-            whole, _, fraction = token.partition('.')
-            items.extend((word, offset) for word in number_words(int(whole)))
-            if '.' in token:
-                items.append(('point', offset))
-                items.extend((ONES[int(digit)], offset) for digit in fraction)
+            items.extend((word, offset) for word in number_token_words(token))
         elif 'a' <= token[0] <= 'z':
             bare = token[:-1] if token.endswith('.') else token
             if bare in ABBREVIATIONS:

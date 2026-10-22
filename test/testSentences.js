@@ -125,4 +125,10 @@ test('speechText', () => {
     assert.equal(speechText('XIV.'), '14.');
     assert.equal(speechText('I am here.'), 'I am here.');
     assert.equal(speechText('Chapter Ten'), 'Chapter Ten');
+
+    // Other Roman numerals of two or more letters are numbers - not the pronoun I, the abbreviations, the word MIX, or
+    // letters that aren't a numeral
+    assert.equal(speechText('World War II, Henry VIII, and Louis XIV in MDCCCXCII.'), 'World War 2, Henry 8, and Louis 14 in 1892.');
+    assert.equal(speechText('I saw DC, CD, MM, and MIX.'), 'I saw DC, CD, MM, and MIX.');
+    assert.equal(speechText('IIII, XM, VIVID, Civil, and ii'), 'IIII, XM, VIVID, Civil, and ii');
 });

@@ -1,7 +1,7 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-import {numberWords, setPronouncer, textToPhrases, whWords} from '../lib/lexicon.js';
+import {numberTokenWords, numberWords, setPronouncer, textToPhrases, whWords, yearWords} from '../lib/lexicon.js';
 import {strict as assert} from 'node:assert';
 import {g2pModel} from '../lib/models/g2pModel.js';
 import {loadG2p} from '../lib/g2p.js';
@@ -210,6 +210,59 @@ test('lexicon.textToPhrases, numbers', () => {
     // A trailing period ends the phrase - it is not a decimal point
     const phrases = textToPhrases('It is 42. Yes');
     assert.deepEqual(phrases.map(wordTexts), [['it', 'is', 'forty', 'two'], ['yes']]);
+
+    // Commas group thousands; a four-digit number is a year
+    assert.deepEqual(wordTexts(textToPhrases('23,000,000 in 1972')[0]),
+        ['twenty', 'three', 'million', 'in', 'nineteen', 'seventy', 'two']);
+    assert.deepEqual(textToPhrases('1,2,3456').map(wordTexts), [['one'], ['two'], ['thirty', 'four', 'fifty', 'six']]);
+    assert.deepEqual(textToPhrases('12,34567').map(wordTexts),
+        [['twelve'], ['thirty', 'four', 'thousand', 'five', 'hundred', 'sixty', 'seven']]);
+
+    // Ordinals and plurals - not words (1st is not one saint)
+    assert.deepEqual(textToPhrases('The 1st, 4th of the 1970s').map(wordTexts),
+        [['the', 'first'], ['fourth', 'of', 'the', 'nineteen', 'seventies']]);
+    assert.deepEqual(wordTexts(textToPhrases('4things 5stars')[0]), ['four', 'things', 'five', 'stars']);
+});
+
+
+test('lexicon.numberTokenWords', () => {
+    // Four-digit numbers are years; with commas, or with leading zeros, numbers
+    assert.deepEqual(numberTokenWords('1972'), ['nineteen', 'seventy', 'two']);
+    assert.deepEqual(numberTokenWords('1,972'), ['one', 'thousand', 'nine', 'hundred', 'seventy', 'two']);
+    assert.deepEqual(numberTokenWords('0972'), ['nine', 'hundred', 'seventy', 'two']);
+    assert.deepEqual(numberTokenWords('19720'), ['nineteen', 'thousand', 'seven', 'hundred', 'twenty']);
+    assert.deepEqual(numberTokenWords('23,000,000'), ['twenty', 'three', 'million']);
+
+    // Decimals
+    assert.deepEqual(numberTokenWords('3.14'), ['three', 'point', 'one', 'four']);
+    assert.deepEqual(numberTokenWords('1972.5'), ['one', 'thousand', 'nine', 'hundred', 'seventy', 'two', 'point', 'five']);
+
+    // Ordinals
+    assert.deepEqual(numberTokenWords('1st'), ['first']);
+    assert.deepEqual(numberTokenWords('12th'), ['twelfth']);
+    assert.deepEqual(numberTokenWords('22nd'), ['twenty', 'second']);
+    assert.deepEqual(numberTokenWords('40th'), ['fortieth']);
+    assert.deepEqual(numberTokenWords('1900th'), ['one', 'thousand', 'nine', 'hundredth']);
+
+    // Plurals
+    assert.deepEqual(numberTokenWords('1970s'), ['nineteen', 'seventies']);
+    assert.deepEqual(numberTokenWords('1900s'), ['nineteen', 'hundreds']);
+    assert.deepEqual(numberTokenWords('80\'s'), ['eighties']);
+    assert.deepEqual(numberTokenWords('6s'), ['sixes']);
+});
+
+
+test('lexicon.yearWords', () => {
+    assert.deepEqual(yearWords(1972), ['nineteen', 'seventy', 'two']);
+    assert.deepEqual(yearWords(1900), ['nineteen', 'hundred']);
+    assert.deepEqual(yearWords(1905), ['nineteen', 'oh', 'five']);
+    assert.deepEqual(yearWords(1066), ['ten', 'sixty', 'six']);
+    assert.deepEqual(yearWords(2024), ['twenty', 'twenty', 'four']);
+
+    // A millennium's first years are numbers
+    assert.deepEqual(yearWords(2000), ['two', 'thousand']);
+    assert.deepEqual(yearWords(2001), ['two', 'thousand', 'one']);
+    assert.deepEqual(yearWords(1009), ['one', 'thousand', 'nine']);
 });
 
 
@@ -229,6 +282,7 @@ test('lexicon.numberWords', () => {
     ]);
     assert.deepEqual(numberWords(3e9), ['three', 'billion']);
     assert.deepEqual(numberWords(12e9 + 5), ['twelve', 'billion', 'five']);
+    assert.deepEqual(numberWords(4e12 + 2), ['four', 'trillion', 'two']);
 
     // Not a number
     assert.deepEqual(numberWords(NaN), []);

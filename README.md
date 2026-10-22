@@ -176,8 +176,9 @@ file - a `Uint8Array` of the file's bytes.
 | `sampleRate` | `24000` | The output sample rate (Hz), from 8000 to 96000 - 24 kHz is the voices' own rate |
 
 The text is split into sentences (and paragraphs, at blank lines); each sentence starts with a short pause - 0.24
-seconds, or 0.4 before a paragraph (so the text's first sentence starts with one). Numbers, common abbreviations, dashes,
-ellipses, and Roman-numeral chapter headings are spoken as words. An invalid text or option throws a `TypeError` or a
+seconds, or 0.4 before a paragraph (so the text's first sentence starts with one). Numbers (four-digit numbers as years,
+1972 as "nineteen seventy-two"; ordinals, 1st; decades, 1970s), common abbreviations, dashes, ellipses, and Roman
+numerals (Chapter IV, World War II) are spoken as words. An invalid text or option throws a `TypeError` or a
 `RangeError` with a message saying what's wrong (`stream` and `speak` throw at once; `synthesize` rejects).
 
 The output is bit-for-bit deterministic: the same text and options give the same samples, in the browser and in Node.
