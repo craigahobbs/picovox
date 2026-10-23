@@ -4,10 +4,11 @@
 import {autoStyles, paragraphBeats} from '../lib/style.js';
 import {
     blockSize, createSentenceRenderer, defaultSampleRate, defaultVoice, modelLoader, outputGain, paragraphPause, sentenceBlocks,
-    sentenceFrames, sentencePause, softLimit, spanFrames, styleSettings, styleTable, textBlocks, voiceSettings, voiceSpeaker,
-    voiceTable
+    sentenceFrames, sentencePause, softLimit, sourceShelf, spanFrames, styleSettings, styleTable, textBlocks, voiceSettings,
+    voiceSpeaker, voiceTable
 } from '../lib/synthesis.js';
 import {speechText, splitSentences} from '../lib/sentences.js';
+import {Buffer} from 'node:buffer';
 import {applyTransforms} from '../lib/transforms.js';
 import {strict as assert} from 'node:assert';
 import {readFileSync} from 'node:fs';
@@ -20,6 +21,14 @@ import test from 'node:test';
 const importG2p = () => import('../lib/models/g2pModel.js');
 const importVoice = () => import('../lib/models/voiceModel.js');
 const model = await modelLoader(importG2p, importVoice)();
+
+
+// Whether two sample arrays are the same, sample for sample (their bytes - a failed comparison costs nothing, where
+// assert.deepEqual's diff of every sample can exhaust memory)
+function sameSamples(actual, expected) {
+    const bytes = (array) => Buffer.from(array.buffer, array.byteOffset, array.byteLength);
+    return bytes(actual).equals(bytes(expected));
+}
 
 
 // Blocks concatenated
@@ -141,16 +150,17 @@ test('voiceSpeaker', () => {
 
 
 test('voiceSettings', () => {
-    // A package voice - its speaker, no rate or adjustments
-    assert.deepEqual(voiceSettings(model, 'male'), {'speaker': 1, 'rate': 1, 'transforms': []});
+    // A package voice - its speaker, no rate, its softer pulse, and the source shelf correction
+    assert.deepEqual(voiceSettings(model, 'male'), {'speaker': 1, 'rate': 1, 'transforms': [{'rdScale': 1.2}, {'shelf': sourceShelf}]});
+    assert.equal(sourceShelf, -5);
 
-    // A designed voice - its blend, rate, and adjustments as transforms (identity values omitted)
+    // A designed voice - its blend, rate, and adjustments as transforms (identity values omitted), then the correction
     const helen = voiceSettings(model, 'helen');
     assert.deepEqual(helen.speaker, voiceSpeaker(model, 'helen'));
     assert.equal(helen.rate, 0.9);
-    assert.deepEqual(helen.transforms, [{'pitchScale': 0.95}, {'tractScale': 0.98}]);
-    assert.deepEqual(voiceSettings(model, 'grace').transforms, [{'effort': -2}]);
-    assert.deepEqual(voiceSettings(model, 'david').transforms, []);
+    assert.deepEqual(helen.transforms, [{'pitchScale': 0.95}, {'tractScale': 0.98}, {'shelf': -5}]);
+    assert.deepEqual(voiceSettings(model, 'grace').transforms, [{'effort': -2}, {'shelf': -5}]);
+    assert.deepEqual(voiceSettings(model, 'david').transforms, [{'shelf': -5}]);
     assert.throws(() => voiceSettings(model, 'nobody'), {'message': 'Unknown voice "nobody"'});
 });
 
@@ -264,7 +274,7 @@ test('textBlocks, auto', () => {
             'pause': sentence.paragraphStart ? paragraphPause : sentencePause
         })]);
     });
-    assert.deepEqual(concat([...textBlocks(model, text, {'voice': 'kate', 'style': 'auto', 'seed': 3})]), concat(expected));
+    assert(sameSamples(concat([...textBlocks(model, text, {'voice': 'kate', 'style': 'auto', 'seed': 3})]), concat(expected)));
 });
 
 
@@ -281,14 +291,18 @@ test('sentenceFrames, voices', () => {
         assert.deepEqual(eq, expected.eq);
     }
 
-    // A package voice is its speaker, exactly
+    // A package voice is its speaker with its adjustments and the source shelf correction, exactly
+    const {transforms} = voiceSettings(model, 'female');
+    assert.deepEqual(transforms, [{'rdScale': 1.2}, {'shelf': sourceShelf}]);
     const voiced = sentenceFrames(model, text, {'voice': 'female'});
     const spoken = sentenceFrames(model, text, {'speaker': voiceSpeaker(model, 'female')});
-    assert.deepEqual([...voiced.chunks].flat(), [...spoken.chunks].flat());
+    assert.deepEqual([...voiced.chunks].flat().map((frame) => Array.from(frame)),
+        applyTransforms([...spoken.chunks].flat(), transforms).map((frame) => Array.from(frame)));
 
     // sentenceBlocks and textBlocks take the voice too
-    assert.deepEqual(concat([...sentenceBlocks(model, text, {'voice': 'female', 'seed': 2})]),
-        concat([...sentenceBlocks(model, text, {'speaker': voiceSpeaker(model, 'female'), 'seed': 2})]));
+    const correction = {transforms, 'rate': 1};
+    assert(sameSamples(concat([...sentenceBlocks(model, text, {'voice': 'female', 'seed': 2})]),
+        concat([...sentenceBlocks(model, text, {'speaker': voiceSpeaker(model, 'female'), 'seed': 2, 'beat': correction})])));
     assert(concat([...textBlocks(model, 'Hello there.', {'voice': 'amy'})]).some((value) => value !== 0));
 });
 
@@ -333,7 +347,7 @@ test('sentenceBlocks, streaming', () => {
     const startWhole = performance.now();
     const whole = directSentence(text, options);
     const wholeMs = performance.now() - startWhole;
-    assert.deepEqual(concat([first.value, second.value, ...rest]), whole);
+    assert(sameSamples(concat([first.value, second.value, ...rest]), whole));
     assert(firstMs < wholeMs, `first block ${firstMs} ms, whole sentence ${wholeMs} ms`);
 
     // An empty sentence is only its pause
@@ -376,7 +390,7 @@ test('textBlocks', () => {
         speaker, 'rate': 0.8, 'seed': 1000 + sentence.index, 'pause': sentence.paragraphStart ? paragraphPause : sentencePause
     }));
     assert.equal(expected.length, 5);
-    assert.deepEqual(concat([...textBlocks(model, text, {speaker, 'rate': 0.8, 'seed': 1000})]), concat(expected));
+    assert(sameSamples(concat([...textBlocks(model, text, {speaker, 'rate': 0.8, 'seed': 1000})]), concat(expected)));
 
     // Defaults - seed 1, normal speed, 24 kHz
     const defaults = concat([...textBlocks(model, 'One. Two.')]);

@@ -17,6 +17,7 @@
 
 import {speakFrames, streamFrames} from '../../lib/model.js';
 import {applyTransforms} from '../../lib/transforms.js';
+import {sourceShelf} from '../../lib/synthesis.js';
 
 
 // A voice of the voices document by id
@@ -56,9 +57,10 @@ export function voiceBlend(model, voice) {
 }
 
 
-// The voice's adjustments as frame transforms - [{'pitchScale'}, {'tractScale'}, {'effort'}] (identity values omitted)
+// The voice's adjustments as frame transforms - [{'pitchScale'}, {'tractScale'}, {'effort'}, {'rdScale'}] (identity values omitted),
+// then the package's source shelf correction (lib/synthesis.js sourceShelf)
 export function voiceTransforms(voice) {
-    const {pitchScale = 1, tractScale = 1, effort = 0} = voice.adjust ?? {};
+    const {pitchScale = 1, tractScale = 1, effort = 0, rdScale = 1} = voice.adjust ?? {};
     const transforms = [];
     if (pitchScale !== 1) {
         transforms.push({pitchScale});
@@ -69,6 +71,10 @@ export function voiceTransforms(voice) {
     if (effort !== 0) {
         transforms.push({effort});
     }
+    if (rdScale !== 1) {
+        transforms.push({rdScale});
+    }
+    transforms.push({'shelf': sourceShelf});
     return transforms;
 }
 

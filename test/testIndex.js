@@ -1,12 +1,21 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-import {modelLoader, textBlocks, voiceSpeaker} from '../lib/synthesis.js';
+import {modelLoader, textBlocks} from '../lib/synthesis.js';
 import {readFileSync, readdirSync} from 'node:fs';
 import {speak, stream, styles, synthesize, toWav, voices} from '../lib/index.js';
+import {Buffer} from 'node:buffer';
 import {strict as assert} from 'node:assert';
 import {encodeWav} from '../lib/wav.js';
 import test from 'node:test';
+
+
+// Whether two sample arrays are the same, sample for sample (their bytes - a failed comparison costs nothing, where
+// assert.deepEqual's diff of every sample can exhaust memory)
+function sameSamples(actual, expected) {
+    const bytes = (array) => Buffer.from(array.buffer, array.byteOffset, array.byteLength);
+    return bytes(actual).equals(bytes(expected));
+}
 
 
 // Blocks concatenated
@@ -52,14 +61,14 @@ test('synthesize, styles', async () => {
     // A style changes the audio; neutral is the default
     const line = 'Get out!';
     const plain = await synthesize(line, {'voice': 'james'});
-    assert.deepEqual((await synthesize(line, {'voice': 'james', 'style': 'neutral'})).samples, plain.samples);
+    assert(sameSamples((await synthesize(line, {'voice': 'james', 'style': 'neutral'})).samples, plain.samples));
     assert.notDeepEqual((await synthesize(line, {'voice': 'james', 'style': 'whisper'})).samples, plain.samples);
 
     // Auto - the quotations in the dialogue style, each paragraph's beat
     const dialogue = '"Get out!" he said.\n\nShe left.';
     const auto = await synthesize(dialogue, {'voice': 'james', 'style': 'auto'});
     assert.notDeepEqual(auto.samples, (await synthesize(dialogue, {'voice': 'james'})).samples);
-    assert.deepEqual((await synthesize(dialogue, {'voice': 'james', 'style': 'auto'})).samples, auto.samples);
+    assert(sameSamples((await synthesize(dialogue, {'voice': 'james', 'style': 'auto'})).samples, auto.samples));
     await assert.rejects(synthesize(line, {'style': 'bored'}), {
         'name': 'RangeError', 'message': 'Unknown style "bored" - the styles are "neutral", "angry", "happy", "sad", "fearful", ' +
             '"disgusted", "whisper", "soft", "shouting", "dialogue", "exclaim", "auto"'
@@ -90,8 +99,8 @@ test('synthesize', async () => {
 
     // The synthesis pipeline - the female voice, seed 1000 for the first sentence, normal speed
     const model = await modelLoader(() => import('../lib/models/g2pModel.js'), () => import('../lib/models/voiceModel.js'))();
-    const expected = concat([...textBlocks(model, text, {'speaker': voiceSpeaker(model, 'female'), 'seed': 1000})]);
-    assert.deepEqual(samples, expected);
+    const expected = concat([...textBlocks(model, text, {'voice': 'female', 'seed': 1000})]);
+    assert(sameSamples(samples, expected), 'synthesize is the pipeline\'s samples');
 });
 
 
@@ -99,11 +108,11 @@ test('synthesize, defaults', async () => {
     // The male voice, normal speed, 24 kHz
     const {samples, sampleRate} = await synthesize('Hello.');
     assert.equal(sampleRate, 24000);
-    assert.deepEqual(samples, (await synthesize('Hello.', {'voice': 'male', 'rate': 1, 'seed': 1000, 'sampleRate': 24000})).samples);
+    assert(sameSamples(samples, (await synthesize('Hello.', {'voice': 'male', 'rate': 1, 'seed': 1000, 'sampleRate': 24000})).samples));
     assert.notDeepEqual(samples, (await synthesize('Hello.', {'voice': 'female'})).samples);
 
     // Undefined options take their defaults
-    assert.deepEqual((await synthesize('Hello.', {'voice': undefined, 'rate': undefined})).samples, samples);
+    assert(sameSamples((await synthesize('Hello.', {'voice': undefined, 'rate': undefined})).samples, samples));
 });
 
 
@@ -138,14 +147,14 @@ test('stream', async () => {
     const blocks = await streamBlocks(text, {'voice': 'female', 'rate': 1.2});
     assert(blocks.length > 10);
     assert(blocks.every((block) => block instanceof Float32Array));
-    assert.deepEqual(concat(blocks), (await synthesize(text, {'voice': 'female', 'rate': 1.2})).samples);
+    assert(sameSamples(concat(blocks), (await synthesize(text, {'voice': 'female', 'rate': 1.2})).samples));
 
     // The first block is the first sentence's pause (a paragraph's - 0.4 s at 1.2x)
     assert.equal(blocks[0].length, Math.round(24000 * 0.4 / 1.2));
     assert(blocks[0].every((value) => value === 0));
 
     // Defaults
-    assert.deepEqual(concat(await streamBlocks('Hello.')), (await synthesize('Hello.')).samples);
+    assert(sameSamples(concat(await streamBlocks('Hello.')), (await synthesize('Hello.')).samples));
 });
 
 
@@ -159,7 +168,8 @@ test('stream, early stop', async () => {
         }
     }
     const all = await streamBlocks(text);
-    assert.deepEqual(blocks, all.slice(0, 3));
+    assert.equal(blocks.length, 3);
+    blocks.forEach((block, index) => assert(sameSamples(block, all[index]), `block ${index}`));
 });
 
 
@@ -216,13 +226,13 @@ test('toWav', () => {
     const samples = Float32Array.from([0, 0.5, -0.5, 1, -2]);
     const wav = toWav(samples, 24000);
     assert(wav instanceof Uint8Array);
-    assert.deepEqual(wav, encodeWav(samples, 24000));
+    assert(sameSamples(wav, encodeWav(samples, 24000)));
     assert.equal(wav.length, 44 + 2 * samples.length);
     assert.equal(new TextDecoder().decode(wav.subarray(0, 4)), 'RIFF');
 
     // Float64Array and array samples
-    assert.deepEqual(toWav(Float64Array.from(samples), 24000), wav);
-    assert.deepEqual(toWav(Array.from(samples), 24000), wav);
+    assert(sameSamples(toWav(Float64Array.from(samples), 24000), wav));
+    assert(sameSamples(toWav(Array.from(samples), 24000), wav));
 
     // Invalid
     assert.throws(() => toWav('samples', 24000), {

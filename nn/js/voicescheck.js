@@ -105,7 +105,8 @@ async function main() {
     assert.ok(Math.abs(options.rate - 1 / (1.25 * (first.rate ?? 1) * (shout.rate ?? 1))) < 1e-12, 'rates compose');
     assert.equal(options.pauseThreshold, 0.6);
     const adjustCount = Object.keys(first.adjust ?? {}).filter((name) => name !== 'rate').length;
-    assert.equal(transforms.length, adjustCount + (shout.transform ?? []).length, 'the voice\'s transforms, then the style\'s');
+    assert.equal(transforms.length, adjustCount + 1 + (shout.transform ?? []).length,
+        'the voice\'s transforms and the source shelf correction, then the style\'s');
     const happy = findStyle(voices, 'happy');
     assert.deepEqual(voiceOptions(model, voices, {'voice': first.id, 'style': 'happy'}).options.style, happy.model);
     assert.equal(voiceOptions(model, voices, {'voice': first.id}).options.style, undefined, 'neutral has no model style');

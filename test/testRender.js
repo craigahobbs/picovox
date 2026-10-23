@@ -3,8 +3,17 @@
 
 import {DEFAULTS, FLOOR_DB, NAMES, PARAMETERS} from '../lib/params.js';
 import {createRenderer, frameValues, noiseFftSize, render, sampleCount} from '../lib/render.js';
+import {Buffer} from 'node:buffer';
 import {strict as assert} from 'node:assert';
 import test from 'node:test';
+
+
+// Whether two sample arrays are the same, sample for sample (their bytes - a failed comparison costs nothing, where
+// assert.deepEqual's diff of every sample can exhaust memory)
+function sameSamples(actual, expected) {
+    const bytes = (array) => Buffer.from(array.buffer, array.byteOffset, array.byteLength);
+    return bytes(actual).equals(bytes(expected));
+}
 
 
 // A voiced vowel frame (an object of parameters), varied over time
@@ -124,7 +133,7 @@ test('render, onBlock', () => {
         joined.set(block, offset);
         return offset + block.length;
     }, 0);
-    assert.deepEqual(joined, samples);
+    assert(sameSamples(joined, samples));
 });
 
 
@@ -145,7 +154,7 @@ test('render, voicing onsets and offsets', () => {
             streamed.set(block, offset);
             return offset + block.length;
         }, 0);
-        assert.deepEqual(streamed, whole);
+        assert(sameSamples(streamed, whole));
         const energy = (start, end) => whole.slice(start, end).reduce((sum, value) => sum + value * value, 0);
         assert(energy(120 * (onset + 2), 120 * (onset + 28)) > 1e-2);
     }
@@ -196,7 +205,7 @@ test('createRenderer', () => {
         joined.set(block, offset);
         return offset + block.length;
     }, 0);
-    assert.deepEqual(joined, whole);
+    assert(sameSamples(joined, whole));
 
     // Frames pushed after the end render nothing
     const endBlocks = blocks.length;

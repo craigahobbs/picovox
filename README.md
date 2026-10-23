@@ -110,7 +110,11 @@ The built-in voices - `[{key, label, sex, description}]`, the default first:
 
 The ten designed voices (`data/nn/voices.json`) are blends of two to four of the model's audiobook readers, with mild
 pitch, vocal-tract, and effort adjustments and their own speaking rate (the `rate` option multiplies it); on the
-listener panel's texts they score UTMOS 4.09-4.28 (the package's two voices 4.08 and 4.18).
+listener panel's texts they score UTMOS 4.09-4.28 (the package's two voices 4.08 and 4.18). Every voice's source is 5
+dB darker than the network predicts it (`lib/synthesis.js` `sourceShelf`), and the package's two voices have a softer
+glottal pulse (Rd x1.2): in blind A/B listening the network's source sounded tinny - darker, it was less tinny in six of
+the twelve voices and never worse, and never less natural - with UTMOS, Whisper's WER, and speaker similarity on the
+panel texts unchanged.
 
 ### `styles()`
 
@@ -201,7 +205,7 @@ that runs its own synthesis loop (PicoShelf's worker does):
 | `lib/model.js` | The voice network - text to parameter frames (`speakFrames`, `streamFrames`), any speaker blend and style |
 | `lib/render.js` | The source-filter synthesizer - parameter frames to samples, streaming (`createRenderer`, `render`) |
 | `lib/lf.js`, `lib/rng.js`, `lib/fft.js`, `lib/params.js` | The LF glottal pulse, the counter-based noise, the FFT, the parameter set |
-| `lib/transforms.js` | Voice and style transforms of parameter frames (pitch, tract length, bandwidths, whisper, effort) |
+| `lib/transforms.js` | Voice and style transforms of parameter frames (pitch, tract length, bandwidths, whisper, effort, pulse softness, source shelf) |
 | `lib/package.js` | The generated model modules' loader (`loadPackagedModel`) |
 | `lib/wav.js` | WAV encoding (`encodeWav`) |
 | `lib/models/g2pModel.js`, `lib/models/voiceModel.js` | The generated models (`make train`) |

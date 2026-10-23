@@ -3,7 +3,7 @@
 
 import {DEFAULTS, FLOOR_DB, NAMES, TRACT_FREQUENCIES} from '../lib/params.js';
 import {
-    applyTransforms, bandwidthScale, effort, frication, level, pitchRange, pitchScale, press, tractScale, whisper
+    applyTransforms, bandwidthScale, effort, frication, level, pitchRange, pitchScale, press, rdScale, shelf, tractScale, whisper
 } from '../lib/transforms.js';
 import {strict as assert} from 'node:assert';
 import test from 'node:test';
@@ -142,6 +142,23 @@ test('transforms.frication', () => {
 });
 
 
+test('transforms.rdScale', () => {
+    // The pulse's Rd scaled, within its range, nothing else
+    const before = frame({'rd': 1.5});
+    assert.deepEqual(changes(before, rdScale([before], 1.2)[0]), {'rd': [1.5, 1.5 * 1.2]});
+    assert.equal(rdScale([frame({'rd': 2.5})], 1.2)[0][IX.rd], 2.7);
+    assert.equal(rdScale([frame({'rd': 0.35})], 0.5)[0][IX.rd], 0.3);
+});
+
+
+test('transforms.shelf', () => {
+    // The source shelf raised or lowered, nothing else
+    const before = frame({'shelf': 12});
+    assert.deepEqual(changes(before, shelf([before], -5)[0]), {'shelf': [12, 7]});
+    assert.deepEqual(changes(before, shelf([before], 0)[0]), {});
+});
+
+
 test('transforms.applyTransforms', () => {
     const frames = [frame(), frame({'f0': 200})];
 
@@ -149,11 +166,13 @@ test('transforms.applyTransforms', () => {
     assert.equal(applyTransforms(frames), frames);
     assert.equal(applyTransforms(frames, []), frames);
 
-    // Each in turn, in a transform's fixed order (bandwidth, pitch, tract, whisper, effort, press, level, frication)
+    // Each in turn, in a transform's fixed order (bandwidth, pitch, tract, whisper, effort, press, level, frication, Rd,
+    // shelf)
     const shaped = whisper(tractScale(pitchScale(bandwidthScale(frames, 0.8), 1.1), 0.9), {'intensity': 0.5});
-    const expected = frication(level(press(effort(shaped, 3), 2), -4), 1);
+    const expected = shelf(rdScale(frication(level(press(effort(shaped, 3), 2), -4), 1), 1.1), -5);
     const applied = applyTransforms(frames, [
-        {'frication': 1, 'level': -4, 'press': 2, 'effort': 3, 'whisper': 0.5, 'tractScale': 0.9, 'pitchScale': 1.1, 'bandwidthScale': 0.8}
+        {'shelf': -5, 'rdScale': 1.1, 'frication': 1, 'level': -4, 'press': 2, 'effort': 3, 'whisper': 0.5, 'tractScale': 0.9,
+            'pitchScale': 1.1, 'bandwidthScale': 0.8}
     ]);
     assert.deepEqual(applied.map((item) => Array.from(item)), expected.map((item) => Array.from(item)));
     assert.deepEqual(applyTransforms(frames, [{'pitchRange': 1.5}]).map((item) => Array.from(item)),
