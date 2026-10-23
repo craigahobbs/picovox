@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.6 (2026-10-23)
+
+- [cb5a8e6](https://github.com/craigahobbs/picovox/commit/cb5a8e6) - less tinny voices: every voice's source 5 dB darker than the network predicts, and the Male and Female voices' glottal pulse a little softer - in blind A/B listening, less tinny in half the voices and never worse, never less natural, and the warble on drawn-out words like "times" gone; UTMOS, word error rate, and speaker similarity unchanged
+
 ## 1.6.5 (2026-10-23)
 
 - [afa5018](https://github.com/craigahobbs/picovox/commit/afa5018) - reading fixes: a number of 309 or more digits no longer stops synthesis (numbers past 15 digits are read digit by digit); "I said no. Then I left." is two sentences ("No." is an abbreviation only before a number - "No. 5" as "number five"); an uppercase P.M. or A.M. ends a sentence; an en dash between numbers is "to" ("1812–15"); Rev., Capt., Col., Prof., Esq., Jr., Sr., Lt., Mt., Vol., and Fig. spelled out; MI, DI, MV, and DV aren't Roman numerals
