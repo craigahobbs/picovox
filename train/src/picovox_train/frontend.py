@@ -203,11 +203,14 @@ WH_WORDS = set(['who', 'what', 'where', 'when', 'why', 'how', 'which', 'whose', 
 # Abbreviations
 ABBREVIATIONS = {'mr': 'mister', 'mrs': 'missus', 'dr': 'doctor', 'st': 'saint', 'vs': 'versus', 'etc': 'etcetera'}
 
-# Abbreviations only with their period - the months and days (lib/lexicon.js's periodAbbreviations)
+# Abbreviations only with their period - the months and days, and the titles and the rest that don't end a sentence;
+# "No." before a number is "number" (lib/lexicon.js's periodAbbreviations)
 PERIOD_ABBREVIATIONS = {
     'jan': 'january', 'feb': 'february', 'apr': 'april', 'jun': 'june', 'jul': 'july', 'aug': 'august', 'sep': 'september',
     'sept': 'september', 'oct': 'october', 'nov': 'november', 'dec': 'december', 'mon': 'monday', 'tue': 'tuesday',
-    'tues': 'tuesday', 'thu': 'thursday', 'thur': 'thursday', 'thurs': 'thursday', 'fri': 'friday'
+    'tues': 'tuesday', 'thu': 'thursday', 'thur': 'thursday', 'thurs': 'thursday', 'fri': 'friday',
+    'prof': 'professor', 'capt': 'captain', 'col': 'colonel', 'lt': 'lieutenant', 'rev': 'reverend',
+    'esq': 'esquire', 'jr': 'junior', 'sr': 'senior', 'mt': 'mount', 'vol': 'volume', 'fig': 'figure'
 }
 
 # Number words
@@ -275,19 +278,30 @@ def plural_word(word):
     return f'{word[:-1]}ies' if word.endswith('y') else ('sixes' if word == 'six' else f'{word}s')
 
 
+# Digits in words, digit by digit (digitWords)
+def digit_words(digits):
+    return [ONES[int(digit)] for digit in digits]
+
+
+# An integer's digits (commas grouping its thousands or not) in words - digit by digit past 15 digits (a number that
+# long isn't read as one, and is past a JavaScript double's exact integers) (integerWords)
+def integer_words(digits):
+    plain = digits.replace(',', '').lstrip('0') or '0'
+    return digit_words(plain) if len(plain) > 15 else number_words(int(plain))
+
+
 # A decimal's fraction in words - digit by digit after the point (fractionWords)
 def fraction_words(fraction):
-    return ['point'] + [ONES[int(digit)] for digit in fraction]
+    return ['point'] + digit_words(fraction)
 
 
-# A number token's words - its digits (commas grouping its thousands) in words, a four-digit number as a year, a
-# decimal's fraction digit by digit, a percentage, and an ordinal (1st, 22nd) or a plural (1970s, 70's) as its last
-# word's (numberTokenWords)
+# A number token's words - its digits (commas grouping its thousands) in words (integer_words), a four-digit number as
+# a year, a decimal's fraction digit by digit, a percentage, and an ordinal (1st, 22nd) or a plural (1970s, 70's) as its
+# last word's (numberTokenWords)
 def number_token_words(token):
     digits, fraction, suffix = NUMBER_REGEX.match(token).groups()
-    value = int(digits.replace(',', ''))
     is_year = YEAR_REGEX.match(digits) and fraction is None and (suffix == '' or suffix.endswith('s'))
-    words = year_words(value) if is_year else number_words(value)
+    words = year_words(int(digits)) if is_year else integer_words(digits)
     if fraction is not None:
         words.extend(fraction_words(fraction))
     if suffix == '%':
@@ -313,11 +327,11 @@ def money_words(token):
     value = int(digits.replace(',', ''))
     if fraction is not None and len(fraction) == 2 and scale is None:
         cents = int(fraction)
-        words = [] if value == 0 and cents != 0 else number_words(value) + [unit if value == 1 else units]
+        words = [] if value == 0 and cents != 0 else integer_words(digits) + [unit if value == 1 else units]
         if cents != 0:
             words.extend(([] if not words else ['and']) + number_words(cents) + [hundredth if cents == 1 else hundredths])
         return words
-    words = number_words(value)
+    words = integer_words(digits)
     if fraction is not None:
         words.extend(fraction_words(fraction))
     if scale is not None:
@@ -373,7 +387,8 @@ def text_items(text):
             items[-1] = ({'end': end}, offset)
             parenthesis_end = False
 
-    for match in TOKEN_REGEX.finditer(plain_letters(text).lower().replace('‘', '\'').replace('’', '\'')):
+    matches = list(TOKEN_REGEX.finditer(plain_letters(text).lower().replace('‘', '\'').replace('’', '\'')))
+    for index, match in enumerate(matches):
         token, offset = match.group(0), match.start()
         if TIME_REGEX.match(token):
             items.extend((word, offset) for word in time_words(token))
@@ -389,6 +404,8 @@ def text_items(text):
                 items.append((ABBREVIATIONS[bare], offset))
             elif token.endswith('.') and bare in PERIOD_ABBREVIATIONS:
                 items.append((PERIOD_ABBREVIATIONS[bare], offset))
+            elif token == 'no.' and index + 1 < len(matches) and '0' <= matches[index + 1].group(0)[0] <= '9':
+                items.append(('number', offset))
             else:
                 items.append((bare.strip('\''), offset))
                 if token.endswith('.'):

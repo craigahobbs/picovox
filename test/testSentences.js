@@ -49,12 +49,20 @@ test('splitSentences, not sentence ends', () => {
         ['It cost 3.50 at example.com today.', true], ['Mr. Smith and Dr. Jones met J. R. Tolkien.', false], ['no. 5 vs. 6.', false]
     ]);
 
+    // "No." is an abbreviation only before a number
+    assert.deepEqual(sentenceTexts('"No." He left. I said no. Then No. 7 came.'), [
+        ['"No."', true], ['He left.', false], ['I said no.', false], ['Then No. 7 came.', false]
+    ]);
+
     // An abbreviation is case-insensitive; a lone lowercase letter ends a sentence
     assert.deepEqual(sentenceTexts('See VOL. 2. Plan a. Then b.'), [['See VOL. 2.', true], ['Plan a.', false], ['Then b.', false]]);
 
     // a.m. and p.m. end a sentence only before a word that isn't lowercase
     assert.deepEqual(sentenceTexts('At 5 p.m. on Monday we met. At 9 a.m. Then 6 P.M. sharp. Go.'), [
         ['At 5 p.m. on Monday we met.', true], ['At 9 a.m.', false], ['Then 6 P.M. sharp.', false], ['Go.', false]
+    ]);
+    assert.deepEqual(sentenceTexts('At 6 P.M. Then we left at 7 A.M. on the dot.'), [
+        ['At 6 P.M.', true], ['Then we left at 7 A.M. on the dot.', false]
     ]);
 });
 
@@ -78,6 +86,7 @@ test('splitSentences, long sentences', () => {
 test('splitSentences, whitespace', () => {
     // Runs of whitespace become single spaces; a blank line with spaces or a carriage return is a paragraph break
     assert.deepEqual(sentenceTexts('One\n  two\tthree.\r\n \t\r\nFour.'), [['One two three.', true], ['Four.', true]]);
+    assert.deepEqual(sentenceTexts(`One.\n${' '.repeat(60)}\nTwo.\nThree.`), [['One.', true], ['Two.', true], ['Three.', false]]);
     assert.deepEqual(sentenceTexts('No end'), [['No end', true]]);
 });
 
@@ -120,8 +129,9 @@ test('speechText', () => {
     assert.equal(speechText('in\u00advisi\u200bble\u2060\ufeff'), 'invisible');
     assert.equal(speechText('a\u00a0b\u2009c\u200ad\u202fe'), 'a b c d e');
 
-    // Dashes are pauses, ellipses are periods
+    // Dashes are pauses (an en dash between numbers is "to"), ellipses are periods
     assert.equal(speechText('It was \u2014 so to speak \u2014 late\u2013ish'), 'It was, so to speak, late, ish');
+    assert.equal(speechText('In 1812\u201315, pages 3 \u2013 7; 1990\u20142000'), 'In 1812 to 15, pages 3 to 7; 1990, 2000');
     assert.equal(speechText('Wait\u2026 what?'), 'Wait... what?');
 
     // Roman-numeral headings are numbers
@@ -135,6 +145,7 @@ test('speechText', () => {
     // letters that aren't a numeral
     assert.equal(speechText('World War II, Henry VIII, and Louis XIV in MDCCCXCII.'), 'World War 2, Henry 8, and Louis 14 in 1892.');
     assert.equal(speechText('I saw DC, CD, MM, and MIX.'), 'I saw DC, CD, MM, and MIX.');
+    assert.equal(speechText('MI, DI, MV, DV, but LV and CI'), 'MI, DI, MV, DV, but 55 and 101');
     assert.equal(speechText('IIII, XM, VIVID, Civil, and ii'), 'IIII, XM, VIVID, Civil, and ii');
 
     // World War I is one, not the pronoun

@@ -29,7 +29,9 @@ TEXTS = [
     'Señor Amadís and Doña Œdipus saw Cæsar in Łódź - Straße, ñ, ŋ.',
     'In 1972, 1905, 1900, and 2001 - the 1970s and 80\'s - the 1st, 22nd, 3rd, and 12th of 23,000,000 (12,3456).',
     'At 10:30 a.m., 9:00 p.m., or 6pm, I am paying 50% - $1,234.56, $0.50, $5 million, £1.50, and €20 - in the a.m.',
-    'He left the room (quietly, as always) and closed the door (1818); (Aside.) The end (truly)'
+    'He left the room (quietly, as always) and closed the door (1818); (Aside.) The end (truly)',
+    'Pi is 3.14159265358979323846; 12345678901234567890 and 9,007,199,254,740,993 are long, $12345678901234567.89 too.',
+    'Rev. Smith, Esq., Capt. Hook, and Ms. Ames saw No. 5, Vol. 2, and Fig. 3 on Mt. Ida; I said no. No. Gen. Lee, Ch. 4.'
 ]
 
 
@@ -150,6 +152,8 @@ class TestFrontend(unittest.TestCase):
         self.assertEqual(frontend.text_words(['On Mon. Nov. 5, mon ami, Aug. sat.']),
                          ['on', 'monday', 'november', 'five', 'mon', 'ami', 'august', 'sat'])
         self.assertEqual(frontend.PERIOD_ABBREVIATIONS['sept'], 'september')
+        self.assertEqual(frontend.text_words(['Rev. Ames saw No. 5; I said no. No.']),
+                         ['reverend', 'ames', 'saw', 'number', 'five', 'i', 'said', 'no'])
 
     def test_pronounce_texts(self):
         # Without a context network
@@ -208,6 +212,14 @@ class TestFrontend(unittest.TestCase):
         self.assertEqual(frontend.number_token_words('19720'), ['nineteen', 'thousand', 'seven', 'hundred', 'twenty'])
         self.assertEqual(frontend.number_token_words('23,000,000'), ['twenty', 'three', 'million'])
 
+        # Past 15 digits, digit by digit (leading zeros aside)
+        self.assertEqual(frontend.number_token_words('999,999,999,999,999')[:5], ['nine', 'hundred', 'ninety', 'nine', 'trillion'])
+        self.assertEqual(frontend.number_token_words('0001234567890123456'),
+                         ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'zero', 'one', 'two', 'three',
+                          'four', 'five', 'six'])
+        self.assertEqual(len(frontend.number_token_words('7' * 400)), 400)
+        self.assertEqual(frontend.number_token_words('0'), ['zero'])
+
         # Decimals
         self.assertEqual(frontend.number_token_words('3.14'), ['three', 'point', 'one', 'four'])
         self.assertEqual(frontend.number_token_words('1972.5'),
@@ -236,6 +248,8 @@ class TestFrontend(unittest.TestCase):
         self.assertEqual(frontend.money_words('$1,234.56'),
                          ['one', 'thousand', 'two', 'hundred', 'thirty', 'four', 'dollars', 'and', 'fifty', 'six', 'cents'])
         self.assertEqual(frontend.money_words('$1.01'), ['one', 'dollar', 'and', 'one', 'cent'])
+        self.assertEqual(frontend.money_words('$' + '1' * 16), ['one'] * 16 + ['dollars'])
+        self.assertEqual(frontend.money_words('$' + '2' * 16 + '.25'), ['two'] * 16 + ['dollars', 'and', 'twenty', 'five', 'cents'])
         self.assertEqual(frontend.money_words('$1.00'), ['one', 'dollar'])
         self.assertEqual(frontend.money_words('$0.50'), ['fifty', 'cents'])
         self.assertEqual(frontend.money_words('$0.00'), ['zero', 'dollars'])

@@ -186,6 +186,20 @@ test('lexicon.textToPhrases, month and day abbreviations', () => {
 });
 
 
+test('lexicon.textToPhrases, title abbreviations', () => {
+    // With their period, the titles and the rest are spelled out (without ending the phrase); "No." before a number is
+    // "number" - otherwise the word; "Gen." and "Ch." are words
+    const phrases = textToPhrases('Rev. Smith, Esq., Capt. Hook, and Ms. Ames saw No. 5, Vol. 2, and Fig. 3 on Mt. Ida; I said no. ' +
+        'No. Gen. Lee, Ch. 4, Col. Jr. Sr. Prof. Lt.');
+    assert.deepEqual(phrases.map(wordTexts), [
+        ['reverend', 'smith'], ['esquire'], ['captain', 'hook'], ['and', 'ms'], ['ames', 'saw', 'number', 'five'], ['volume', 'two'],
+        ['and', 'figure', 'three', 'on', 'mount', 'ida'], ['i', 'said', 'no'], ['no'], ['gen'], ['lee'], ['ch'], ['four'],
+        ['colonel', 'junior', 'senior', 'professor', 'lieutenant']
+    ]);
+    assert.deepEqual(textToPhrases('I said no.').map(wordTexts), [['i', 'said', 'no']]);
+});
+
+
 test('lexicon.textToPhrases, abbreviations', () => {
     // An abbreviation's period does not end the phrase
     const phrases = textToPhrases('Mr. and Mrs. Smith met Dr. Jones on St. Mark, vs. etc.');
@@ -266,6 +280,8 @@ test('lexicon.moneyWords', () => {
     assert.deepEqual(moneyWords('$1,234.56'),
         ['one', 'thousand', 'two', 'hundred', 'thirty', 'four', 'dollars', 'and', 'fifty', 'six', 'cents']);
     assert.deepEqual(moneyWords('$1.01'), ['one', 'dollar', 'and', 'one', 'cent']);
+    assert.deepEqual(moneyWords(`$${'1'.repeat(16)}`), [...Array(16).fill('one'), 'dollars']);
+    assert.deepEqual(moneyWords(`$${'2'.repeat(16)}.25`), [...Array(16).fill('two'), 'dollars', 'and', 'twenty', 'five', 'cents']);
     assert.deepEqual(moneyWords('$1.00'), ['one', 'dollar']);
     assert.deepEqual(moneyWords('$0.50'), ['fifty', 'cents']);
     assert.deepEqual(moneyWords('$0.00'), ['zero', 'dollars']);
@@ -307,6 +323,13 @@ test('lexicon.numberTokenWords', () => {
     assert.deepEqual(numberTokenWords('0972'), ['nine', 'hundred', 'seventy', 'two']);
     assert.deepEqual(numberTokenWords('19720'), ['nineteen', 'thousand', 'seven', 'hundred', 'twenty']);
     assert.deepEqual(numberTokenWords('23,000,000'), ['twenty', 'three', 'million']);
+
+    // Past 15 digits, digit by digit (leading zeros aside)
+    assert.deepEqual(numberTokenWords('999,999,999,999,999').slice(0, 5), ['nine', 'hundred', 'ninety', 'nine', 'trillion']);
+    assert.deepEqual(numberTokenWords('0001234567890123456'),
+        ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'zero', 'one', 'two', 'three', 'four', 'five', 'six']);
+    assert.equal(numberTokenWords('7'.repeat(400)).length, 400);
+    assert.deepEqual(numberTokenWords('0'), ['zero']);
 
     // Decimals
     assert.deepEqual(numberTokenWords('3.14'), ['three', 'point', 'one', 'four']);
