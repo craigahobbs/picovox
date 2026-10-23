@@ -34,11 +34,12 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   and its training (`model.py`, `trainmulti.py`, `losses.py`, `discriminator.py`, `quant.py`, `optim.py` - the training
   step's options), distillation (`distill.py`), export (`export.py`, `package.py`, `synthesize.py`), the listener panel
   (`panel.py`, and the listener models, `listeners.py` - `build/venv-listeners`), and the pipeline's tools (`gpulock.py`,
-  `smoke.py`, `stepcheck.py`).
+  `smoke.py`, `stepcheck.py`, and `quality.py` - the voices' quality measures against their readers' recordings).
   `picovox_train/__init__.py` documents each module. `make train` runs it from its source (`PYTHONPATH=train/src`) in
   the training environments (`build/venv-nn`, `venv-listeners`, `venv-pos` - `requirements/*.txt`).
 - `tools/` - the training dashboard (`dashboard/`), the performance lab (`perf/` - the playback pipeline timed on a
-  phone, and under Node without a JIT), `heteronyms.js` (the heteronym and names regression sets), make train's
+  phone, and under Node without a JIT), the voice lab (`voicelab/` - the package synthesizing in a page with adjustable
+  frame edits, for Claude's blind A/B questions in an artifact; `make voicelab` stages it with `lib/` in `build/voicelab/`), `heteronyms.js` (the heteronym and names regression sets), make train's
   bookkeeping (`trainstage.sh`, `trainutil.sh` - the stage events and logs, the utilization samples, `trainpower.sh`)
   and listening samples (`trainsamples.js`, `trainsamplesindex.js`), and the panel's texts
   (`panel-texts.json`).
@@ -97,8 +98,10 @@ the python-build skill before running its tests, lint, or coverage, or changing 
   120). The API's exports have JSDoc comments (`make doc`).
 - The package is NN-only at runtime: every word is pronounced by the G2P network - no dictionary, no rules - and it
   imports nothing but its own modules (`test/testIndex.js` checks).
-- Voice changes are judged by measurement, not by ear: the listener panel (`picovox_train/panel.py` - UTMOS, Whisper's
-  WER, speaker similarity; `picovox_train.distill eval`) over the panel texts; compare averages over several seeds.
+- Voice changes are judged by measurement: blind A/B listening in the voice lab (`tools/voicelab/` - forced choices,
+  with repeats; the measures in `picovox_train.quality` guide, they don't decide), and the listener panel as the
+  guardrail (`picovox_train/panel.py` - UTMOS, Whisper's WER, speaker similarity; `picovox_train.distill eval`) over the
+  panel texts; compare averages over several seeds.
 - Refactors must leave the audio bit-identical - compare a hash of the package's audio (`lib/synthesis.js`
   `sentenceBlocks` over `tools/panel-texts.json`, both voices, and `synthesize` over multi-paragraph texts) before and
   after - and the trainer exact (`picovox_train/stepcheck.py` before and after). The generated models must still

@@ -41,6 +41,16 @@ _gh-pages: site
 ESLINT_ARGS := $(ESLINT_ARGS) tools/ nn/js/ --ignore-pattern 'lib/models/**'
 
 
+# The voice lab (tools/voicelab/) staged with the package's lib/ in build/voicelab/ - published as an artifact (Claude's
+# questions and the answers in its db store; index.html the page, the rest its files) or served locally (Explore only)
+.PHONY: voicelab
+voicelab:
+	rm -rf build/voicelab
+	mkdir -p build/voicelab/picovox
+	rsync -a tools/voicelab/ build/voicelab/
+	rsync -a lib build/voicelab/picovox/
+
+
 # The training package (train/ - a python-build package, picovox_train): make commit runs its gate too (its unit tests,
 # pylint, and 100% branch coverage - make -C train commit), and make clean cleans it
 .PHONY: commit-train
