@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.5 (2026-10-23)
+
+- [afa5018](https://github.com/craigahobbs/picovox/commit/afa5018) - reading fixes: a number of 309 or more digits no longer stops synthesis (numbers past 15 digits are read digit by digit); "I said no. Then I left." is two sentences ("No." is an abbreviation only before a number - "No. 5" as "number five"); an uppercase P.M. or A.M. ends a sentence; an en dash between numbers is "to" ("1812–15"); Rev., Capt., Col., Prof., Esq., Jr., Sr., Lt., Mt., Vol., and Fig. spelled out; MI, DI, MV, and DV aren't Roman numerals
+- [d91ddc1](https://github.com/craigahobbs/picovox/commit/d91ddc1) - the package's internals simplified (one base64 and inflate, one encoder path, the unused openFraction removed), its audio bit-identical
+
 ## 1.6.4 (2026-10-22)
 
 - [a7ed6d6](https://github.com/craigahobbs/picovox/commit/a7ed6d6) - parentheses pause: an aside's opening and closing parentheses are each a comma's phrase break ("He left the room (quietly, as always) and closed the door."), punctuation after a parenthesis keeping its own break
