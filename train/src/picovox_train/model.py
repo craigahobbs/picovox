@@ -74,6 +74,9 @@ PAD, UNK, BOS, WORD = 0, 1, 2, 3
 PHRASE_ENDS = (4, 5, 6, 7, 8)
 FIRST_PHONE = 9
 
+# A boundary token pauses at inference when its pause probability is above this (lib/model.js's too)
+PAUSE_THRESHOLD = 0.5
+
 # The parameters the network predicts (all but jitter and shimmer, which are constants)
 FIXED_NAMES = ('jitter', 'shimmer')
 
@@ -286,12 +289,12 @@ class MultiModel(torch.nn.Module):
 
     # Durations (frames, integer) from the duration predictor's outputs, for inference
     @staticmethod
-    def predicted_durations(outputs, tokens, pause_threshold=0.5, rate=1.0):
+    def predicted_durations(outputs, tokens):
         log_duration, pause_logit, log_paused = outputs.unbind(-1)
-        phone = torch.expm1(log_duration).clamp(min=1.0) * rate
-        paused = torch.expm1(log_paused).clamp(min=1.0) * rate
+        phone = torch.expm1(log_duration).clamp(min=1.0)
+        paused = torch.expm1(log_paused).clamp(min=1.0)
         boundary = is_boundary(tokens) | (tokens == BOS)
-        pause = torch.sigmoid(pause_logit) > pause_threshold
+        pause = torch.sigmoid(pause_logit) > PAUSE_THRESHOLD
         durations = torch.where(boundary, torch.where(pause, paused, torch.zeros_like(paused)), phone)
         durations = durations * (tokens != PAD)
         # Round the running sum, so rounding errors don't accumulate
@@ -359,13 +362,13 @@ class MultiModel(torch.nn.Module):
         return {'duration': duration_outputs, 'unit': unit, 'frameMask': frame_mask}
 
     @torch.no_grad()
-    def infer(self, tokens, speaker=None, emotion=None, intensity=None, speaker_vector=None, pause_threshold=0.5, rate=1.0):
+    def infer(self, tokens, speaker=None, emotion=None, intensity=None):
         """Inference - {durations [B, N] (10 ms frames), values (parameter frames [B, 2F + 1, COUNT]), frames}"""
-        if speaker is None and speaker_vector is None:
+        if speaker is None:
             speaker = torch.zeros(tokens.shape[0], dtype=torch.long, device=tokens.device)
-        condition = self.condition(speaker, emotion, intensity, speaker_vector)
+        condition = self.condition(speaker, emotion, intensity)
         features, mask = self.encode(tokens, condition)
-        durations = self.predicted_durations(self.durations(features, mask, condition), tokens, pause_threshold, rate)
+        durations = self.predicted_durations(self.durations(features, mask, condition), tokens)
         regulated, positions, frame_mask = self.regulate(features, durations)
         values = self.parameters_from_unit(self.decode(regulated, positions, frame_mask, condition))
         values = torch.cat([values, values[:, -1:]], dim=1)

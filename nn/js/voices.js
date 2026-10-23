@@ -80,16 +80,15 @@ export function voiceTransforms(voice) {
 
 
 // The model options and frame transforms of a voice in a style - {options (speakFrames's: speaker, style, rate - a
-// duration multiplier), transforms}. options.rate is the listener's speaking speed (1 is the voice's own); other
-// options (pauseThreshold, ...) pass through.
-export function voiceOptions(model, voices, {voice: voiceId, style: styleId, rate = 1, ...rest} = {}) {
+// duration multiplier), transforms}. options.rate is the listener's speaking speed (1 is the voice's own).
+export function voiceOptions(model, voices, {voice: voiceId, style: styleId, rate = 1} = {}) {
     const voice = findVoice(voices, voiceId);
     const style = findStyle(voices, styleId);
     const speed = rate * (voice.rate ?? 1) * (style.rate ?? 1);
     if (!(speed > 0)) {
         throw new Error(`invalid rate ${rate}`);
     }
-    const options = {...rest, 'speaker': voiceBlend(model, voice), 'rate': 1 / speed};
+    const options = {'speaker': voiceBlend(model, voice), 'rate': 1 / speed};
     if (style.model) {
         options.style = style.model;
     }

@@ -127,8 +127,6 @@ class TestModel(unittest.TestCase):
         # <bos> paused (4), the phone 2.4, the word boundary unpaused, a phone clamped to 1, the period paused (2.6), padding 0
         self.assertEqual(durations.tolist(), [[4, 2, 0, 1, 3, 0]])
         self.assertEqual(durations.dtype, torch.long)
-        slower = model.MultiModel.predicted_durations(outputs, tokens, pause_threshold=0.999, rate=2.0)
-        self.assertEqual(slower.tolist(), [[0, 5, 0, 2, 0, 0]])
 
     def test_regulate(self):
         features = torch.arange(6, dtype=torch.float32).reshape(1, 3, 2)
@@ -159,9 +157,6 @@ class TestModel(unittest.TestCase):
         self.assertFalse(result['values'].requires_grad)
         styled = network.infer(tokens, speaker=torch.tensor([1, 1]), emotion=torch.tensor([3, 3]), intensity=torch.tensor([1.0, 1.0]))
         self.assertEqual(styled['values'].shape[-1], params.COUNT)
-        vector = network.infer(tokens, speaker_vector=network.speaker_vector(torch.tensor([1, 1])), emotion=torch.tensor([3, 3]),
-                               intensity=torch.tensor([1.0, 1.0]))
-        self.assertTrue(torch.allclose(vector['values'], styled['values']))
 
     def test_build_model(self):
         self.assertIsInstance(model.build_model(tiny_config(), dropout=0.0), model.MultiModel)

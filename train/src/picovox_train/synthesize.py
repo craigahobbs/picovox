@@ -83,7 +83,7 @@ class Voice:
     def condition(self):
         return {'speaker': self.speaker_input, 'emotion': self.emotion, 'intensity': self.intensity}
 
-    def frames(self, text, pause_threshold=0.5, rate=1.0):
+    def frames(self, text):
         """Text to parameter frames [T, COUNT] (numpy, the end frame included) and the sentences' token ids and
         durations"""
         ids = tokenize(text)['ids']
@@ -93,7 +93,7 @@ class Voice:
             mapped = [self.remap.get(token_id, token_id) for token_id in sentence]
             tokens = torch.tensor([mapped], device=self.device)
             with torch.no_grad():
-                result = self.model.infer(tokens, **self.condition(), pause_threshold=pause_threshold, rate=rate)
+                result = self.model.infer(tokens, **self.condition())
             values = result['values'][0, :-1].cpu().numpy()
             parts.append({'ids': sentence, 'durations': result['durations'][0].cpu().numpy().tolist()})
             chunks.append(values)

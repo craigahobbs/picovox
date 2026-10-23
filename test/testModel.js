@@ -176,12 +176,6 @@ test('speakFrames, rate and pauses', () => {
     const slow = speakFrames(multi, text, {'speaker': 0, 'rate': 1.5});
     assert(slow.frames.length > 1.3 * normal.frames.length);
 
-    // The pause threshold - no pauses, or a pause at every word boundary
-    const noPauses = speakFrames(multi, text, {'speaker': 0, 'pauseThreshold': 1});
-    const allPauses = speakFrames(multi, text, {'speaker': 0, 'pauseThreshold': 0});
-    assert(noPauses.frames.length < normal.frames.length);
-    assert(allPauses.frames.length > normal.frames.length);
-
     // A zero rate - no frames
     assert.deepEqual(speakFrames(multi, text, {'rate': 0}).frames, []);
 

@@ -100,10 +100,8 @@ async function main() {
     // voice's then the style's, and the model style comes from the style
     const [first] = voices.voices;
     const shout = voices.styles.find((style) => style.transform && !style.model) ?? findStyle(voices, 'neutral');
-    const {options, transforms} = voiceOptions(model, voices,
-        {'voice': first.id, 'style': shout.id, 'rate': 1.25, 'pauseThreshold': 0.6});
+    const {options, transforms} = voiceOptions(model, voices, {'voice': first.id, 'style': shout.id, 'rate': 1.25});
     assert.ok(Math.abs(options.rate - 1 / (1.25 * (first.rate ?? 1) * (shout.rate ?? 1))) < 1e-12, 'rates compose');
-    assert.equal(options.pauseThreshold, 0.6);
     const adjustCount = Object.keys(first.adjust ?? {}).filter((name) => name !== 'rate').length;
     assert.equal(transforms.length, adjustCount + 1 + (shout.transform ?? []).length,
         'the voice\'s transforms and the source shelf correction, then the style\'s');

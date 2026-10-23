@@ -8,7 +8,7 @@
 // lib/models/voiceModel.js out/voice), speaking a voice and a style (batch items may set speaker and style too):
 //
 //     node nn/js/speak.js -m out/voice "Hello, world." -o hello.wav [-r 44100] [-s seed] [--params out.json]
-//         [--transform '[{"pitchScale": 1.2}]'] [--pause 0.5] [--rate 1]
+//         [--transform '[{"pitchScale": 1.2}]'] [--rate 1]
 //     node nn/js/speak.js -m out/voice --batch list.json    # [{text, wav, params, seed, transform}, ...]
 //
 //     node nn/js/speak.js -m out/voice "Hello." -o hello.wav --speaker 5            # a speaker id (data/nn/speakers.json)
@@ -41,7 +41,7 @@ import {voiceOptions} from './voices.js';
 // Parse the command line
 function parseArgs(argv) {
     const args = {'model': null, 'text': null, 'wav': null, 'params': null, 'sampleRate': 44100, 'seed': 1, 'batch': null,
-        'transform': null, 'pauseThreshold': 0.5, 'rate': 1, 'framesOnly': false, 'peak': 0.89,
+        'transform': null, 'rate': 1, 'framesOnly': false, 'peak': 0.89,
         'speaker': undefined, 'style': undefined, 'intensity': 1,
         'voices': 'data/nn/voices.json', 'voice': undefined, 'voiceStyle': undefined};
     for (let ix = 0; ix < argv.length; ix++) {
@@ -61,8 +61,6 @@ function parseArgs(argv) {
             args.batch = take();
         } else if (arg === '--transform') {
             args.transform = JSON.parse(take());
-        } else if (arg === '--pause') {
-            args.pauseThreshold = Number(take());
         } else if (arg === '--rate') {
             args.rate = Number(take());
         } else if (arg === '--peak') {
@@ -129,15 +127,14 @@ function main() {
     let audioSeconds = 0;
     for (const item of items) {
         const startNetwork = performance.now();
-        let options = {'pauseThreshold': item.pauseThreshold ?? args.pauseThreshold, 'rate': item.rate ?? args.rate,
-            'speaker': item.speaker ?? args.speaker, 'style': item.style ?? defaultStyle};
+        let options = {'rate': item.rate ?? args.rate, 'speaker': item.speaker ?? args.speaker, 'style': item.style ?? defaultStyle};
         let voiceTransforms = [];
         const voiceId = item.voice ?? args.voice;
         if (voiceId !== undefined) {
             // A designed voice - its blend, style, and transforms (the rate is the listener's speed: 1 / the duration multiplier)
             voices ??= JSON.parse(readFileSync(args.voices, 'utf8'));
             const resolved = voiceOptions(model, voices, {'voice': voiceId, 'style': item.voiceStyle ?? args.voiceStyle,
-                'rate': 1 / options.rate, 'pauseThreshold': options.pauseThreshold});
+                'rate': 1 / options.rate});
             // (an explicit model style - --style or the item's style - replaces the designed style's)
             options = {...resolved.options, 'style': options.style ?? resolved.options.style};
             voiceTransforms = resolved.transforms;
