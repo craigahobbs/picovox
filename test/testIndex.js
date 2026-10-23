@@ -264,7 +264,8 @@ test('toWav, synthesize', async () => {
 
 // A fake AudioContext - its time advances when advance() is called, ending the blocks played by then
 class FakeAudioContext {
-    constructor({state = 'running', instant = false, failBuffer = false} = {}) {
+    constructor({state = 'running', instant = false, failBuffer = false, sampleRate = 48000} = {}) {
+        this.sampleRate = sampleRate;
         this.currentTime = 0;
         this.state = state;
         this.destination = {'name': 'destination'};
@@ -443,7 +444,8 @@ test('speak', async () => {
             time = source.startTime + source.buffer.length / 24000;
         }
 
-        // The playback's own context is closed at the end; stopping after the end does nothing
+        // The playback's own context runs at the sample rate, and is closed at the end; stopping after the end does nothing
+        assert.equal(context.sampleRate, 24000);
         assert.equal(context.closed, 1);
         assert.equal(context.resumed, 0);
         playback.stop();
@@ -535,9 +537,10 @@ test('speak, a given context', async () => {
 
 test('speak, webkitAudioContext', async () => {
     await withAudioContext('webkitAudioContext', async () => {
-        const playback = speak('Hello.');
+        const playback = speak('Hello.', {'sampleRate': 16000});
         const [context] = FakeAudioContext.instances;
         await playThrough(context, playback);
+        assert.equal(context.sampleRate, 16000);
         assert(context.sources.length > 0);
         assert.equal(context.closed, 1);
     });

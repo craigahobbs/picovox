@@ -86,7 +86,9 @@ Speak text aloud in a browser, with Web Audio. Returns a playback, `{stop(), fin
 `finished` is a Promise that resolves when the playback ends or is stopped (and rejects if synthesis fails). Playback
 starts with the first blocks while the rest are synthesized, a few seconds ahead. Synthesis runs on the main thread, a
 block at a time between the page's other work; for long texts, use `stream` in a Web Worker and play its blocks.
-`options.context` is an `AudioContext` to play in (by default, a new one, closed when the playback ends). Under Node,
+`options.context` is an `AudioContext` to play in (by default, a new one at the sample rate, closed when the playback
+ends). Play blocks in a context at their sample rate (`new AudioContext({'sampleRate': 24000})`): a context at another
+rate resamples each block apart, and the blocks' joins click. Under Node,
 `speak` throws an error - there is no Web Audio; use `synthesize` and `toWav`.
 
 ### `voices()`
