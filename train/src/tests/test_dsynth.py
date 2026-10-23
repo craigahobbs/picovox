@@ -341,6 +341,15 @@ class TestLibraries(unittest.TestCase):
                 unittest.mock.patch.object(torch.mps, 'compile_shader', side_effect=RuntimeError('no Metal')):
             self.assertIsNone(dsynth._amplitudes_library_for(values))
 
+    def test_amplitudes_source_constants(self):
+        # The amplitudes kernel's literals are params's values - the reference rate, the equalizer's lowest band and band
+        # count, and ln(10) / 20 (the tests don't run the Metal path, which would otherwise part from the CPU path and
+        # lib/render.js unnoticed)
+        self.assertEqual((params.REF_RATE, params.EQ_LOW_HZ, params.EQ_BAND_COUNT, round(math.log(10) / 20, 8)),
+                         (44100, 60, 24, 0.11512925))
+        for literal in ('/ 44100.0f;', '/ 60.0f)', '0.0f, 23.0f)', '22L)', '* 24;', 'g_eq[24];', 'i < 24;', 'frame * 24 +',
+                        '* 0.11512925f;'):
+            self.assertIn(literal, dsynth._AMPLITUDES_SOURCE)
 
 
 class TestKernels(unittest.TestCase):

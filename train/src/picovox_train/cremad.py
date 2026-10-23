@@ -1,5 +1,5 @@
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
 Emotional speech for the style modifiers - CREMA-D (Cao et al., 2014): 91 actors (48 male, 43 female, ages 20-74)
@@ -54,7 +54,7 @@ from . import ROOT, SOURCE_DIR
 CORPORA_DIR = os.path.join(ROOT, 'data', 'corpora')
 CREMAD_DIR = os.path.join(CORPORA_DIR, 'crema_d')
 WAV_DIR = os.path.join(CREMAD_DIR, 'AudioWAV')
-USER_AGENT = 'voice-synth-corpora/1.0 (+https://github.com/craigahobbs/voice-synth; research)'
+USER_AGENT = 'picovox-corpora/1.0 (+https://github.com/craigahobbs/picovox; research)'
 
 # The official repository (git LFS) - the media host serves the LFS objects by path
 REPO = 'CheyneyComputerScience/CREMA-D'
@@ -171,7 +171,7 @@ def write_readme():
         '## crema-d',
         '',
         f'- Source: https://github.com/{REPO} (git LFS; the WAV files from {MEDIA_URL.format(path="AudioWAV/<name>.wav")}, '
-        'fetched by `python -m nn.cremad fetch`)',
+        'fetched by `python -m picovox_train.cremad fetch`)',
         '- Contents: CREMA-D, the Crowd-sourced Emotional Multimodal Actors Dataset - 91 actors (48 male, 43 female, '
         'ages 20-74, several races and ethnicities) reading 12 sentences as angry, disgusted, fearful, happy, neutral, '
         'and sad (the sentence "It\'s eleven o\'clock" also at low, medium, and high intensity); 7,442 clips, 16 kHz '
@@ -491,7 +491,9 @@ def align_command(args):
     model, vocab, device = load_ctc(args.device)
     start = time.time()
     failures = 0
-    with open(ALIGNMENTS_PATH if not args.limit else ALIGNMENTS_PATH + '.sample', 'w', encoding='utf-8') as file:
+    # (written beside its path, then moved there - another make train's build may be reading it)
+    path = ALIGNMENTS_PATH if not args.limit else ALIGNMENTS_PATH + '.sample'
+    with open(path + '.part', 'w', encoding='utf-8') as file:
         for offset in range(0, len(items), 256):
             group = items[offset:offset + 256]
             samples_list = [read_16k(item['wav']) for item in group]
@@ -511,6 +513,7 @@ def align_command(args):
                     record['greedy'] = greedy_decode(log_posteriors, vocab)
                 file.write(json.dumps(record, ensure_ascii=False) + '\n')
             log(f'  {offset + len(group)}/{len(items)} clips, {time.time() - start:.0f} s')
+    os.replace(path + '.part', path)
     log(f'aligned {len(items) - failures} of {len(items)} clips ({failures} failed) in {time.time() - start:.0f} s')
     return 0
 
@@ -687,21 +690,28 @@ def build(args):
                 check['reasons'].append(f'garbled (greedy phone error {check["phoneError"]:.2f} > {MAX_PHONE_ERROR})')
         checks[item['id']] = check
 
-    # Relabeled clips are realigned to the sentence actually read (alignments.jsonl holds the intended sentence's)
+    # Relabeled clips are realigned to the sentence actually read (alignments.jsonl holds the intended sentence's) - again
+    # with --realign, or when realigned.jsonl isn't of these clips and sentences
     relabeled = [item for item in items if checks[item['id']]['sentence'] != item['sentence']]
     for item in relabeled:
         log(f'  {item["id"]}: reads {checks[item["id"]]["sentence"]} ("{SENTENCES[checks[item["id"]]["sentence"]]}") - realigning')
     if relabeled:
         realign_path = os.path.join(BUILD_DIR, 'realigned.jsonl')
-        if not os.path.exists(realign_path) or args.realign:
+        sentences = {item['id']: checks[item['id']]['sentence'] for item in relabeled}
+
+        # The realigned clips (realigned.jsonl's records by id)
+        def read_realigned():
+            with open(realign_path, encoding='utf-8') as file:
+                return {record['id']: record for record in map(json.loads, file)}
+        realigned = read_realigned() if os.path.exists(realign_path) else {}
+        if args.realign or any(realigned.get(clip_id, {}).get('sentence') != sentence for clip_id, sentence in sentences.items()):
             import subprocess  # pylint: disable=import-outside-toplevel
             python = os.path.join(ROOT, 'build', 'venv-listeners', 'bin', 'python')
-            ids = [f'{item["id"]}={checks[item["id"]]["sentence"]}' for item in relabeled]
+            ids = [f'{clip_id}={sentence}' for clip_id, sentence in sentences.items()]
             subprocess.run([python, '-B', '-m', 'picovox_train.cremad', 'realign', *ids], check=True, cwd=ROOT,
                            env={**os.environ, 'PYTHONPATH': SOURCE_DIR})
-        with open(realign_path, encoding='utf-8') as file:
-            for record in map(json.loads, file):
-                alignments[record['id']] = record
+            realigned = read_realigned()
+        alignments.update(realigned)
 
     # Typical phone durations (for splitting alignment blocks - with exact alignment, unused but required)
     totals = collections.defaultdict(lambda: [0.0, 0])
@@ -727,10 +737,12 @@ def build(args):
         ranges[key] = (round(max(50.0, 0.75 * float(np.percentile(values, 25))), 1),
                        round(min(900.0, 1.5 * float(np.percentile(values, 75))), 1))
 
+    # The clips' tasks - each aligned clip of an actor with a pitch range (every actor has one but in a small --limit
+    # sample)
     tasks = []
     for item in items:
         record = alignments[item['id']]
-        if not record['labels']:
+        if not record['labels'] or item['actor'] not in ranges:
             continue
         sex = actor_info[item['actor']]['sex']
         floor, ceiling = ranges.get((item['actor'], item['emotion']), ranges[item['actor']])
@@ -743,9 +755,9 @@ def build(args):
     with multiprocessing.Pool(args.jobs) as pool:
         results = pool.map(process_clip, tasks, chunksize=4)
 
-    # The actors - speaker entries (sorted by actor id)
+    # The actors - speaker entries (sorted by actor id), each with a pitch range
     speakers = {}
-    for index, actor in enumerate(sorted(actor_info)):
+    for index, actor in enumerate(sorted(actor for actor in actor_info if actor in ranges)):
         info = actor_info[actor]
         speakers[f'cremad-{actor}'] = {
             'index': index, 'sex': info['sex'], 'corpus': 'CREMA-D', 'actor': actor, 'age': info['age'],
@@ -838,7 +850,7 @@ def build(args):
                              'emotion two-pass range (speakers[...].pitchRanges)'),
         'vocab': vocabulary(),
         'maxEdgeSilence': data.MAX_EDGE_SILENCE,
-        'alignment': {'method': f'CTC forced alignment with {CTC_REPO} (nn/cremad.py)', 'shift': CTC_SHIFT,
+        'alignment': {'method': f'CTC forced alignment with {CTC_REPO} (picovox_train/cremad.py)', 'shift': CTC_SHIFT,
                       'split': CTC_SPLIT, 'edgeExtend': EDGE_EXTEND},
         'emotions': list(EMOTIONS.values()),
         'intensities': list(INTENSITIES.values()),
@@ -887,8 +899,8 @@ def write_summary(index, path=SUMMARY_PATH):
     per_actor = collections.Counter(entry['speaker'] for entry in included)
     reasons = collections.Counter(reason.split(' (')[0] for entry in entries for reason in entry['reason'].split('; ') if reason)
     summary = {
-        'description': 'CREMA-D emotional speech for the style modifiers (nn/cremad.py; the data in build/nn/data/cremad/, '
-                       'nn/data.py\'s format with style labels) - counts, actors, alignment quality, and the listener '
+        'description': 'CREMA-D emotional speech for the style modifiers (picovox_train/cremad.py; the data in build/nn/data/cremad/, '
+                       'picovox_train/data.py\'s format with style labels) - counts, actors, alignment quality, and the listener '
                        'panel\'s emotion recognition of the recordings',
         'corpus': 'CREMA-D (Cao et al., 2014) - https://github.com/' + REPO,
         'license': LICENSE,
@@ -918,14 +930,21 @@ def realign_command(args):
     pairs = [item.split('=') for item in args.ids]
     samples_list = [read_16k(os.path.join(WAV_DIR, clip_id + '.wav')) for clip_id, _ in pairs]
     posteriors = ctc_log_posteriors(model, device, samples_list)
-    with open(os.path.join(BUILD_DIR, 'realigned.jsonl'), 'w', encoding='utf-8') as file:
+    path = os.path.join(BUILD_DIR, 'realigned.jsonl')
+    with open(path + '.part', 'w', encoding='utf-8') as file:
         for (clip_id, sentence), samples, log_posteriors in zip(pairs, samples_list, posteriors):
             tokens = tokenize(SENTENCES[sentence])['tokens']
-            labels, confidences, score = ctc_labels(tokens, log_posteriors, vocab, samples)
-            file.write(json.dumps({'id': clip_id, 'sentence': sentence, 'seconds': round(len(samples) / CTC_SAMPLE_RATE, 4),
-                                   'tokens': tokens, 'labels': [[label, round(begin, 4), round(end, 4)] for label, begin, end in labels],
-                                   'confidences': [round(value, 4) for value in confidences], 'score': round(score, 4),
-                                   'greedy': greedy_decode(log_posteriors, vocab)}, ensure_ascii=False) + '\n')
+            record = {'id': clip_id, 'sentence': sentence, 'seconds': round(len(samples) / CTC_SAMPLE_RATE, 4), 'tokens': tokens}
+            result = ctc_labels(tokens, log_posteriors, vocab, samples)
+            if result is None:
+                record['labels'] = None
+            else:
+                labels, confidences, score = result
+                record.update({'labels': [[label, round(begin, 4), round(end, 4)] for label, begin, end in labels],
+                               'confidences': [round(value, 4) for value in confidences], 'score': round(score, 4),
+                               'greedy': greedy_decode(log_posteriors, vocab)})
+            file.write(json.dumps(record, ensure_ascii=False) + '\n')
+    os.replace(path + '.part', path)
     return 0
 
 

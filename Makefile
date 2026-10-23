@@ -88,9 +88,9 @@ TRAIN_ENV := NN_DATA_DIR=$(TRAIN_DIR)/data NN_RUNS_DIR=$(TRAIN_DIR)/runs NN_DIST
 # samples) at the utility QoS: CPU work beside a GPU stage shares the unified memory's bandwidth - three memory-bound
 # jobs at the default QoS slowed teacher B 53%, at utility 15%, at background 1% (but 4.6x slower themselves)
 BESIDE := taskpolicy -c utility
-# (the GPU stages hold the GPU lock and use two CPU threads - more don't speed a step, and the CPU stages beside them
-# would oversubscribe the cores)
-GPU := OMP_NUM_THREADS=2 $(NN_PYTHON) -m picovox_train.gpulock $(TRAIN_DIR)/gpu.lock --
+# (the GPU stages hold the GPU lock - the machine's, whatever the TRAIN_DIR - and use two CPU threads: more don't speed a
+# step, and the CPU stages beside them would oversubscribe the cores)
+GPU := OMP_NUM_THREADS=2 $(NN_PYTHON) -m picovox_train.gpulock build/gpu.lock --
 TRAIN_RUNS := $(TRAIN_DIR)/runs
 
 # The bookkeeping, for the training dashboard (tools/dashboard/): each stage's start, end, and failure in
@@ -168,12 +168,12 @@ $(TRAIN_DIR)/corpora.done: | build/venv-analysis.build build/venv-nn.build
 #
 # In make train, the G2P's memory-bound stages (the context labels, the relabeling) are scheduled after the readers'
 # data build (order-only prerequisites) - into the teacher's GPU-bound hours, when the cores are idle - not competing
-# with the data build on the critical path; the G2P network itself (one core) starts at once. G2P_JOBS is the chain's
-# worker processes - the context labels' aligned and tag workers and cross-validate's folds at once (each fold one
-# thread); the outputs are the same for any count. make train runs the chain beside the GPU stages, so its count is low
-# (BESIDE) for the memory-bound context labels; the context network's trainings (its four teachers, and each of the ten
-# folds' four teachers and network - one thread each, small and compute-bound) take CONTEXT_JOBS (at 2, the folds
-# outlasted the voice stages by 40 minutes); make train-g2p runs G2P_STANDALONE_JOBS for both.
+# with the data build on the critical path; the G2P network itself (one core) starts at once. G2P_JOBS is the context
+# labels' worker processes - the aligned and tag workers; the outputs are the same for any count. make train runs the
+# chain beside the GPU stages, so its count is low (BESIDE) for the memory-bound context labels; the context network's
+# trainings (its four teachers, and each of cross-validate's ten folds' four teachers and network - one thread each,
+# small and compute-bound) take CONTEXT_JOBS (at 2, the folds outlasted the voice stages by 40 minutes); make train-g2p
+# runs G2P_STANDALONE_JOBS for both.
 G2P_JOBS ?= 2
 CONTEXT_JOBS ?= 6
 G2P_STANDALONE_JOBS ?= 10
@@ -197,8 +197,10 @@ $(TRAIN_DIR)/context-labels.done: $(TRAIN_DIR)/corpora.done data/nn/train.json d
 	@$(STAGE) end
 	touch $@
 
+# (its log new - the training dashboard counts the log's finished trainings as the stage's progress)
 $(TRAIN_DIR)/context-network.done: $(TRAIN_DIR)/context-labels.done
 	@$(STAGE) start
+	$(STAGE) -- rm -f $(TRAIN_DIR)/context/train.log
 	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context train-context --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/context.pt \
 		--log $(TRAIN_DIR)/context/train.log -j $(CONTEXT_JOBS)
 	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context cross-validate --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/folds \
@@ -224,7 +226,8 @@ $(TRAIN_DIR)/g2p-install.done: $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.don
 
 
 # The heteronym relabeling (CPU) - it must reproduce data/nn/g2p-relabel.json's words
-$(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/corpora.done | $(if $(G2P_STANDALONE),,$(TRAIN_DIR)/data-multi.done)
+$(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/corpora.done data/cmudict.dict data/nn/g2p-relabel.json \
+		| $(if $(G2P_STANDALONE),,$(TRAIN_DIR)/data-multi.done)
 	@$(STAGE) start
 	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.heteronyms --out $(TRAIN_DIR)/heteronyms -j 4 --check data/nn/g2p-relabel.json
 	@$(STAGE) end
@@ -323,10 +326,10 @@ $(TRAIN_DIR)/package.done: $(TRAIN_DIR)/student-eval.done | $(TRAIN_DIR)/samples
 # (the checkpoint the next stage starts from, exported as the package stage exports it) speaking data/nn/train.json's
 # samples texts in its speakers' voices as the package speaks them, scored with UTMOS, in $(TRAIN_DIR)/samples/ (index.json)
 # for the training dashboard's Listen tab - and the reference, the shipped lib/models/voiceModel.js before the package
-# stage replaces it (in the teacher's GPU-bound hours, after the readers' data build)
+# stage replaces it (in the teacher's GPU-bound hours, after the readers' data build; again when the shipped model changes)
 SAMPLES := OMP_NUM_THREADS=2 $(BESIDE) node tools/trainsamples.js --out $(TRAIN_DIR)/samples
 
-$(TRAIN_DIR)/samples-reference.done: | build/venv-listeners.build $(TRAIN_DIR)/data-multi.done
+$(TRAIN_DIR)/samples-reference.done: lib/models/voiceModel.js | build/venv-listeners.build $(TRAIN_DIR)/data-multi.done
 	@$(STAGE) start
 	$(STAGE) -- $(SAMPLES) --stage reference --model lib/models/voiceModel.js
 	@$(STAGE) end

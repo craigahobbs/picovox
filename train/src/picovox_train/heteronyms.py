@@ -1,5 +1,5 @@
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
 The G2P's relabeled words (data/nn/g2p-relabel.json, g2p.py's focus stage) - dictionary words whose first

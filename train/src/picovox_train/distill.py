@@ -1,5 +1,5 @@
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
 Knowledge distillation of the multi-speaker acoustic model (model.py's MultiModel) - small students trained to
@@ -77,7 +77,7 @@ import torch
 from .data import DATA_DIR, ArcticData
 from .export import export, load_model, token_remap, training_token_counts
 from .frontend import pronounce_texts, set_pronunciations, tokenize, vocabulary
-from .model import BOS, FIRST_PHONE, FIXED_NAMES, PAD, STYLE_NAMES, MultiModel, is_boundary, parameter_count
+from .model import BOS, FIRST_PHONE, FIXED_NAMES, INTENSITY, PAD, STYLE_NAMES, MultiModel, is_boundary, parameter_count, save_checkpoint
 from .synthesize import sentences
 from . import ROOT, books, optim, panel, params
 
@@ -93,8 +93,6 @@ torch.backends.nnpack.set_flags(False)
 # The distillation set's sources
 SOURCES = ('readers', 'actors', 'books')
 
-# The style intensities of CREMA-D's intensity labels (trainmulti.py INTENSITY)
-INTENSITY = {'low': 0.5, 'medium': 0.75, 'high': 1.0, 'unspecified': 0.75}
 
 # The distillation set's per-item record
 ITEM_DTYPE = numpy.dtype([
@@ -165,7 +163,9 @@ def book_paragraphs(path):
     return paragraphs
 
 
-# A book's sentences as token id lists (the front end's tokens, split as inference splits them) - (path, sentences)
+# A book's sentences as token id lists - (path, sentences): each paragraph's tokens, split at its sentence ends as the
+# model's inference splits them (lib/model.js sentences; the package tokenizes each of lib/sentences.js's sentences
+# apart, so its heteronyms' contexts don't cross a sentence end, as these can)
 def book_sentences(path):
     vocab = vocabulary()
     out = []
@@ -376,7 +376,7 @@ def make_targets(args):
     sizes = {name: os.path.getsize(os.path.join(out_dir, f'{name}.bin')) for name in files}
     hours = {name: round(float(items['frameCount'][items['source'] == index].sum()) / 100 / 3600, 2) for index, name in enumerate(SOURCES)}
     index = {
-        'format': 'voice-synth-distill', 'version': 1, 'teacher': teacher_path, 'teacherStep': state.get('step'),
+        'format': 'picovox-distill', 'version': 1, 'teacher': teacher_path, 'teacherStep': state.get('step'),
         'teacherConfig': state['config'], 'speakers': state['speakers'], 'readerCount': state['readerCount'],
         'styles': state['styles'], 'remap': remap_names, 'vocab': vocab, 'settings': settings,
         'count': len(items), 'sources': {name: int((items['source'] == ix).sum()) for ix, name in enumerate(SOURCES)},
@@ -778,8 +778,8 @@ def train_student(args):
                                          {'distill': {'student': student_cfg, 'targets': targets.directory}})
             if ema_result['total'] < ema_best:
                 ema_best = ema_result['total']
-                torch.save(ema_state, os.path.join(directory, 'ema-best.pt'))
-            torch.save(ema_state, os.path.join(directory, 'ema-last.pt'))
+                save_checkpoint(ema_state, os.path.join(directory, 'ema-best.pt'))
+            save_checkpoint(ema_state, os.path.join(directory, 'ema-last.pt'))
         if step % settings['valEvery'] == 0 or step == steps:
             result = validate_student(model, targets, val_indices, device, column_mask)
             result['total'] = result['frames'] + settings['durationWeight'] * (result['durPhone'] + result['durPause'] +
@@ -791,12 +791,12 @@ def train_student(args):
                                      {'distill': {'student': student_cfg, 'targets': targets.directory}})
             if result['total'] < best:
                 best = result['total']
-                torch.save(state, os.path.join(directory, 'best.pt'))
-            torch.save(state, os.path.join(directory, 'last.pt'))
+                save_checkpoint(state, os.path.join(directory, 'best.pt'))
+            save_checkpoint(state, os.path.join(directory, 'last.pt'))
             log_line('students', f'{name}: {step}/{steps} steps, val frames {result["frames"]:.4f} durPhone {result["durPhone"]:.4f} '
                      f'durations off by {result["durationErrorFrames"]:.2f} frames ({(time.time() - start_time) / 60:.1f} min)')
             if args.keep_every and step % args.keep_every == 0:
-                torch.save(state, os.path.join(directory, f'ckpt-{step}.pt'))
+                save_checkpoint(state, os.path.join(directory, f'ckpt-{step}.pt'))
     prefetcher.close()
     log.close()
     minutes = (time.time() - start_time) / 60
@@ -862,7 +862,7 @@ def polish(args):
         path = os.path.join(directory, checkpoint)
         polished = torch.load(path, map_location='cpu', weights_only=False)
         polished['distill'] = {**state.get('distill', {}), 'polishedFrom': init}
-        torch.save(polished, path)
+        save_checkpoint(polished, path)
     log_line('students', f'{name}: polished - {settings["steps"]} steps in {(time.time() - start) / 60:.1f} min')
     return 0
 
@@ -992,8 +992,8 @@ def evaluate(args):
     names = args.models or ['teacher'] + [student['name'] for student in config['students']]
     reference_path = os.path.join(DISTILL_DIR, 'eval', 'teacher', 'result.json')
     reference = None
-    if 'teacher' in names:
-        names = ['teacher'] + [name for name in names if name != 'teacher']
+    # (the teacher first - its result is the others' reference - as teacher or teacher=CHECKPOINT)
+    names = sorted(names, key=lambda model: model.partition('=')[0] != 'teacher')
     for number, model in enumerate(names, 1):
         # (NAME=CHECKPOINT - any checkpoint, its results in <eval>/NAME)
         name, _, checkpoint = model.partition('=')

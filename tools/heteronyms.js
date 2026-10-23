@@ -65,13 +65,14 @@ export function scoreHeteronyms(items) {
 export const minimums = {'default': 0.9, 'context': 0.85, 'missing': 0, 'names': 0.93};
 
 
-// The one-line result - kinds' scores against their minimums, and whether any is below
+// The one-line result - kinds' scores against their minimums, and whether any is below (or has no minimum - a kind
+// without one, or a minimum that isn't a number, fails)
 export function resultLine(kinds, kindMinimums) {
     const parts = [];
     const below = [];
     for (const [kind, {right, total}] of Object.entries(kinds)) {
         const share = right / total;
-        if (share < kindMinimums[kind]) {
+        if (!(share >= kindMinimums[kind])) {
             below.push(kind);
         }
         parts.push(`${kind} ${right}/${total} (${(100 * share).toFixed(1)}%, min ${kindMinimums[kind]})`);

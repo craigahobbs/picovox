@@ -444,6 +444,13 @@ class TestAlignment(unittest.TestCase):
         self.assertEqual([(record['id'], record['sentence']) for record in records], [('1002_TIE_NEU_XX', 'DFA')])
         self.assertEqual(records[0]['tokens'], frontend.tokenize(cremad.SENTENCES['DFA'])['tokens'])
 
+        # A clip that doesn't align has no labels
+        with tiny_cremad(), fake_recognizer(), unittest.mock.patch.object(cremad, 'ctc_labels', return_value=None):
+            self.assertEqual(cremad.realign_command(argparse.Namespace(ids=['1002_TIE_NEU_XX=DFA'], device=None)), 0)
+            with open(os.path.join(cremad.BUILD_DIR, 'realigned.jsonl'), encoding='utf-8') as file:
+                records = [json.loads(line) for line in file]
+        self.assertEqual([(record['id'], record['labels']) for record in records], [('1002_TIE_NEU_XX', None)])
+
 
 class TestBuild(unittest.TestCase):
 
@@ -472,9 +479,19 @@ class TestBuild(unittest.TestCase):
                 summary = json.load(file)
             with open(os.path.join(out, 'alignment.jsonl'), encoding='utf-8') as file:
                 alignment = [json.loads(line) for line in file]
-            # The realigned clips are kept (no subprocess) unless --realign
+            # The realigned clips are kept (no subprocess) unless --realign, or unless realigned.jsonl is of other clips or
+            # sentences
             run_again, _, _ = self.run_build(build_args(out))
             run_realign, _, _ = self.run_build(build_args(out, realign=True))
+            realign_path = os.path.join(cremad.BUILD_DIR, 'realigned.jsonl')
+            with open(realign_path, encoding='utf-8') as file:
+                record = json.loads(file.read())
+            with open(realign_path, 'w', encoding='utf-8') as file:
+                file.write(json.dumps(dict(record, sentence='IEO')) + '\n')
+            run_stale, _, _ = self.run_build(build_args(out))
+            with open(realign_path, encoding='utf-8') as file:
+                self.assertEqual(json.loads(file.read())['sentence'], 'DFA')
+        self.assertEqual(run_stale.call_count, 1)
         self.assertEqual(run.call_count, 1)
         self.assertEqual(run.call_args.args[0][0], os.path.join(cremad.ROOT, 'build', 'venv-listeners', 'bin', 'python'))
         self.assertEqual(run.call_args.args[0][5:], ['1002_TIE_NEU_XX=DFA'])
@@ -533,6 +550,17 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(run.call_count, 0)
         self.assertEqual([entry['id'] for entry in index['utterances']], ['cremad/1001_IEO_ANG_HI', 'cremad/1001_WSI_DIS_XX',
                                                                           'cremad/1002_MTI_FEA_XX'])
+
+    def test_build_limit_no_pitch_range(self):
+        # A sample's actor with too few voiced frames for a pitch range is left out
+        real = cremad.first_pass_f0
+        with tiny_cremad() as directory, \
+                unittest.mock.patch.object(cremad, 'first_pass_f0', lambda path: real(path)[:0] if '1002_' in path else real(path)):
+            out = os.path.join(directory, 'data')
+            self.run_build(build_args(out, limit=3))
+            index = data.ArcticData(out).index
+        self.assertEqual(list(index['speakers']), ['cremad-1001'])
+        self.assertEqual([entry['id'] for entry in index['utterances']], ['cremad/1001_IEO_ANG_HI', 'cremad/1001_WSI_DIS_XX'])
 
     def test_build_stale_alignment(self):
         with tiny_cremad():

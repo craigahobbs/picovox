@@ -1,19 +1,19 @@
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
 Run a command holding the GPU lock - make train's GPU stages (teacher A and B, the distillation targets, the student,
 its polish) one at a time, while its CPU stages run beside them (two GPU jobs at once each run at about half speed):
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.gpulock build/train/gpu.lock -- python -m picovox_train.trainmulti ...
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.gpulock build/gpu.lock -- python -m picovox_train.trainmulti ...
 
-The lock is an exclusive flock on the file (released when the command exits, or if this process dies); waiting for it
-is logged to stderr.
+The lock is an exclusive flock on the file; waiting for it is logged to stderr. The command then runs in this process
+(exec), holding the lock until it exits - a signal to this process (make train's stage stopped) is the command's, so the
+lock is never released while the command runs.
 """
 
 import fcntl
 import os
-import subprocess
 import sys
 import time
 
@@ -33,7 +33,12 @@ def main(argv=None):
             print(f'gpulock: waiting for {path} ({" ".join(command)})', file=sys.stderr, flush=True)
             fcntl.flock(lock, fcntl.LOCK_EX)
             print(f'gpulock: acquired {path} after {time.time() - start:.0f} s', file=sys.stderr, flush=True)
-        return subprocess.run(command, check=False).returncode
+        os.set_inheritable(lock.fileno(), True)
+        try:
+            os.execvp(command[0], command)
+        except OSError as error:
+            print(f'gpulock: {error}', file=sys.stderr)
+    return 127
 
 
 if __name__ == '__main__':

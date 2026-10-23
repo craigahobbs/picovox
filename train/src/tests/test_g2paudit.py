@@ -130,15 +130,6 @@ class TestG2pAudit(unittest.TestCase):
             patch.stop()
         self.directory.cleanup()
 
-    def test_log_line(self):
-        path = os.path.join(self.directory.name, 'log.txt')
-        with captured() as (_, stderr):
-            g2paudit.log_line(path, 'one')
-            g2paudit.log_line(None, 'two')
-        self.assertTrue(stderr.getvalue().endswith(' two\n'))
-        with open(path, encoding='utf-8') as file:
-            self.assertTrue(file.read().endswith(' one\n'))
-
     def test_unstressed_group_partition(self):
         self.assertEqual(g2paudit.unstressed('HH AA1 B Z'), 'HH AA B Z')
         self.assertEqual(g2paudit.group_key('hobbes\'s'), 'hobbes')

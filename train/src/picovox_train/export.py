@@ -1,5 +1,5 @@
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
 Export - a trained model (an trainmulti.py or distill.py checkpoint) to the browser's format, <out>/<voice>.bin
@@ -210,8 +210,8 @@ def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0, bandwidt
         eq = [round(float(value), 3) for value in model.eq(torch.tensor([speaker]))[0]]
     manifest = {
         'format': 'voice-synth-nn', 'version': FORMAT_VERSION, 'voice': voice, 'kind': 'multi',
-        'description': 'The multi-speaker, multi-style neural model (nn/trainmulti.py) - tokens to durations to '
-                       'synthesizer parameter frames (nn/params.py), rendered by lib/render.js; a voice is any blend of '
+        'description': 'The multi-speaker, multi-style neural model (picovox_train/trainmulti.py) - tokens to durations to '
+                       'synthesizer parameter frames (picovox_train/params.py), rendered by lib/render.js; a voice is any blend of '
                        'the speaker table\'s rows, a style any blend of the style table\'s rows (neutral is zero)',
         'config': model.config, 'parameterNames': params.NAMES, 'frameRate': params.FRAME_RATE,
         'speakers': speaker_list(state), 'styles': list(STYLE_NAMES), 'defaultSpeaker': speaker,

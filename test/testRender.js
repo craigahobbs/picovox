@@ -169,7 +169,8 @@ test('render, silence', () => {
 
 
 test('createRenderer', () => {
-    // Streaming - frames pushed one at a time, as arrays, as typed arrays, or in lists - is rendering whole
+    // Streaming - frames pushed one at a time, as arrays, as typed arrays, or in lists (an empty list pushes none) - is
+    // rendering whole
     const frames = phrase(400);
     const whole = render(frames, {'sampleRate': 24000, 'seed': 9});
     const blocks = [];
@@ -179,6 +180,7 @@ test('createRenderer', () => {
     renderer.push(NAMES.map((name) => frameValues(frames[1])[NAMES.indexOf(name)]));
     renderer.push(frameValues(frames[2]));
     renderer.push(frames.slice(3, 100));
+    renderer.push([]);
     for (const frame of frames.slice(100)) {
         renderer.push([frame]);
     }

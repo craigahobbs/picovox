@@ -1,7 +1,7 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-// The designed voices and styles of the multi-speaker, multi-style model (data/nn/voices.json, nn/voicedesign.py) -
+// The designed voices and styles of the multi-speaker, multi-style model (data/nn/voices.json) -
 // browser and Node, no dependencies beyond nn/js. A voice is a blend of the speaker table's readers (by speaker key)
 // with mild interpretable adjustments (pitch, tract, and effort transforms of the parameter frames) and a default
 // speaking rate; a style is the model's style embedding at an intensity, parameter transforms (whisper, soft,

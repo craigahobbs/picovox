@@ -274,8 +274,8 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke   # ever
 
 ```sh
 node nn/js/speak.js -m data/nn/slt "Hello, world." -o out/hello.wav    # an exported model (data/nn/<voice>.json and .bin)
-node nn/js/speak.js -m data/nn/multi "Hello." -o out/hello.wav --voice narrator-f   # a designed voice (data/nn/voices.json)
 node nn/js/unpack.js lib/models/voiceModel.js out/voice                 # a packaged model back to its export
+node nn/js/speak.js -m out/voice "Hello." -o out/hello.wav --voice narrator-f   # a designed voice (data/nn/voices.json)
 node nn/js/packagecheck.js lib/models/voiceModel.js out/voice           # check a packaged model against its export
 node nn/js/voicescheck.js [lib/models/voiceModel.js]                    # check the designed voices
 node tools/heteronyms.js                                                # the heteronym and names regression sets
@@ -293,15 +293,16 @@ NAME` times each under Node without a JIT (`--jitless` - the phone's speed withi
 another app (PicoShelf, with its `?timing&log=URL` timeline posted to `build/perf/devlog.jsonl`).
 
 `nn/js/speak.js` speaks with an exported model (`picovox_train.export CHECKPOINT --voice NAME` writes
-`data/nn/NAME.json` and `.bin`; `data/nn/multi` is an export of the multi-speaker model), every word pronounced by the
+`data/nn/NAME.json` and `.bin`; `nn/js/unpack.js` makes one of the package's multi-speaker model), every word pronounced by the
 G2P network as the package pronounces (`-r` rate, `-s` seed, `--params` the parameter frames, `--batch` a list of
 items); the multi-speaker model takes a speaker (`--speaker`, `--blend`), a style (`--style`, `--intensity`), or a
 designed voice and style (`--voice`, `--voice-style` - `nn/js/voices.js`, the designed voices of `data/nn/voices.json`,
 each a blend of the model's speakers with a style and transforms).
 
 The training dashboard, `tools/dashboard/`, follows `make train` and the neural voices' training as they run: serve the
-repository (`python3 -m http.server`), start its monitor (`node tools/dashboard/monitor.js`), and open
-http://localhost:8000/tools/dashboard/. It has five tabs (each linkable, e.g. `#listen`): Train, Listen, Runs, Logs,
+repository (`python3 -m http.server`) and open http://localhost:8000/tools/dashboard/ (its monitor, `node
+tools/dashboard/monitor.js`, adds the processes working in the repository and the experiment runs' checkpoint samples -
+`make train` needs none). It has five tabs (each linkable, e.g. `#listen`): Train, Listen, Runs, Logs,
 and Archive. Train is a `make train` run (`tools/dashboard/pipeline.json`'s `train`: its `TRAIN_DIR`, default
 `build/train`; the default tab while it runs): the run's state, its ETA and critical path; the CPU and GPU utilization
 over the run with each stage as a band (the GPU's idle time shaded, the forecast faded); every stage of
@@ -409,7 +410,7 @@ rebuild the voice). Each stage is a stamp in
 | baseline-eval - the shipped model through the panel, beside the student's GPU stages | CPU | teacher-eval |
 | student-eval - the panel and the gate (`picovox_train.distill pick --against baseline`: no worse than the shipped model) | CPU | polish, baseline-eval |
 | package - `lib/models/voiceModel.js`, with its provenance | CPU | student-eval (after samples-reference) |
-| heteronyms - the relabeled words, checked to reproduce `data/nn/g2p-relabel.json` (the G2P network's input) | CPU, ~6 min | corpora (after data-multi) |
+| heteronyms - the relabeled words, checked to reproduce `data/nn/g2p-relabel.json` (the G2P network's input) | CPU, ~9 min | corpora (after data-multi) |
 | g2p-network, context-labels, context-network, g2p - the G2P (the network; the heteronym labels from the pinned books; the context network and its cross-validation; the reading stage, the export, and the gate) | CPU - the network one core, ~30 min | corpora (the labels, after data-multi) |
 | g2p-install - `lib/models/g2pModel.js`, when the gated module differs from it | CPU | g2p, heteronyms |
 | samples-reference, samples-teacher-a, -teacher-b, -student, -polish - the listening samples | CPU, under a minute each | the shipped model (after data-multi); each stage's model |
@@ -454,11 +455,12 @@ or the distillation set change with it, so make train no longer reproduces the c
 fetch alone, for every pinned text: `python -m picovox_train.books fetch`.
 
 `make -j train-g2p` runs the G2P alone - its stages, without the voice stages or make train's ordering after the
-readers' data build - for G2P work. The chain's independent parts run in `G2P_JOBS` worker processes - the context
-labels' aligned readings (by utterance) and part-of-speech tags (by book), and cross-validate's ten folds (each one
-thread) - and the context network and its cross-validation run beside the G2P network; every output is the same for any
-count. Inside make train the chain runs beside the GPU stages, which CPU work slows (the Makefile's `BESIDE`), so
-`G2P_JOBS` is 2 there; `make train-g2p` runs `G2P_STANDALONE_JOBS` (10) at the default QoS. Measured at the background
+readers' data build - for G2P work. The chain's independent parts run in worker processes - the context labels' aligned
+readings (by utterance) and part-of-speech tags (by book) in `G2P_JOBS`, and the context network's trainings and
+cross-validate's ten folds (each one thread) in `CONTEXT_JOBS` - and the context network and its cross-validation run
+beside the G2P network; every output is the same for any count. Inside make train the chain runs beside the GPU stages,
+which CPU work slows (the Makefile's `BESIDE`), so `G2P_JOBS` is 2 and `CONTEXT_JOBS` 6 there; `make train-g2p` runs
+`G2P_STANDALONE_JOBS` (10) for both at the default QoS. Measured at the background
 QoS (the efficiency cores only, beside another job's load - October 2026): the context labels took 36 minutes (65
 before: the tags are made by book in worker processes, not by spaCy's worker pool for each book), and the ten folds 54
 minutes at once (one fold alone, two threads, took 134). On a quiet M3 Max the chain was 59 minutes - the G2P network

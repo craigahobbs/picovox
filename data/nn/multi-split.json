@@ -1,5 +1,5 @@
 {
- "description": "The multi-speaker split of nn/multi.py - per speaker, the held-out utterances (\"val\" and \"test\"); ARCTIC speakers by sentence (as data/nn/arctic-split.json), LibriTTS-R by a hash of the utterance id (2% test, 3% validation); the rest is training",
+ "description": "The multi-speaker split of picovox_train/multi.py - per speaker, the held-out utterances (\"val\" and \"test\"); ARCTIC speakers by sentence (as data/nn/arctic-split.json), LibriTTS-R by a hash of the utterance id (2% test, 3% validation); the rest is training",
  "val": {
   "arctic-slt": [
    "arctic_a0107",

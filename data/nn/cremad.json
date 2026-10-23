@@ -1,5 +1,5 @@
 {
- "description": "CREMA-D emotional speech for the style modifiers (nn/cremad.py; the data in build/nn/data/cremad/, nn/data.py's format with style labels) - counts, actors, alignment quality, and the listener panel's emotion recognition of the recordings",
+ "description": "CREMA-D emotional speech for the style modifiers (picovox_train/cremad.py; the data in build/nn/data/cremad/, picovox_train/data.py's format with style labels) - counts, actors, alignment quality, and the listener panel's emotion recognition of the recordings",
  "corpus": "CREMA-D (Cao et al., 2014) - https://github.com/CheyneyComputerScience/CREMA-D",
  "license": "Open Database License 1.0 (https://opendatacommons.org/licenses/odbl/1-0/) for the database; any rights in its individual contents under the Database Contents License 1.0 (https://opendatacommons.org/licenses/dbcl/1-0/) - the repository's LICENSE.txt. Cite Cao, Cooper, Keutmann, Gur, Nenkova, and Verma, \"CREMA-D: Crowd-sourced Emotional Multimodal Actors Dataset\", IEEE Transactions on Affective Computing 5(4), 2014. A model trained on it is a \"Produced Work\" under the ODbL (attribution notice; share-alike applies only to derived databases, such as build/nn/data/cremad/ if it were redistributed)",
  "clips": 7442,
@@ -55,7 +55,7 @@
   "unspecified"
  ],
  "alignment": {
-  "method": "CTC forced alignment with facebook/wav2vec2-lv-60-espeak-cv-ft (nn/cremad.py)",
+  "method": "CTC forced alignment with facebook/wav2vec2-lv-60-espeak-cv-ft (picovox_train/cremad.py)",
   "shift": -0.005,
   "split": "mid",
   "edgeExtend": 0.15

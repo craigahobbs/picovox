@@ -1,5 +1,5 @@
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
 The Liljencrants-Fant (LF) glottal flow derivative pulse, parameterized by Rd - a port of the former lib/glottal.js (kept here

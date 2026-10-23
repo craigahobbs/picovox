@@ -1,5 +1,5 @@
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
 The pinned book texts - the Project Gutenberg books make train reads (the heteronym labels' books - contextlabels.py -
@@ -50,7 +50,7 @@ from . import ROOT
 # The pins, the default books directory, and the fetch's User-Agent
 PINS_PATH = os.path.join(ROOT, 'data', 'nn', 'books.json')
 BOOKS_DIR = os.path.join(ROOT, 'build', 'nn', 'books')
-USER_AGENT = 'voice-synth-train/1.0 (+https://github.com/craigahobbs/voice-synth)'
+USER_AGENT = 'picovox-train/1.0 (+https://github.com/craigahobbs/picovox)'
 
 # The Wayback Machine's capture index (CDX) and a capture's raw bytes
 CDX_URL = 'https://web.archive.org/cdx/search/cdx?url={url}&output=json&filter=digest:{digest}&filter=statuscode:200'

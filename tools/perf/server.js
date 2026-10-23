@@ -15,7 +15,7 @@
 // - POST /log - an app's log (PicoShelf's ?timing&log=URL timeline), appended to build/perf/devlog.jsonl
 
 import {appendFileSync, createReadStream, existsSync, mkdirSync, statSync} from 'node:fs';
-import {dirname, extname, join, normalize, resolve} from 'node:path';
+import {dirname, extname, join, normalize, resolve, sep} from 'node:path';
 import {Buffer} from 'node:buffer';
 import {createServer} from 'node:http';
 import {fileURLToPath} from 'node:url';
@@ -141,10 +141,11 @@ function recordResult(result) {
 }
 
 
-// Serve a repository file (no caching - a reload picks up every change)
+// Serve a repository file (no caching - a reload picks up every change) - only a file under the served root (not a
+// sibling directory whose name starts with the root's)
 function serveFile(response, urlPath) {
     const path = normalize(join(servedRoot, decodeURIComponent(urlPath)));
-    if (!path.startsWith(servedRoot) || !existsSync(path) || !statSync(path).isFile()) {
+    if (!path.startsWith(servedRoot + sep) || !existsSync(path) || !statSync(path).isFile()) {
         response.writeHead(404, {'Content-Type': 'text/plain'});
         response.end('not found');
         return;

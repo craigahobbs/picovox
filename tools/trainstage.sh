@@ -38,9 +38,10 @@ if [ "${1:-}" = -- ]; then
 fi
 
 # Run the command (in the background, so a signal - make interrupted - is handled at once: the command is stopped and
-# the stage marked failed), its output tee'd to the logs; a failure is marked failed with its exit status
+# the stage marked failed), its output tee'd to the logs; a failure is marked failed with its exit status. The command
+# is stopped with TERM even when make is interrupted: a background command starts with SIGINT ignored.
 trap 'kill -TERM "$pid" 2>/dev/null; wait "$pid"; event fail ", \"signal\": \"terminated\""; exit 143' TERM
-trap 'kill -INT "$pid" 2>/dev/null; wait "$pid"; event fail ", \"signal\": \"interrupted\""; exit 130' INT
+trap 'kill -TERM "$pid" 2>/dev/null; wait "$pid"; event fail ", \"signal\": \"interrupted\""; exit 130' INT
 PYTHONUNBUFFERED=1 env "$@" > >(tee -a "${logs[@]}") 2>&1 &
 pid=$!
 wait "$pid"

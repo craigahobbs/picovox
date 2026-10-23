@@ -1,5 +1,5 @@
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
 Training the multi-speaker, multi-style model (model.py's MultiModel) - end-to-end training through the
@@ -76,7 +76,7 @@ import torch
 
 from . import ROOT, discriminator, dsynth, optim, params, quant
 from .data import DATA_DIR, ArcticData
-from .model import FIRST_PHONE, STYLE_NAMES, MultiModel, parameter_count
+from .model import FIRST_PHONE, INTENSITY, STYLE_NAMES, MultiModel, parameter_count, save_checkpoint
 from .losses import F_INDEX, PRIORS, duration_loss, f0_track, render_values, spectral_loss
 
 
@@ -92,8 +92,6 @@ RECIPE_PATH = os.path.join(ROOT, 'data', 'nn', 'train.json')
 # The most training steps the CPU runs ahead of the GPU (MPS)
 IN_FLIGHT = 2
 
-# The style intensities of CREMA-D's intensity labels
-INTENSITY = {'low': 0.5, 'medium': 0.75, 'high': 1.0, 'unspecified': 0.75}
 
 # The head's starting point - between the ARCTIC speakers' priors
 MULTI_PRIORS = {name: (PRIORS['slt'][name] * PRIORS['bdl'][name]) ** 0.5 if PRIORS['slt'][name] > 0 else
@@ -281,9 +279,6 @@ def crop(values, batch, crop_frames, rate, rng):
     return crops_values, torch.tensor(crop_audio(batch['corpus'], batch['items'], starts, length, rate), device=values.device)
 
 
-# Low-pass audio [B, N] at a cutoff per item (Hz) - zeroing the FFT bins above it (so the magnitude spectra of the
-# losses and the critic take a small epsilon - a magnitude of exactly zero has an infinite gradient); cutoff_tensor is
-# the cutoffs as a float32 tensor on the audio's device, if the caller has it
 # The spectral loss compiled - on MPS its elementwise work fused into a few kernels (8-13% of a stage-A step; the
 # gradient within rounding of the eager loss's, 143 dB)
 compiled_spectral_loss = torch.compile(spectral_loss)
@@ -308,6 +303,9 @@ def step_crop_frames(args, step):
     return args.crop_frames
 
 
+# Low-pass audio [B, N] at a cutoff per item (Hz) - zeroing the FFT bins above it (so the magnitude spectra of the
+# losses and the critic take a small epsilon - a magnitude of exactly zero has an infinite gradient); cutoff_tensor is
+# the cutoffs as a float32 tensor on the audio's device, if the caller has it
 def band_limit(audio, cutoffs, rate, cutoff_tensor=None):
     if all(cutoff >= rate / 2 for cutoff in cutoffs):
         return audio
@@ -737,9 +735,10 @@ def main(argv=None):
             extra = {**(extra or {}), 'critic': critic.state_dict(), 'criticOptimizer': critic_optimizer.state_dict()}
         if ema is not None:
             extra = {**(extra or {}), 'ema': ema.state_dict(), 'emaBest': ema_best}
-        torch.save({'model': (weights or model).state_dict(), 'optimizer': optimizer.state_dict(), 'scheduler': scheduler.state_dict(),
-                    'step': step, 'best': best, 'config': model.config, 'priors': MULTI_PRIORS, 'speakers': speaker_keys,
-                    'readerCount': reader_count, 'styles': list(STYLE_NAMES), 'args': vars(args), **(extra or {})}, path)
+        save_checkpoint({'model': (weights or model).state_dict(), 'optimizer': optimizer.state_dict(),
+                         'scheduler': scheduler.state_dict(), 'step': step, 'best': best, 'config': model.config,
+                         'priors': MULTI_PRIORS, 'speakers': speaker_keys, 'readerCount': reader_count,
+                         'styles': list(STYLE_NAMES), 'args': vars(args), **(extra or {})}, path)
 
     streams = {'multi': batch_stream(readers, args.batch, args.max_frames, rng)}
     corpora = {'multi': readers}

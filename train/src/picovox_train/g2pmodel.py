@@ -1,5 +1,5 @@
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
 The Python port of lib/g2p.js - the neural grapheme-to-phoneme (G2P) model's inference, from the same generated module,

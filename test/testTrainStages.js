@@ -39,9 +39,10 @@ test('trainStages', () => {
     }
 
     // A stage's progress counts its log's finished parts - the context network's trainings: its teachers and itself,
-    // and each fold's
+    // and each fold's - in a log the stage starts anew
     for (const stage of manifest.stages.filter((item) => item.progress)) {
         assert.equal(typeof stage.progress.log, 'string', stage.stage);
+        assert.equal(stages[stage.stage].recipe[1], `$(STAGE) -- rm -f $(TRAIN_DIR)/${stage.progress.log}`, stage.stage);
         assert(new RegExp(stage.progress.pattern).test('train-context: step 10000/10000 (quantized) loss 0.0180'), stage.stage);
         assert(stage.progress.total > 0, stage.stage);
     }

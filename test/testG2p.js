@@ -1,9 +1,10 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-import {base64Bytes, loadG2p, unpackTensors} from '../lib/g2p.js';
+import {loadG2p, unpackTensors} from '../lib/g2p.js';
 import {Buffer} from 'node:buffer';
 import {strict as assert} from 'node:assert';
+import {decodeBase64} from '../lib/package.js';
 import {g2pModel} from '../lib/models/g2pModel.js';
 import test from 'node:test';
 
@@ -75,12 +76,6 @@ function assertArraysEqual(actual, expected, message) {
 
 // Words to compare models on
 const words = ['queequeg', 'longbourn', 'netherfield', 'clerval', 'raskolnikov', 'pumblechook', 'harpooneer', 'a', 'x', 'o\'clock'];
-
-
-test('g2p.base64Bytes', () => {
-    assert.deepEqual([...base64Bytes('AAEC\n/w==')], [0, 1, 2, 255]);
-    assert.deepEqual([...base64Bytes('')], []);
-});
 
 
 test('g2p.unpackTensors, packed per row', () => {
@@ -218,7 +213,7 @@ test('g2p.loadG2p, no context network', async () => {
 
 test('g2p.loadG2p, context network not deflated', async () => {
     const {context} = g2pModel;
-    const bytes = await streamBytes(base64Bytes(context.weights), new DecompressionStream('deflate-raw'));
+    const bytes = await streamBytes(decodeBase64(context.weights), new DecompressionStream('deflate-raw'));
     const other = {...g2pModel, 'context': {...context, 'deflate': false, 'weights': bytesBase64(bytes)}};
     const [pronounce, pronounceOther] = await Promise.all([loadG2p(g2pModel), loadG2p(other)]);
     const items = ['he', 'touched', 'a', 'live', 'wire', '.'];
@@ -241,7 +236,7 @@ test('g2p.loadG2p, unsupported design', async () => {
 
 
 test('g2p.loadG2p, deflated and not', async () => {
-    const bytes = base64Bytes(g2pModel.weights);
+    const bytes = decodeBase64(g2pModel.weights);
     const other = {...g2pModel, 'deflate': false, 'weights': bytesBase64(await streamBytes(bytes, new DecompressionStream('deflate-raw')))};
     const [pronounce, pronounceOther] = await Promise.all([loadG2p(g2pModel), loadG2p(other)]);
     assert.deepEqual(words.map(pronounceOther), words.map(pronounce));
@@ -249,7 +244,7 @@ test('g2p.loadG2p, deflated and not', async () => {
 
 
 test('g2p.loadG2p, both layouts', async () => {
-    const raw = await streamBytes(base64Bytes(g2pModel.weights), new DecompressionStream('deflate-raw'));
+    const raw = await streamBytes(decodeBase64(g2pModel.weights), new DecompressionStream('deflate-raw'));
     const other = {
         ...g2pModel,
         'layout': {'bytes': 'packed', 'packed': 'bytes'}[g2pModel.layout],
@@ -257,7 +252,7 @@ test('g2p.loadG2p, both layouts', async () => {
         'weights': bytesBase64(otherLayout(g2pModel, raw))
     };
     // Converting back gives the same bytes
-    const otherRaw = base64Bytes(other.weights);
+    const otherRaw = decodeBase64(other.weights);
     assertArraysEqual(otherLayout(other, otherRaw), raw, 'weight bytes');
     const tensors = unpackTensors(g2pModel, raw);
     const otherTensors = unpackTensors(other, otherRaw);

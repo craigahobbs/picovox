@@ -1,6 +1,6 @@
 {
     "version": 1,
-    "description": "The neural-network input tokens - the id of a token is its index in \"tokens\". Made by nn/frontend.py from lib/lexicon.js textToPhrases: <bos>, then each phrase's words' phones (ARPAbet, vowels with stress) separated by \"_\", then its phrase-end token.",
+    "description": "The neural-network input tokens - the id of a token is its index in \"tokens\". Made by picovox_train/frontend.py from lib/lexicon.js textToPhrases: <bos>, then each phrase's words' phones (ARPAbet, vowels with stress) separated by \"_\", then its phrase-end token.",
     "tokens": [
         "<pad>",
         "<unk>",

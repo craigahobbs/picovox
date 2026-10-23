@@ -694,6 +694,11 @@ class TestEvaluation(DistillCase):
             self.assertEqual(self.run_main(['eval', '--config', self.config, 'x=/a/b.pt', 'tiny']), 0)
             self.assertEqual(calls[0][:3], ('x', '/a/b.pt', {'name': 'saved'}))
             self.assertEqual(calls[1][2], {'name': 'saved'})
+            # (teacher=CHECKPOINT first - the students' reference)
+            calls.clear()
+            self.assertEqual(self.run_main(['eval', '--config', self.config, 'tiny', 'teacher=/t.pt']), 0)
+            self.assertEqual([call[:2] for call in calls], [('teacher', '/t.pt'), ('tiny', self.student)])
+            self.assertEqual(calls[1][2]['name'], 'teacher')
 
     def write_result(self, name, parameters, mos, wer, similarity=None):
         out_dir = os.path.join(distill.DISTILL_DIR, 'eval', name)

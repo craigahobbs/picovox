@@ -4,7 +4,7 @@ Notes for coding agents working in this repository.
 
 ## Project overview
 
-PicoVox (the npm package `picovox`, github.com/craigahobbs/picovox; the local checkout may be named voice-synth) -
+PicoVox (the npm package `picovox`, github.com/craigahobbs/picovox) -
 realistic speech synthesis in pure JavaScript, under 1 MB - is a from-scratch speech synthesizer: a small
 grapheme-to-phoneme network pronounces every word, a small neural network speaks interpretable source-filter
 synthesizer parameters, and a JavaScript synthesizer renders them (no recorded speech, no runtime dependencies). This
@@ -14,7 +14,7 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
 
 - `lib/` - the package (and only the package - the code audio playback needs): browser- and Node-safe ES modules with no
   Node built-ins and no dependencies, 100% test coverage. The API is `lib/index.js` (`synthesize`, `stream`, `speak`,
-  `voices`, `toWav`), built on `lib/synthesis.js` (the voices and styles, the pipeline - sentence by sentence, the gain and soft
+  `voices`, `styles`, `toWav`), built on `lib/synthesis.js` (the voices and styles, the pipeline - sentence by sentence, the gain and soft
   limiter, 24 kHz), `lib/sentences.js` (text to sentences, their quotations, speakable text), and `lib/style.js` (style
   "auto" - the dialogue, exclamation, and paragraph beats). The text front end: `lexicon.js`
   (normalization and phrasing; the pronouncer is the G2P network - no dictionary at runtime), `g2p.js` (the G2P

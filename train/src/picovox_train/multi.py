@@ -1,5 +1,5 @@
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
 The multi-speaker training data - American audiobook readers: LibriTTS-R (train-clean-100 and dev-clean) speakers
@@ -326,8 +326,8 @@ def build_command(args):
         'maxEdgeSilence': MAX_EDGE_SILENCE,
         'minMatch': MIN_MATCH,
         'minWordMatch': MIN_WORD_MATCH,
-        'wordMatchExempt': 'LibriTTS-R utterances: function words and abbreviation expansions (nn/multi.py WORD_MATCH_EXEMPT); '
-                           'worstAnyWord is nn/data.py\'s worst word over all words',
+        'wordMatchExempt': 'LibriTTS-R utterances: function words and abbreviation expansions (picovox_train/multi.py WORD_MATCH_EXEMPT); '
+                           'worstAnyWord is picovox_train/data.py\'s worst word over all words',
         'speakers': speaker_index,
         'readings': {**reading_counts, 'checkedTokens': reading_check['tokens'], 'disagree': reading_check['disagree'],
                      'szOnly': reading_check['szOnly']},
@@ -444,8 +444,9 @@ def write_speakers(corpus_data, speakers, row_of, edits_by_speaker, missing_labe
         })
     table.sort(key=lambda item: item['id'])
     result = {
-        'description': 'The multi-speaker pool of nn/multi.py - American English readers (LibriTTS-R train-clean-100 and '
-                       'dev-clean speakers classified "us" by nn/accent.py, and the labeled CMU ARCTIC US speakers): id is the '
+        'description': 'The multi-speaker pool of picovox_train/multi.py - American English readers (LibriTTS-R train-clean-100 and '
+                       'dev-clean speakers classified "us" by the former accent classifier (git history), and the labeled CMU '
+                       'ARCTIC US speakers): id is the '
                        'training speaker index (build/nn/data/multi/index.json), hours are of the included utterances, medianF0 '
                        'is Praat\'s over their voiced frames, and phoneMatch is the share of our front end\'s phones paired '
                        'exactly (or AH/AX) with the corpus labels',
@@ -457,7 +458,7 @@ def write_speakers(corpus_data, speakers, row_of, edits_by_speaker, missing_labe
 
 # Write data/nn/multi-split.json - the held-out utterance ids per speaker
 def write_split(entries, path=SPLIT_PATH):
-    split = {'description': 'The multi-speaker split of nn/multi.py - per speaker, the held-out utterances ("val" and "test"); '
+    split = {'description': 'The multi-speaker split of picovox_train/multi.py - per speaker, the held-out utterances ("val" and "test"); '
                             'ARCTIC speakers by sentence (as data/nn/arctic-split.json), LibriTTS-R by a hash of the utterance id '
                             f'({TEST_PERCENT}% test, {VAL_PERCENT}% validation); the rest is training',
              'val': collections.defaultdict(list), 'test': collections.defaultdict(list)}

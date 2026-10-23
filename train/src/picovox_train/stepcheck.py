@@ -1,5 +1,5 @@
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
 The step-0 check - the multi-speaker trainer's losses on fixed batches, from a fixed checkpoint, written exactly (as

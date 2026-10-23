@@ -1,5 +1,5 @@
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
 Download and unpack the human speech corpora used as calibration targets, idempotently, into data/corpora/.
@@ -27,7 +27,7 @@ import urllib.request
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 CORPORA_DIR = os.path.join(ROOT, 'data', 'corpora')
 DOWNLOADS_DIR = os.path.join(CORPORA_DIR, 'downloads')
-USER_AGENT = 'voice-synth-corpora/1.0 (+https://github.com/craigahobbs/voice-synth; research calibration)'
+USER_AGENT = 'picovox-corpora/1.0 (+https://github.com/craigahobbs/picovox; research calibration)'
 
 ARCTIC_URL = 'http://festvox.org/cmu_arctic/packed/cmu_us_{speaker}_arctic.tar.bz2'
 ARCTIC_RELEASE_URL = 'http://festvox.org/cmu_arctic/cmu_arctic/packed/cmu_us_{speaker}_arctic-0.95-release.tar.bz2'
@@ -227,7 +227,7 @@ def write_readme():
         '# Speech corpora',
         '',
         'Human speech for calibrating the synthesizer\'s voices, fetched by `tools/corpora.py`. This directory is',
-        'gitignored - the corpora are not redistributed with voice-synth. Only small derived statistics are committed',
+        'gitignored - the corpora are not redistributed with picovox. Only small derived statistics are committed',
         '(`data/targets/`).',
         ''
     ]

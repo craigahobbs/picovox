@@ -1,5 +1,5 @@
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
 The network - a small non-autoregressive (FastSpeech/LightSpeech-like) model from our front end's phoneme tokens
@@ -37,6 +37,7 @@ all-convolution encoder, architecture options that weren't adopted, are in git h
 """
 
 import math
+import os
 
 import torch
 
@@ -140,12 +141,22 @@ def parameter_count(model):
     return sum(parameter.numel() for parameter in model.parameters())
 
 
+# Save a checkpoint atomically - written beside its path, then moved there (a stage stopped mid-save leaves the last
+# whole checkpoint, which --resume reads)
+def save_checkpoint(state, path):
+    torch.save(state, path + '.tmp')
+    os.replace(path + '.tmp', path)
+
+
 #
 # The multi-speaker, multi-style model
 #
 
 # The style rows of the multi-speaker model's style table, in order - neutral is the absence of style (the zero vector)
 STYLE_NAMES = ('angry', 'disgusted', 'fearful', 'happy', 'sad')
+
+# The style intensities of CREMA-D's intensity labels
+INTENSITY = {'low': 0.5, 'medium': 0.75, 'high': 1.0, 'unspecified': 0.75}
 
 
 class FiLMConvFFN(ConvFFN):

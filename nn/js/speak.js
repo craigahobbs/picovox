@@ -8,16 +8,16 @@
 //         [--transform '[{"pitchScale": 1.2}]'] [--pause 0.5] [--rate 1] [--bandwidth-scale 1 (the network's own)]
 //     node nn/js/speak.js -m data/nn/slt --batch list.json    # [{text, wav, params, seed, transform}, ...]
 //
-// The multi-speaker, multi-style model (data/nn/multi) takes a voice and a style (batch items may set speaker,
-// embedding, and style too):
+// The multi-speaker, multi-style model (the package's - node nn/js/unpack.js lib/models/voiceModel.js out/voice) takes a
+// voice and a style (batch items may set speaker, embedding, and style too):
 //
-//     node nn/js/speak.js -m data/nn/multi "Hello." -o hello.wav --speaker 5        # a speaker id (data/nn/speakers.json)
+//     node nn/js/speak.js -m out/voice "Hello." -o hello.wav --speaker 5            # a speaker id (data/nn/speakers.json)
 //         [--blend '{"5": 0.6, "12": 0.4}'] [--embedding '[...]']                  # a blend, or a raw embedding
 //         [--style happy --intensity 0.7] [--style '{"happy": 0.5, "sad": 0.2}']   # an emotion, or a blend
 //
 // or a designed voice and style of data/nn/voices.json (nn/js/voices.js; batch items may set voice and voiceStyle):
 //
-//     node nn/js/speak.js -m data/nn/multi "Hello." -o hello.wav --voice narrator-f [--voice-style whisper]
+//     node nn/js/speak.js -m out/voice "Hello." -o hello.wav --voice narrator-f [--voice-style whisper]
 //         [--voices data/nn/voices.json] [--rate 1 (the duration multiplier - 0.9 is 10% faster)]
 //
 // It prints one JSON line: the audio seconds, and the seconds spent loading, in the network, and rendering.

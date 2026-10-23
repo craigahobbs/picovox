@@ -2,7 +2,7 @@
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 import {LF_HARMONICS, LF_RD_MAX, LF_RD_MIN} from '../lib/params.js';
-import {LF_RD_COUNT, lfHarmonics, lfPulse, lfTiming, openFraction} from '../lib/lf.js';
+import {LF_RD_COUNT, lfHarmonics, lfPulse, lfTiming} from '../lib/lf.js';
 import {strict as assert} from 'node:assert';
 import test from 'node:test';
 
@@ -59,11 +59,4 @@ test('lf.lfHarmonics', () => {
     assert(Math.abs(row.re[0]) < 1e-3);
     assert.equal(lfHarmonics(70), row);
     assert.notEqual(lfHarmonics(0), row);
-});
-
-
-test('lf.openFraction', () => {
-    assert.equal(openFraction(1), 0.62);
-    assert.equal(openFraction(0.3), 0.45 + 0.17 * 0.3);
-    assert.equal(openFraction(5), 0.95);
 });

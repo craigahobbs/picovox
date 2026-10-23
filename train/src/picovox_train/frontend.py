@@ -1,5 +1,5 @@
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
 The network's input tokens - the vocabulary (vocab.json) and a Python port of the text front end,
@@ -62,7 +62,7 @@ def write_vocab(path=VOCAB_PATH):
     vocab = {
         'version': 1,
         'description': 'The neural-network input tokens - the id of a token is its index in "tokens". Made by '
-                       'nn/frontend.py from lib/lexicon.js textToPhrases: <bos>, then each phrase\'s words\' phones '
+                       'picovox_train/frontend.py from lib/lexicon.js textToPhrases: <bos>, then each phrase\'s words\' phones '
                        '(ARPAbet, vowels with stress) separated by "_", then its phrase-end token.',
         'tokens': tokens,
         'pad': tokens.index(PAD),

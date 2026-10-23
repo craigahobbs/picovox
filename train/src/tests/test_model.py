@@ -3,6 +3,8 @@
 
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
+import os
+import tempfile
 import unittest
 
 import torch
@@ -50,6 +52,15 @@ class TestModel(unittest.TestCase):
 
     def test_parameter_count(self):
         self.assertEqual(model.parameter_count(torch.nn.Linear(3, 2)), 8)
+
+    def test_save_checkpoint(self):
+        # Written beside its path, then moved there - replacing the last
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'last.pt')
+            model.save_checkpoint({'step': 1}, path)
+            model.save_checkpoint({'step': 2}, path)
+            self.assertEqual(torch.load(path, weights_only=False), {'step': 2})
+            self.assertEqual(os.listdir(directory), ['last.pt'])
 
     def test_multi_model(self):
         network = model.MultiModel(tiny_config(), priors={'f0': 150})

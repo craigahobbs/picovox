@@ -1,5 +1,5 @@
 # Licensed under the MIT License
-# https://github.com/craigahobbs/voice-synth/blob/main/LICENSE
+# https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
 The dictionary audit - the CMU Pronouncing Dictionary's label errors the G2P network would learn (HOBBES HH AA1 B IY0
@@ -41,6 +41,7 @@ import re
 import sys
 
 from . import g2p
+from .g2p import log_line
 from .frontend import ROOT
 
 
@@ -59,15 +60,6 @@ MARGIN = 3.0
 # The controls - words every fold model agrees with, in the books at least CONTROL_COUNT times, with one pronunciation
 CONTROL_COUNT = 20
 CONTROL_CANDIDATES = 400
-
-
-# A progress line
-def log_line(path, text):
-    line = f'{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} {text}'
-    print(line, file=sys.stderr, flush=True)
-    if path:
-        with open(path, 'a', encoding='utf-8') as file:
-            file.write(line + '\n')
 
 
 # A phone string without stress
@@ -755,7 +747,7 @@ def command_adjudicate(args):
 
 
 FIXES_DESCRIPTION = (
-    'The CMU Pronouncing Dictionary\'s corrected labels (nn/g2paudit.py; g2p.py applies them in every stage, before '
+    'The CMU Pronouncing Dictionary\'s corrected labels (picovox_train/g2paudit.py; g2p.py applies them in every stage, before '
     'g2p-relabel.json, and the rule-labeled words derived from them follow) - words whose first pronunciation the '
     'cross-validated screening models confidently disagree with (fold models trained without the word: every model\'s '
     'phones differ, by a log-probability margin) and whose LibriTTS-R readers\' audio confirms the alternative (the CTC '
