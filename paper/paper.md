@@ -16,8 +16,8 @@ rule-based version of the same synthesizer, calibrated against measurements of 4
 out of 5 for naturalness. A multi-speaker, multi-style teacher of 966K parameters, trained on 237 American audiobook
 readers and 7,442 emotional clips, is distilled to a student of 305K parameters that scores 4.15 on an automatic
 naturalness predictor (UTMOS; human recordings score 3.8-4.4 on it) with a 1.1% Whisper word error rate, and runs
-about 52 times faster than real time in Node and about 2.7 times real time on an iPhone interpreting JavaScript
-(as its Safari does on a page served over plain http). Every word is pronounced by a
+about 52 times faster than real time in Node and about 2.7 times real time on an iPhone running JavaScript
+without a JIT (as Safari does on any page served over plain http). Every word is pronounced by a
 neural grapheme-to-phoneme network of 373K parameters, with a 48K-parameter context network for heteronyms, in place of
 a 3.6 MB pronouncing dictionary. A cross-validated audit of that dictionary against audiobook readers' speech found
 label errors the network had faithfully learned - "Hobbes" read as "hobbies" - and corrected them. One command
@@ -413,7 +413,7 @@ one teacher, polished, through the panel):
 | d64-L3 - decoder 64 wide, 3 layers | 283,851 | 361 KB | 4.095 | 1.76% | 0.964 |
 
 d64 averages 0.02 UTMOS below s80 - about the seed spread - with a lower word error rate, and its voice network runs
-1.24 times faster on that iPhone; it ships in picovox 1.2.0. (Its third run is the recipe's own student, retrained to
+1.24 times faster on an iPhone without a JIT; it ships in picovox 1.2.0. (Its third run is the recipe's own student, retrained to
 check the recipe: the same losses through step 1,000 and within 0.02% at the end, but not bitwise the same weights - the
 voice's training on the GPU is not bit-reproducible, which the model's export and packaging, from a checkpoint, are.)
 
@@ -978,27 +978,26 @@ Device diagnostics from an iPhone (a startup timeline posted from the page) show
 than real time with the teacher-sized model at 44.1 kHz (a 9-word sentence: G2P 0.8 s, voice network 4.9 s, rendering
 7.4 s), and three parallel workers each running 3 times slower than one - Safari gives a page about one core's worth
 there. The distilled student, 24 kHz rendering, one worker on iPhones, and the speedups above brought it to **about 1.18
-times real time**, measured on the first author's iPhone in Safari with the 1.0.0 voice (1.0.1's has the same
-architecture and size) - fast enough for continuous playback, with little margin. These diagnostics posted the timeline
-back to the laptop, which Safari blocks from an https page, so the page was served over plain http from the laptop -
-and, as Section 12.4 found later, interpreted: they measured a phone without a JIT. The player's playback had to change
-too: iOS muted Web Audio while a keep-alive media element held the audio session, so the speech plays through the media
-element; a late block now delays the rest of its sentence instead of being dropped (on a device slower than real time
-every block after the first underrun had been dropped, so the clock ran in silence); and a streaming sentence starts
-only once its synthesized audio covers playing it through at the measured synthesis speed, so a slow device pauses
-between sentences rather than mid-word.
+times real time**, measured in Safari on an iPhone with the 1.0.0 voice (1.0.1's has the same architecture and size) -
+fast enough for continuous playback, with little margin. These diagnostics were served over plain http from the laptop
+(to post the timeline back, which Safari blocks from an https page), so Safari ran them without a JIT (Section 12.4).
+The player's playback had to change too: iOS muted Web Audio while a keep-alive media element held the audio session, so
+the speech plays through the media element; a late block now delays the rest of its sentence instead of being dropped
+(on a device slower than real time every block after the first underrun had been dropped, so the clock ran in silence);
+and a streaming sentence starts only once its synthesized audio covers playing it through at the measured synthesis
+speed, so a slow device pauses between sentences rather than mid-word.
 
 ### 12.4 Without a JIT
 
-That iPhone's speed puzzled us: a phone CPU is a few times slower than an M3 Max, not thirty. A performance lab
+The iPhone's speed puzzled us: a phone CPU is a few times slower than an M3 Max, not thirty. A performance lab
 (`tools/perf/`) - a backend on the laptop serving the repository to the phone over the local network, the page polling
 it for commands (timings of each pipeline stage in a worker, as the player runs them) and posting the results back -
 found why. A fixed arithmetic loop took about 93 ms on the phone and 1 ms on the laptop, and never got faster when
-repeated: Safari there ran JavaScript without a JIT, interpreting every operation (it was not Lockdown Mode - WebAssembly
-ran, though interpreted too, about 3 times JavaScript's speed, which we did not pursue). Built-in functions ran at
-native speed (`Math.cos` was only 4 times slower than the laptop's), so the cost was the number of JavaScript operations
-per second of audio. Node without its JIT (`node --jitless`) ran the pipeline within 20% of the phone, so changes were
-made against it and checked on the phone:
+repeated: Safari ran JavaScript without a JIT, interpreting every operation (not Lockdown Mode - WebAssembly ran, though
+interpreted too, about 3 times JavaScript's speed, which we did not pursue). Built-in functions ran at native speed
+(`Math.cos` was only 4 times slower than the laptop's), so the cost was the number of JavaScript operations per second
+of audio. Node without its JIT (`node --jitless`) ran the pipeline within 20% of the phone, so changes were made against
+it and checked on the phone:
 
 - **Voicing from tables.** Each output sample summed about 95 harmonics, twice (the two frames it falls between) -
   about 1,900 operations a sample. A frame's voicing is one period of a waveform of the glottal phase, so it is now
@@ -1015,7 +1014,7 @@ made against it and checked on the phone:
   beside each synthesis worker, which streams it frame chunks as the network makes them. Two such pipelines at once
   (four workers) gave 3.7 times real time in all, but each sentence slower; the player uses one.
 
-| On the iPhone, without a JIT | 1.0.2 | 1.1.0 | 1.2.0 |
+| On an iPhone without a JIT | 1.0.2 | 1.1.0 | 1.2.0 |
 | --- | --- | --- | --- |
 | Voice network | 3.6x real time | 4.1x | 5.4x |
 | Renderer | 2.1x | 3.8x | 4.6x |
@@ -1030,23 +1029,23 @@ spectrum, a half-size FFT), and the noise draws and gains a little cheaper - the
 voice is the d64 student (Section 8): the network 1.24 times faster. With the two apart in workers, the slower one
 sets the speed, so neither alone moved the pipeline much (with only the renderer faster, it was 3.0x).
 
-**Why there was no JIT.** The lab serves its page over plain http, from the laptop on the local network - and that, it
-turned out later, was the cause. On the same iPhone (iOS 18.7, Safari) in the same hour, the player's worker ran the
-lab's fixed loop in 4 ms on its https site and in 103 ms served over http from the laptop (its log, posted back, named
-the device), and the lab's own bench, over http, took about 100 ms on the page and in a worker. **Safari on the iPhone
-runs JavaScript without a JIT on a page served over plain http, and with one over https.** We found this documented
-nowhere, and apparently unnoticed - plausibly because pages tried on a phone over local http are usually unminified
-development builds, which take the blame for being slow. So the table above, and Section 12.3, measured the interpreted
-case - what an iPhone in Lockdown Mode (which disables the JIT) gets, not what the player's https visitors get. The
-changes still count: they made synthesis faster with a JIT too (Section 12.2), with the audio unchanged. How much faster
-than real time a phone compiling JavaScript is was not measured; the lab would need to be served over https for that.
+**Why there was no JIT.** The lab serves its page over plain http, from the laptop on the local network, and that is the
+cause: **Safari on the iPhone runs JavaScript without a JIT on a page served over plain http, and with one over https.**
+The player's worker runs the lab's fixed loop in 4 ms on its https site and in 103 ms served over plain http from the
+laptop (iOS 18.7, Safari 27, in the same hour; its posted log names the device), and the lab's own bench over http takes
+about 100 ms on the page and in a worker. This is documented nowhere we found - pages tried on a phone over local http
+are usually unminified development builds, which take the blame for being slow. So the table above, and Section 12.3,
+measured the interpreted case - Safari over http, and in Lockdown Mode (which disables the JIT) - not what the player's
+https visitors get. The changes still count: they made synthesis faster with a JIT too (Section 12.2), with the audio
+unchanged. How much faster than real time an iPhone runs with its JIT was not measured; the lab must serve https for
+that.
 
 In the player, five minutes of a book played through with no stall. Two things measured did not make it: the noise
 filtering at half the overlap (the renderer 1.4 times faster, but the noise itself changed - SNR 25-31 dB against the
 current filtering - and the network is the bottleneck once the two run apart), and two whole-sentence workers instead of
-a pipeline (1.6 times one worker in all, each sentence slower). Unlike Section 12.3's earlier measurement, this iPhone
-(Safari 27) ran two workers at nearly twice one's speed and four at about 2.4 times, so the player's one worker on
-iPhones is now one pipeline of two.
+a pipeline (1.6 times one worker in all, each sentence slower). Unlike Section 12.3's earlier measurement, an iPhone in
+Safari 27 ran two workers at nearly twice one's speed and four at about 2.4 times, so the player's one worker on iPhones
+is now one pipeline of two.
 
 ### 12.5 picovox 1.0.1's voice
 

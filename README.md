@@ -568,8 +568,8 @@ network's time, so students that shrink only it - s80's encoder - were trained o
 | L3 - decoder 80 wide, 3 layers | 317,947 | 397 KB | 4.136 | 1.56% | 0.974 |
 | d64-L3 - decoder 64 wide, 3 layers | 283,851 | 361 KB | 4.095 | 1.76% | 0.964 |
 
-d64 is about 0.02 UTMOS below s80 on average (the seed spread) with a lower WER, and its network is 1.24x faster on that
-iPhone. The voice's training on the GPU isn't bit-reproducible - the recipe's d64, retrained, matched its losses but not
+d64 is about 0.02 UTMOS below s80 on average (the seed spread) with a lower WER, and its network is 1.24x faster on an
+iPhone without a JIT. The voice's training on the GPU isn't bit-reproducible - the recipe's d64, retrained, matched its losses but not
 its weights bitwise - though its export and packaging from a checkpoint are.
 
 
