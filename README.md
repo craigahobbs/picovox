@@ -221,7 +221,7 @@ that runs its own synthesis loop (PicoShelf's worker does):
 | The voice network | 305,035 parameters, 8-bit weights - 385 KB gzipped |
 | The G2P network | 373,256 parameters (and the heteronym context network's 47,779), 6-bit weights |
 | Speed, Apple M3 Max (Node) | The voice network about 127x real time, the renderer about 97x; synthesis end to end (24 kHz) about 55x |
-| Speed, iPhone without a JIT (Safari) | About 2.6x real time in one worker; about 3.1-3.4x with the network and the renderer in two workers (`sentenceFrames` and `createSentenceRenderer`) |
+| Speed, iPhone without a JIT (Safari over plain http, or in Lockdown Mode) | About 2.6x real time in one worker; about 3.1-3.4x with the network and the renderer in two workers (`sentenceFrames` and `createSentenceRenderer`) |
 | Startup | About 0.1 s to load both networks (Node, M3 Max) |
 
 The voices score a mean UTMOS (a neural predictor of listeners' naturalness ratings, 1-5) of about 4.1 on the listener
@@ -292,7 +292,8 @@ repository on the local network (open the printed URL on the phone, which then p
 tools/perf/send.js COMMAND '{options}'` runs one there and prints its result - `timing` (the network, the renderer, and
 the streaming pipeline, stage by stage, in a worker as an app runs them), `parallel` and `pipeline` (several workers, or
 network and render workers in pairs, at once), `bench` (fixed workloads - whether the JavaScript engine compiles them;
-an iPhone's Safari can run without a JIT), and `reload`. A variant of `lib/` to try a change in is
+an iPhone's Safari interprets JavaScript on a page served over plain http, as the lab's is - so the lab measures that
+case; over https it compiles), and `reload`. A variant of `lib/` to try a change in is
 `tools/perf/variant.sh NAME` (`build/perf/variants/NAME/lib`, which the lab's commands take as `lib`);
 `tools/perf/compare.js NAME` compares its output with `lib/`'s (identical, else the SNR), and `tools/perf/speed.js lib
 NAME` times each under Node without a JIT (`--jitless` - the phone's speed within about 20%). `--root DIR` serves
