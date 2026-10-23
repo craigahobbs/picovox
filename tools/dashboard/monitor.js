@@ -310,7 +310,7 @@ function writeSamplesIndex(index) {
 // Score WAV files with UTMOS on the CPU - {file name: mos}
 async function scoreSamples(files) {
     const python = join(repository, 'build/venv-listeners/bin/python');
-    const args = ['-I', 'train/src/picovox_train/listeners.py', '--device', 'cpu', '--no-embedding', '--no-emotion', ...files];
+    const args = ['-I', 'train/src/picovox_train/listeners.py', '--device', 'cpu', '--no-embedding', ...files];
     const env = {...process.env, 'OMP_NUM_THREADS': '4'};
     const {stdout} = await execFileAsync(python, args, {'cwd': repository, env, 'maxBuffer': 16 * 1024 * 1024});
     const scores = {};

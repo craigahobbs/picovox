@@ -12,10 +12,10 @@ import unittest.mock
 import warnings
 
 import numpy
-import soundfile
 import torch
 
 from picovox_train import export, frontend, params, synthesize
+from picovox_train.wav import read_wav
 
 from . import helpers
 from .test_trainmulti import TrainData
@@ -115,7 +115,7 @@ class TestSynthesize(unittest.TestCase):
             with helpers.captured() as (stdout, _):
                 self.assertEqual(synthesize.main([self.checkpoint, 'Hello.', '-o', wav, '--rate', '16000', '--params', frames,
                                                   '--speaker', 'arctic-slt', '--style', 'sad', '--intensity', '0.5']), 0)
-            audio, rate = soundfile.read(wav)
+            audio, rate = read_wav(wav)
             with open(frames, encoding='utf-8') as file:
                 written = json.load(file)
             self.assertRegex(stdout.getvalue(), r'^hello\.wav: [0-9.]+ s\n$')
@@ -125,7 +125,7 @@ class TestSynthesize(unittest.TestCase):
             with helpers.captured():
                 self.assertEqual(synthesize.main([self.checkpoint, 'Hello.', '-o', wav, '--rate', '16000', '--float', '--blend',
                                                   '{"0": 1, "1": 1}', '--bandwidth-scale', '0.9']), 0)
-            self.assertEqual(soundfile.read(wav)[1], 16000)
+            self.assertEqual(read_wav(wav)[1], 16000)
 
     def test_module_main(self):
         with unittest.mock.patch('sys.argv', ['synthesize']), helpers.captured() as (_, stderr), warnings.catch_warnings():

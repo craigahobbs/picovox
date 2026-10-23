@@ -11,9 +11,9 @@ import os
 import sys
 
 import numpy
-import soundfile
 
 from picovox_train import frontend
+from picovox_train.wav import write_wav
 
 
 class FakePool:
@@ -152,7 +152,7 @@ def make_arctic(arctic_dir, speaker, texts, rate=16000):
         file.write('not a prompt line\n')
     for number, (sentence, text) in enumerate(texts.items()):
         labels, seconds = text_labels(text or 'Call me Ishmael.')
-        soundfile.write(os.path.join(directory, 'wav', sentence + '.wav'), labels_audio(labels, seconds, rate, number), rate)
+        write_wav(os.path.join(directory, 'wav', sentence + '.wav'), labels_audio(labels, seconds, rate, number), rate)
         write_xwaves(os.path.join(directory, 'lab', sentence + '.lab'), labels)
     return directory
 
@@ -164,7 +164,7 @@ def make_libritts(libritts_dir, label_dir, subset, speaker, chapter, texts, with
     os.makedirs(directory, exist_ok=True)
     for number, (utterance_id, text) in enumerate(texts.items()):
         labels, seconds = text_labels(text, 'mfa')
-        soundfile.write(os.path.join(directory, utterance_id + '.wav'), labels_audio(labels, seconds, rate, number), rate)
+        write_wav(os.path.join(directory, utterance_id + '.wav'), labels_audio(labels, seconds, rate, number), rate)
         with open(os.path.join(directory, utterance_id + '.normalized.txt'), 'w', encoding='utf-8') as file:
             file.write(text + '\n')
         if utterance_id not in without_labels:

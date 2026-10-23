@@ -15,10 +15,10 @@ import unittest.mock
 import warnings
 
 import numpy
-import soundfile
 import torch
 
 from picovox_train import cremad, g2p, g2paudit, heteronyms
+from picovox_train.wav import write_wav
 
 from .helpers import captured
 
@@ -350,7 +350,7 @@ class TestG2pAudit(unittest.TestCase):
                 file.write('not a label')
             directory = os.path.join(audio, subset, speaker, chapter)
             os.makedirs(directory, exist_ok=True)
-            soundfile.write(os.path.join(directory, name + '.wav'), numpy.zeros(48000), 24000)
+            write_wav(os.path.join(directory, name + '.wav'), numpy.zeros(48000), 24000)
         return labels, audio
 
     def test_tokens(self):
@@ -386,7 +386,7 @@ class TestG2pAudit(unittest.TestCase):
 
     def test_read_segment(self):
         path = os.path.join(self.directory.name, 'one.wav')
-        soundfile.write(path, numpy.zeros((24000, 2)), 24000)
+        write_wav(path, numpy.zeros((24000, 2)), 24000)
         self.assertEqual(len(g2paudit.read_segment(path, 0.25, 0.75)), 8000)
 
     def test_audio_plan(self):

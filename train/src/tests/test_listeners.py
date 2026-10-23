@@ -19,9 +19,9 @@ import unittest.mock
 import warnings
 
 import numpy
-import soundfile
 import torch
 
+from picovox_train.wav import write_wav as write_pcm
 from tests import data_fixtures, helpers
 
 
@@ -46,26 +46,15 @@ class FakeEcapa:
         return torch.tensor([[[float(batch.shape[1]), 1.0, 0.0]]])
 
 
-# A fake emotion2vec+ model
-class FakeEmotion:
-
-    @staticmethod
-    def generate(part, granularity, extract_embedding, disable_pbar):
-        assert (granularity, extract_embedding, disable_pbar) == ('utterance', False, True)
-        print('a progress line')
-        assert len(part) > 0
-        return [{'labels': ['生气/angry', '中立/neutral', '<unk>'], 'scores': [0.25, 0.5, 0.25]}]
-
-
 # Write a WAV file (a buzz) - its path
 def write_wav(directory, name, seconds, rate, channels=1):
     samples = data_fixtures.buzz(seconds, rate)
     path = os.path.join(directory, name)
-    soundfile.write(path, numpy.stack([samples] * channels, axis=1) if channels > 1 else samples, rate)
+    write_pcm(path, numpy.stack([samples] * channels, axis=1) if channels > 1 else samples, rate)
     return path
 
 
-# The listener model libraries' fake modules - speechbrain, funasr, huggingface_hub (local_files_only fails when
+# The listener model libraries' fake modules - speechbrain, huggingface_hub (local_files_only fails when
 # offline is False)
 @contextlib.contextmanager
 def fake_libraries(cached=True):
@@ -77,12 +66,10 @@ def fake_libraries(cached=True):
     hub.snapshot_download = unittest.mock.Mock(side_effect=snapshot_download)
     speaker = types.ModuleType('speechbrain.inference.speaker')
     speaker.EncoderClassifier = types.SimpleNamespace(from_hparams=unittest.mock.Mock(return_value=FakeEcapa()))
-    funasr = types.ModuleType('funasr')
-    funasr.AutoModel = unittest.mock.Mock(return_value=FakeEmotion())
     with data_fixtures.fake_modules(**{'huggingface_hub': hub, 'speechbrain': types.ModuleType('speechbrain'),
                                        'speechbrain.inference': types.ModuleType('speechbrain.inference'),
-                                       'speechbrain.inference.speaker': speaker, 'funasr': funasr}):
-        yield hub, speaker, funasr
+                                       'speechbrain.inference.speaker': speaker}):
+        yield hub, speaker
 
 
 class TestArguments(unittest.TestCase):
@@ -94,8 +81,7 @@ class TestArguments(unittest.TestCase):
                 file.write('b.wav\n\n  c.wav \n')
             args = listeners.parse_args(['a.wav', '--files-from', list_path, '--no-mos', '--device', 'cpu'])
         self.assertEqual(args.files, ['a.wav', 'b.wav', 'c.wav'])
-        self.assertEqual((args.no_mos, args.no_embedding, args.no_emotion, args.device, args.chunk_seconds, args.emotion_model),
-                         (True, False, False, 'cpu', 20, listeners.EMOTION_REPO))
+        self.assertEqual((args.no_mos, args.no_embedding, args.device, args.chunk_seconds), (True, False, 'cpu', 20))
         with unittest.mock.patch.object(sys, 'stdin', io.StringIO('d.wav\n')):
             self.assertEqual(listeners.parse_args(['--files-from', '-']).files, ['d.wav'])
         with helpers.captured() as (_, stderr), self.assertRaises(SystemExit):
@@ -122,10 +108,10 @@ class TestArguments(unittest.TestCase):
 class TestModels(unittest.TestCase):
 
     def test_hf_snapshot(self):
-        with fake_libraries() as (hub, _, _):
+        with fake_libraries() as (hub, _):
             self.assertEqual(listeners.hf_snapshot('a/b'), '/snapshots/a/b')
         self.assertEqual(hub.snapshot_download.call_args_list, [unittest.mock.call('a/b', local_files_only=True)])
-        with fake_libraries(cached=False) as (hub, _, _):
+        with fake_libraries(cached=False) as (hub, _):
             self.assertEqual(listeners.hf_snapshot('a/b'), '/snapshots/a/b')
         self.assertEqual(hub.snapshot_download.call_args_list[1], unittest.mock.call('a/b'))
 
@@ -143,15 +129,12 @@ class TestModels(unittest.TestCase):
             listeners.load_utmos('cpu')
             self.assertEqual(load.call_args, unittest.mock.call(repo_dir, 'utmos22_strong', source='local', progress=False))
 
-    def test_load_ecapa_emotion(self):
-        with fake_libraries() as (_, speaker, funasr):
+    def test_load_ecapa(self):
+        with fake_libraries() as (_, speaker):
             self.assertIsInstance(listeners.load_ecapa('cpu'), FakeEcapa)
-            self.assertIsInstance(listeners.load_emotion('x/emotion', 'cpu'), FakeEmotion)
         self.assertEqual(speaker.EncoderClassifier.from_hparams.call_args, unittest.mock.call(
             source=f'/snapshots/{listeners.ECAPA_REPO}', savedir=os.path.join(listeners.CACHE_DIR, 'spkrec-ecapa-voxceleb'),
             run_opts={'device': 'cpu'}))
-        self.assertEqual(funasr.AutoModel.call_args, unittest.mock.call(model='/snapshots/x/emotion', disable_update=True, device='cpu',
-                                                                        log_level='ERROR'))
 
 
 class TestScoring(unittest.TestCase):
@@ -169,25 +152,19 @@ class TestScoring(unittest.TestCase):
         with unittest.mock.patch.object(listeners, 'SAMPLE_RATE', 40):
             self.assertEqual([len(part) for part in listeners.chunks(samples, 1)], [34, 34, 32])
 
-    def test_emotion_label(self):
-        self.assertEqual(listeners.emotion_label('生气/angry'), 'angry')
-        self.assertEqual(listeners.emotion_label('<unk>'), 'unknown')
-        self.assertEqual(listeners.emotion_label('sad'), 'sad')
-
     def test_score_file(self):
-        models = {'mos': FakeUtmos(), 'embedding': FakeEcapa(), 'emotion': FakeEmotion()}
+        models = {'mos': FakeUtmos(), 'embedding': FakeEcapa()}
         with tempfile.TemporaryDirectory() as directory, helpers.captured() as (stdout, _):
             path = write_wav(directory, 'a.wav', 1.0, 16000)
             args = argparse.Namespace(chunk_seconds=0.4, device='cpu')
             result = listeners.score_file(path, models, args)
             alone = listeners.score_file(path, {}, args)
         self.assertEqual(stdout.getvalue(), '')
-        self.assertEqual(set(result), {'file', 'seconds', 'mos', 'embedding', 'emotion'})
+        self.assertEqual(set(result), {'file', 'seconds', 'mos', 'embedding'})
         self.assertEqual((result['file'], result['seconds']), (path, 1.0))
         self.assertGreater(result['mos'], 3)
         lengths = [5334, 5334, 5332]
         self.assertEqual(result['embedding'], [round(sum(length * length for length in lengths) / 16000, 5), 1.0, 0.0])
-        self.assertEqual(result['emotion'], {'angry': 0.25, 'neutral': 0.5, 'unknown': 0.25})
         self.assertEqual(alone, {'file': path, 'seconds': 1.0})
 
 
@@ -215,7 +192,7 @@ class TestMain(unittest.TestCase):
                 listeners.main(paths)
             lines = [json.loads(line) for line in stdout.buffer.getvalue().decode('utf-8').splitlines()]
             stdout = FakeStdout()
-            argv = ['listeners.py', paths[0], '--no-mos', '--no-embedding', '--no-emotion', '--device', 'cpu']
+            argv = ['listeners.py', paths[0], '--no-mos', '--no-embedding', '--device', 'cpu']
             with unittest.mock.patch.object(sys, 'stdout', stdout), unittest.mock.patch.object(sys, 'argv', argv):
                 listeners.main()
             bare = [json.loads(line) for line in stdout.buffer.getvalue().decode('utf-8').splitlines()]
@@ -223,7 +200,7 @@ class TestMain(unittest.TestCase):
         set_num_threads.assert_called_with(max(1, min(8, os.cpu_count() or 1)))
         self.assertEqual(load_utmos.call_args, unittest.mock.call('cpu'))
         self.assertEqual([line['file'] for line in lines], paths)
-        self.assertEqual(set(lines[0]), {'file', 'seconds', 'mos', 'embedding', 'emotion'})
+        self.assertEqual(set(lines[0]), {'file', 'seconds', 'mos', 'embedding'})
         self.assertEqual(bare, [{'file': paths[0], 'seconds': 0.5}])
 
     def test_module_main(self):

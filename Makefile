@@ -152,9 +152,9 @@ train-clean:
 	rm -rf $(TRAIN_DIR)
 
 # The corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D (downloads, once)
-$(TRAIN_DIR)/corpora.done: | build/venv-analysis.build build/venv-nn.build
+$(TRAIN_DIR)/corpora.done: | build/venv-nn.build
 	@$(STAGE) start
-	$(STAGE) -- build/venv-analysis/bin/python -I train/src/picovox_train/corpora.py
+	$(STAGE) -- build/venv-nn/bin/python -I train/src/picovox_train/corpora.py
 	$(STAGE) -- $(NN_PYTHON) -m picovox_train.cremad fetch
 	@$(STAGE) end
 	@mkdir -p $(@D) && touch $@

@@ -1,2 +1,0 @@
-# The environment for the corpus downloads (tools/corpora.py, make train's first stage) - build/venv-analysis
-# (make build/venv-analysis.build); tools/corpora.py needs only the standard library

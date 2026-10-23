@@ -4,21 +4,21 @@
 """
 The listener-model panel - neural listeners that score WAV files, one JSON object per file (JSON lines) on stdout.
 
-    build/venv-listeners/bin/python -I train/src/picovox_train/listeners.py [--no-mos] [--no-embedding] [--no-emotion]
+    build/venv-listeners/bin/python -I train/src/picovox_train/listeners.py [--no-mos] [--no-embedding]
         [--device auto|cpu|mps] [--files-from list.txt|-] file.wav ...
 
-Each line is {"file", "seconds", "mos", "embedding", "emotion"}:
+Each line is {"file", "seconds", "mos", "embedding"}:
 
 - mos - UTMOS22 strong (the UTokyo-SaruLab VoiceMOS Challenge 2022 system, through torch.hub tarepan/SpeechMOS), a
   predicted mean opinion score of naturalness from 1 (bad) to 5 (excellent).
 - embedding - the 192-dimension ECAPA-TDNN speaker embedding (speechbrain/spkrec-ecapa-voxceleb); compare two with
   cosine similarity (same speaker is typically above 0.5-0.6).
-- emotion - emotion2vec+ base (emotion2vec/emotion2vec_plus_base) class probabilities: angry, disgusted, fearful,
-  happy, neutral, other, sad, surprised, unknown.
 
-Audio of any sample rate is mixed to mono and resampled to 16 kHz. Files longer than --chunk-seconds are scored in
-chunks (MOS and emotion averaged by duration, embeddings averaged). All models are loaded once per run. Model files
-are cached under data/listeners/ (like the corpora, kept by make clean); after the first run, no network access is
+(The emotion2vec+ emotion recognizer, for the style experiments - paper Section 12.7 - is in git history.)
+
+Audio (16-bit PCM WAV, of any sample rate - picovox_train/wav.py) is mixed to mono and resampled to 16 kHz. Files
+longer than --chunk-seconds are scored in chunks (MOS averaged by duration, embeddings averaged). All models are loaded
+once per run. Model files are cached under data/listeners/ (like the corpora, kept by make clean); after the first run, no network access is
 needed. On Apple silicon the models run on the GPU (MPS) by default - about 3x faster than the CPU, with the same scores
 to four decimals.
 """
@@ -42,13 +42,15 @@ SAMPLE_RATE = 16000
 UTMOS_REPO = 'tarepan/SpeechMOS:v1.2.0'
 UTMOS_REPO_DIR = 'tarepan_SpeechMOS_v1.2.0'
 ECAPA_REPO = 'speechbrain/spkrec-ecapa-voxceleb'
-EMOTION_REPO = 'emotion2vec/emotion2vec_plus_base'
 
 # The model caches, set before the model libraries are imported
 os.environ.setdefault('TORCH_HOME', os.path.join(CACHE_DIR, 'torch'))
 os.environ.setdefault('HF_HOME', os.path.join(CACHE_DIR, 'hf'))
-os.environ.setdefault('MODELSCOPE_CACHE', os.path.join(CACHE_DIR, 'modelscope'))
 os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
+
+# The package, from train/src (last on the path - the script runs isolated, python -I, its own directory not on the
+# path, so its sibling modules can't shadow the model libraries' imports)
+sys.path.append(os.path.join(ROOT, 'train', 'src'))
 
 
 # Parse the command line
@@ -59,12 +61,9 @@ def parse_args(argv):
                         help='read more WAV paths, one per line, from a file (- for stdin)')
     parser.add_argument('--no-mos', action='store_true', help='skip the UTMOS naturalness score')
     parser.add_argument('--no-embedding', action='store_true', help='skip the ECAPA speaker embedding')
-    parser.add_argument('--no-emotion', action='store_true', help='skip the emotion2vec+ emotion probabilities')
     parser.add_argument('--device', default='auto', choices=['auto', 'cpu', 'mps'],
                         help='the torch device (default auto - mps on Apple silicon, else cpu)')
     parser.add_argument('--chunk-seconds', type=float, default=20, help='score longer files in chunks of this length')
-    parser.add_argument('--emotion-model', default=EMOTION_REPO,
-                        help=f'the emotion2vec+ model (default {EMOTION_REPO})')
     args = parser.parse_args(argv)
     if args.files_from:
         with (sys.stdin if args.files_from == '-' else open(args.files_from, encoding='utf-8')) as list_file:
@@ -88,7 +87,7 @@ def to_stderr(function, *args, **kwargs):
 
 
 # Download a Hugging Face model snapshot, or find it in the cache without network access - returns its local directory
-# (the listener models' libraries - huggingface_hub, speechbrain, funasr - are build/venv-listeners's)
+# (the listener models' libraries - huggingface_hub, speechbrain - are build/venv-listeners's)
 def hf_snapshot(repo):
     import huggingface_hub  # pylint: disable=import-outside-toplevel,import-error
     try:
@@ -116,19 +115,12 @@ def load_ecapa(device):
     return to_stderr(EncoderClassifier.from_hparams, source=source, savedir=savedir, run_opts={'device': device})
 
 
-# Load the emotion2vec+ emotion recognizer (funasr) from its local snapshot
-def load_emotion(model_repo, device):
-    from funasr import AutoModel  # pylint: disable=import-outside-toplevel,import-error
-    model_dir = hf_snapshot(model_repo)
-    return to_stderr(AutoModel, model=model_dir, disable_update=True, device=device, log_level='ERROR')
-
-
 # Read a WAV file as 16 kHz mono float32 - returns (samples, original duration in seconds)
 def read_audio(path):
     import numpy  # pylint: disable=import-outside-toplevel
-    import soundfile  # pylint: disable=import-outside-toplevel
     import soxr  # pylint: disable=import-outside-toplevel
-    samples, sample_rate = soundfile.read(path, dtype='float32', always_2d=True)
+    from picovox_train.wav import read_wav  # pylint: disable=import-outside-toplevel
+    samples, sample_rate = read_wav(path, dtype='float32')
     samples = samples.mean(axis=1)
     if sample_rate != SAMPLE_RATE:
         samples = soxr.resample(samples, sample_rate, SAMPLE_RATE, quality='HQ').astype(numpy.float32)
@@ -140,12 +132,6 @@ def chunks(samples, chunk_seconds):
     count = max(1, math.ceil(len(samples) / (chunk_seconds * SAMPLE_RATE)))
     size = math.ceil(len(samples) / count)
     return [samples[ix:ix + size] for ix in range(0, len(samples), size)] or [samples]
-
-
-# The emotion2vec+ label of a class (its labels are "<Chinese>/<English>")
-def emotion_label(label):
-    english = label.split('/')[-1]
-    return 'unknown' if english == '<unk>' else english
 
 
 # Score one file with the loaded models - returns its result object
@@ -166,15 +152,6 @@ def score_file(path, models, args):
             embeddings = [models['embedding'].encode_batch(batch).squeeze().cpu().numpy() for batch in batches]
             embedding = numpy.average(numpy.stack(embeddings), axis=0, weights=weights)
             result['embedding'] = [round(float(value), 5) for value in embedding]
-        if 'emotion' in models:
-            probabilities = {}
-            for weight, part in zip(weights, parts):
-                output = to_stderr(models['emotion'].generate, part, granularity='utterance', extract_embedding=False,
-                                   disable_pbar=True)[0]
-                for label, score in zip(output['labels'], output['scores']):
-                    name = emotion_label(label)
-                    probabilities[name] = probabilities.get(name, 0) + weight * float(score)
-            result['emotion'] = {name: round(score, 5) for name, score in probabilities.items()}
     return result
 
 
@@ -191,8 +168,6 @@ def main(argv=None):
         models['mos'] = load_utmos(args.device)
     if not args.no_embedding:
         models['embedding'] = load_ecapa(args.device)
-    if not args.no_emotion:
-        models['emotion'] = load_emotion(args.emotion_model, args.device)
     output = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
     for path in args.files:
         output.write(json.dumps(score_file(path, models, args)) + '\n')

@@ -10,9 +10,9 @@ import unittest
 import unittest.mock
 
 import numpy
-import soundfile
 
 from picovox_train import data, frontend
+from picovox_train.wav import read_wav, write_wav
 from tests import data_fixtures, helpers
 
 
@@ -155,7 +155,7 @@ class TestProcessing(unittest.TestCase):
         labels, seconds = data_fixtures.text_labels(text)
         samples = data_fixtures.labels_audio(labels, seconds, rate)
         wav = os.path.join(directory, 'a.wav')
-        soundfile.write(wav, numpy.stack([samples] * channels, axis=1) if channels > 1 else samples, rate)
+        write_wav(wav, numpy.stack([samples] * channels, axis=1) if channels > 1 else samples, rate)
         lab = os.path.join(directory, 'a.lab')
         data_fixtures.write_xwaves(lab, labels)
         return {'text': text, 'wav': wav, 'lab': lab}, seconds
@@ -176,7 +176,7 @@ class TestProcessing(unittest.TestCase):
     def test_process_utterance_native_rate(self):
         with tempfile.TemporaryDirectory() as directory:
             utterance, _ = self._utterance(directory, data.SAMPLE_RATE)
-            samples, _ = soundfile.read(utterance['wav'], dtype='float64')
+            samples = read_wav(utterance['wav'])[0][:, 0]
             result = data.process_utterance((utterance, {}, (75, 400, 5500)))
         # (no resampling - the audio is the recording's samples, cut)
         start = int(round(result['cutStart'] * data.SAMPLE_RATE))

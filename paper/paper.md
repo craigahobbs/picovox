@@ -83,7 +83,7 @@ narrative passages with dialogue from public-domain books, two questions, and tw
 | Naturalness | UTMOS22 (strong) | Predicted mean opinion score, 1-5 |
 | Intelligibility | Whisper `base.en` | Word error rate (WER) against the text |
 | Speaker identity | ECAPA-TDNN (VoxCeleb) | 192-dimension speaker embedding; cosine similarity |
-| Style | emotion2vec+ base | Emotion probabilities (angry, disgusted, fearful, happy, neutral, sad, ...) |
+| Style | emotion2vec+ base | Emotion probabilities (angry, disgusted, fearful, happy, neutral, sad, ...) - for the style experiments; retired with the style network (Section 12.7) |
 
 We calibrated the panel on human and commercial speech before trusting it:
 

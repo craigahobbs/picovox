@@ -262,8 +262,8 @@ python-build package of its own: its unit tests (`train/src/tests/`) run on the 
 synthetic data and no network, in python-build's environment (`train/build/venv/`), which installs the package with the
 training's pinned PyTorch and numpy (`train/pyproject.toml`, the same versions as `requirements/nn.txt`). `make train`
 runs the package from its source (`PYTHONPATH=train/src`) in the training environments, `build/venv-<name>` from
-`requirements/<name>.txt` - `venv-nn` (PyTorch, Praat), `venv-listeners` (the listener models), `venv-pos` (spaCy), and
-`venv-analysis` (the corpus download). A training module runs the same way by hand:
+`requirements/<name>.txt` - `venv-nn` (PyTorch, soxr, Praat - and the corpus download, which needs only the standard
+library), `venv-listeners` (the listener models), and `venv-pos` (spaCy). A training module runs the same way by hand:
 
 ```sh
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke   # every training entry point, a few steps on the CPU
@@ -343,7 +343,6 @@ speaker identity, and speaking style alongside Whisper's intelligibility. They r
 | Intelligibility | Whisper `base.en` (whisper.cpp, `whisper-cli`, the model in `data/whisper/`) | Word error rate against the text |
 | Naturalness | [UTMOS22 strong](https://github.com/sarulab-speech/UTMOS22) (through torch.hub [tarepan/SpeechMOS](https://github.com/tarepan/SpeechMOS)) | Predicted mean opinion score, 1-5 |
 | Speaker identity | [ECAPA-TDNN](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb) (SpeechBrain, VoxCeleb) | A 192-dimension speaker embedding |
-| Style | [emotion2vec+ base](https://huggingface.co/emotion2vec/emotion2vec_plus_base) (FunASR) | Probabilities of angry, disgusted, fearful, happy, neutral, other, sad, surprised, unknown |
 
 `picovox_train/panel.py` is the panel's scoring, shared by every evaluation (`picovox_train.distill eval`, make train's
 gate): an exported model speaks a fixed evaluation set, `tools/panel-texts.json` - six Harvard sentences, six narrative
@@ -351,16 +350,17 @@ passages from public-domain books with dialogue (Austen, Melville, Dickens, Doyl
 two exclamations - through `nn/js/speak.js` (every word pronounced by the G2P network, as the package pronounces), and
 the renderings are scored with UTMOS, Whisper's WER, and the ECAPA speaker similarity.
 
-`picovox_train/listeners.py` is the scoring tool itself - WAV files of any sample rate in, one JSON line per file out:
+`picovox_train/listeners.py` is the scoring tool itself - WAV files (16-bit PCM) of any sample rate in, one JSON line per
+file out:
 
 ```sh
 make listeners                                              # build/venv-listeners from requirements/listeners.txt
-build/venv-listeners/bin/python -I picovox_train/listeners.py [--no-mos] [--no-embedding] [--no-emotion] [--device auto|cpu|mps] \
+build/venv-listeners/bin/python -I train/src/picovox_train/listeners.py [--no-mos] [--no-embedding] [--device auto|cpu|mps] \
     [--files-from list.txt|-] file.wav ...
 ```
 
 ```json
-{"file": "a.wav", "seconds": 2.63, "mos": 3.33, "embedding": [31.48, ...], "emotion": {"angry": 0.0, ..., "neutral": 1.0}}
+{"file": "a.wav", "seconds": 2.63, "mos": 3.33, "embedding": [31.48, ...]}
 ```
 
 The models load once per run (4-7 s) and then score about 35 seconds of speech a second (6 sentences) on an M3 Max's
@@ -369,8 +369,10 @@ chunks. The models download on first use - about 1.5 GB, into `data/listeners/` 
 `make clean` keeps them) - and later runs need no network.
 
 The environment is built with `python3` (3.14 here; 3.12 also works - `make listeners PYTHON_VENV=python3.12`). Its
-packages are pinned in `requirements/listeners.txt`: PyTorch 2.14, torchaudio 2.11 (resampling, for UTMOS),
-SpeechBrain 1.1, FunASR 1.4 (emotion2vec), and soundfile and soxr for reading and resampling audio.
+packages are pinned in `requirements/listeners.txt`: PyTorch 2.14, torchaudio 2.11 (UTMOS's), SpeechBrain 1.1,
+transformers 5.20 (the CREMA-D aligner's wav2vec2), and soxr for resampling audio (WAV files are read with the
+standard library - `picovox_train/wav.py`). (The emotion2vec+ emotion recognizer, FunASR's - about 40 packages more -
+was the style experiments'; it's in git history.)
 
 Calibration (the evaluation set, or 16 recordings of each human speaker; October 2026):
 
@@ -686,8 +688,8 @@ idempotently and sequentially, resuming interrupted downloads; `--list` shows th
 its `README.md` records each corpus's source, license, and size:
 
 ```sh
-make build/venv-analysis.build                                  # build/venv-analysis (picovox_train/corpora.py's environment)
-build/venv-analysis/bin/python -I picovox_train/corpora.py              # download the corpora into data/corpora/
+make build/venv-nn.build                                        # build/venv-nn (corpora.py needs only the standard library)
+build/venv-nn/bin/python -I train/src/picovox_train/corpora.py          # download the corpora into data/corpora/
 ```
 
 | Corpus | Speakers | Download | License |

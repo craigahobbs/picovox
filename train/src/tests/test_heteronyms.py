@@ -14,9 +14,9 @@ import unittest.mock
 import warnings
 
 import numpy
-import soundfile
 
 from picovox_train import heteronyms
+from picovox_train.wav import write_wav
 
 from .helpers import captured
 
@@ -217,7 +217,7 @@ class TestHeteronyms(unittest.TestCase):
         audio, rate = voiced_audio()
         wav = os.path.join(self.audio, 'train-clean-100', '100', '1', '100_1_000000.wav')
         os.makedirs(os.path.dirname(wav))
-        soundfile.write(wav, audio, rate)
+        write_wav(wav, audio, rate)
         return rel
 
     def test_measure(self):

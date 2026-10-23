@@ -34,7 +34,7 @@ TEXTS_PATH = os.path.join(ROOT, 'tools', 'panel-texts.json')
 
 # Score WAV files with the listener panel (on the CPU) - {path: {mos, embedding}}
 def listen(paths):
-    command = [LISTENERS_PYTHON, '-I', LISTENERS_SCRIPT, '--device', 'cpu', '--no-emotion', '--files-from', '-']
+    command = [LISTENERS_PYTHON, '-I', LISTENERS_SCRIPT, '--device', 'cpu', '--files-from', '-']
     process = subprocess.run(command, input='\n'.join(paths), capture_output=True, text=True, check=True)
     return {item['file']: item for item in (json.loads(line) for line in process.stdout.splitlines() if line.strip())}
 

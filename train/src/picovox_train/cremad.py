@@ -12,8 +12,8 @@ medium, and high intensity), 7,442 clips, 16 kHz WAV, with crowd-sourced ratings
     PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.cremad build          # build/nn/data/cremad/, data/nn/cremad.json
     PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.cremad build --out DIR   # elsewhere, its cremad.json beside it
 
-The align command needs transformers, so it runs in build/venv-listeners (no new packages); build needs Praat
-(parselmouth), so it runs in build/venv-nn.
+The align command needs transformers, so it runs in build/venv-listeners; build needs Praat (parselmouth), so it runs
+in build/venv-nn.
 
 Alignment - CREMA-D has no phone labels. Our tokens (frontend.py) are force-aligned to the CTC posteriors of a
 wav2vec2 phoneme recognizer (facebook/wav2vec2-lv-60-espeak-cv-ft, espeak IPA, 20 ms frames): each of our phones is a
@@ -472,9 +472,9 @@ def label_durations(tokens, labels, samples, rate, mean_seconds):
 # Read a 16 kHz mono clip (float64)
 def read_16k(path):
     import numpy as np  # pylint: disable=import-outside-toplevel
-    import soundfile  # pylint: disable=import-outside-toplevel
     import soxr  # pylint: disable=import-outside-toplevel
-    samples, rate = soundfile.read(path, dtype='float64', always_2d=True)
+    from .wav import read_wav  # pylint: disable=import-outside-toplevel
+    samples, rate = read_wav(path)
     samples = samples.mean(axis=1)
     if rate != CTC_SAMPLE_RATE:
         samples = soxr.resample(samples, rate, CTC_SAMPLE_RATE, quality='VHQ')
@@ -900,8 +900,7 @@ def write_summary(index, path=SUMMARY_PATH):
     reasons = collections.Counter(reason.split(' (')[0] for entry in entries for reason in entry['reason'].split('; ') if reason)
     summary = {
         'description': 'CREMA-D emotional speech for the style modifiers (picovox_train/cremad.py; the data in build/nn/data/cremad/, '
-                       'picovox_train/data.py\'s format with style labels) - counts, actors, alignment quality, and the listener '
-                       'panel\'s emotion recognition of the recordings',
+                       'picovox_train/data.py\'s format with style labels) - counts, actors, and alignment quality',
         'corpus': 'CREMA-D (Cao et al., 2014) - https://github.com/' + REPO,
         'license': LICENSE,
         'clips': len(entries),

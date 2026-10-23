@@ -43,6 +43,7 @@ import sys
 from . import g2p
 from .g2p import log_line
 from .frontend import ROOT
+from .wav import read_wav
 
 
 # The audit's partitions - REPEATS partitions of FOLDS folds (every word held out REPEATS times)
@@ -522,13 +523,10 @@ def token_context(token, phones):
 
 # A segment of an utterance's audio at 16 kHz
 def read_segment(path, start, end):
-    import soundfile  # pylint: disable=import-outside-toplevel
     import soxr  # pylint: disable=import-outside-toplevel
     from .cremad import CTC_SAMPLE_RATE  # pylint: disable=import-outside-toplevel
-    info = soundfile.info(path)
-    samples, rate = soundfile.read(path, start=int(start * info.samplerate), stop=int(end * info.samplerate), dtype='float64',
-                                   always_2d=True)
-    return soxr.resample(samples.mean(axis=1), rate, CTC_SAMPLE_RATE, quality='VHQ')
+    samples, rate = read_wav(path)
+    return soxr.resample(samples[int(start * rate):int(end * rate)].mean(axis=1), rate, CTC_SAMPLE_RATE, quality='VHQ')
 
 
 # Why an alternative can't correct a label (None if it can) - as heteronyms.py selects its relabeled words: not a

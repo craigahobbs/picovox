@@ -4,7 +4,7 @@
 """
 Download and unpack the human speech corpora used as calibration targets, idempotently, into data/corpora/.
 
-    build/venv-analysis/bin/python -I corpora.py [--list] [--keep-archives] [name ...]
+    build/venv-nn/bin/python -I train/src/picovox_train/corpora.py [--list] [--keep-archives] [name ...]
 
 The corpora (names): the CMU ARCTIC US English speakers (arctic-<speaker>), the LibriTTS-R dev-clean audiobook
 and train-clean-100 subsets (libritts-r-dev-clean, libritts-r-train-clean-100), and the LibriTTSLabel forced alignments

@@ -36,6 +36,7 @@ import numpy as np
 
 from . import align
 from .frontend import ROOT, tokenize
+from .wav import read_wav
 
 
 CORPORA_DIR = os.path.join(ROOT, 'data', 'corpora')
@@ -293,11 +294,9 @@ def frame_tracks(samples, frame_count, pitch_floor, pitch_ceiling, formant_ceili
 # Process one utterance - its tokens, durations, audio, and tracks (a worker task)
 def process_utterance(task):
     utterance, mean_seconds, settings = task
-    import soundfile  # pylint: disable=import-outside-toplevel
     import soxr  # pylint: disable=import-outside-toplevel
-    samples, rate = soundfile.read(utterance['wav'], dtype='float64')
-    if samples.ndim > 1:
-        samples = samples.mean(axis=1)
+    samples, rate = read_wav(utterance['wav'])
+    samples = samples.mean(axis=1)
     tokens, seconds, cut_start, cut_end, report = align_utterance(utterance, mean_seconds, samples, rate)
     frames = align.durations_to_frames(seconds, FRAME_SECONDS, tokens)
     frame_count = sum(frames)

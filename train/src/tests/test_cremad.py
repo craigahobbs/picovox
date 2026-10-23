@@ -18,10 +18,10 @@ import urllib.error
 import warnings
 
 import numpy
-import soundfile
 import torch
 
 from picovox_train import cremad, data, frontend
+from picovox_train.wav import write_wav
 from tests import data_fixtures, helpers
 
 
@@ -124,7 +124,7 @@ def tiny_cremad():
                 samples = numpy.zeros_like(samples)
             elif kind == 'end':
                 samples = numpy.clip(samples * 20, -1, 1)
-            soundfile.write(os.path.join(wav_dir, clip_id + '.wav'), samples, cremad.CTC_SAMPLE_RATE)
+            write_wav(os.path.join(wav_dir, clip_id + '.wav'), samples, cremad.CTC_SAMPLE_RATE)
             intended_labels, _ = clip_labels(cremad.SENTENCES[intended], trailing=kind != 'end')
             record = {'id': clip_id, 'seconds': round(seconds, 4), 'tokens': frontend.tokenize(cremad.SENTENCES[intended])['tokens'],
                       'labels': None if kind == 'none' else intended_labels if read == intended else labels}
@@ -299,9 +299,9 @@ class TestClips(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, 'a.wav')
             samples = data_fixtures.buzz(0.5, 16000)
-            soundfile.write(path, samples, 16000, subtype='FLOAT')
-            self.assertTrue(numpy.allclose(cremad.read_16k(path), samples.astype(numpy.float32)))
-            soundfile.write(path, numpy.stack([samples[::2], samples[::2]], axis=1), 8000)
+            write_wav(path, samples, 16000)
+            self.assertTrue(numpy.allclose(cremad.read_16k(path), samples, rtol=0, atol=1 / 32768))
+            write_wav(path, numpy.stack([samples[::2], samples[::2]], axis=1), 8000)
             resampled = cremad.read_16k(path)
         self.assertEqual(len(resampled), 8000)
         self.assertTrue(resampled.flags['C_CONTIGUOUS'])
@@ -418,7 +418,7 @@ class TestAlignment(unittest.TestCase):
     def test_align_command(self):
         with tiny_cremad() as directory, fake_recognizer(), helpers.captured() as (_, stderr):
             # A clip too short to align
-            soundfile.write(os.path.join(directory, 'crema_d', 'AudioWAV', '1002_DFA_HAP_XX.wav'), numpy.zeros(3200), 16000)
+            write_wav(os.path.join(directory, 'crema_d', 'AudioWAV', '1002_DFA_HAP_XX.wav'), numpy.zeros(3200), 16000)
             self.assertEqual(cremad.align_command(argparse.Namespace(limit=None, device=None)), 0)
             with open(cremad.ALIGNMENTS_PATH, encoding='utf-8') as file:
                 records = [json.loads(line) for line in file]

@@ -30,13 +30,13 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   package - its unit tests in `train/src/tests/`): the front end's port (`frontend.py`, `g2pmodel.py`, `vocab.json`),
   the G2P and heteronym models (`g2p.py`, `heteronyms.py`, `context.py`, `contextlabels.py`, `readings.py`), the data
   (`corpora.py` - the corpus download, `books.py` - the pinned book texts, `data.py`, `align.py`, `multi.py`,
-  `cremad.py`), the differentiable synthesizer (`params.py`, `dsynth.py`, `lf.py`, `rng.py`, `spectral.py`), the model
+  `cremad.py`, `wav.py`), the differentiable synthesizer (`params.py`, `dsynth.py`, `lf.py`, `rng.py`, `spectral.py`), the model
   and its training (`model.py`, `trainmulti.py`, `losses.py`, `discriminator.py`, `quant.py`, `optim.py` - the training
   step's options), distillation (`distill.py`), export (`export.py`, `package.py`, `synthesize.py`), the listener panel
   (`panel.py`, and the listener models, `listeners.py` - `build/venv-listeners`), and the pipeline's tools (`gpulock.py`,
   `smoke.py`, `stepcheck.py`).
   `picovox_train/__init__.py` documents each module. `make train` runs it from its source (`PYTHONPATH=train/src`) in
-  the training environments (`build/venv-nn`, `venv-listeners`, `venv-pos`, `venv-analysis` - `requirements/*.txt`).
+  the training environments (`build/venv-nn`, `venv-listeners`, `venv-pos` - `requirements/*.txt`).
 - `tools/` - the training dashboard (`dashboard/`), the performance lab (`perf/` - the playback pipeline timed on a
   phone, and under Node without a JIT), `heteronyms.js` (the heteronym and names regression sets), make train's
   bookkeeping (`trainstage.sh`, `trainutil.sh` - the stage events and logs, the utilization samples, `trainpower.sh`)

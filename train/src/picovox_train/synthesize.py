@@ -21,12 +21,12 @@ import os
 import sys
 
 import numpy
-import soundfile
 import torch
 
 from . import dsynth, params
 from .export import load_model, quantized_model, token_remap, training_token_counts
 from .frontend import tokenize
+from .wav import write_wav
 from .model import STYLE_NAMES
 
 
@@ -143,7 +143,7 @@ def main(argv=None):
     values, _ = voice.frames(args.text)
     if args.params:
         params.write_params(args.params, values, eq=voice.eq)
-    soundfile.write(args.output, render(values, voice.eq, args.rate), args.rate, subtype='PCM_16')
+    write_wav(args.output, render(values, voice.eq, args.rate), args.rate)
     print(f'{os.path.basename(args.output)}: {len(values) / params.FRAME_RATE:.2f} s')
     return 0
 
