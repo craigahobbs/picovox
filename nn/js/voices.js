@@ -81,7 +81,7 @@ export function voiceTransforms(voice) {
 
 // The model options and frame transforms of a voice in a style - {options (speakFrames's: speaker, style, rate - a
 // duration multiplier), transforms}. options.rate is the listener's speaking speed (1 is the voice's own); other
-// options (pauseThreshold, bandwidthScale, ...) pass through.
+// options (pauseThreshold, ...) pass through.
 export function voiceOptions(model, voices, {voice: voiceId, style: styleId, rate = 1, ...rest} = {}) {
     const voice = findVoice(voices, voiceId);
     const style = findStyle(voices, styleId);

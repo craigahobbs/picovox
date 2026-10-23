@@ -6,7 +6,8 @@
 //
 // It also renders samples of each new checkpoint (build/nn/runs/<run>/step-*.pt, of the runs since the pipeline started)
 // with pipeline.json's sample speakers and text, scores them with UTMOS (on the CPU, leaving the GPU to training), and
-// lists them in build/nn/samples-progress/index.json, with the package's voices as a reference.
+// lists them in build/nn/samples-progress/index.json, with the package's voices (pipeline.json's reference) as a
+// reference.
 //
 // node tools/dashboard/monitor.js
 
@@ -15,6 +16,7 @@ import {
 } from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
 import {execFile, execFileSync} from 'node:child_process';
+import {synthesize, toWav} from '../../lib/index.js';
 import {Buffer} from 'node:buffer';
 import {fileURLToPath} from 'node:url';
 import {homedir} from 'node:os';
@@ -331,10 +333,11 @@ async function renderSamples(config, checkpoint, prefix) {
     const env = {...process.env, 'OMP_NUM_THREADS': '2'};
     const voices = checkpoint === null ? config.reference : config.speakers;
     const files = await Promise.all(voices.map(async (voice) => {
-        const name = `${prefix}-${(voice.key || voice.model.slice(voice.model.lastIndexOf('/') + 1))}.wav`;
+        const name = `${prefix}-${voice.key}.wav`;
         const output = join(samplesPath, name);
         if (checkpoint === null) {
-            await execFileAsync('node', ['nn/js/speak.js', '-m', voice.model, config.text, '-o', output], {'cwd': repository, env});
+            const {samples, sampleRate} = await synthesize(config.text, {'voice': voice.key});
+            writeFileSync(output, toWav(samples, sampleRate));
         } else {
             const python = join(repository, 'build/venv-nn/bin/python');
             const args = ['-B', '-m', 'picovox_train.synthesize', checkpoint, config.text, '-o', output, '--speaker', voice.key];

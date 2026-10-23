@@ -123,7 +123,7 @@ class TestExport(unittest.TestCase):
     def test_export(self):
         model, state = export.load_model(self.checkpoint)
         with tempfile.TemporaryDirectory() as out_dir:
-            manifest = export.export(model, state, 'voice', out_dir, extra={'note': 'x'}, speaker=1, bandwidth_scale=0.9)
+            manifest = export.export(model, state, 'voice', out_dir, extra={'note': 'x'}, speaker=1)
             with open(os.path.join(out_dir, 'voice.json'), encoding='utf-8') as file:
                 self.assertEqual(json.load(file), json.loads(json.dumps(manifest)))
             binary_size = os.path.getsize(os.path.join(out_dir, 'voice.bin'))
@@ -131,7 +131,7 @@ class TestExport(unittest.TestCase):
         self.assertEqual(manifest['note'], 'x')
         self.assertNotIn('quantization', manifest)
         self.assertEqual(manifest['defaultSpeaker'], 1)
-        self.assertEqual(manifest['inference'], {'pauseThreshold': 0.5, 'bandwidthScale': 0.9})
+        self.assertEqual(manifest['inference'], {'pauseThreshold': 0.5, 'bandwidthScale': 1.0})
         self.assertEqual(len(manifest['eq']), params.EQ_BAND_COUNT)
         encodings = {tensor['name']: tensor['encoding'] for tensor in manifest['tensors']}
         self.assertEqual(encodings['embedding.weight'], 'int8')
@@ -170,7 +170,7 @@ class TestExport(unittest.TestCase):
         with tempfile.TemporaryDirectory() as out_dir, helpers.captured() as (stdout, _):
             self.assertEqual(export.main([self.checkpoint, '--voice', 'model', '--out', out_dir]), 0)
             self.assertEqual(export.main([self.checkpoint, '--voice', 'small', '--out', out_dir, '--speaker', 'arctic-slt',
-                                          '--bits', '4', '--bandwidth-scale', '0.8']), 0)
+                                          '--bits', '4']), 0)
             with open(os.path.join(out_dir, 'small.json'), encoding='utf-8') as file:
                 small = json.load(file)
             with open(os.path.join(out_dir, 'model.json'), encoding='utf-8') as file:
@@ -181,7 +181,6 @@ class TestExport(unittest.TestCase):
         self.assertEqual(default['defaultSpeaker'], 1)
         self.assertEqual(small['defaultSpeaker'], 0)
         self.assertEqual(small['quantization'], {'bits': 4, 'group': 0})
-        self.assertEqual(small['inference']['bandwidthScale'], 0.8)
 
     def test_module_main(self):
         with unittest.mock.patch('sys.argv', ['export', '--help']), helpers.captured() as (stdout, _), \

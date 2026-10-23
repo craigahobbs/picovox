@@ -3,12 +3,12 @@
 
 // Check the designed voices (data/nn/voices.json) with nn/js/voices.js under Node: every voice resolves (its speakers
 // are in the model, its blend sums to 1, its sex matches its speakers'), speaks in every style, and its stream
-// (streamVoice) equals its whole-text frames (speakVoice); voiceOptions composes the rates and transforms; bad ids
-// throw; and the single-speaker voices (data/nn/slt, data/nn/bdl) still load and speak.
+// (streamVoice) equals its whole-text frames (speakVoice); voiceOptions composes the rates and transforms; and bad ids
+// throw.
 //
 //     node nn/js/voicescheck.js [lib/models/voiceModel.js] [data/nn/voices.json]
 //
-// The model is a packaged module (the package's voice by default) or an export (data/nn/<name>, its .json and .bin).
+// The model is a packaged module (the package's voice by default) or an export (<out>/<voice>, its .json and .bin).
 //
 // It prints one JSON line - the checks run - and exits non-zero on the first failure.
 
@@ -118,14 +118,6 @@ async function main() {
     const direct = speakFrames(model, text, {'speaker': voiceBlend(model, first), 'rate': 1 / (first.rate ?? 1)});
     assert.equal(speakVoice(model, voices, text, {'voice': first.id}).frames.length, direct.frames.length, 'the voice is its blend');
     checks += 9;
-
-    // The single-speaker voices still load and speak
-    for (const legacy of ['data/nn/slt', 'data/nn/bdl']) {
-        const legacyModel = load(legacy);
-        const {frames} = speakFrames(legacyModel, text);
-        assert.ok(frames.length > 100 && frames.every((frame) => frame.every(Number.isFinite)), `${legacy} speaks`);
-        checks += 1;
-    }
     console.log(JSON.stringify({'ok': true, checks, 'voices': voices.voices.length, 'styles': voices.styles.length}));
 }
 

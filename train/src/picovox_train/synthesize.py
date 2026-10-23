@@ -50,10 +50,9 @@ def sentences(ids, vocab):
 class Voice:
     """A model ready for inference - the model, its remap, and its channel equalizer"""
 
-    def __init__(self, checkpoint, quantized=True, device='cpu', speaker=None, bandwidth_scale=1.0, blend=None, emotion=None,
-                 intensity=1.0, bits=8, group=0):
+    def __init__(self, checkpoint, quantized=True, device='cpu', speaker=None, blend=None, emotion=None, intensity=1.0, bits=8,
+                 group=0):
         model, state = load_model(checkpoint, device)
-        self.bandwidth_scale = bandwidth_scale
         self.speaker = speaker_id(state, speaker) if speaker is not None else 0
         self.model = quantized_model(model, bits, group) if quantized else model
         self.model.eval()
@@ -102,8 +101,6 @@ class Voice:
             return numpy.zeros((0, params.COUNT)), parts
         values = numpy.concatenate(chunks)
         values = numpy.concatenate([values, values[-1:]])
-        if self.bandwidth_scale != 1:
-            values = params.bandwidth_scale(values, self.bandwidth_scale)
         return values, parts
 
 
@@ -133,12 +130,11 @@ def main(argv=None):
     parser.add_argument('--params', default=None)
     parser.add_argument('--float', action='store_true', help='the unquantized model')
     parser.add_argument('--speaker', default=None, help='the speaker of a multi-speaker model')
-    parser.add_argument('--bandwidth-scale', type=float, default=1.0)
     parser.add_argument('--blend', default=None, help='a multi-speaker model\'s speaker blend (JSON {id or key: weight})')
     parser.add_argument('--style', default=None, help='a multi-speaker model\'s style (an emotion)')
     parser.add_argument('--intensity', type=float, default=1.0)
     args = parser.parse_args(argv)
-    voice = Voice(args.checkpoint, quantized=not args.float, speaker=args.speaker, bandwidth_scale=args.bandwidth_scale,
+    voice = Voice(args.checkpoint, quantized=not args.float, speaker=args.speaker,
                   blend=json.loads(args.blend) if args.blend else None, emotion=args.style, intensity=args.intensity)
     values, _ = voice.frames(args.text)
     if args.params:

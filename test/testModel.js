@@ -5,11 +5,9 @@ import * as voiceModule from '../lib/models/voiceModel.js';
 import {loadModel, sentences, speakFrames, streamFrames} from '../lib/model.js';
 import {NAMES} from '../lib/params.js';
 import {strict as assert} from 'node:assert';
-import {bandwidthScale} from '../lib/transforms.js';
 import {g2pModel} from '../lib/models/g2pModel.js';
 import {loadG2p} from '../lib/g2p.js';
 import {loadPackagedModel} from '../lib/package.js';
-import {readFileSync} from 'node:fs';
 import {setPronouncer} from '../lib/lexicon.js';
 import test from 'node:test';
 
@@ -18,14 +16,8 @@ import test from 'node:test';
 setPronouncer(await loadG2p(g2pModel));
 
 
-// The package's multi-speaker model, and the single-speaker slt export (data/nn/slt)
+// The package's model
 const multi = await loadPackagedModel(voiceModule);
-function loadSlt() {
-    const bytes = readFileSync(new URL('../data/nn/slt.bin', import.meta.url));
-    const manifest = JSON.parse(readFileSync(new URL('../data/nn/slt.json', import.meta.url), 'utf8'));
-    return loadModel(manifest, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-}
-const slt = loadSlt();
 
 
 // Frames as plain arrays (for comparisons)
@@ -84,7 +76,7 @@ test('loadModel, encodings', () => {
             {'name': 'packed3', 'shape': [1, 5], 'offset': 40, 'encoding': 'packed', 'bits': 3, 'group': 2, 'scaleOffset': 44},
             {'name': 'nan', 'shape': [1, 1], 'offset': 50, 'encoding': 'packed', 'bits': 4, 'group': 1, 'scaleOffset': 52}
         ],
-        'config': {'kind': 'single'}
+        'config': {}
     };
     const model = loadModel(manifest, buffer);
     assert.equal(model.manifest, manifest);
@@ -138,12 +130,10 @@ test('speakFrames, speakers', () => {
     assert.notDeepEqual(plain(female.frames), plain(male.frames));
     assert.notDeepEqual(female.eq, male.eq);
 
-    // The default speaker is the manifest's, else the first
+    // The default speaker is the manifest's
     assert.equal(multi.manifest.defaultSpeaker, 1);
     assert.deepEqual(plain(speakFrames(multi, text).frames), plain(male.frames));
     assert.deepEqual(plain(speakFrames(multi, text, {'speaker': null}).frames), plain(male.frames));
-    const noDefault = {...multi, 'manifest': {...multi.manifest, 'defaultSpeaker': undefined}};
-    assert.deepEqual(plain(speakFrames(noDefault, text).frames), plain(female.frames));
 
     // A blend of one speaker is the speaker (ids may be strings; the weights are normalized)
     assert.deepEqual(plain(speakFrames(multi, text, {'speaker': {'0': 2}}).frames), plain(female.frames));
@@ -155,30 +145,6 @@ test('speakFrames, speakers', () => {
     for (const speaker of [{'0': 0}, {'x': 1}, {'999': 1}, {'0': 1, '1': -0.5}, 1.5, -1, multi.config.speakers]) {
         assert.throws(() => speakFrames(multi, text, {speaker}), {'message': `invalid speaker ${JSON.stringify(speaker)}`});
     }
-});
-
-
-test('speakFrames, embedding and eq', () => {
-    const text = 'Call me Ishmael.';
-    const {speakerDim} = multi.config;
-    const table = multi.tensors['speaker.weight'].data;
-
-    // A raw speaker embedding replaces the speaker's (the channel equalizer stays the speaker's)
-    const embedding = Array.from(table.subarray(0, speakerDim));
-    const female = speakFrames(multi, text, {'speaker': 0});
-    const embedded = speakFrames(multi, text, {'speaker': 1, embedding});
-    assert.deepEqual(plain(embedded.frames), plain(female.frames));
-    assert.deepEqual(embedded.eq, speakFrames(multi, text, {'speaker': 1}).eq);
-    assert.deepEqual(plain(speakFrames(multi, text, {'speaker': 0, 'embedding': null}).frames), plain(female.frames));
-    assert.throws(() => speakFrames(multi, text, {'embedding': [1, 2]}), {
-        'message': `the speaker embedding must have ${speakerDim} values`
-    });
-
-    // A channel equalizer in place of the speaker's
-    const eq = new Array(24).fill(1.5);
-    const equalized = speakFrames(multi, text, {'speaker': 0, eq});
-    assert.equal(equalized.eq, eq);
-    assert.deepEqual(plain(equalized.frames), plain(female.frames));
 });
 
 
@@ -226,10 +192,10 @@ test('speakFrames, rate and pauses', () => {
 });
 
 
-test('speakFrames, durations round half to even', () => {
+test('speakFrames, durations round half to even', async () => {
     // A model whose every phone is 1 frame and no pause - at half rate, each 0.5: the running totals 0.5, 1, 1.5, 2, ...
     // round half to even (0, 1, 2, 2, 2, 3, 4, 4, ...)
-    const model = loadSlt();
+    const model = await loadPackagedModel(voiceModule);
     model.tensors['duration_out.weight'].data.fill(0);
     model.tensors['duration_out.bias'].data.set([Math.log(2), -20, 0]);
     const {sentences: [sentence]} = speakFrames(model, 'Shapes.', {'rate': 0.5});
@@ -247,7 +213,7 @@ test('speakFrames, durations round half to even', () => {
     assert.deepEqual(sentence.durations.slice(1, 6), [0, 1, 1, 0, 0]);
 
     // A padding token (by the remap) takes no time
-    const padded = loadSlt();
+    const padded = await loadPackagedModel(voiceModule);
     padded.tensors['duration_out.weight'].data.fill(0);
     padded.tensors['duration_out.bias'].data.set([Math.log(3), -20, 0]);
     const plainDurations = speakFrames(padded, 'Shapes.').sentences[0].durations;
@@ -260,28 +226,10 @@ test('speakFrames, durations round half to even', () => {
 });
 
 
-test('speakFrames, single-speaker model', () => {
-    // The slt export - its own channel equalizer, and its bandwidth scale (0.6) applied to the frames
-    const text = 'Call me Ishmael. "Was it?"';
-    const spoken = speakFrames(slt, text);
-    assert(spoken.frames.length > 100);
-    assert.equal(spoken.eq, slt.manifest.eq);
-    assert.equal(slt.manifest.inference.bandwidthScale, 0.6);
-    const unscaled = speakFrames(slt, text, {'bandwidthScale': 1});
-    assert.deepEqual(plain(spoken.frames), plain(bandwidthScale(unscaled.frames, 0.6)));
-    assert.equal(spoken.sentences.length, 2);
-
-    // Without the manifest's inference defaults, no bandwidth scale
-    const bare = loadSlt();
-    delete bare.manifest.inference;
-    assert.deepEqual(plain(speakFrames(bare, text).frames), plain(unscaled.frames));
-    bare.manifest.inference = {};
-    assert.deepEqual(plain(speakFrames(bare, text).frames), plain(unscaled.frames));
-
-    // A missing tensor
-    const broken = loadSlt();
+test('speakFrames, a missing tensor', () => {
+    const broken = {...multi, 'tensors': {...multi.tensors}};
     delete broken.tensors['encoder_norm.weight'];
-    assert.throws(() => speakFrames(broken, text), {'message': 'model tensor encoder_norm.weight not found'});
+    assert.throws(() => speakFrames(broken, 'Call me Ishmael.'), {'message': 'model tensor encoder_norm.weight not found'});
 });
 
 
@@ -300,9 +248,6 @@ test('streamFrames', () => {
     assert.equal(chunks[chunks.length - 1].length, 1);
     assert.deepEqual(plain(chunks.flat()), plain(whole.frames));
     assert.deepEqual(stream.sentences, whole.sentences);
-
-    // The single-speaker model's chunks are bandwidth-scaled too
-    assert.deepEqual(plain([...streamFrames(slt, text).chunks].flat()), plain(speakFrames(slt, text).frames));
 });
 
 

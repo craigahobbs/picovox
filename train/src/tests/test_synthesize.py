@@ -79,22 +79,17 @@ class TestSynthesize(unittest.TestCase):
         self.assertEqual((empty.shape, parts), ((0, params.COUNT), []))
 
     def test_voice_blend_style(self):
-        voice = synthesize.Voice(self.checkpoint, quantized=False, blend={'0': 1, 'arctic-bdl': 3}, emotion='happy', intensity=0.5,
-                                 bandwidth_scale=0.5)
+        voice = synthesize.Voice(self.checkpoint, quantized=False, blend={'0': 1, 'arctic-bdl': 3}, emotion='happy', intensity=0.5)
         self.assertEqual(voice.speaker_input.tolist(), [[0.25, 0.75, 0.0, 0.0]])
         self.assertEqual(voice.emotion.tolist(), [3])
         self.assertEqual(voice.intensity.tolist(), [0.5])
         self.assertEqual(voice.condition(), {'speaker': voice.speaker_input, 'emotion': voice.emotion,
                                              'intensity': voice.intensity})
         values, _ = voice.frames('Hello.')
-        plain = synthesize.Voice(self.checkpoint, quantized=False, blend={'0': 1, 'arctic-bdl': 3}, emotion='happy',
-                                 intensity=0.5)
-        unscaled, _ = plain.frames('Hello.')
-        self.assertTrue(numpy.allclose(values[:, params.INDEX['b1']], 0.5 * unscaled[:, params.INDEX['b1']]))
-        self.assertTrue(numpy.array_equal(values[:, params.INDEX['f1']], unscaled[:, params.INDEX['f1']]))
+        self.assertEqual(values.shape[1], params.COUNT)
         # The 4-bit export's weights
         quantized = synthesize.Voice(self.checkpoint, bits=4, group=8)
-        self.assertFalse(torch.equal(quantized.model.head.weight, plain.model.head.weight))
+        self.assertFalse(torch.equal(quantized.model.head.weight, voice.model.head.weight))
 
     def test_render(self):
         voice = synthesize.Voice(self.checkpoint)
@@ -124,7 +119,7 @@ class TestSynthesize(unittest.TestCase):
             self.assertEqual(len(written['eq']), params.EQ_BAND_COUNT)
             with helpers.captured():
                 self.assertEqual(synthesize.main([self.checkpoint, 'Hello.', '-o', wav, '--rate', '16000', '--float', '--blend',
-                                                  '{"0": 1, "1": 1}', '--bandwidth-scale', '0.9']), 0)
+                                                  '{"0": 1, "1": 1}']), 0)
             self.assertEqual(read_wav(wav)[1], 16000)
 
     def test_module_main(self):

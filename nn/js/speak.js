@@ -4,15 +4,15 @@
 // Speak text with a neural voice (lib/model.js) rendered by lib/render.js, under Node - every word pronounced by the G2P
 // network (lib/g2p.js), as the package pronounces
 //
-//     node nn/js/speak.js -m data/nn/slt "Hello, world." -o hello.wav [-r 44100] [-s seed] [--params out.json]
-//         [--transform '[{"pitchScale": 1.2}]'] [--pause 0.5] [--rate 1] [--bandwidth-scale 1 (the network's own)]
-//     node nn/js/speak.js -m data/nn/slt --batch list.json    # [{text, wav, params, seed, transform}, ...]
+// The model is an export (picovox_train.export's <out>/<voice>.json and .bin - the package's: node nn/js/unpack.js
+// lib/models/voiceModel.js out/voice), speaking a voice and a style (batch items may set speaker and style too):
 //
-// The multi-speaker, multi-style model (the package's - node nn/js/unpack.js lib/models/voiceModel.js out/voice) takes a
-// voice and a style (batch items may set speaker, embedding, and style too):
+//     node nn/js/speak.js -m out/voice "Hello, world." -o hello.wav [-r 44100] [-s seed] [--params out.json]
+//         [--transform '[{"pitchScale": 1.2}]'] [--pause 0.5] [--rate 1]
+//     node nn/js/speak.js -m out/voice --batch list.json    # [{text, wav, params, seed, transform}, ...]
 //
 //     node nn/js/speak.js -m out/voice "Hello." -o hello.wav --speaker 5            # a speaker id (data/nn/speakers.json)
-//         [--blend '{"5": 0.6, "12": 0.4}'] [--embedding '[...]']                  # a blend, or a raw embedding
+//         [--blend '{"5": 0.6, "12": 0.4}']                                        # or a blend
 //         [--style happy --intensity 0.7] [--style '{"happy": 0.5, "sad": 0.2}']   # an emotion, or a blend
 //
 // or a designed voice and style of data/nn/voices.json (nn/js/voices.js; batch items may set voice and voiceStyle):
@@ -40,9 +40,9 @@ import {voiceOptions} from './voices.js';
 
 // Parse the command line
 function parseArgs(argv) {
-    const args = {'model': 'data/nn/slt', 'text': null, 'wav': null, 'params': null, 'sampleRate': 44100, 'seed': 1, 'batch': null,
-        'transform': null, 'pauseThreshold': 0.5, 'rate': 1, 'framesOnly': false, 'peak': 0.89, 'bandwidthScale': null,
-        'speaker': undefined, 'embedding': undefined, 'style': undefined, 'intensity': 1,
+    const args = {'model': null, 'text': null, 'wav': null, 'params': null, 'sampleRate': 44100, 'seed': 1, 'batch': null,
+        'transform': null, 'pauseThreshold': 0.5, 'rate': 1, 'framesOnly': false, 'peak': 0.89,
+        'speaker': undefined, 'style': undefined, 'intensity': 1,
         'voices': 'data/nn/voices.json', 'voice': undefined, 'voiceStyle': undefined};
     for (let ix = 0; ix < argv.length; ix++) {
         const arg = argv[ix];
@@ -65,16 +65,12 @@ function parseArgs(argv) {
             args.pauseThreshold = Number(take());
         } else if (arg === '--rate') {
             args.rate = Number(take());
-        } else if (arg === '--bandwidth-scale') {
-            args.bandwidthScale = Number(take());
         } else if (arg === '--peak') {
             args.peak = Number(take());
         } else if (arg === '--speaker') {
             args.speaker = Number(take());
         } else if (arg === '--blend') {
             args.speaker = JSON.parse(take());
-        } else if (arg === '--embedding') {
-            args.embedding = JSON.parse(take());
         } else if (arg === '--style') {
             const style = take();
             args.style = style.startsWith('{') ? JSON.parse(style) : style;
@@ -118,6 +114,9 @@ function normalize(samples, peak) {
 
 function main() {
     const args = parseArgs(process.argv.slice(2));
+    if (args.model === null) {
+        throw new Error('usage: node nn/js/speak.js -m MODEL (an export, without its .json and .bin) TEXT -o WAV');
+    }
     const defaultStyle = typeof args.style === 'string' ? {'emotion': args.style, 'intensity': args.intensity} : args.style;
     const startLoad = performance.now();
     const model = loadModel(JSON.parse(readFileSync(`${args.model}.json`, 'utf8')), toArrayBuffer(readFileSync(`${args.model}.bin`)));
@@ -130,16 +129,15 @@ function main() {
     let audioSeconds = 0;
     for (const item of items) {
         const startNetwork = performance.now();
-        let options = {'pauseThreshold': item.pauseThreshold ?? args.pauseThreshold,
-            'rate': item.rate ?? args.rate, 'bandwidthScale': item.bandwidthScale ?? args.bandwidthScale ?? undefined,
-            'speaker': item.speaker ?? args.speaker, 'embedding': item.embedding ?? args.embedding, 'style': item.style ?? defaultStyle};
+        let options = {'pauseThreshold': item.pauseThreshold ?? args.pauseThreshold, 'rate': item.rate ?? args.rate,
+            'speaker': item.speaker ?? args.speaker, 'style': item.style ?? defaultStyle};
         let voiceTransforms = [];
         const voiceId = item.voice ?? args.voice;
         if (voiceId !== undefined) {
             // A designed voice - its blend, style, and transforms (the rate is the listener's speed: 1 / the duration multiplier)
             voices ??= JSON.parse(readFileSync(args.voices, 'utf8'));
             const resolved = voiceOptions(model, voices, {'voice': voiceId, 'style': item.voiceStyle ?? args.voiceStyle,
-                'rate': 1 / options.rate, 'pauseThreshold': options.pauseThreshold, 'bandwidthScale': options.bandwidthScale});
+                'rate': 1 / options.rate, 'pauseThreshold': options.pauseThreshold});
             // (an explicit model style - --style or the item's style - replaces the designed style's)
             options = {...resolved.options, 'style': options.style ?? resolved.options.style};
             voiceTransforms = resolved.transforms;

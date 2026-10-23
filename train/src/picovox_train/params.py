@@ -191,24 +191,6 @@ def _stack(columns, like):
 
 
 #
-# The bandwidth transform of parameter values ([..., COUNT] torch tensors or numpy arrays, returned as copies) - the
-# inference default (the export's bandwidthScale); the voice and style transforms are lib/transforms.js's
-#
-
-def _copy(values):
-    return values.clone() if hasattr(values, 'clone') else values.copy()
-
-
-# Scale the formant bandwidths (b1-b5) - below 1 sharpens the resonances (a network trained by spectral regression
-# over-smooths them), above 1 dulls them
-def bandwidth_scale(values, scale, names=('b1', 'b2', 'b3', 'b4', 'b5')):
-    out = _copy(values)
-    for name in names:
-        out[..., INDEX[name]] = out[..., INDEX[name]] * scale
-    return out
-
-
-#
 # Parameter files - JSON {"frameRate": 200, "names": [...], "frames": [[value, ...], ...], "eq": [dB, ...] (optional)},
 # shared with nn/js
 #

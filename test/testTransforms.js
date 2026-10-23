@@ -3,7 +3,7 @@
 
 import {DEFAULTS, FLOOR_DB, NAMES, TRACT_FREQUENCIES} from '../lib/params.js';
 import {
-    applyTransforms, bandwidthScale, effort, frication, level, pitchRange, pitchScale, press, rdScale, shelf, tractScale, whisper
+    applyTransforms, effort, frication, level, pitchRange, pitchScale, press, rdScale, shelf, tractScale, whisper
 } from '../lib/transforms.js';
 import {strict as assert} from 'node:assert';
 import test from 'node:test';
@@ -40,15 +40,6 @@ test('transforms.tractScale', () => {
     for (const name of TRACT_FREQUENCIES) {
         assert.equal(output[IX[name]], input[IX[name]] * 1.1);
     }
-});
-
-
-test('transforms.bandwidthScale', () => {
-    const input = frame();
-    const [output] = bandwidthScale([input], 0.6);
-    assert.deepEqual(Object.keys(changes(input, output)), ['b1', 'b2', 'b3', 'b4', 'b5']);
-    assert.equal(output[IX.b1], input[IX.b1] * 0.6);
-    assert.equal(input[IX.b1], DEFAULTS.b1);
 });
 
 
@@ -166,13 +157,12 @@ test('transforms.applyTransforms', () => {
     assert.equal(applyTransforms(frames), frames);
     assert.equal(applyTransforms(frames, []), frames);
 
-    // Each in turn, in a transform's fixed order (bandwidth, pitch, tract, whisper, effort, press, level, frication, Rd,
-    // shelf)
-    const shaped = whisper(tractScale(pitchScale(bandwidthScale(frames, 0.8), 1.1), 0.9), {'intensity': 0.5});
+    // Each in turn, in a transform's fixed order (pitch, tract, whisper, effort, press, level, frication, Rd, shelf)
+    const shaped = whisper(tractScale(pitchScale(frames, 1.1), 0.9), {'intensity': 0.5});
     const expected = shelf(rdScale(frication(level(press(effort(shaped, 3), 2), -4), 1), 1.1), -5);
     const applied = applyTransforms(frames, [
         {'shelf': -5, 'rdScale': 1.1, 'frication': 1, 'level': -4, 'press': 2, 'effort': 3, 'whisper': 0.5, 'tractScale': 0.9,
-            'pitchScale': 1.1, 'bandwidthScale': 0.8}
+            'pitchScale': 1.1}
     ]);
     assert.deepEqual(applied.map((item) => Array.from(item)), expected.map((item) => Array.from(item)));
     assert.deepEqual(applyTransforms(frames, [{'pitchRange': 1.5}]).map((item) => Array.from(item)),

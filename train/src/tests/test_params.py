@@ -48,17 +48,6 @@ class TestParams(unittest.TestCase):
         self.assertEqual(values.shape, (2, 3, params.COUNT))
         self.assertTrue(torch.allclose(params.normalize(values), unit))
 
-    def test_bandwidth_scale(self):
-        values = numpy.array([[params.DEFAULTS[name] for name in params.NAMES]])
-        scaled = params.bandwidth_scale(values, 0.5)
-        self.assertEqual(scaled[0, params.INDEX['b1']], 40.0)
-        self.assertEqual(scaled[0, params.INDEX['b6']], values[0, params.INDEX['b6']])
-        self.assertEqual(values[0, params.INDEX['b1']], 80.0)
-        tensor = torch.tensor(values)
-        scaled_tensor = params.bandwidth_scale(tensor, 2.0, names=('b6',))
-        self.assertEqual(float(scaled_tensor[0, params.INDEX['b6']]), 2000.0)
-        self.assertEqual(float(tensor[0, params.INDEX['b6']]), 1000.0)
-
     def test_write_params(self):
         frames = [[params.DEFAULTS[name] + 0.123456 for name in params.NAMES] + [99.0]] * 2
         with tempfile.TemporaryDirectory() as directory:

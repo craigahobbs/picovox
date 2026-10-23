@@ -47,8 +47,8 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   `speak` with a fake AudioContext, and the package's browser safety and exports), and the dashboard's and make train's
   (`testTrainDashboard.js`, `testTrainSamplesIndex.js`, `testTrainStages.js`).
 - `data/` - the CMU Pronouncing Dictionary (G2P training only), `data/nn/` (the recipe `train.json`, the pinned book
-  texts `books.json`, the speaker pool, the G2P and heteronym data, the designed voices, the single-speaker exports
-  `slt`/`bdl`), and `data/targets/` (the four labeled ARCTIC speakers' analysis settings).
+  texts `books.json`, the speaker pool, the G2P and heteronym data, and the designed voices), and
+  `data/targets/` (the four labeled ARCTIC speakers' analysis settings).
 - `paper/` - the paper (`paper.md`; `index.html` renders it with MarkdownUp).
 
 ## javascript-build

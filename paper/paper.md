@@ -1172,12 +1172,13 @@ make listeners                                                  # the listener p
 make -j train                                                   # both models from scratch: the G2P, and the voice - the corpora, the teacher, the student, the gate
 make -j train-g2p-check                                         # reproduce the G2P chain and check it against the committed module
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke    # every training entry point, a few steps on the CPU
-node nn/js/speak.js -m data/nn/slt "Call me Ishmael." -o ishmael.wav   # the single-speaker slt voice of Section 5
+node nn/js/unpack.js lib/models/voiceModel.js out/voice && node nn/js/speak.js -m out/voice "Call me Ishmael." -o ishmael.wav
 ```
 
 The dictionary audit is `picovox_train.g2paudit` (folds, suspects, audio, adjudicate). The rule-based synthesizer's
-tools (`tools/panel.js`, `tools/targets.py`, `tools/say.js`) were removed in commit 33fbfad, and the single-speaker
-trainer (`nn/train.py`) in commit 7f667db; their versions are in git history.
+tools (`tools/panel.js`, `tools/targets.py`, `tools/say.js`) were removed in commit 33fbfad, the single-speaker
+trainer (`nn/train.py`) in commit 7f667db, and its exports (`data/nn/slt` and `bdl`, Section 5's voices) later; their
+versions are in git history.
 
 The training dashboard (`tools/dashboard/`) follows `make train` live: the stages and the critical path, CPU and GPU
 utilization, loss curves, logs, and listening samples of each stage's final model beside the shipped model's.

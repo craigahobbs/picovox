@@ -18,8 +18,8 @@ float32 scale per output channel (row) - symmetric, the scale the row's largest 
 norm parameters, a small fraction of the model, stay float32. The .bin is the tensors' data back to back (each
 tensor's int8 data, then its float32 scales; or its float32 data), aligned to 4 bytes; the .json manifest lists each
 tensor's name, shape, encoding, and byte offsets, with the model config, the vocabulary remap, the channel equalizer,
-and the inference defaults (the pause threshold, and the formant bandwidth scale - a sharpening of the network's
-over-smoothed bandwidths, chosen on the validation sentences).
+and the format's fixed inference defaults (the pause threshold, and a formant bandwidth scale of 1 - lib/model.js reads
+neither; they stay so the committed module reproduces from its checkpoint).
 
 The quantization is the only lossy step - quantized_model() gives the PyTorch model with the exported weights
 (dequantized), which lib/model.js must match.
@@ -173,7 +173,7 @@ def relative_paths(value):
 
 # Export a model - writes <out>/<voice>.bin and <voice>.json, returns the manifest (bits and group - the weights'
 # precision, quant.py; the default is the 8-bit per-row 'int8' format)
-def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0, bandwidth_scale=1.0, bits=8, group=0):
+def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0, bits=8, group=0):
     os.makedirs(out_dir, exist_ok=True)
     if not quant.is_int8(bits, group):
         extra = {**(extra or {}), 'quantization': {'bits': bits, 'group': group}}
@@ -216,7 +216,7 @@ def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0, bandwidt
         'config': model.config, 'parameterNames': params.NAMES, 'frameRate': params.FRAME_RATE,
         'speakers': speaker_list(state), 'styles': list(STYLE_NAMES), 'defaultSpeaker': speaker,
         'eq': eq, 'remap': token_remap(vocab, counts), 'vocab': vocab,
-        'inference': {'pauseThreshold': 0.5, 'bandwidthScale': bandwidth_scale},
+        'inference': {'pauseThreshold': 0.5, 'bandwidthScale': 1.0},
         'parameterCount': parameter_count(model),
         'parameterCountCore': parameter_count(model) - model.speaker.weight.numel() - model.eq_free.numel(),
         'bytes': len(binary), 'tensors': tensors,
@@ -243,15 +243,12 @@ def main(argv=None):
     parser.add_argument('--voice', required=True)
     parser.add_argument('--out', default=OUT_DIR)
     parser.add_argument('--speaker', default=None, help='the default speaker and its channel equalizer (default: arctic-bdl)')
-    parser.add_argument('--bandwidth-scale', type=float, default=1.0,
-                        help='the default formant bandwidth scale at inference (lib/model.js speakFrames)')
     parser.add_argument('--bits', type=int, default=8, help='the weights\' bit width (quant.py; default 8)')
     parser.add_argument('--group', type=int, default=0, help='per-group scales of this many weights (default 0: per row)')
     args = parser.parse_args(argv)
     model, state = load_model(args.checkpoint)
     speaker = state['speakers'].index(args.speaker if args.speaker else 'arctic-bdl')
-    manifest = export(model, state, args.voice, args.out, speaker=speaker, bandwidth_scale=args.bandwidth_scale, bits=args.bits,
-                      group=args.group)
+    manifest = export(model, state, args.voice, args.out, speaker=speaker, bits=args.bits, group=args.group)
     sizes = {suffix: os.path.getsize(os.path.join(args.out, f'{args.voice}.{suffix}')) for suffix in ('bin', 'json')}
     print(json.dumps({'voice': args.voice, 'parameters': manifest['parameterCount'], 'bytes': sizes,
                       'quantized': sum(1 for tensor in manifest['tensors'] if tensor['encoding'] in ('int8', 'packed')),
