@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.7 (2026-10-23)
+
+- [ab9f58b](https://github.com/craigahobbs/picovox/commit/ab9f58b) - no clicks in speak's playback: its audio context runs at the synthesis sample rate, so the blocks join exactly - a context at the device's rate resampled each block apart, and every join (each 85 ms) clicked; the README says to play stream's blocks the same way
+- [a71531f](https://github.com/craigahobbs/picovox/commit/a71531f), [7285b69](https://github.com/craigahobbs/picovox/commit/7285b69) - the package's internals simplified: the single-speaker model support and the voice network's unused options (a raw speaker embedding, a channel equalizer, a formant bandwidth scale, and the pause threshold) removed, its audio bit-identical
+
 ## 1.6.6 (2026-10-23)
 
 - [cb5a8e6](https://github.com/craigahobbs/picovox/commit/cb5a8e6) - less tinny voices: every voice's source 5 dB darker than the network predicts, and the Male and Female voices' glottal pulse a little softer - in blind A/B listening, less tinny in half the voices and never worse, never less natural, and the warble on drawn-out words like "times" gone; UTMOS, word error rate, and speaker similarity unchanged

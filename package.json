@@ -1,7 +1,7 @@
 {
     "type": "module",
     "name": "picovox",
-    "version": "1.6.6",
+    "version": "1.6.7",
     "description": "PicoVox - realistic speech synthesis in pure JavaScript, under 1 MB",
     "keywords": [
         "speech",
