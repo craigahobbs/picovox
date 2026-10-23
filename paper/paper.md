@@ -1030,15 +1030,16 @@ spectrum, a half-size FFT), and the noise draws and gains a little cheaper - the
 voice is the d64 student (Section 8): the network 1.24 times faster. With the two apart in workers, the slower one
 sets the speed, so neither alone moved the pipeline much (with only the renderer faster, it was 3.0x).
 
-**Why there was no JIT.** The lab serves its page over plain http, from the laptop on the local network - and that,
-it turned out later, was the cause. On the same iPhone (iOS 18.7, Safari) in the same hour, the player's worker ran the
+**Why there was no JIT.** The lab serves its page over plain http, from the laptop on the local network - and that, it
+turned out later, was the cause. On the same iPhone (iOS 18.7, Safari) in the same hour, the player's worker ran the
 lab's fixed loop in 4 ms on its https site and in 103 ms served over http from the laptop (its log, posted back, named
-the device), and the lab's own bench, over http, took about 100 ms on the page and in a worker: Safari compiled
-JavaScript over https and interpreted it over http. We found it documented nowhere, and presume it is Safari's
-behavior rather than that phone's. So the table above, and Section 12.3, measured the interpreted case - what an iPhone
-in Lockdown Mode (which disables the JIT) gets, not what the player's https visitors get. The changes still count: they
-made synthesis faster with a JIT too (Section 12.2), with the audio unchanged. How much faster than real time a phone
-compiling JavaScript is was not measured; the lab would need to be served over https for that.
+the device), and the lab's own bench, over http, took about 100 ms on the page and in a worker. **Safari on the iPhone
+runs JavaScript without a JIT on a page served over plain http, and with one over https.** We found this documented
+nowhere, and apparently unnoticed - plausibly because pages tried on a phone over local http are usually unminified
+development builds, which take the blame for being slow. So the table above, and Section 12.3, measured the interpreted
+case - what an iPhone in Lockdown Mode (which disables the JIT) gets, not what the player's https visitors get. The
+changes still count: they made synthesis faster with a JIT too (Section 12.2), with the audio unchanged. How much faster
+than real time a phone compiling JavaScript is was not measured; the lab would need to be served over https for that.
 
 In the player, five minutes of a book played through with no stall. Two things measured did not make it: the noise
 filtering at half the overlap (the renderer 1.4 times faster, but the noise itself changed - SNR 25-31 dB against the
@@ -1153,8 +1154,8 @@ quotations ending in "!" are neutral by the teacher, 7% shouted.
   WSD-scheduled stage A is untested, as is the crop warm-up measured in Section 11.4.
 - **Phones.** Interpreting JavaScript, an iPhone synthesizes at about 3.1-3.4 times real time with two workers and 2.6
   times with one (Section 12.4); the network and the renderer now take about equal time, so each further gain needs
-  both. Its Safari interpreted over plain http and compiled over https (Section 12.4); the speed of a phone compiling
-  JavaScript - the player's case - was not measured.
+  both. Safari on the iPhone interprets JavaScript over plain http and compiles it over https (Section 12.4); the
+  speed of a phone compiling JavaScript - the player's case - was not measured.
 - **The designed voices.** The ten voices with emotional styles (Section 7) are specified but not shipped; the package
   has two.
 - **Expressive reading** follows the text's structure only (Section 12.7): no quotation is read angry, shouted, or
