@@ -19,7 +19,7 @@ import torch
 
 from picovox_train import ROOT, distill, export, package, params
 from picovox_train.books import PinError
-from tests import helpers, model_fixtures
+from tests import data_fixtures, helpers, model_fixtures
 
 
 # A short public-domain text, as a Gutenberg book (its license header and footer)
@@ -74,13 +74,15 @@ def write_config(root, teacher):
     return path
 
 
-# A distill test's temporary root, directories, data, teacher, and recipe
+# A distill test's temporary root, directories, data, teacher, and recipe (and the book workers' pool in this process)
 class DistillCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
         cls.root = cls.temp.name
+        cls.pool = unittest.mock.patch.object(distill.multiprocessing, 'Pool', data_fixtures.FakePool)
+        cls.pool.start()
         cls.patches = model_fixtures.patched_dirs(cls.root)
         cls.data_dir = cls.patches.__enter__()
         model_fixtures.write_data(cls.data_dir)
@@ -90,6 +92,7 @@ class DistillCase(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.patches.__exit__(None, None, None)
+        cls.pool.stop()
         cls.temp.cleanup()
 
     # Run a distill subcommand quietly (one CPU core for the book workers) - its exit status
