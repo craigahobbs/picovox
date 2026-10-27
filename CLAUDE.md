@@ -44,7 +44,8 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   frame edits, for Claude's blind A/B questions in an artifact; `make voicelab` stages it with `lib/` in
   `build/voicelab/`, and `make train-check` with the trained voice too - a version's `model`, shipped or trained),
   make train-check's blind A/B (`trainab.js` - the voice lab served locally with its trials, the answers in
-  `build/train/listen/`; `trainabreport.js` - the trials, and the report with its recommendation), `heteronyms.js`
+  `build/train/listen/`; `trainabreport.js` - the trials, where the voices' frames differ most, and the report with
+  its recommendation), `heteronyms.js`
   (the heteronym and names regression sets), `trainmodels.js` (make train-check's module hook), make train's
   bookkeeping (`trainstage.sh`, `trainutil.sh` - the stage events and logs, the utilization samples, `trainpower.sh`)
   and listening samples (`trainsamples.js`, `trainsamplesindex.js`), the panel's texts (`panel-texts.json`), and the

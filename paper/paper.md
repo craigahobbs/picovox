@@ -775,14 +775,18 @@ alone): it reproduces the G2P and gates it against the committed module. `make t
 size, the voice's scores against the shipped model, and whether each module differs from the committed one - and
 installs nothing: `make train-check` runs the package's tests with the trained models, then a blind A/B of the trained
 voice against the shipped one in the voice lab, served locally (both with the shipped G2P; each of the twelve voices
-speaks a sentence and a passage, with six repeats - thirty forced choices), and reports the listener's win rate for the
-trained voice with its interval and sign test and a recommendation; `make train-install` installs the trained modules
+speaks the two texts, of nine, where the two voices' parameter frames differ most, aligned by dynamic time warping, with
+six repeats - thirty forced choices, finished early after eight Same answers in a row), and reports the listener's win
+rate for the trained voice with its interval and sign test and a recommendation (no audible difference when at most a
+fifth of the answers chose a voice); `make train-install` installs the trained modules
 that differ (`make train-install-voice` and `train-install-g2p`, one).
 
 The first run of this flow showed both checks earning their place: the trained voice ran 2% longer on one test sentence,
 past a duration bound the shipped voice had met by 0.02 seconds (the bound was widened), and the G2P's context network
 did not reproduce the committed module - the G2P network itself did, checkpoint for checkpoint - though it passed its
-gate.
+gate. And its A/B was thirty Same answers: a retrain of an unchanged recipe is, by ear, the shipped voice (its panel
+scores within noise - UTMOS 4.131 against 4.146), so the A/B is a retrain's guardrail against a bad run, and the judge
+of a recipe change.
 
 ### 10.2 Gates and provenance
 

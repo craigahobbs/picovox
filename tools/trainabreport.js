@@ -4,7 +4,10 @@
 // make train-check's blind A/B (tools/trainab.js) - its trials, and the report of the answers with a recommendation. A
 // trial is a voice lab question (tools/voicelab/voicelab.js): the shipped voice against make train's trained voice (both
 // with the shipped G2P), played in a shuffled order, chosen or "Same". An answer's version is the chosen version's name
-// (shipped or trained), null for Same.
+// (shipped or trained), null for Same. The trials are where the two voices differ most - each voice's texts ranked by
+// the distance of their parameter frames (aligned) - so an audible difference is heard if there is one.
+
+import {PARAMETERS} from '../lib/params.js';
 
 
 // A seeded random number generator (mulberry32) - numbers in [0, 1), the same sequence for a seed
@@ -29,16 +32,69 @@ function shuffle(items, random) {
 }
 
 
-// The trials of a round - each voice speaks a sentence and a passage (cycling through each list), in a shuffled order
-// (seeded by the round), and repeats of the first trials (repeatOf), each placed at least three trials after its
-// original, for the listener's consistency
-export function makeQuestions({voices, sentences, passages, round, repeats = 6}) {
+// The audible parameters a frame's distance compares - the source (pitch, voicing, pulse shape, tilt, the noises) and the
+// tract's lower formants and bandwidths - each scaled to its range (a log parameter's log range)
+const FEATURES = ['f0', 'av', 'rd', 'shelf', 'ah', 'af', 'f1', 'f2', 'f3', 'f4', 'b1', 'b2', 'b3'].map((name) => {
+    const index = PARAMETERS.findIndex((parameter) => parameter.name === name);
+    const {scale, low, high} = PARAMETERS[index];
+    return scale === 'log' ?
+        {index, 'transform': (value) => Math.log(Math.max(value, low) / low) / Math.log(high / low)} :
+        {index, 'transform': (value) => (value - low) / (high - low)};
+});
+
+
+// A text's parameter frames (200 a second) as feature vectors (FEATURES), one every step frames
+export function frameFeatures(frames, step = 4) {
+    const features = [];
+    for (let index = 0; index < frames.length; index += step) {
+        features.push(FEATURES.map(({index: parameter, transform}) => transform(frames[index][parameter])));
+    }
+    return features;
+}
+
+
+// The distance of two feature sequences - the mean Euclidean distance along their dynamic time warping alignment (the
+// voices' timings differ), plus the log ratio of their durations
+export function alignedDistance(first, second) {
+    if (first.length === 0 || second.length === 0) {
+        return first.length === second.length ? 0 : Infinity;
+    }
+    const distance = (one, two) => Math.sqrt(one.reduce((sum, value, index) => sum + (value - two[index]) ** 2, 0));
+    let previous = new Float64Array(second.length + 1).fill(Infinity);
+    let previousSteps = new Float64Array(second.length + 1);
+    previous[0] = 0;
+    for (let row = 1; row <= first.length; row++) {
+        const current = new Float64Array(second.length + 1).fill(Infinity);
+        const currentSteps = new Float64Array(second.length + 1);
+        for (let column = 1; column <= second.length; column++) {
+            const options = [[previous[column - 1], previousSteps[column - 1]], [previous[column], previousSteps[column]],
+                [current[column - 1], currentSteps[column - 1]]];
+            const [best, steps] = options.reduce((least, option) => (option[0] < least[0] ? option : least));
+            current[column] = best + distance(first[row - 1], second[column - 1]);
+            currentSteps[column] = steps + 1;
+        }
+        previous = current;
+        previousSteps = currentSteps;
+    }
+    return previous[second.length] / previousSteps[second.length] + Math.abs(Math.log(first.length / second.length));
+}
+
+
+// The trials - each voice's texts most different between the two voices (candidates: [{voice, text, difference}]), the
+// perVoice of each voice's, in the candidates' voice order
+export function chooseTrials(candidates, perVoice = 2) {
+    const voices = [...new Set(candidates.map((candidate) => candidate.voice))];
+    return voices.flatMap((voice) => candidates.filter((candidate) => candidate.voice === voice)
+        .sort((one, two) => two.difference - one.difference).slice(0, perVoice));
+}
+
+
+// The trials of a round ([{voice, text, difference}] - chooseTrials's), in a shuffled order (seeded by the round), and
+// repeats of the first trials (repeatOf), each placed at least three trials after its original, for the listener's
+// consistency
+export function makeQuestions({trials, round, repeats = 6}) {
     const random = seededRandom(round);
-    const trials = voices.flatMap((voice, index) => [
-        {voice, 'text': sentences[index % sentences.length]},
-        {voice, 'text': passages[index % passages.length]}
-    ]);
-    const questions = shuffle(trials, random).map((trial, index) => ({...trial, 'id': `r${round}-${index + 1}`}));
+    const questions = shuffle([...trials], random).map((trial, index) => ({...trial, 'id': `r${round}-${index + 1}`}));
     for (const original of questions.slice(0, repeats)) {
         const after = questions.findIndex((question) => question.id === original.id) + 3;
         const position = after + Math.floor(random() * (questions.length - after + 1));
@@ -48,7 +104,7 @@ export function makeQuestions({voices, sentences, passages, round, repeats = 6})
         'id': question.id, 'order': round * 1000 + index, round, 'type': 'ab',
         'prompt': 'Which sounds better - more natural, and clearer?',
         'hint': 'Play each as often as you like, then choose - Same if you can\'t tell them apart.',
-        'text': question.text, 'voice': question.voice, 'allowSame': true,
+        'text': question.text, 'voice': question.voice, 'difference': question.difference, 'allowSame': true,
         'versions': [{'name': 'shipped', 'model': 'shipped'}, {'name': 'trained', 'model': 'trained'}],
         ...(question.repeatOf ? {'repeatOf': question.repeatOf} : {})
     }));
@@ -104,11 +160,18 @@ export function abReport(questions, answers) {
         byVoice[question.voice][answers[question.id].version ?? 'same'] += 1;
     }
 
-    // The recommendation - keep the shipped voice when it's significantly preferred, install the trained voice when it's
-    // preferred at least as often, else too close to call
+    // The recommendation - no audible difference when at most a fifth of the answers chose a voice (keep the shipped
+    // voice - installing changes nothing heard), keep the shipped voice when it's significantly preferred, install the
+    // trained voice when it's preferred at least as often, else too close to call
     let recommendation;
-    if (decided === 0) {
-        recommendation = {'action': 'unclear', 'text': 'No decided trials - every answer was Same'};
+    if (answered.length === 0) {
+        recommendation = {'action': 'unclear', 'text': 'No answers'};
+    } else if (decided * 5 <= answered.length) {
+        recommendation = {
+            'action': 'same',
+            'text': `No audible difference - you heard the voices as the same in ${answered.length - decided} of ${answered.length} ` +
+                'trials, where they differ most: keep the shipped voice (installing the trained one changes nothing you can hear)'
+        };
     } else if (shipped > trained && pValue < 0.05) {
         recommendation = {'action': 'keep', 'text': `Keep the shipped voice - you preferred it in ${shipped} of ${decided} decided trials`};
     } else if (trained >= shipped) {

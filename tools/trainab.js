@@ -2,23 +2,29 @@
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 // make train-check's blind A/B - the voice lab (build/voicelab - make voicelab VOICELAB_TRAINED) served locally with its
-// trials (tools/trainabreport.js): the trained voice against the shipped one, each of the package's voices speaking a
-// sentence and a passage, with repeats. The answers are saved as they're given (OUT/answers.json - a rerun resumes);
-// when a round is answered, the report and its recommendation (printed, and OUT/report.json), and the server exits. A
-// rerun after a finished round starts the next round; the report counts every round. Ctrl-C prints the report so far.
+// trials (tools/trainabreport.js): the trained voice against the shipped one, each of the package's voices speaking the
+// two of its candidate texts (the panel's Harvard sentences and the recipe's listening samples texts) where the two
+// voices' parameter frames differ most, with repeats. The answers are saved as they're given (OUT/answers.json - a rerun
+// resumes); when a round is answered - or finished early from the page (no audible difference) - the report and its
+// recommendation (printed, and OUT/report.json), and the server exits. A rerun after a finished round starts the next
+// round; the report counts every round. Ctrl-C prints the report so far.
 //
 //     node tools/trainab.js --lab build/voicelab --out build/train/listen [--summary build/train/distill/summary.json]
 //         [--port 8770] [--open false - the browser not opened]
 
-import {abReport, formatReport, makeQuestions} from './trainabreport.js';
+import {abReport, alignedDistance, chooseTrials, formatReport, frameFeatures, makeQuestions} from './trainabreport.js';
 import {dirname, extname, join, normalize, resolve} from 'node:path';
 import {existsSync, mkdirSync, readFileSync, renameSync, writeFileSync} from 'node:fs';
+import {fileURLToPath, pathToFileURL} from 'node:url';
+import {sentenceFrames, voiceTable} from '../lib/synthesis.js';
+import {speechText, splitSentences} from '../lib/sentences.js';
 import {Buffer} from 'node:buffer';
 import {createServer} from 'node:http';
-import {fileURLToPath} from 'node:url';
+import {loadG2p} from '../lib/g2p.js';
+import {loadPackagedModel} from '../lib/package.js';
 import process from 'node:process';
+import {setPronouncer} from '../lib/lexicon.js';
 import {spawn} from 'node:child_process';
-import {voiceTable} from '../lib/synthesis.js';
 
 
 // Print a line
@@ -48,8 +54,28 @@ function writeJSON(path, value) {
 }
 
 
-// The trials - the earlier rounds', and a new round when they're all answered: each voice's sentence (the panel's
-// Harvard sentences) and passage (the recipe's listening samples texts)
+// A text's parameter frames in a voice - its sentences' frames, one after another
+function textFrames(model, voice, text) {
+    return splitSentences(text).flatMap((sentence) => [...sentenceFrames(model, speechText(sentence.text), {voice}).chunks].flat());
+}
+
+
+// The candidate trials - each voice speaking each text with the shipped and the trained voice model (the shipped G2P),
+// and the distance of their frames
+async function candidateTrials(texts) {
+    const g2pModule = await import(pathToFileURL(join(repository, 'lib', 'models', 'g2pModel.js')).href);
+    setPronouncer(await loadG2p(g2pModule.g2pModel));
+    const shipped = await loadPackagedModel(await import(pathToFileURL(join(repository, 'lib', 'models', 'voiceModel.js')).href));
+    const trained = await loadPackagedModel(await import(pathToFileURL(join(resolve(args.lab), 'trained', 'voiceModel.js')).href));
+    return voiceTable.flatMap(({key}) => texts.map((text) => ({
+        'voice': key, text,
+        'difference': alignedDistance(frameFeatures(textFrames(shipped, key, text)), frameFeatures(textFrames(trained, key, text)))
+    })));
+}
+
+
+// The trials - the earlier rounds', and a new round when they're all answered: each voice's two candidate texts that
+// differ most between the voices
 mkdirSync(args.out, {'recursive': true});
 const questionsPath = join(args.out, 'questions.json');
 const answersPath = join(args.out, 'answers.json');
@@ -61,11 +87,15 @@ if (unanswered().length === 0) {
     const panelTexts = readJSON(join(repository, 'tools', 'panel-texts.json'), null).texts;
     const recipe = readJSON(join(repository, 'data', 'nn', 'train.json'), null);
     const round = questions.reduce((latest, question) => Math.max(latest, question.round), 0) + 1;
-    questions.push(...makeQuestions({
-        'voices': voiceTable.map((voice) => voice.key), round,
-        'sentences': panelTexts.filter((text) => text.kind === 'harvard').map((text) => text.text),
-        'passages': recipe.samples.texts.map((text) => text.text)
-    }));
+    const texts = [...panelTexts.filter((text) => text.kind === 'harvard'), ...recipe.samples.texts].map((text) => text.text);
+    print(`make train-check: choosing the trials - where the voices differ most, of ${voiceTable.length * texts.length} ` +
+        `(${voiceTable.length} voices, ${texts.length} texts)`);
+    const start = Date.now();
+    const trials = chooseTrials(await candidateTrials(texts));
+    const differences = trials.map((trial) => trial.difference);
+    print(`make train-check: chose ${trials.length} trials in ${Math.round((Date.now() - start) / 1000)} s - their frames' ` +
+        `differences ${Math.min(...differences).toFixed(3)} to ${Math.max(...differences).toFixed(3)}`);
+    questions.push(...makeQuestions({trials, round}));
     writeJSON(questionsPath, questions);
 }
 
@@ -84,7 +114,8 @@ function report() {
 }
 
 
-// The server - the voice lab's files, and the A/B's API: the questions, the answers, and an answer's post
+// The server - the voice lab's files, and the A/B's API: the questions, the answers, an answer's post, and the round
+// finished early (no audible difference - its unanswered trials dropped, so a rerun starts the next round)
 const types = {'.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.css': 'text/css', '.svg': 'image/svg+xml'};
 const labDir = resolve(args.lab);
 const server = createServer((request, response) => {
@@ -97,6 +128,15 @@ const server = createServer((request, response) => {
         send(200, JSON.stringify(questions));
     } else if (request.method === 'GET' && url.pathname === '/api/answers') {
         send(200, JSON.stringify(answers));
+    } else if (request.method === 'POST' && url.pathname === '/api/finish') {
+        const asked = questions.filter((question) => question.id in answers);
+        questions.splice(0, questions.length, ...asked);
+        writeJSON(questionsPath, questions);
+        send(200, '{}');
+        print('make train-check: finished early - no audible difference');
+        report();
+        server.close();
+        process.exit(0);
     } else if (request.method === 'POST' && url.pathname.startsWith('/api/answers/')) {
         const id = decodeURIComponent(url.pathname.slice('/api/answers/'.length));
         const chunks = [];

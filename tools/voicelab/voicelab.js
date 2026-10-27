@@ -341,6 +341,10 @@ document.getElementById('explore-baseline').addEventListener(
 document.getElementById('explore-reset').addEventListener('click', () => setExplore(NEUTRAL));
 
 
+// The A/B's early finish - offered after this many Same answers in a row
+const FINISH_SAME = 8;
+
+
 // The store (the artifact's db - null without one), Claude's questions, and the answers
 let store = null;
 let questions = [];
@@ -454,6 +458,24 @@ function renderQuestion() {
     });
     const submitRow = element('div', 'row');
     submitRow.append(submit);
+
+    // The A/B finished early - offered after FINISH_SAME answers in a row were Same (no audible difference)
+    const latest = [...answers.values()].sort((one, two) => one.answeredAt.localeCompare(two.answeredAt)).slice(-FINISH_SAME);
+    if (local && latest.length === FINISH_SAME && latest.every((answered) => answered.choice === 'Same')) {
+        const finish = element('button', 'btn', 'Finish - I can\'t hear a difference');
+        finish.type = 'button';
+        finish.addEventListener('click', async () => {
+            finish.disabled = true;
+            const finished = await fetch('./api/finish', {'method': 'POST'}).catch(() => null);
+            if (finished?.ok) {
+                card.replaceChildren(element('p', 'empty', 'Finished - no audible difference. The report is in your terminal.'));
+            } else {
+                finish.disabled = false;
+                setStatus('Not finished - the A/B server is unavailable.', 'warn');
+            }
+        });
+        submitRow.append(finish);
+    }
     card.append(
         element('p', 'progress', `Question ${questions.length - pending.length + 1} of ${questions.length}`),
         element('p', 'prompt', next.prompt), element('p', 'text', `"${next.text}"`), players,

@@ -397,13 +397,19 @@ The flow:
 3. `make train-check` - the package's tests with the trained models in place of `lib/models/`'s
    (`tools/trainmodels.js`, a module hook), then the blind A/B of the trained voice against the shipped one, in your
    browser (`tools/trainab.js` serves the voice lab locally, with the trained voice in `build/voicelab/trained/`; both
-   sides speak with the shipped G2P, so the A/B is the voice's alone): each of the package's voices speaks a Harvard
-   sentence and a passage, in a shuffled order, with 6 repeats - 30 forced choices (or Same), about 8 minutes. The
-   answers are saved as you go (`build/train/listen/` - a rerun resumes; a rerun after a finished round starts another,
-   and the report counts every round). At the end it prints the report (`tools/trainabreport.js`): the trained
-   voice's win rate over the decided trials with its 95% interval and sign test, the repeats' agreement, each voice's
-   counts, the panel's scores, and a recommendation - keep the shipped voice when it's significantly preferred, install
-   the trained voice when it's preferred at least as often, else too close to call.
+   sides speak with the shipped G2P, so the A/B is the voice's alone): each of the package's voices speaks the two of
+   its candidate texts (the panel's Harvard sentences and the recipe's listening samples texts) where the two voices
+   differ most - the distance of their parameter frames (pitch, voicing, pulse shape, tilt, the noises, the lower
+   formants and bandwidths, each scaled to its range), aligned by dynamic time warping - so an audible difference is
+   heard if there is one. The trials are shuffled, with 6 repeats - 30 forced choices (or Same), about 8 minutes; after
+   8 Same answers in a row the page offers to finish early (no audible difference). The answers are saved as you go
+   (`build/train/listen/` - a rerun resumes; a rerun after a finished round starts another, and the report counts every
+   round). At the end it prints the report (`tools/trainabreport.js`): the trained voice's win rate over the decided
+   trials with its 95% interval and sign test, the repeats' agreement, each voice's counts, the panel's scores, and a
+   recommendation - no audible difference when at most a fifth of the answers chose a voice (keep the shipped voice:
+   installing changes nothing you can hear), keep the shipped voice when it's significantly preferred, install the
+   trained voice when it's preferred at least as often, else too close to call. A retrain of an unchanged recipe is
+   usually no audible difference - the A/B is its guardrail against a bad run; a recipe change is where it decides.
 4. `make train-install` - the trained modules that differ into `lib/models/` (the G2P when it differs below its
    comment header; `picovox_train.trained install`) - or one model, `make train-install-voice` or `make
    train-install-g2p`; then `make commit` and commit them.

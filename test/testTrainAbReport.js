@@ -1,15 +1,23 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-import {abReport, formatReport, makeQuestions, seededRandom, signTest, wilson} from '../tools/trainabreport.js';
+import {
+    abReport, alignedDistance, chooseTrials, formatReport, frameFeatures, makeQuestions, seededRandom, signTest, wilson
+} from '../tools/trainabreport.js';
+import {NAMES} from '../lib/params.js';
 import {strict as assert} from 'node:assert';
 import test from 'node:test';
 
 
-// A round's trials - three voices, each a sentence and a passage, with two repeats
-const questions = makeQuestions({
-    'voices': ['male', 'female', 'sarah'], 'sentences': ['One.', 'Two.'], 'passages': ['A passage.'], 'round': 1, 'repeats': 2
-});
+// Three voices' trials - each a sentence and a passage
+const trials = ['male', 'female', 'sarah'].flatMap((voice, index) => [
+    {voice, 'text': index === 1 ? 'Two.' : 'One.', 'difference': 0.1 * index},
+    {voice, 'text': 'A passage.', 'difference': 0.2}
+]);
+
+
+// A round's trials, with two repeats
+const questions = makeQuestions({trials, 'round': 1, 'repeats': 2});
 
 
 // Answers ({id: answer}) choosing a version for each question in turn (null - Same)
@@ -25,6 +33,59 @@ test('trainabreport.seededRandom', () => {
     assert.deepEqual(values, [second(), second(), second()]);
     assert(values.every((value) => value >= 0 && value < 1));
     assert.notEqual(values[0], seededRandom(8)());
+});
+
+
+// A frame - every parameter at its default, with some set
+function frame(values = {}) {
+    return Float64Array.from(NAMES.map((name) => values[name] ?? {'f0': 100, 'f1': 500, 'f2': 1500, 'f3': 2500, 'f4': 3500,
+        'b1': 80, 'b2': 90, 'b3': 150, 'rd': 1}[name] ?? 0));
+}
+
+
+test('trainabreport.frameFeatures', () => {
+    // Every step-th frame, each feature scaled to its range - a log parameter's log range
+    const frames = Array.from({'length': 9}, (_unused, index) => frame({'f0': 40 * (index + 1), 'av': -39}));
+    const features = frameFeatures(frames);
+    assert.equal(features.length, 3);
+    assert.equal(features[0].length, 13);
+    assert.equal(features[0][0], 0);
+    assert(Math.abs(features[1][0] - Math.log(5) / Math.log(15)) < 1e-12);
+    assert(Math.abs(features[0][1] - 0.5) < 1e-12);
+    assert.equal(frameFeatures(frames, 1).length, 9);
+
+    // A log parameter below its low is its low
+    assert.equal(frameFeatures([frame({'f0': 10})])[0][0], 0);
+});
+
+
+test('trainabreport.alignedDistance', () => {
+    // The same frames - no distance; frames slower in time - aligned, only the duration's log ratio
+    const features = frameFeatures(Array.from({'length': 40}, (_unused, index) => frame({'f0': 100 + 5 * index})));
+    assert.equal(alignedDistance(features, features), 0);
+    const slower = features.flatMap((feature) => [feature, feature]);
+    assert(Math.abs(alignedDistance(features, slower) - Math.log(2)) < 1e-12);
+
+    // Different frames - their mean distance along the alignment
+    const higher = features.map((feature) => feature.map((value, index) => (index === 1 ? value + 0.1 : value)));
+    assert(Math.abs(alignedDistance(features, higher) - 0.1) < 1e-12);
+
+    // Empty sequences
+    assert.equal(alignedDistance([], []), 0);
+    assert.equal(alignedDistance(features, []), Infinity);
+});
+
+
+test('trainabreport.chooseTrials', () => {
+    // Each voice's most different texts, in the voices' order
+    const candidates = [
+        {'voice': 'male', 'text': 'a', 'difference': 0.1}, {'voice': 'male', 'text': 'b', 'difference': 0.3},
+        {'voice': 'female', 'text': 'a', 'difference': 0.5}, {'voice': 'male', 'text': 'c', 'difference': 0.2},
+        {'voice': 'female', 'text': 'b', 'difference': 0.4}, {'voice': 'female', 'text': 'c', 'difference': 0.6}
+    ];
+    const chosen = (perVoice) => chooseTrials(candidates, perVoice).map((trial) => `${trial.voice} ${trial.text}`);
+    assert.deepEqual(chosen(), ['male b', 'male c', 'female c', 'female a']);
+    assert.deepEqual(chosen(1), ['male b', 'female c']);
 });
 
 
@@ -47,8 +108,10 @@ test('trainabreport.makeQuestions', () => {
         assert(questions.indexOf(repeat) - questions.indexOf(original) >= 3);
     }
 
-    // Each a blind A/B of the shipped voice and the trained one, ordered within its round
+    // Each a blind A/B of the shipped voice and the trained one, ordered within its round, with its trial's difference
     for (const [index, question] of questions.entries()) {
+        const trial = trials.find((item) => item.voice === question.voice && item.text === question.text);
+        assert.equal(question.difference, trial.difference);
         assert.equal(question.order, 1000 + index);
         assert.equal(question.round, 1);
         assert.equal(question.type, 'ab');
@@ -56,10 +119,10 @@ test('trainabreport.makeQuestions', () => {
         assert.deepEqual(question.versions, [{'name': 'shipped', 'model': 'shipped'}, {'name': 'trained', 'model': 'trained'}]);
     }
 
-    // The same round is the same trials; another round, its own ids and order
-    assert.deepEqual(makeQuestions({'voices': ['male', 'female', 'sarah'], 'sentences': ['One.', 'Two.'], 'passages': ['A passage.'],
-        'round': 1, 'repeats': 2}), questions);
-    const second = makeQuestions({'voices': ['male'], 'sentences': ['One.'], 'passages': ['A passage.'], 'round': 2, 'repeats': 0});
+    // The same round is the same trials (the trials unchanged); another round, its own ids and order
+    assert.deepEqual(makeQuestions({trials, 'round': 1, 'repeats': 2}), questions);
+    assert.deepEqual(trials.map((trial) => trial.voice), ['male', 'male', 'female', 'female', 'sarah', 'sarah']);
+    const second = makeQuestions({'trials': trials.slice(0, 2), 'round': 2, 'repeats': 0});
     assert.deepEqual(second.map((question) => [question.id, question.order]), [['r2-1', 2000], ['r2-2', 2001]]);
 });
 
@@ -105,8 +168,8 @@ test('trainabreport.abReport', () => {
         /^Install the trained voice \(make train-install-voice\) - you preferred it in 5 of 7 decided trials \(not/);
 
     // Significantly preferred - install
-    const many = makeQuestions({'voices': Array.from({'length': 10}, (_unused, index) => `voice${index}`), 'sentences': ['One.'],
-        'passages': ['Two.'], 'round': 1, 'repeats': 0});
+    const manyTrials = Array.from({'length': 20}, (_unused, index) => ({'voice': `voice${index}`, 'text': 'One.', 'difference': 0}));
+    const many = makeQuestions({'trials': manyTrials, 'round': 1, 'repeats': 0});
     const winning = Object.fromEntries(many.map((question, index) => [question.id, {'version': index < 16 ? 'trained' : 'shipped'}]));
     assert.match(abReport(many, winning).recommendation.text, /in 16 of 20 decided trials, significantly$/);
 
@@ -122,11 +185,19 @@ test('trainabreport.abReport', () => {
     assert.equal(close.recommendation.action, 'unclear');
     assert.match(close.recommendation.text, /^Too close to call - the trained voice won 1 of 3 decided trials/);
 
-    // Every answer Same, or none
-    assert.deepEqual(abReport(questions, answer([null, null])).recommendation,
-        {'action': 'unclear', 'text': 'No decided trials - every answer was Same'});
+    // Every answer Same, or at most a fifth a voice - no audible difference
+    assert.deepEqual(abReport(questions, answer([null, null])).recommendation, {
+        'action': 'same',
+        'text': 'No audible difference - you heard the voices as the same in 2 of 2 trials, where they differ most: keep the shipped ' +
+            'voice (installing the trained one changes nothing you can hear)'
+    });
+    assert.equal(abReport(questions, answer([null, null, null, null, 'trained'])).recommendation.action, 'same');
+    assert.equal(abReport(questions, answer([null, null, null, 'trained', 'trained'])).recommendation.action, 'install');
+
+    // No answers
     const none = abReport(questions, {});
     assert.deepEqual([none.answered, none.winRate, none.repeats.pairs], [0, null, 0]);
+    assert.deepEqual(none.recommendation, {'action': 'unclear', 'text': 'No answers'});
 });
 
 
