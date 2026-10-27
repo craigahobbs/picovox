@@ -251,8 +251,8 @@ def sample_track(track_times, track_values, frame_count, tolerance=0.006):
 
 # The auxiliary frame tracks of 24 kHz audio - [frames, channels]
 def frame_tracks(samples, frame_count, pitch_floor, pitch_ceiling, formant_ceiling):
-    import parselmouth  # pylint: disable=import-outside-toplevel
-    sound = parselmouth.Sound(samples.astype(np.float64), sampling_frequency=SAMPLE_RATE)  # pylint: disable=c-extension-no-member
+    import parselmouth  # pylint: disable=import-outside-toplevel, import-error
+    sound = parselmouth.Sound(samples.astype(np.float64), sampling_frequency=SAMPLE_RATE)
     tracks = np.zeros((frame_count, len(CHANNELS)), dtype=np.float32)
 
     # F0, voicing, and pitch strength

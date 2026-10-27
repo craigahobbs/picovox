@@ -15,7 +15,6 @@ requires-python = ">=3.12"
 # test checks they match) - the unit tests run with exactly the training's versions
 dependencies = [
     "numpy == 2.5.4",
-    "praat-parselmouth == 0.4.7",
     "soundfile == 0.14.0",
     "soxr == 1.1.0",
     "torch == 2.14.1"

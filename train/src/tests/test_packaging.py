@@ -20,13 +20,6 @@ from picovox_train import ROOT, export, package
 from tests import helpers, model_fixtures
 
 
-# A JavaScript literal's value, evaluated by Node
-def node_value(literal):
-    process = subprocess.run(['node', '--input-type=module', '-e', f'console.log(JSON.stringify({literal}))'],
-                             check=True, capture_output=True, text=True)
-    return json.loads(process.stdout)
-
-
 class TestPackageText(unittest.TestCase):
 
     def test_wrap_json(self):
@@ -40,7 +33,7 @@ class TestPackageText(unittest.TestCase):
             self.assertTrue(line.startswith('  '))
             self.assertLessEqual(len(line) - 2, 78)
         self.assertIn('" +\n', text)
-        self.assertEqual(node_value(text), json.loads(json.dumps(value)))
+        self.assertEqual(helpers.js_literal(text), json.loads(json.dumps(value)))
 
     def test_wrap_json_unbreakable(self):
         # (a token longer than the line can't be broken)
@@ -161,7 +154,7 @@ class TestPackage(unittest.TestCase):
         self.assertTrue(all(len(line) <= package.LINE_LENGTH for line in text.split('\n')))
 
     def test_main_round_trip(self):
-        # The module, unpacked by nn/js/unpack.js, is the export; nn/js/packagecheck.js loads it as the package does
+        # The module, unpacked, is the export (lib/package.js's loading of package.py's modules - test/testPackage.js)
         for compress in ('always', 'never'):
             output = os.path.join(self.root, 'out', f'voiceModel-{compress}.js')
             with helpers.captured() as (stdout, _), \
@@ -170,15 +163,11 @@ class TestPackage(unittest.TestCase):
                                                '--recipe', 'data/nn/train.json', '--data', 'a', 'b', '--scores', 'result.json']), 0)
             provenance.assert_called_once_with('data/nn/train.json', ['a', 'b'], 'result.json')
             self.assertEqual(json.loads(stdout.getvalue())['output'], output)
-            unpacked = os.path.join(self.root, f'unpacked-{compress}')
-            subprocess.run(['node', os.path.join(ROOT, 'nn', 'js', 'unpack.js'), output, unpacked], check=True, cwd=ROOT)
-            with open(unpacked + '.bin', 'rb') as file, open(self.model_path + '.bin', 'rb') as original:
-                self.assertEqual(file.read(), original.read())
-            with open(unpacked + '.json', encoding='utf-8') as file, open(self.model_path + '.json', encoding='utf-8') as original:
-                self.assertEqual(json.load(file), {**json.load(original), 'provenance': {'commit': 'abc', 'dirty': False}})
-            process = subprocess.run(['node', os.path.join(ROOT, 'nn', 'js', 'packagecheck.js'), output, self.model_path],
-                                     check=True, capture_output=True, text=True, cwd=ROOT)
-            self.assertIn('"tensors"', process.stdout)
+            manifest, weights = helpers.unpack_module(output)
+            with open(self.model_path + '.bin', 'rb') as original:
+                self.assertEqual(weights, original.read())
+            with open(self.model_path + '.json', encoding='utf-8') as original:
+                self.assertEqual(manifest, {**json.load(original), 'provenance': {'commit': 'abc', 'dirty': False}})
 
     def test_main_no_provenance(self):
         output = os.path.join(self.root, 'plain.js')

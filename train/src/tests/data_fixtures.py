@@ -9,6 +9,7 @@ synthetic recordings and phone labels that match the front end's tokens
 import contextlib
 import os
 import sys
+import types
 
 import numpy
 import soundfile
@@ -53,6 +54,94 @@ def fake_modules(**modules):
         for name in saved:
             del sys.modules[name]
         sys.modules.update({name: module for name, module in saved.items() if module is not None})
+
+
+class FakeSound:
+    """A fake recording (a path or samples) and its analyses: pitch by a frame autocorrelation
+    (voiced where the signal is loud and periodic), harmonicity from its peak, and fixed formants wherever the signal
+    isn't silent"""
+
+    def __init__(self, values, sampling_frequency=None):
+        if isinstance(values, str):
+            values, sampling_frequency = soundfile.read(values, dtype='float64')
+        self.samples = numpy.asarray(values, dtype=numpy.float64)
+        self.rate = sampling_frequency
+
+    # The frames' center times, each frame's RMS, and its autocorrelation peak (lag, normalized) within the pitch range
+    def frames(self, time_step, pitch_floor=75.0, pitch_ceiling=600.0):
+        half = int(0.02 * self.rate)
+        times = (numpy.arange(int(len(self.samples) / self.rate / time_step)) + 0.5) * time_step
+        rms = []
+        peaks = []
+        for time in times:
+            center = int(time * self.rate)
+            window = self.samples[max(0, center - half):center + half]
+            rms.append(float(numpy.sqrt(numpy.mean(window ** 2))) if len(window) else 0.0)
+            lags = numpy.arange(int(self.rate / pitch_ceiling), min(int(self.rate / pitch_floor), len(window) - 1))
+            energy = float(numpy.dot(window, window))
+            correlations = [float(numpy.dot(window[:-lag], window[lag:])) / energy for lag in lags] if energy > 0 and len(lags) else [0.0]
+            best = int(numpy.argmax(correlations))
+            peaks.append((int(lags[best]) if len(lags) else 1, correlations[best]))
+        return times, numpy.array(rms), peaks
+
+    def to_pitch_ac(self, time_step, pitch_floor, pitch_ceiling):
+        times, rms, peaks = self.frames(time_step, pitch_floor, pitch_ceiling)
+        voiced = [level > 0.01 and peak > 0.5 for level, (_, peak) in zip(rms, peaks)]
+        return FakePitch(times, [self.rate / lag if ok else 0.0 for ok, (lag, _) in zip(voiced, peaks)],
+                         [peak if ok else 0.0 for ok, (_, peak) in zip(voiced, peaks)])
+
+    def to_harmonicity_cc(self, time_step, minimum_pitch):
+        times, rms, peaks = self.frames(time_step, minimum_pitch)
+        hnr = [10 * numpy.log10(min(peak, 0.999) / (1 - min(peak, 0.999))) if level > 0.01 and peak > 0.5 else -200.0
+               for level, (_, peak) in zip(rms, peaks)]
+        return FakeTrack(times, numpy.array([hnr]))
+
+    def to_formant_burg(self, time_step, max_number_of_formants, maximum_formant, window_length=0.025, pre_emphasis_from=50):
+        assert max_number_of_formants == 5 and maximum_formant > 0 and window_length > 0 and pre_emphasis_from > 0
+        times, rms, _ = self.frames(time_step)
+        return FakeFormant(times, rms > 0.001)
+
+
+class FakeTrack:
+    """A fake analysis's frames - their times and values"""
+
+    def __init__(self, times, values):
+        self.times = times
+        self.values = values
+
+    def xs(self):
+        return self.times
+
+    # The frame nearest a time
+    def frame(self, time):
+        return int(numpy.clip(numpy.round(time / (self.times[1] - self.times[0]) - 0.5), 0, len(self.times) - 1))
+
+
+class FakePitch(FakeTrack):
+    """A fake pitch track - its selected candidates (frequency, strength; 0 Hz unvoiced) and the value at a time (NaN
+    unvoiced)"""
+
+    def __init__(self, times, frequency, strength):
+        super().__init__(times, None)
+        self.selected_array = numpy.array(list(zip(frequency, strength)), dtype=[('frequency', float), ('strength', float)])
+
+    def get_value_at_time(self, time):
+        frequency = self.selected_array['frequency'][self.frame(time)]
+        return frequency if frequency > 0 else float('nan')
+
+
+class FakeFormant(FakeTrack):
+    """A fake formant track - formant n at 1000n - 500 Hz with an 80n Hz bandwidth where the signal isn't silent (else NaN)"""
+
+    def get_value_at_time(self, number, time):
+        return 1000.0 * number - 500.0 if self.values[self.frame(time)] else float('nan')
+
+    def get_bandwidth_at_time(self, number, time):
+        return 80.0 * number if self.values[self.frame(time)] else float('nan')
+
+
+# The fake acoustic analysis module, for fake_modules
+ANALYSIS = types.SimpleNamespace(Sound=FakeSound)
 
 
 # Seconds of each phone, and of the edge silences

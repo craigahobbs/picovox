@@ -10,7 +10,7 @@ import numpy
 
 from picovox_train import lf, params
 
-from .test_rng import node_json
+from . import parity
 
 
 class TestLf(unittest.TestCase):
@@ -51,16 +51,14 @@ class TestLf(unittest.TestCase):
         self.assertEqual(table.shape, (len(lf.rd_grid()), params.LF_HARMONICS))
         self.assertEqual(len(lf.rd_grid()), 241)
         self.assertIs(lf.harmonic_table(), table)
-        # lib/lf.js's golden values (Rd 1.0 - grid index 70), and lib/lf.js's own table
+        # lib/lf.js's golden values (Rd 1.0 - grid index 70), and lib/lf.js's own table (the parity check - tools/parity.js)
         row = table[70]
         self.assertLess(abs(row[1].real - 0.062216950987419264), 1e-15)
         self.assertLess(abs(row[1].imag + 0.1705324149150758), 1e-15)
         self.assertLess(abs(row[5].real + 0.014752542877681525), 1e-15)
-        expected = node_json("import {lfHarmonics} from './lib/lf.js';"
-                             "const rows = [0, 70, 240].map((ix) => lfHarmonics(ix));"
-                             "console.log(JSON.stringify(rows.map((row) => [Array.from(row.re.slice(0, 64)),"
-                             " Array.from(row.im.slice(0, 64))])));")
-        for index, (real, imag) in zip((0, 70, 240), expected):
+        parity.inputs(self, 'lfHarmonics', {'rows': [0, 70, 240], 'count': 64})
+        expected = parity.outputs('lfHarmonics')
+        for index, real, imag in zip((0, 70, 240), expected['real'], expected['imag']):
             self.assertLess(numpy.abs(table[index, :64].real - real).max(), 1e-12)
             self.assertLess(numpy.abs(table[index, :64].imag - imag).max(), 1e-12)
 

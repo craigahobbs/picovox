@@ -11,6 +11,9 @@ import time
 import unittest
 import unittest.mock
 
+import numpy
+import soundfile
+
 from picovox_train import ROOT, export, panel
 from tests import model_fixtures
 
@@ -98,6 +101,19 @@ class TestPanelScore(unittest.TestCase):
         model, state = export.load_model(model_fixtures.write_checkpoint(os.path.join(cls.root, 'teacher.pt')))
         export.export(model, state, 'model', os.path.join(cls.root, 'export'))
         cls.model_path = os.path.join(cls.root, 'export', 'model')
+        cls.enterClassContext(unittest.mock.patch.object(panel.subprocess, 'run', side_effect=cls.speak_js))
+
+    # nn/js/speak.js - a tenth of a second of silence for each batch item, and its report
+    @classmethod
+    def speak_js(cls, command, check, capture_output, text, cwd):
+        assert command[:3] == ['node', os.path.join(ROOT, 'nn', 'js', 'speak.js'), '-m'] and command[4] == '--batch'
+        assert (check, capture_output, text, cwd) == (True, True, True, ROOT)
+        rate = int(command[command.index('-r') + 1])
+        with open(command[5], encoding='utf-8') as file:
+            batch = json.load(file)
+        for item in batch:
+            soundfile.write(item['wav'], numpy.zeros(rate // 10), rate)
+        return subprocess.CompletedProcess(command, 0, stdout=json.dumps({'count': len(batch), 'audioSeconds': 0.1 * len(batch)}) + '\n')
 
     @classmethod
     def tearDownClass(cls):

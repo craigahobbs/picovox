@@ -8,6 +8,7 @@ import json
 import os
 import runpy
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -483,14 +484,26 @@ class TestContext(unittest.TestCase):
 
     def test_js_pronouncer_and_heteronym_scores(self):
         module_path = g2pmodel.MODULE_PATH
-        pronounce = context.js_pronouncer(module_path)
-        self.assertEqual(pronounce(['lead', 'hello']), [['L', 'IY1', 'D'], ['HH', 'AH0', 'L', 'OW1']])
         python = g2pmodel.G2p(g2pmodel.read_module())
-        self.assertEqual(pronounce(['cat']), [python.pronounce('cat')])
-        kinds, status = context.heteronym_scores(module_path)
-        self.assertEqual(status, 0)
-        self.assertEqual(set(kinds), {'default', 'context', 'missing', 'names'})
-        self.assertTrue(all(right <= total for right, total in kinds.values()))
+
+        # nn/js/pronounceLines.js (lib/g2p.js - the Python port's pronunciations - the parity check's) and
+        # tools/heteronyms.js (its report)
+        def run(command, **kwargs):
+            if command[1] == os.path.join(ROOT, 'nn', 'js', 'pronounceLines.js'):
+                self.assertEqual(command[2], module_path)
+                self.assertEqual({key: kwargs[key] for key in ('capture_output', 'text', 'check')},
+                                 {'capture_output': True, 'text': True, 'check': True})
+                words = kwargs['input'].split('\n')[:-1]
+                return subprocess.CompletedProcess(command, 0, ''.join(' '.join(python.pronounce(word)) + '\n' for word in words))
+            self.assertEqual(command, ['node', os.path.join(ROOT, 'tools', 'heteronyms.js'), '-m', module_path])
+            return subprocess.CompletedProcess(command, 1, 'default 52/52\ncontext 51/54\nmissing 3/3\nnames 80/86\n')
+        with unittest.mock.patch('subprocess.run', side_effect=run):
+            pronounce = context.js_pronouncer(module_path)
+            self.assertEqual(pronounce(['lead', 'hello']), [['L', 'IY1', 'D'], ['HH', 'AH0', 'L', 'OW1']])
+            self.assertEqual(pronounce(['cat']), [python.pronounce('cat')])
+            kinds, status = context.heteronym_scores(module_path)
+        self.assertEqual(status, 1)
+        self.assertEqual(kinds, {'default': (52, 52), 'context': (51, 54), 'missing': (3, 3), 'names': (80, 86)})
 
     def test_check(self):
         # Identical below the comment header

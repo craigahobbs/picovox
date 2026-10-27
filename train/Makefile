@@ -15,8 +15,17 @@ $(eval $(call WGET, https://craigahobbs.github.io/python-build/Makefile.base))
 $(eval $(call WGET, https://craigahobbs.github.io/python-build/pylintrc))
 
 
+# The Pythons the training code supports - its pinned numpy and torch install on 3.12 through 3.14 (set before the
+# include, which filters them)
+PYTHON_IMAGES_EXCLUDE := python:3.11 python:3.15
+
+
 # Include python-build
 include Makefile.base
+
+
+# PARITY_WRITE=1 rewrites the parity checks' inputs (src/tests/parity.py) - in the containers too
+DOCKER_ENV := $(if $(PARITY_WRITE),-e PARITY_WRITE=1)
 
 
 # The code's style documents each function with a short comment above it (CLAUDE.md), not a docstring

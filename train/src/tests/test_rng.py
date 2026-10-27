@@ -3,19 +3,13 @@
 
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
-import json
-import subprocess
 import unittest
 
 import numpy
 
-from picovox_train import ROOT, rng
+from picovox_train import rng
 
-
-# Evaluate a JavaScript module expression (an ES module script printing JSON) with node in the repository
-def node_json(script):
-    process = subprocess.run(['node', '--input-type=module', '-e', script], capture_output=True, text=True, check=True, cwd=ROOT)
-    return json.loads(process.stdout)
+from . import parity
 
 
 class TestRng(unittest.TestCase):
@@ -48,13 +42,12 @@ class TestRng(unittest.TestCase):
         self.assertLess(abs((values ** 2).mean() - 1), 0.05)
 
     def test_javascript(self):
-        # lib/rng.js computes the same draws, exactly
-        expected = node_json(
-            "import {streamSeed, uniformAt, gaussAt} from './lib/rng.js';"
-            "const seed = streamSeed(31337, 2);"
-            "console.log(JSON.stringify({seed, 'uniform': [0, 1, 17, 99999].map((ix) => uniformAt(seed, ix)),"
-            " 'gauss': [0, 5, 1234].map((ix) => gaussAt(seed, ix))}));")
+        # lib/rng.js computes the same draws, exactly (the parity check - tools/parity.js)
+        uniform = [0, 1, 17, 99999]
+        gauss = [0, 5, 1234]
+        parity.inputs(self, 'rng', {'seed': 31337, 'stream': 2, 'uniform': uniform, 'gauss': gauss})
+        expected = parity.outputs('rng')
         seed = rng.stream_seed(31337, 2)
-        self.assertEqual(seed, expected['seed'])
-        self.assertEqual(rng.uniform(seed, numpy.array([0, 1, 17, 99999])).tolist(), expected['uniform'])
-        self.assertEqual([float(rng.gauss(seed, index, 1)[0]) for index in (0, 5, 1234)], expected['gauss'])
+        self.assertEqual(seed, expected['streamSeed'])
+        self.assertEqual(rng.uniform(seed, numpy.array(uniform)).tolist(), expected['uniform'])
+        self.assertEqual([float(rng.gauss(seed, index, 1)[0]) for index in gauss], expected['gauss'])

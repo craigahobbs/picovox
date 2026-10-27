@@ -3,10 +3,10 @@
 
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
+import base64
 import json
 import os
 import runpy
-import subprocess
 import tempfile
 import unittest
 import unittest.mock
@@ -17,7 +17,7 @@ import torch
 
 from picovox_train import ROOT, export, params, quant
 from picovox_train.synthesize import Voice
-from tests import helpers, model_fixtures
+from tests import helpers, model_fixtures, parity
 
 
 class TestExport(unittest.TestCase):
@@ -194,8 +194,8 @@ class TestExport(unittest.TestCase):
 
 
 class TestExportParity(unittest.TestCase):
-    """lib/model.js (nn/js/speak.js --frames-only) against PyTorch with the export's dequantized weights - the browser
-    path's inference is the exported model's (the former parity.py's check)"""
+    """lib/model.js against PyTorch with the export's dequantized weights - the browser path's inference is the exported
+    model's (the parity check - tools/parity.js: the exported models are its committed inputs)"""
 
     @classmethod
     def setUpClass(cls):
@@ -215,27 +215,22 @@ class TestExportParity(unittest.TestCase):
         texts = ['Call me Ishmael.', 'It was the best of times, it was the worst of times.', 'Is it cold? Wait here!']
         model, state = export.load_model(self.checkpoint)
         out_dir = os.path.join(self.root, f'export-{bits}-{group}')
-        export.export(model, state, 'model', out_dir, bits=bits, group=group)
-        batch = [{'text': text, 'params': os.path.join(out_dir, f'{index}.json')} for index, text in enumerate(texts)]
-        with open(os.path.join(out_dir, 'batch.json'), 'w', encoding='utf-8') as file:
-            json.dump(batch, file)
-        style_args = ['--style', style, '--intensity', '0.7'] if style else []
-        subprocess.run(['node', os.path.join(ROOT, 'nn', 'js', 'speak.js'), '-m', os.path.join(out_dir, 'model'), '--batch',
-                        os.path.join(out_dir, 'batch.json'), '--frames-only', '--speaker', str(speaker), *style_args],
-                       check=True, capture_output=True, cwd=ROOT)
+        manifest = export.export(model, state, 'model', out_dir, bits=bits, group=group)
+        with open(os.path.join(out_dir, 'model.bin'), 'rb') as file:
+            binary = base64.b64encode(file.read()).decode('ascii')
+        name = f'export-{bits}-{group}'
+        parity.inputs(self, name, {'manifest': manifest, 'bin': binary, 'speaker': speaker, 'style': style, 'intensity': 0.7,
+                                   'texts': texts})
         voice = Voice(self.checkpoint, quantized=True, speaker=speaker, bits=bits, group=group, emotion=style, intensity=0.7)
-        for item, text in zip(batch, texts):
-            with open(item['params'], encoding='utf-8') as file:
-                data = json.load(file)
+        for text, expected in zip(texts, parity.outputs(name), strict=True):
             values, parts = voice.frames(text)
-            self.assertEqual([duration for sentence in data['sentences'] for duration in sentence['durations']],
-                             [duration for part in parts for duration in part['durations']])
-            js_values = numpy.array(data['frames'], dtype=numpy.float64)
-            self.assertEqual(js_values.shape, values.shape)
+            self.assertEqual(expected['durations'], [duration for part in parts for duration in part['durations']])
+            js_values = numpy.array(expected['frames'], dtype=numpy.float64)
+            self.assertEqual(js_values.shape, values[:, :params.COUNT].shape)
             self.assertGreater(len(values), 10)
-            difference = numpy.abs(params.normalize(js_values) - params.normalize(values))
+            difference = numpy.abs(params.normalize(js_values) - params.normalize(values[:, :params.COUNT]))
             self.assertLess(float(difference.max()), 1e-4)
-            self.assertTrue(numpy.allclose(data['eq'], voice.eq, atol=1e-3))
+            self.assertTrue(numpy.allclose(expected['eq'], voice.eq, atol=1e-3))
 
     def test_parity_int8(self):
         self.check_parity(8, 0, 1)

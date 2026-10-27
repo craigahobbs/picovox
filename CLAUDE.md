@@ -40,11 +40,12 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
 - `tools/` - the training dashboard (`dashboard/`), the performance lab (`perf/` - the playback pipeline timed on a
   phone, and under Node without a JIT), `heteronyms.js` (the heteronym and names regression sets), make train's
   bookkeeping (`trainstage.sh`, `trainutil.sh` - the stage events and logs, the utilization samples, `trainpower.sh`)
-  and listening samples (`trainsamples.js`, `trainsamplesindex.js`), and the panel's texts
-  (`panel-texts.json`).
+  and listening samples (`trainsamples.js`, `trainsamplesindex.js`), the panel's texts (`panel-texts.json`), and the
+  parity checks' outputs (`parity.js` - make parity).
 - `test/` - unit tests (`node:test`), one `test<Module>.js` per `lib/` module (`testIndex.js` for the API - including
   `speak` with a fake AudioContext, and the package's browser safety and exports), and the dashboard's and make train's
-  (`testTrainDashboard.js`, `testTrainSamplesIndex.js`, `testTrainStages.js`).
+  (`testTrainDashboard.js`, `testTrainSamplesIndex.js`, `testTrainStages.js`); `parity-inputs.json` - the parity checks'
+  inputs (below).
 - `data/` - the CMU Pronouncing Dictionary (G2P training only), `data/nn/` (the recipe `train.json`, the pinned book
   texts `books.json`, the speaker pool, the G2P and heteronym data, the designed voices, the single-speaker exports
   `slt`/`bdl`), and `data/targets/` (the four labeled ARCTIC speakers' analysis settings).
@@ -61,7 +62,8 @@ Local Makefile overrides:
 
 - `ESLINT_ARGS` - also `tools/` and `nn/js/` (not the generated `lib/models/`)
 
-- `commit` - also runs the training package's gate (`commit-train`: `make -C train commit`); `make clean` cleans it too
+- `commit` - also runs the training package's gate (`commit-train`: `make -C train commit`, after `make parity`); `make
+  clean` cleans it too
 
 `make commit` (test, lint, doc, cover, and the training's gate) is the gate before committing. `npm pack --dry-run`
 lists the package's files (`package.json` `files`: `lib/`). `make -j train` trains both generated models from the recipe
@@ -80,12 +82,17 @@ the python-build skill before running its tests, lint, or coverage, or changing 
 `train/Makefile` copies python-build's files from `../../python-build` when it exists (`PYTHON_BUILD_DIR`).
 
 - `make -C train commit` - its gate: unittest (`-W error`), pylint (python-build's pylintrc), and 100% branch coverage
-- Local Makefile overrides: `PYLINT_ARGS` - `missing-function-docstring` disabled (a comment above each function is the
-  code's documentation)
+- Local Makefile overrides: `PYTHON_IMAGES_EXCLUDE` - Python 3.11 and 3.15 (the pinned numpy and torch install on 3.12
+  through 3.14); `DOCKER_ENV` - `PARITY_WRITE` into the containers; `PYLINT_ARGS` - `missing-function-docstring`
+  disabled (a comment above each function is the code's documentation)
 - The tests run on the CPU only, fast, with no network: tiny synthetic corpora and models
   (`train/src/tests/helpers.py`), temp directories, and mocks for the downloads, the GPU, the listener models, and the
-  subprocesses that aren't the repository's own Node tools. `# pragma: no cover` marks only the Apple GPU's (MPS, Metal)
-  paths.
+  subprocesses - the repository's Node tools too (the tests never run node). The parity checks
+  (`train/src/tests/parity.py`) test the Python port against `lib/`'s outputs of their inputs: `make parity`
+  (`tools/parity.js`) builds the outputs (`build/parity-outputs.json`) of the committed inputs
+  (`test/parity-inputs.json`), which each check compares with its own - after a change to a check's inputs (or the
+  export format, the export checks' models), rewrite them (`PARITY_WRITE=1 make -C train test`). `# pragma: no cover`
+  marks only the Apple GPU's (MPS, Metal) paths.
 - The test environment (`train/build/venv/`) installs `train/pyproject.toml`'s dependencies - pinned as
   `requirements/nn.txt` pins them (`tests/test_package.py` checks); `make train` uses `build/venv-*` and
   `PYTHONPATH=train/src`.

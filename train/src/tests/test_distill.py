@@ -607,7 +607,17 @@ class TestEvaluation(DistillCase):
         module_path = os.path.join(self.root, 'voiceModel.js')
         with open(module_path, 'w', encoding='utf-8') as file:
             file.write(text)
-        with unittest.mock.patch.object(distill.panel, 'score_model', side_effect=self.score_model):
+
+        # (nn/js/unpack.js - its export)
+        def unpack(command, check):
+            self.assertEqual((command[:3], check), (['node', os.path.join(ROOT, 'nn', 'js', 'unpack.js'), module_path], True))
+            manifest, weights = helpers.unpack_module(command[2])
+            with open(command[3] + '.json', 'w', encoding='utf-8') as file:
+                json.dump(manifest, file)
+            with open(command[3] + '.bin', 'wb') as file:
+                file.write(weights)
+        with unittest.mock.patch.object(distill.panel, 'score_model', side_effect=self.score_model), \
+                unittest.mock.patch.object(distill.subprocess, 'run', side_effect=unpack):
             result = distill.evaluate_model('baseline', module_path, config, reference={'speakers': {}}, whisper_workers=2)
         self.assertEqual(result['checkpoint'], module_path)
         self.assertIsNone(result['step'])
@@ -616,8 +626,9 @@ class TestEvaluation(DistillCase):
         self.assertEqual(result['size']['moduleBytes'], len(text.encode('utf-8')))
         self.assertEqual(result['size']['binBytes'], os.path.getsize(os.path.join(export_dir, 'model.bin')))
         self.assertEqual(result['panel']['mos'], 3.5)
-        result = distill.evaluate_module('baseline', module_path, config, None, False, 2,
-                                         os.path.join(distill.DISTILL_DIR, 'eval', 'baseline'), time.time())
+        with unittest.mock.patch.object(distill.subprocess, 'run', side_effect=unpack):
+            result = distill.evaluate_module('baseline', module_path, config, None, False, 2,
+                                             os.path.join(distill.DISTILL_DIR, 'eval', 'baseline'), time.time())
         self.assertNotIn('panel', result)
 
     def write_export(self, name):

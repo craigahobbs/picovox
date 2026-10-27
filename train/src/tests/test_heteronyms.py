@@ -18,6 +18,7 @@ import soundfile
 
 from picovox_train import heteronyms
 
+from . import data_fixtures
 from .helpers import captured
 
 
@@ -61,6 +62,11 @@ def voiced_audio(seconds=1.2, silence_at=0.9, rate=24000):
 
 
 class TestHeteronyms(unittest.TestCase):
+
+    # The fake acoustic analysis
+    @classmethod
+    def setUpClass(cls):
+        cls.enterClassContext(data_fixtures.fake_modules(parselmouth=data_fixtures.ANALYSIS))
 
     def setUp(self):
         self.directory = tempfile.mkdtemp()

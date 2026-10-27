@@ -139,6 +139,11 @@ class TestPool(unittest.TestCase):
 
 class TestBuild(unittest.TestCase):
 
+    # The fake acoustic analysis
+    @classmethod
+    def setUpClass(cls):
+        cls.enterClassContext(data_fixtures.fake_modules(parselmouth=data_fixtures.ANALYSIS))
+
     def test_build(self):
         with tiny_pool() as (directory, pool_path), helpers.captured() as (stdout, _):
             out = os.path.join(directory, 'multi')
@@ -322,7 +327,9 @@ class TestVerifyTokens(unittest.TestCase):
     def test_verify_tokens(self):
         with tempfile.TemporaryDirectory() as directory, helpers.captured() as (stdout, _):
             helpers.write_corpus(directory)
-            with unittest.mock.patch.object(multi, 'OUT_DIR', directory):
+            # (lib/tokens.js - the front end's tokens - the parity check's)
+            with unittest.mock.patch.object(multi, 'OUT_DIR', directory), \
+                    unittest.mock.patch.object(data, 'js_tokenize', side_effect=lambda texts: [frontend.tokenize(text) for text in texts]):
                 status = multi.verify_tokens_command(argparse.Namespace(out=None, jobs=1))
         self.assertEqual(status, 0)
         texts = len(set(helpers.TEXTS[:5]))

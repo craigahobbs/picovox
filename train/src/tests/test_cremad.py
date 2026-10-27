@@ -447,6 +447,11 @@ class TestAlignment(unittest.TestCase):
 
 class TestBuild(unittest.TestCase):
 
+    # The fake acoustic analysis
+    @classmethod
+    def setUpClass(cls):
+        cls.enterClassContext(data_fixtures.fake_modules(parselmouth=data_fixtures.ANALYSIS))
+
     # The build with a phone of one clip given no frames
     def run_build(self, args):
         real = cremad.process_clip

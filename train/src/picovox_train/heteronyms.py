@@ -288,13 +288,13 @@ def difference(first, majority):
 
 # Measure an utterance - its target tokens' formants or voiced share, and its other vowels' formants (the references)
 def measure(task):
-    import parselmouth  # pylint: disable=import-outside-toplevel
+    import parselmouth  # pylint: disable=import-outside-toplevel, import-error
     rel, sex, wanted = task
     subset, speaker, chapter, name = rel.split(os.sep)
     wav = os.path.join(AUDIO, subset, speaker, chapter, name[:-4] + '.wav')
     if not os.path.exists(wav):
         return None
-    sound = parselmouth.Sound(wav)  # pylint: disable=c-extension-no-member # (a compiled module pylint can't inspect)
+    sound = parselmouth.Sound(wav)
     formant = sound.to_formant_burg(time_step=0.005, max_number_of_formants=5, maximum_formant=5500 if sex == 'F' else 5000)
     pitch = None
     phones = read_lab(os.path.join(LABELS, 'phone', rel))

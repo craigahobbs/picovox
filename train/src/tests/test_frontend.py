@@ -6,15 +6,15 @@
 import json
 import os
 import runpy
-import subprocess
 import sys
 import tempfile
 import unittest
 import unittest.mock
 import warnings
 
-from picovox_train import ROOT, frontend
+from picovox_train import frontend
 
+from . import parity
 from .helpers import captured
 
 
@@ -333,12 +333,10 @@ class TestFrontend(unittest.TestCase):
         self.assertEqual(frontend.phone_token({'ph': 'K', 'stress': None}), 'K')
 
     def test_tokenize_javascript(self):
-        # The front end tokenizes as lib/tokens.js does (nn/js/tokenizeLines.js - the package's G2P network and context
-        # network)
-        process = subprocess.run(['node', os.path.join(ROOT, 'nn', 'js', 'tokenizeLines.js')],
-                                 input=''.join(json.dumps(text) + '\n' for text in TEXTS), capture_output=True, text=True,
-                                 check=True, cwd=ROOT)
-        expected = [json.loads(line) for line in process.stdout.splitlines()]
+        # The front end tokenizes as lib/tokens.js does (the parity check - tools/parity.js - with the package's G2P network
+        # and context network)
+        parity.inputs(self, 'tokenize', {'texts': TEXTS})
+        expected = parity.outputs('tokenize')
         self.assertEqual(len(expected), len(TEXTS))
         for text, js_result in zip(TEXTS, expected):
             self.assertEqual(frontend.tokenize(text), js_result, text)
