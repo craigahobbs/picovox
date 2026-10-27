@@ -19,7 +19,7 @@ import torch
 
 from picovox_train import ROOT, context, g2p, g2pmodel
 
-from . import data_fixtures
+from . import data_fixtures, helpers
 from .helpers import captured
 
 
@@ -536,21 +536,20 @@ class TestContext(unittest.TestCase):
         plain = tiny_g2p()
         torch.save({'config': plain.config, 'state': plain.state_dict()}, self.path('init.pt'))
         config = {'alpha': 0.5, 'uniform': 0.1, 'unknown': 0.0, 'model': {'embed': 4, 'hidden': 4},
-                  'stages': [{'name': 'one'}, {'name': 'focus', 'relabel': 'data/nn/g2p-relabel.json'}]}
+                  'stages': [{'name': 'one'}, {'name': 'focus', 'relabel': 'train/data/g2p-relabel.json'}]}
         config_path = self.path('train.json')
-        with open(config_path, 'w', encoding='utf-8') as file:
-            json.dump({'g2p': config}, file)
         relabels = []
 
         def load_data(relabel):
             relabels.append(relabel)
             return data
         log_path = self.path('train.log')
-        with unittest.mock.patch.object(g2p, 'load_data', load_data), captured():
+        with unittest.mock.patch.object(g2p, 'load_data', load_data), helpers.json_files(g2p, {config_path: {'g2p': config}}), \
+                captured():
             self.assertEqual(context.main(['train-g2p', '--labels', self.write_labels(), '--init', self.path('init.pt'),
                                            '--out', self.path('g2p.pt'), '--config', config_path, '--settings', json.dumps(G2P_TINY),
                                            '--log', log_path]), 0)
-        self.assertEqual(relabels, [os.path.join(ROOT, 'data/nn/g2p-relabel.json')])
+        self.assertEqual(relabels, [os.path.join(ROOT, 'train/data/g2p-relabel.json')])
         checkpoint = torch.load(self.path('g2p.pt'), weights_only=False)
         self.assertEqual(checkpoint['config']['readings'], context.READINGS)
         self.assertEqual(checkpoint['settings']['steps'], 3)

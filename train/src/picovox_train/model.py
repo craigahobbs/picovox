@@ -58,7 +58,7 @@ MULTI_CONFIG = {
     'decoderLayers': 6,
     'decoderKernel': 9,        # depthwise convolution kernel in the decoder (10 ms frames)
     'subframes': 2,            # parameter frames (5 ms) per decoder frame (10 ms)
-    'speakers': 328,           # the speaker table's rows (data/nn/speakers.json ids, then the style corpus's actors)
+    'speakers': 328,           # the speaker table's rows (train/data/speakers.json ids, then the style corpus's actors)
     'styleDim': 8,             # the style embedding's width
     'jitter': 0.005,
     'shimmer': 0.02,

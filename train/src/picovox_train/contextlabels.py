@@ -5,31 +5,30 @@
 The heteronym labels - for the G2P network's reading input and ambiguity head and the context network (context.py):
 which words have more than one reading the neighboring words decide, their readings in the G2P's order, and labeled
 examples of each reading in context. Training-time only: the app has no word list - the G2P's ambiguity head says when
-to ask the context network. The commands (each with PYTHONPATH=train/src; tag in build/venv-pos - spaCy,
-requirements/pos.txt - the others in build/venv-nn):
+to ask the context network. The commands (each with PYTHONPATH=train/src):
 
-    build/venv-nn/bin/python -B -m picovox_train.contextlabels books                   # 0. the recipe's books (pinned - books.py)
-    build/venv-nn/bin/python -B -m picovox_train.contextlabels aligned --out DIR [-j]  # 1. the aligned readings (LibriTTS-R MFA labels)
-    build/venv-pos/bin/python -B -m picovox_train.contextlabels tag --out DIR [-j]     # 2. part-of-speech tags
-    build/venv-nn/bin/python -B -m picovox_train.contextlabels labels --out DIR        # 3. the words, readings, and examples -> labels.json
+    build/venv-train/bin/python -B -m picovox_train.contextlabels books                  # 0. the recipe's books (pinned - books.py)
+    build/venv-train/bin/python -B -m picovox_train.contextlabels aligned --out DIR [-j] # 1. the aligned readings (LibriTTS-R MFA)
+    build/venv-train/bin/python -B -m picovox_train.contextlabels tag --out DIR [-j]     # 2. part-of-speech tags
+    build/venv-train/bin/python -B -m picovox_train.contextlabels labels --out DIR       # 3. the labels -> labels.json
 
 (-j: the worker processes - aligned's utterances and tag's books are independent; the outputs are the same for any -j.)
 
-The label sources (data/nn/context-labels.json is the curated part):
+The label sources (train/data/context-labels.json is the curated part):
 
 1. Aligned readings - every LibriTTS-R utterance with MFA labels: each token of a candidate word the aligner matched to a
    dictionary variant (readings.py), in its sentence. The speaker's reading, heard in the audio.
-2. Silver readings - Project Gutenberg books (pinned texts - books.py, data/nn/books.json) tagged for part of speech
+2. Silver readings - Project Gutenberg books (pinned texts - books.py, train/data/books.json) tagged for part of speech
    (training time only), each candidate token's tag mapped to a reading (the word's own mapping, else its family's -
    the noun/verb stress pairs, the -ate words, the S/Z words), only for the words whose mapping agrees with their
    aligned readings (the audio) on at least MIN_AGREEMENT of at least MIN_VALIDATE tokens.
-3. Seeds - hand-labeled sentences (data/nn/context-labels.json "seeds") for the sense heteronyms (lead the metal, tear, bow,
+3. Seeds - hand-labeled sentences (train/data/context-labels.json "seeds") for the sense heteronyms (lead the metal, tear, bow,
    bass), the readings the dictionary lacks (does the deer, row the quarrel, house the verb), and the pairs whose tag
    mapping the audio doesn't validate (use, close, separate, increase, ...), and collocations
    ("collocations": a neighboring word that fixes the reading, reviewed by hand) over the books.
 
-Held out: the regression set's sentences (data/nn/heteronyms-test.json), 10% of the aligned speakers (by a hash), and
-two books. The settings are data/nn/train.json's context.labels.
+Held out: the regression set's sentences (train/data/heteronyms-test.json), 10% of the aligned speakers (by a hash), and
+two books. The settings are train/data/train.json's context.labels.
 
 The transfer windows - unlabeled: the ambiguous words' other windows in the books (not the held-out books), up to
 "maxTransfer" a word - are where the context network's teachers' mean probabilities are distilled into it (context.py).
@@ -45,17 +44,17 @@ import re
 import sys
 
 from .frontend import context_sequence, text_items
-from . import RECIPE_PATH, ROOT, books, heteronyms
+from . import RECIPE_PATH, ROOT, books, heteronyms, read_json
 from . import readings as readings_module
 
 
-SPEC_PATH = os.path.join(ROOT, 'data', 'nn', 'context-labels.json')
-TEST_PATH = os.path.join(ROOT, 'data', 'nn', 'heteronyms-test.json')
+SPEC_PATH = os.path.join(ROOT, 'train', 'data', 'context-labels.json')
+TEST_PATH = os.path.join(ROOT, 'train', 'data', 'heteronyms-test.json')
 LIBRITTS_DIR = os.path.join(ROOT, 'downloads', 'corpora', 'libritts_r', 'LibriTTS_R')
 LABEL_DIR = os.path.join(ROOT, 'downloads', 'corpora', 'libritts_label', 'lab', 'phone')
 
 
-# The recipe's label settings - data/nn/train.json's context.labels (and the context network's window)
+# The recipe's label settings - train/data/train.json's context.labels (and the context network's window)
 def load_settings(path=RECIPE_PATH):
     with open(path, encoding='utf-8') as file:
         context = json.load(file)['context']
@@ -95,7 +94,7 @@ NOUN_TAGS = {'NN', 'NNS'}
 VERB_TAGS = {'VB', 'VBP', 'VBZ', 'VBD', 'VBN', 'VBG'}
 
 
-# The curated spec - data/nn/context-labels.json
+# The curated spec - train/data/context-labels.json
 def load_spec(path=SPEC_PATH):
     with open(path, encoding='utf-8') as file:
         return json.load(file)
@@ -339,7 +338,7 @@ _TAGGER = None
 
 # Set a tagging worker's spaCy pipeline (the part-of-speech tagger - en_core_web_sm) and the candidate words
 def set_tagger(words):
-    import spacy  # pylint: disable=import-outside-toplevel,import-error # (build/venv-pos only - not the test environment's)
+    import spacy  # pylint: disable=import-outside-toplevel,import-error # (build/venv-train only - not the test environment's)
     global _TAGGER  # pylint: disable=global-statement
     _TAGGER = (spacy.load('en_core_web_sm', disable=['parser', 'ner', 'lemmatizer']), words)
 
@@ -402,8 +401,7 @@ def tag_command(args):
 
 # The held-out examples' windows - the regression set's
 def regression_windows():
-    with open(TEST_PATH, encoding='utf-8') as file:
-        items = json.load(file)
+    items = read_json(TEST_PATH)
     windows = set()
     for item in items:
         sequence = context_sequence(text_items(item['text']))

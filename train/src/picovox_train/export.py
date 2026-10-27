@@ -3,12 +3,12 @@
 
 """
 Export - a trained model (an trainmulti.py or distill.py checkpoint) to the browser's format, <out>/<voice>.bin
-and <out>/<voice>.json (default data/nn/), which lib/model.js loads (and package.py packages as a module):
+and <out>/<voice>.json (default train/data/), which lib/model.js loads (and package.py packages as a module):
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.export build/nn/runs/multi-b/best.pt --voice multi
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.export build/nn/runs/multi-b/best.pt --voice multi
 
 The multi-speaker, multi-style model (model.py's MultiModel) exports whole: its speaker table (a row per speaker -
-the readers' data/nn/speakers.json ids, then the emotional corpus's actors), its style table (model.py's
+the readers' train/data/speakers.json ids, then the emotional corpus's actors), its style table (model.py's
 STYLE_NAMES; neutral is the zero vector), and its channel equalizers (eq_table, dB, a row per speaker, float32); the
 manifest lists the speakers (id, key, sex, corpus, role) and the styles, so lib/model.js can blend speakers and
 scale styles.
@@ -42,7 +42,7 @@ from .data import DATA_DIR, ArcticData
 from .model import STYLE_NAMES, MultiModel, core_parameter_count, parameter_count
 
 
-OUT_DIR = os.path.join(ROOT, 'data', 'nn')
+OUT_DIR = os.path.join(ROOT, 'build', 'export')
 FORMAT_VERSION = 1
 
 
@@ -113,7 +113,7 @@ def training_token_counts(state):
 # The multi-speaker model's speaker list - [{id, key, sex, corpus, role ('reader' - the American reader pool, or
 # 'style' - an actor of the emotional corpus), and for readers the reader's name, median F0, and UTMOS}]
 def speaker_list(state):
-    with open(os.path.join(ROOT, 'data', 'nn', 'speakers.json'), encoding='utf-8') as file:
+    with open(os.path.join(ROOT, 'train', 'data', 'speakers.json'), encoding='utf-8') as file:
         readers = {speaker['key']: speaker for speaker in json.load(file)['speakers']}
     cremad = ArcticData(os.path.join(DATA_DIR, 'cremad')).index['speakers']
     out = []
@@ -121,7 +121,7 @@ def speaker_list(state):
         if key in readers:
             reader = readers[key]
             if reader['id'] != index:
-                raise ValueError(f'speaker {key}: table row {index} is not its data/nn/speakers.json id {reader["id"]}')
+                raise ValueError(f'speaker {key}: table row {index} is not its train/data/speakers.json id {reader["id"]}')
             out.append({'id': index, 'key': key, 'sex': reader['sex'], 'corpus': reader['source'], 'role': 'reader',
                         'reader': reader.get('reader'), 'medianF0': reader.get('medianF0'), 'utmos': reader.get('utmos')})
         else:

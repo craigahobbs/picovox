@@ -475,7 +475,7 @@ class TestBuild(unittest.TestCase):
                 self.assertEqual(json.loads(file.read())['sentence'], 'DFA')
         self.assertEqual(run_stale.call_count, 1)
         self.assertEqual(run.call_count, 1)
-        self.assertEqual(run.call_args.args[0][0], os.path.join(cremad.ROOT, 'build', 'venv-listeners', 'bin', 'python'))
+        self.assertEqual(run.call_args.args[0][0], os.path.join(cremad.ROOT, 'build', 'venv-train', 'bin', 'python'))
         self.assertEqual(run.call_args.args[0][5:], ['1002_TIE_NEU_XX=DFA'])
         self.assertEqual(run.call_args.kwargs['env']['PYTHONPATH'], cremad.SOURCE_DIR)
         self.assertEqual(run_again.call_count, 0)

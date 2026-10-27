@@ -6,8 +6,8 @@ The step-0 check - the multi-speaker trainer's losses on fixed batches, from a f
 float hex strings), so two versions of the code can be compared bit for bit. It imports the package from the current
 directory's train/src, so the same file checks another tree (run it with that tree as the working directory):
 
-    build/venv-nn/bin/python -B train/src/picovox_train/stepcheck.py --init build/nn/runs/multi-a/step-15000.pt --out a.json
-    (cd ../baseline && ../worktree/build/venv-nn/bin/python -B ../worktree/train/src/picovox_train/stepcheck.py ... --out b.json)
+    build/venv-train/bin/python -B train/src/picovox_train/stepcheck.py --init build/nn/runs/multi-a/step-15000.pt --out a.json
+    (cd ../baseline && ../worktree/build/venv-train/bin/python -B ../worktree/train/src/picovox_train/stepcheck.py ... --out b.json)
 
 Each batch is a few validation utterances (readers, and the emotional corpus when it is built) with fixed crops and
 noise seeds; the model runs in eval mode (no dropout) and in train mode (dropout, seeded). The losses are trainmulti.py's

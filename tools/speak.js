@@ -9,7 +9,7 @@
 //
 //     node tools/speak.js -m build/voice "Hello, world." -o hello.wav [-r 44100] [-s seed] [--params out.json] [--rate 1]
 //     node tools/speak.js -m build/voice --batch list.json    # [{text, wav, params, seed, speaker, style, rate}, ...]
-//     node tools/speak.js -m build/voice "Hello." -o hello.wav --speaker 5            # a speaker id (data/nn/speakers.json)
+//     node tools/speak.js -m build/voice "Hello." -o hello.wav --speaker 5            # a speaker id (train/data/speakers.json)
 //         [--blend '{"5": 0.6, "12": 0.4}']                                        # or a blend
 //         [--style happy --intensity 0.7] [--style '{"happy": 0.5, "sad": 0.2}']   # an emotion, or a blend
 //

@@ -1,4 +1,4 @@
-// The training dashboard's make train model (no DOM) - the stage graph (data/nn/train-stages.json) and a run's
+// The training dashboard's make train model (no DOM) - the stage graph (train/data/train-stages.json) and a run's
 // bookkeeping ($(TRAIN_DIR)/stages.jsonl, util.log) to each stage's state, the forecast (the
 // critical path and the ETA), the utilization samples, and the listening samples by model
 
@@ -255,7 +255,7 @@ export function forecast(manifest, states, remaining, now) {
 
 
 // The listening samples by model - [{key, stage, status, samples}] for each model with a samples stage in the manifest
-// (data/nn/train-stages.json's samples - teacher-a, teacher-b, student, polish), in the order of the training stages they
+// (train/data/train-stages.json's samples - teacher-a, teacher-b, student, polish), in the order of the training stages they
 // follow (the samples key is the training stage's name), the reference (the shipped model - key reference) first. stage is
 // the samples stage, status its state (done when its samples are in the index - $(TRAIN_DIR)/samples/index.json,
 // tools/trainsamples.js), and samples its index entries ([] until rendered). A model whose samples stage isn't in the

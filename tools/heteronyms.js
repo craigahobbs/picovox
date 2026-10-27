@@ -1,4 +1,4 @@
-// Heteronym and names regression check - the sentences of data/nn/heteronyms-test.json and data/nn/names-test.json through
+// Heteronym and names regression check - the sentences of train/data/heteronyms-test.json and train/data/names-test.json through
 // the package's front end (lib/lexicon.js textToPhrases with the G2P network as the pronouncer), each expected reading
 // scored: right when the word's phones are one of the reading's variants (or match one without stress and no rejected
 // variant's). Kinds: "default" (the reading a context-free G2P should give), "context" (another reading - needs the
@@ -91,7 +91,7 @@ async function main() {
     const {g2pModel} = await import(modulePath ? pathToFileURL(resolve(modulePath)).href : '../lib/models/g2pModel.js');
     setPronouncer(await loadG2p(g2pModel));
     const items = ['heteronyms-test.json', 'names-test.json'].flatMap(
-        (name) => JSON.parse(readFileSync(new URL(`../data/nn/${name}`, import.meta.url), 'utf8'))
+        (name) => JSON.parse(readFileSync(new URL(`../train/data/${name}`, import.meta.url), 'utf8'))
     );
     const {kinds, misses} = scoreHeteronyms(items);
     const kindMinimums = {

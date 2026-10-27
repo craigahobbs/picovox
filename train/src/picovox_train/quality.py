@@ -5,12 +5,12 @@
 Voice quality measures - each of the package's voices, and each of their readers synthesized, measured against the
 readers' own recordings (the voices' tinniness and warble, 2026-10-23):
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.quality measure --out build/quality \\
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.quality measure --out build/quality \\
         [--per-reader 16] [--edits '{"add": {"shelf": -5}}'] [-j 8]
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.quality report build/quality/results.json
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.quality report build/quality/results.json
 
 measure renders each voice over the panel texts (tools/panel-texts.json) and each of the voices' readers over their
-held-out utterances (data/nn/multi-split.json's test, then val, then training utterances to --per-reader) with the
+held-out utterances (train/data/multi-split.json's test, then val, then training utterances to --per-reader) with the
 package (tools/renderLines.js - --edits are frame edits, for an experiment), and measures them and the readers'
 recordings (downloads/corpora) in voiced frames (Praat's pitch):
 
@@ -225,9 +225,9 @@ def render(jobs, processes):
 
 def measure_command(args):
     from . import multi  # pylint: disable=import-outside-toplevel
-    with open(os.path.join(ROOT, 'data', 'nn', 'speakers.json'), encoding='utf-8') as file:
+    with open(os.path.join(ROOT, 'train', 'data', 'speakers.json'), encoding='utf-8') as file:
         speakers = {speaker['key']: speaker for speaker in json.load(file)['speakers']}
-    with open(os.path.join(ROOT, 'data', 'nn', 'multi-split.json'), encoding='utf-8') as file:
+    with open(os.path.join(ROOT, 'train', 'data', 'multi-split.json'), encoding='utf-8') as file:
         split_file = json.load(file)
     split = {key: list(split_file['test'].get(key, [])) + list(split_file['val'].get(key, []))
              for key in set(split_file['test']) | set(split_file['val'])}

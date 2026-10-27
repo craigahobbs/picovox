@@ -1,0 +1,18 @@
+# make train's environment (picovox_train) - build/venv-train (make build/venv-train.build); Python 3.12 through 3.14
+#   The training: PyTorch with MPS, soxr for resampling the corpora, and Praat (parselmouth) for the auxiliary F0,
+#   voicing, and formant tracks (WAV files are read with the standard library - picovox_train/wav.py; the corpus
+#   download, picovox_train/corpora.py, needs only the standard library)
+torch==2.14.1
+numpy==2.5.4
+soxr==1.1.0
+praat-parselmouth==0.4.7
+#   The listener models (picovox_train/listeners.py): UTMOS22 strong (naturalness MOS) through torch.hub
+#   tarepan/SpeechMOS (which needs torchaudio), ECAPA-TDNN speaker embeddings (speechbrain/spkrec-ecapa-voxceleb), and
+#   the CREMA-D aligner's wav2vec2 phoneme recognizer (transformers - picovox_train/cremad.py align)
+torchaudio==2.11.0
+speechbrain==1.1.2
+transformers==5.20.2
+huggingface_hub==2.2.0
+#   Part-of-speech tagging for the heteronym labels (picovox_train/contextlabels.py tag)
+spacy==3.8.16
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl

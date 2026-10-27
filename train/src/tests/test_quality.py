@@ -159,7 +159,7 @@ class TestMeasure(unittest.TestCase):
                 path = os.path.join(directory, f'rec{number}.wav')
                 write_wav(path, bright(0.6, 16000, f0=180), 16000)
                 recordings.append(path)
-            with open(os.path.join(quality.ROOT, 'data', 'nn', 'multi-split.json'), encoding='utf-8') as file:
+            with open(os.path.join(quality.ROOT, 'train', 'data', 'multi-split.json'), encoding='utf-8') as file:
                 held_out = json.load(file)['test']['arctic-slt'][:2]
             candidates = {'arctic-slt': {'utterances': [{'sentence': sentence, 'text': 'Hello.', 'wav': wav}
                                                         for sentence, wav in zip(held_out, recordings)]}}

@@ -9,7 +9,7 @@ variant of another reading than the front end's - the speaker's reading, heard i
 S against Z (the aligner's word-final voicing choice is unreliable: use, close, excuse), where the front end's is kept.
 
     # a build's heteronym tokens against the aligner
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.readings check --out DIR
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.readings check --out DIR
 
 Readings: two variants are different readings when they differ lexically (a stressed vowel's quality; the primary
 stress moving with a quality change), by a consonant (close S/Z), by the primary stress moving alone (the noun/verb
@@ -26,15 +26,13 @@ import argparse
 import difflib
 import json
 import os
-import re
 import sys
 
-from . import ROOT, data, heteronyms
+from . import corpora, data, heteronyms
 from .frontend import BOUNDARIES, FUNCTION_WORDS, text_to_phrases
 from .heteronyms import VOWELS, base, edit_ops, read_lab
 
 
-DICTIONARY_PATH = os.path.join(ROOT, 'data', 'cmudict.dict')
 
 # The share of a build's heteronym tokens that may still disagree with the aligner (readings check fails above it;
 # multi build reports it)
@@ -86,17 +84,13 @@ def readings_of(variants):
 
 
 # Every dictionary word's variants (phone strings, dictionary order, without repeats)
-def read_variants(path=DICTIONARY_PATH):
+def read_variants():
     variants = {}
-    with open(path, encoding='utf-8') as file:
-        for line in file:
-            content = line.split('#')[0].strip()
-            if content and not content.startswith(';;;'):
-                word, *phones = content.split()
-                word = re.sub(r'\(\d+\)$', '', word)
-                phones = ' '.join(phones)
-                if phones not in variants.setdefault(word, []):
-                    variants[word].append(phones)
+    for word, pronunciations in corpora.read_dictionary().items():
+        variants[word] = []
+        for phones in pronunciations:
+            if ' '.join(phones) not in variants[word]:
+                variants[word].append(' '.join(phones))
     return variants
 
 

@@ -11,7 +11,7 @@ import process from 'node:process';
 
 // Parse the command line - {stage, checkpoint, model, run, out, settings}
 export function parseArgs(argv) {
-    const args = {'stage': null, 'checkpoint': null, 'model': null, 'run': null, 'out': null, 'settings': 'data/nn/train.json'};
+    const args = {'stage': null, 'checkpoint': null, 'model': null, 'run': null, 'out': null, 'settings': 'train/data/train.json'};
     const options = {'--stage': 'stage', '--checkpoint': 'checkpoint', '--model': 'model', '--run': 'run', '--out': 'out',
         '--settings': 'settings'};
     for (let ix = 0; ix < argv.length; ix++) {

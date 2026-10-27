@@ -96,12 +96,12 @@ class TestProvenance(unittest.TestCase):
             scores = os.path.join(directory, 'result.json')
             with open(scores, 'w', encoding='utf-8') as file:
                 json.dump({'panel': {'mos': 3.123456, 'wer': 2.5}}, file)
-            recipe = os.path.join(ROOT, 'data', 'nn', 'train.json')
+            recipe = os.path.join(ROOT, 'train', 'data', 'train.json')
             with unittest.mock.patch('subprocess.run', side_effect=run):
                 result = package.provenance(recipe, [data_dir + '/'], scores)
         self.assertEqual(result, {
             'commit': 'abc123', 'dirty': True,
-            'recipe': {'path': 'data/nn/train.json', 'sha256': package.file_sha256(recipe)},
+            'recipe': {'path': 'train/data/train.json', 'sha256': package.file_sha256(recipe)},
             'data': {'multi': hashlib.sha256(b'{}').hexdigest()},
             'scores': {'mos': 3.1235, 'wer': 2.5}
         })
@@ -155,9 +155,9 @@ class TestPackage(unittest.TestCase):
             output = os.path.join(self.root, 'out', f'voiceModel-{min_saving}.js')
             with helpers.captured() as (stdout, _), unittest.mock.patch.object(package, 'MIN_SAVING', min_saving), \
                     unittest.mock.patch.object(package, 'provenance', return_value={'commit': 'abc', 'dirty': False}) as provenance:
-                self.assertEqual(package.main([self.model_path, '-o', output, '--provenance', '--recipe', 'data/nn/train.json',
+                self.assertEqual(package.main([self.model_path, '-o', output, '--provenance', '--recipe', 'train/data/train.json',
                                                '--data', 'a', 'b', '--scores', 'result.json']), 0)
-            provenance.assert_called_once_with('data/nn/train.json', ['a', 'b'], 'result.json')
+            provenance.assert_called_once_with('train/data/train.json', ['a', 'b'], 'result.json')
             self.assertEqual(json.loads(stdout.getvalue())['output'], output)
             manifest, weights = helpers.unpack_module(output)
             with open(self.model_path + '.bin', 'rb') as original:

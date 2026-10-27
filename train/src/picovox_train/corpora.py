@@ -3,20 +3,23 @@
 
 """
 Download and unpack the human speech corpora used as calibration targets, idempotently, into downloads/corpora/ - and
-the listener panel's Whisper model (picovox_train/panel.py), into downloads/whisper/.
+the pinned files (FILES): the CMU Pronouncing Dictionary (the G2P's training data), into downloads/cmudict/, and the
+listener panel's Whisper model (picovox_train/panel.py), into downloads/whisper/.
 
-    build/venv-nn/bin/python -I train/src/picovox_train/corpora.py [--list] [--keep-archives] [name ...]
+    build/venv-train/bin/python -I train/src/picovox_train/corpora.py [--list] [--keep-archives] [name ...]
 
 The corpora (names): the labeled CMU ARCTIC US English speakers (arctic-<speaker>), the LibriTTS-R dev-clean audiobook
 and train-clean-100 subsets (libritts-r-dev-clean, libritts-r-train-clean-100), and the LibriTTSLabel forced alignments
-of LibriTTS (libritts-label-dev-clean, libritts-label-train-clean-100).
-With no names, all of them are fetched, and the Whisper model. A corpus already unpacked (or the model present) is
-skipped; an interrupted download resumes.
+of LibriTTS (libritts-label-dev-clean, libritts-label-train-clean-100); the files (names): cmudict, whisper.
+With no names, all of them are fetched. A corpus already unpacked (or a file present) is skipped; an interrupted
+download resumes; a file is checked against its pinned SHA-256 (a revised file fails the fetch, never trains).
 Downloads are sequential (one connection at a time) with a descriptive User-Agent.
 """
 
 import argparse
+import hashlib
 import os
+import re
 import shutil
 import sys
 import tarfile
@@ -39,9 +42,25 @@ ARCTIC_LICENSE = (
     'authors\' names are kept (the full text is in each 0.95 release\'s COPYING file)'
 )
 
-# The listener panel's Whisper model - whisper.cpp's base.en (picovox_train/panel.py)
-WHISPER_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin'
+# The pinned files - name: {url (at a fixed revision), path, sha256, description}: the CMU Pronouncing Dictionary
+# (cmusphinx/cmudict - its license, BSD-style, is the repository's LICENSE), and the listener panel's Whisper model
+# (whisper.cpp's base.en - picovox_train/panel.py)
+CMUDICT_PATH = os.path.join(ROOT, 'downloads', 'cmudict', 'cmudict.dict')
 WHISPER_MODEL = os.path.join(ROOT, 'downloads', 'whisper', 'ggml-base.en.bin')
+FILES = {
+    'cmudict': {
+        'url': 'https://raw.githubusercontent.com/cmusphinx/cmudict/0f8072f814306c5ee4fbf992ed853601b12c01f9/cmudict.dict',
+        'path': CMUDICT_PATH,
+        'sha256': '81917843c7f44ce2b094ac63873c2c7a4cf802040792c455ba3ca406891c3d22',
+        'description': 'The CMU Pronouncing Dictionary (cmusphinx/cmudict, 2024-12-17) - the G2P\'s training data'
+    },
+    'whisper': {
+        'url': 'https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en.bin',
+        'path': WHISPER_MODEL,
+        'sha256': 'a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002',
+        'description': 'Whisper base.en for whisper.cpp - the listener panel\'s intelligibility'
+    }
+}
 
 # The US English ARCTIC speakers with a 0.95 release's phone labels (per festvox.org/cmu_arctic): sex and notes
 ARCTIC_SPEAKERS = {
@@ -111,6 +130,25 @@ CORPORA['libritts-label-train-clean-100'] = {
                    'alignments of LibriTTS train-clean-100 (the same utterances as LibriTTS-R)',
     'license': 'No license stated by the repository - used here only locally, for measurement, and not redistributed'
 }
+
+# The CMU Pronouncing Dictionary's entries from its lines - {word: [pronunciation (a list of phones), ...]}: every listed
+# pronunciation in the dictionary's order ("word(2)" is the word's second; repeats kept), comments ("# ...", ";;;" lines)
+# skipped
+def parse_dictionary(lines):
+    entries = {}
+    for line in lines:
+        content = line.split('#')[0].strip()
+        if content and not content.startswith(';;;'):
+            word, *phones = content.split()
+            entries.setdefault(re.sub(r'\(\d+\)$', '', word), []).append(phones)
+    return entries
+
+
+# The downloaded dictionary's entries (g2p.py, readings.py, and heteronyms.py read it - the tests give their own)
+def read_dictionary():
+    with open(CMUDICT_PATH, encoding='utf-8') as file:
+        return parse_dictionary(file)
+
 
 # Print a progress line to stderr
 def log(message):
@@ -219,15 +257,24 @@ def fetch(name, keep_archives):
     return size
 
 
-# Fetch the Whisper model, unless it's present - returns its download size in bytes
-def fetch_whisper():
-    if os.path.exists(WHISPER_MODEL):
-        log('whisper: present')
+# Fetch a pinned file, unless it's present - its SHA-256 checked (a mismatch removes it and fails); returns its download
+# size in bytes
+def fetch_file(name):
+    item = FILES[name]
+    if os.path.exists(item['path']):
+        log(f'{name}: present')
         return 0
-    os.makedirs(os.path.dirname(WHISPER_MODEL), exist_ok=True)
-    log(f'whisper: downloading {WHISPER_URL}')
-    download(WHISPER_URL, WHISPER_MODEL)
-    return os.path.getsize(WHISPER_MODEL)
+    os.makedirs(os.path.dirname(item['path']), exist_ok=True)
+    log(f'{name}: downloading {item["url"]}')
+    download(item['url'], item['path'])
+    digest = hashlib.sha256()
+    with open(item['path'], 'rb') as file:
+        for chunk in iter(lambda: file.read(1 << 20), b''):
+            digest.update(chunk)
+    if digest.hexdigest() != item['sha256']:
+        os.remove(item['path'])
+        raise IOError(f'{name}: SHA-256 {digest.hexdigest()} is not the pinned {item["sha256"]}')
+    return os.path.getsize(item['path'])
 
 
 # Write downloads/corpora/README.md - each corpus's source, description, license, and unpacked size
@@ -237,7 +284,7 @@ def write_readme():
         '',
         'Human speech for calibrating the synthesizer\'s voices, fetched by `train/src/picovox_train/corpora.py`. This directory is',
         'gitignored - the corpora are not redistributed with PicoVox. Only small derived statistics are committed',
-        '(`data/nn/speakers.json`, `data/nn/cremad.json`).',
+        '(`train/data/speakers.json`, `train/data/cremad.json`).',
         ''
     ]
     for name, corpus in CORPORA.items():
@@ -272,28 +319,30 @@ def write_readme():
 
 # Command-line entry point
 def main():
-    parser = argparse.ArgumentParser(description='Download the speech calibration corpora into downloads/corpora/')
-    parser.add_argument('names', nargs='*', help='corpora to fetch (default: all, and the Whisper model)')
-    parser.add_argument('--list', action='store_true', help='list the corpora and exit')
+    parser = argparse.ArgumentParser(description='Download the corpora and the pinned files into downloads/')
+    parser.add_argument('names', nargs='*', help='corpora and files to fetch (default: all)')
+    parser.add_argument('--list', action='store_true', help='list the corpora and files and exit')
     parser.add_argument('--keep-archives', action='store_true', help='keep the downloaded archives')
     args = parser.parse_args()
     if args.list:
         for name, corpus in CORPORA.items():
             state = 'present' if os.path.exists(corpus['check']) else 'missing'
             print(f'{name:28s} {state:8s} {corpus["description"]}')
+        for name, item in FILES.items():
+            state = 'present' if os.path.exists(item['path']) else 'missing'
+            print(f'{name:28s} {state:8s} {item["description"]}')
         return
-    names = args.names or list(CORPORA)
-    unknown = [name for name in names if name not in CORPORA]
+    names = args.names or [*CORPORA, *FILES]
+    unknown = [name for name in names if name not in CORPORA and name not in FILES]
     if unknown:
         parser.error(f'unknown corpora: {", ".join(unknown)}')
-    os.makedirs(CORPORA_DIR, exist_ok=True)
     start = time.time()
     total = 0
     for name in names:
-        total += fetch(name, args.keep_archives)
-    if not args.names:
-        total += fetch_whisper()
-    write_readme()
+        total += fetch_file(name) if name in FILES else fetch(name, args.keep_archives)
+    if any(name in CORPORA for name in names):
+        os.makedirs(CORPORA_DIR, exist_ok=True)
+        write_readme()
     log(f'Downloaded {total / 1e6:.0f} MB in {time.time() - start:.0f} s')
 
 

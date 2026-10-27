@@ -574,7 +574,7 @@ const trainSamplesHelp = 'make train renders listening samples of each training 
     '(its own CPU stage, beside the next GPU stage): teacher A (its last checkpoint, which teacher B starts from), teacher B ' +
     '(its best - the distillation\'s teacher), the student (its best, before the polish), and the polished student (its ' +
     'best - the model the package stage packages, if it passes the gate). Each speaks the recipe\'s texts ' +
-    '(data/nn/train.json samples) in six of the training speakers\' voices, three female and three male, exactly as the ' +
+    '(train/data/train.json samples) in six of the training speakers\' voices, three female and three male, exactly as the ' +
     'package speaks (exported and quantized as the package stage exports it, its G2P network, 24 kHz, its gain). Beside each ' +
     'is the shipped model, ' +
     'lib/models/voiceModel.js, rendered the same way - so the new model can be judged by ear (make train installs ' +
@@ -594,7 +594,7 @@ async function renderTrainSamples() {
     }
     const samplesUrl = new URL(`${trainData.dir}/samples/`, rootUrl);
     const [result, recipeResult] = await Promise.all([fetchText(new URL('index.json', samplesUrl)),
-        fetchText(new URL('data/nn/train.json', rootUrl))]);
+        fetchText(new URL('train/data/train.json', rootUrl))]);
     let index;
     let texts;
     try {
@@ -709,7 +709,7 @@ async function renderTrainSamples() {
 
 
 // make train (the Train tab) - TRAIN_DIR (build/train, or the page's ?train=DIR - another checkout's or worktree's run),
-// its stages from data/nn/train-stages.json
+// its stages from train/data/train-stages.json
 let trainManifestText = null;
 let trainManifest = null;
 const trainRuns = new Map();
@@ -718,7 +718,7 @@ let trainSelectedRun = storageGet(trainRunKey);
 let trainData;
 
 
-// A run's planned stop - its data/nn/train.json section's (a dotted path, e.g. teacher.a) stop, else its steps
+// A run's planned stop - its train/data/train.json section's (a dotted path, e.g. teacher.a) stop, else its steps
 function recipeStop(recipe, path) {
     const section = path.split('.').reduce((value, key) => value?.[key], recipe);
     return section?.stop ?? section?.steps ?? null;
@@ -742,7 +742,7 @@ function lastMatch(texts, pattern) {
 async function loadTrain() {
     const dir = (new URLSearchParams(window.location.search).get('train') || 'build/train').replace(/\/$/, '');
     const dirUrl = new URL(`${dir}/`, rootUrl);
-    const manifestResult = await fetchText(new URL('data/nn/train-stages.json', rootUrl));
+    const manifestResult = await fetchText(new URL('train/data/train-stages.json', rootUrl));
     if (manifestResult === null) {
         return null;
     }
@@ -757,7 +757,7 @@ async function loadTrain() {
     const manifest = trainManifest;
     let recipe;
     try {
-        recipe = JSON.parse((await fetchText(new URL('data/nn/train.json', rootUrl)))?.text);
+        recipe = JSON.parse((await fetchText(new URL('train/data/train.json', rootUrl)))?.text);
     } catch {
         recipe = null;
     }
@@ -887,8 +887,8 @@ async function loadTrain() {
 
 // The explanations of the Train tab's sections
 const trainHelp = {
-    'summary': 'make train rebuilds the generated models (lib/models/) from the recipe, data/nn/train.json, one Make target ' +
-        'per stage (data/nn/train-stages.json lists them, their dependencies, and their expected minutes). The ETA ' +
+    'summary': 'make train rebuilds the generated models (lib/models/) from the recipe, train/data/train.json, one Make target ' +
+        'per stage (train/data/train-stages.json lists them, their dependencies, and their expected minutes). The ETA ' +
         'schedules the stages not done yet: each starts when the stages it needs finish (a GPU stage also when the GPU is ' +
         'free - the GPU stages run one at a time) and takes its expected time - a running training run, its remaining steps ' +
         'at its recent seconds per step. The critical path is the chain of stages that sets the ETA: its stages are ' +
@@ -904,7 +904,7 @@ const trainHelp = {
         'the mean CPU and GPU use while it ran. Stage events come from TRAIN_DIR/stages.jsonl.',
     'runs': 'The make train stages that train a network, each a run in TRAIN_DIR/runs/ - the teacher\'s stages A and B, ' +
         'the distilled student, and its polish. Select one for its curves (the Runs tab has every measurement\'s).',
-    'gates': 'The checks make train must pass: the heteronym relabeling reproduces data/nn/g2p-relabel.json; the ' +
+    'gates': 'The checks make train must pass: the heteronym relabeling reproduces train/data/g2p-relabel.json; the ' +
         'retrained G2P is identical to the committed lib/models/g2pModel.js (else within the recipe\'s tolerances) with ' +
         'its held-out context accuracy; the teacher and the student through the listener panel (UTMOS - naturalness, ' +
         '1-5; Whisper\'s word error rate; the speaker similarity to the teacher); and the gate, picovox_train.distill pick - the ' +
@@ -1040,7 +1040,7 @@ function buildTrain(manifest) {
 
     // The gates - each the stage that produces it
     const gateSpecs = [
-        {'key': 'heteronyms', 'title': 'Heteronym relabeling reproduces data/nn/g2p-relabel.json', 'stage': 'heteronyms'},
+        {'key': 'heteronyms', 'title': 'Heteronym relabeling reproduces train/data/g2p-relabel.json', 'stage': 'heteronyms'},
         {'key': 'g2p', 'title': 'G2P check - the retrained context G2P against lib/models/g2pModel.js', 'stage': 'g2p'},
         {'key': 'teacher', 'title': 'The teacher on the listener panel', 'stage': 'teacher-eval'},
         {'key': 'baseline', 'title': 'The shipped model on the listener panel (the gate\'s baseline)', 'stage': 'baseline-eval'},
@@ -1116,7 +1116,7 @@ function renderTrain(force = false) {
         return;
     }
     if (data === null) {
-        document.getElementById('trainFacts').textContent = 'no stage manifest (data/nn/train-stages.json)';
+        document.getElementById('trainFacts').textContent = 'no stage manifest (train/data/train-stages.json)';
         return;
     }
     if (trainBuilt !== trainManifestText) {

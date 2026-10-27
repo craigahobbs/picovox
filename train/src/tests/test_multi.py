@@ -16,11 +16,11 @@ import warnings
 
 import numpy
 
-from picovox_train import data, frontend, multi, readings
+from picovox_train import corpora, data, frontend, multi, readings
 from tests import data_fixtures, helpers
 
 
-# A speaker table row (data/nn/speakers.json's)
+# A speaker table row (train/data/speakers.json's)
 def table_row(row_id, key, accent=True):
     return {'id': row_id, 'key': key, 'accent': {'top': 'us', 'us': 0.9, 'canada': 0.05, 'votes': {'us': 9}} if accent else None,
             'pitchFloor': 75.0, 'pitchCeiling': 400.0, 'formantCeiling': 5000, 'erF3Ratio': 0.6 if accent else None,
@@ -137,6 +137,7 @@ class TestPool(unittest.TestCase):
         self.assertEqual(multi.table_paths('/tmp/out'), ('/tmp/out/speakers.json', '/tmp/out/multi-split.json'))
 
 
+@unittest.mock.patch.object(corpora, 'read_dictionary', lambda: helpers.DICTIONARY)
 class TestBuild(unittest.TestCase):
 
     # The fake acoustic analysis

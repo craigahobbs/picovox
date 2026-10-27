@@ -110,7 +110,7 @@ The built-in voices - `[{key, label, sex, description}]`, the default first:
 | `david` | David | male | A brisk, clear, matter-of-fact voice with a crisp tone for explanation and reportage. |
 | `thomas` | Thomas | male | A gentle, soft, slow voice with a dark, calm tone for poetry and quiet evenings. |
 
-The ten designed voices (`data/nn/voices.json`) are blends of two to four of the model's audiobook readers, with mild
+The ten designed voices (`test/voices.json`) are blends of two to four of the model's audiobook readers, with mild
 pitch, vocal-tract, and effort adjustments and their own speaking rate (the `rate` option multiplies it); on the
 listener panel's texts they score UTMOS 4.09-4.28 (the package's two voices 4.08 and 4.18). Every voice's source is 5
 dB darker than the network predicts it (`lib/synthesis.js` `sourceShelf`), and the package's two voices have a softer
@@ -248,7 +248,7 @@ book (Project Gutenberg and Standard Ebooks), read aloud by PicoVox in the brows
 ## Development
 
 This repository is the package (`lib/`, `test/`) and the training pipeline that makes its models (`train/`,
-`tools/`, `data/`, the paper in `paper/`). The package is developed with
+`tools/`, the paper in `paper/`). The package is developed with
 [javascript-build](https://github.com/craigahobbs/javascript-build#readme), and the training's Python code with
 [python-build](https://github.com/craigahobbs/python-build#readme):
 
@@ -267,13 +267,13 @@ The training pipeline is a Python package, `picovox_train` (`train/src/picovox_t
 below), and Node scripts (`tools/`); they use the package's modules but aren't part of it. `train/` is a
 python-build package of its own: its unit tests (`train/src/tests/`) run on the CPU in a few minutes, with tiny
 synthetic data and no network, in python-build's environment (`train/build/venv/`), which installs the package with the
-training's pinned PyTorch and numpy (`train/pyproject.toml`, the same versions as `requirements/nn.txt`). `make train`
-runs the package from its source (`PYTHONPATH=train/src`) in the training environments, `build/venv-<name>` from
-`requirements/<name>.txt` - `venv-nn` (PyTorch, soxr, Praat - and the corpus download, which needs only the standard
-library), `venv-listeners` (the listener models), and `venv-pos` (spaCy). A training module runs the same way by hand:
+training's pinned PyTorch and numpy (`train/pyproject.toml`, the same versions as `train/requirements.txt`). `make train`
+runs the package from its source (`PYTHONPATH=train/src`) in its environment, `build/venv-train` from
+`train/requirements.txt` - the training (PyTorch, soxr, Praat), the listener models, and spaCy (the corpus download needs
+only the standard library). A training module runs the same way by hand:
 
 ```sh
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke   # every training entry point, a few steps on the CPU
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.smoke   # every training entry point, a few steps on the CPU
 ```
 
 
@@ -299,7 +299,7 @@ NAME` times each under Node without a JIT (`--jitless` - the phone's speed withi
 another app (PicoShelf, with its `?timing&log=URL` timeline posted to `build/perf/devlog.jsonl`).
 
 `tools/speak.js` speaks with an exported model (`picovox_train.export CHECKPOINT --voice NAME` writes
-`data/nn/NAME.json` and `.bin`; `tools/unpack.js` makes one of the package's multi-speaker model), every word pronounced by the
+`train/data/NAME.json` and `.bin`; `tools/unpack.js` makes one of the package's multi-speaker model), every word pronounced by the
 G2P network as the package pronounces (`-r` rate, `-s` seed, `--params` the parameter frames, `--rate` the duration
 multiplier, `--batch` a list of items); `-m` also takes a packaged module (`lib/models/voiceModel.js`). The
 multi-speaker model takes a speaker (`--speaker`, `--blend`) and a style (`--style`, `--intensity`).
@@ -309,7 +309,7 @@ http.server`) and open http://localhost:8000/tools/dashboard/ (with `?train=DIR`
 another checkout's or worktree's; default `build/train`). It has three tabs (each linkable, e.g. `#listen`): Train,
 Listen, and Logs. Train is the `make train` run (the default tab while it runs): the run's state, its ETA and critical
 path; the CPU and GPU utilization over the run with each stage as a band (the GPU's idle time shaded,
-the forecast faded); every stage of `data/nn/train-stages.json` in collapsible groups - its state (waiting, queued for
+the forecast faded); every stage of `train/data/train-stages.json` in collapsible groups - its state (waiting, queued for
 the GPU, running, done, failed, stopped, or not in the run's make target, from `TRAIN_DIR/stages.jsonl`), its start,
 end, and time against the expected time, and its mean CPU and GPU use; the training runs (`TRAIN_DIR/runs/`, their
 `log.jsonl` and `train.log`) with charts of all their measurements - losses, validation, pitch error, and step times;
@@ -342,8 +342,8 @@ the renderings are scored with UTMOS, Whisper's WER, and the ECAPA speaker simil
 file out:
 
 ```sh
-make listeners                                              # build/venv-listeners from requirements/listeners.txt
-build/venv-listeners/bin/python -I train/src/picovox_train/listeners.py [--no-mos] [--no-embedding] [--device auto|cpu|mps] \
+make build/venv-train.build                                 # build/venv-train from train/requirements.txt
+build/venv-train/bin/python -I train/src/picovox_train/listeners.py [--no-mos] [--no-embedding] [--device auto|cpu|mps] \
     [--files-from list.txt|-] file.wav ...
 ```
 
@@ -356,8 +356,8 @@ GPU (MPS, the default on Apple silicon - about 3x the CPU, with the same scores)
 chunks. The models download on first use - about 1.5 GB, into `downloads/listeners/` (torch.hub, Hugging Face; like the corpora,
 `make clean` keeps them - `make superclean` removes them) - and later runs need no network.
 
-The environment is built with `python3` (3.14 here; 3.12 also works - `make listeners PYTHON_VENV=python3.12`). Its
-packages are pinned in `requirements/listeners.txt`: PyTorch 2.14, torchaudio 2.11 (UTMOS's), SpeechBrain 1.1,
+The environment is built with `python3` (3.14 here; 3.12 also works - `make build/venv-train.build PYTHON_VENV=python3.12`). Its
+packages are pinned in `train/requirements.txt`: PyTorch 2.14, torchaudio 2.11 (UTMOS's), SpeechBrain 1.1,
 transformers 5.20 (the CREMA-D aligner's wav2vec2), and soxr for resampling audio (WAV files are read with the
 standard library - `picovox_train/wav.py`). (The emotion2vec+ emotion recognizer, FunASR's - about 40 packages more -
 was the style experiments'; it's in git history.)
@@ -379,7 +379,7 @@ Speaker similarity: every human pair 0.0-0.48; halves of one human speaker's rec
 ## make train
 
 `make train` recreates the generated models - `lib/models/g2pModel.js` and `lib/models/voiceModel.js` - from a clean
-checkout, by one recipe, `data/nn/train.json` (every stage's settings and seeds): `make train-g2p` and `make
+checkout, by one recipe, `train/data/train.json` (every stage's settings and seeds): `make train-g2p` and `make
 train-voice` at once. Each model's training ends in its gate, with its module in `build/train/` (`g2pModel.js`,
 `voiceModel.js`) - `lib/models/` unchanged. The G2P is deterministic, so its gate is that it reproduces the committed
 module (identical below the comment header, else within the recipe's tolerances); the voice's gate is the listener
@@ -420,7 +420,7 @@ time (`picovox_train/gpulock.py` - two at once each run at about half speed) whi
 | Stage | Runs on | Needs |
 | --- | --- | --- |
 | corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D | network | |
-| data-multi - the readers' training data (the pool: `data/nn/speakers.json`) | CPU (every core) | corpora, `lib/models/g2pModel.js` |
+| data-multi - the readers' training data (the pool: `train/data/speakers.json`) | CPU (every core) | corpora, `lib/models/g2pModel.js` |
 | cremad-align, data-cremad - the emotional speech | GPU 2 min, CPU 1 min | corpora |
 | teacher-a, teacher-b - the teacher (`picovox_train.trainmulti --recipe teacher.a`, `teacher.b`) | GPU | the data |
 | teacher-eval - the teacher through the listener panel | CPU | teacher-b |
@@ -428,7 +428,7 @@ time (`picovox_train/gpulock.py` - two at once each run at about half speed) whi
 | baseline-eval - the shipped model through the panel, beside the student's GPU stages | CPU | teacher-eval |
 | student-eval - the panel and the gate (`picovox_train.distill pick --against baseline`: no worse than the shipped model) | CPU | polish, baseline-eval |
 | package - the voice's module, `build/train/voiceModel.js`, with its provenance | CPU | student-eval |
-| heteronyms - the relabeled words, checked to reproduce `data/nn/g2p-relabel.json` (the G2P network's input) | CPU, ~9 min | corpora (after data-multi) |
+| heteronyms - the relabeled words, checked to reproduce `train/data/g2p-relabel.json` (the G2P network's input) | CPU, ~9 min | corpora (after data-multi) |
 | g2p-network, context-labels, context-network, g2p - the G2P (the network; the heteronym labels from the pinned books; the context network and its cross-validation; the reading stage, the export, and the gate) | CPU - the network one core, ~30 min | corpora (the labels, after data-multi) |
 | samples-reference, samples-teacher-a, -teacher-b, -student, -polish - the listening samples | CPU, under a minute each | the shipped model (after data-multi); each stage's model |
 
@@ -441,7 +441,7 @@ scores. `python -m picovox_train.smoke` runs every stage's entry point for a few
 Each training stage's final model - teacher A's last checkpoint (which teacher B starts from), teacher B's best (the
 distillation's teacher), the student's best, and its polish's best (the model the package stage ships) - is rendered
 for listening as the stage finishes, in its own CPU stage beside the next GPU stage (`tools/trainsamples.js`): exported
-as the package stage exports it, it speaks `data/nn/train.json`'s `samples` texts (Moby-Dick's opening, a dialogue,
+as the package stage exports it, it speaks `train/data/train.json`'s `samples` texts (Moby-Dick's opening, a dialogue,
 and heteronyms) in six of the training speakers' voices (three female, three male) exactly as the package speaks a
 sentence (`lib/synthesis.js`, every word pronounced by the G2P network), and each sample is scored with UTMOS on the
 CPU. The shipped `lib/models/voiceModel.js` is rendered the same way, as the reference. The WAV files are
@@ -452,12 +452,12 @@ them, each beside the shipped model's.
 `TRAIN_DIR/stages.jsonl` and each command's output also in `TRAIN_DIR/logs/STAGE.log` (`tools/trainstage.sh` - the
 teacher's also in its run's `train.log`), and every 20 seconds, for the life of `make train`, the CPU busy %, the GPU
 utilization %, the memory used %, and the running stages in `TRAIN_DIR/util.log` (`tools/trainutil.sh`). The stages,
-their dependencies, and their expected times are `data/nn/train-stages.json` (`test/testTrainStages.js` keeps it in
+their dependencies, and their expected times are `train/data/train-stages.json` (`test/testTrainStages.js` keeps it in
 step with the Makefile). `make train` never removes anything; `make train-clean` removes `TRAIN_DIR` for a run from
 scratch.
 
 The books make train reads - the heteronym labels' 132 Project Gutenberg books and the distillation's 22 - are pinned:
-`data/nn/books.json` records each text (by its name in `build/nn/books/`, the recipe's `texts`) with its Gutenberg id
+`train/data/books.json` records each text (by its name in `build/nn/books/`, the recipe's `texts`) with its Gutenberg id
 and source URL, the SHA-256 and size of its bytes as fetched, the date it was pinned, its Gutenberg revision, and a
 [Wayback Machine](https://web.archive.org/) capture of the source URL with the same bytes, where one exists. Project
 Gutenberg revises its books in place and keeps no old revisions (pg2554 changed on 2026-10-16 and moved the context
@@ -501,22 +501,22 @@ for 28 minutes.
 
 Each retrain of the multi-speaker acoustic model ends the same way: train a big teacher, then distill small students
 from it and ship the smallest one that keeps the teacher's quality. `picovox_train/distill.py` runs that pipeline, with
-its settings in `data/nn/train.json`'s `distill` (the teacher, the distillation set, the training settings, the student
+its settings in `train/data/train.json`'s `distill` (the teacher, the distillation set, the training settings, the student
 ladder, the polish, the evaluation speakers, and the tolerance):
 
 ```sh
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill ladder                  # everything below, in order
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill targets                 # 1. the teacher's targets (about 10 minutes on the GPU)
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill train --student s64     # 2. each student of the ladder
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill polish --student s64    # 3. optional: a short fine-tune on the recordings
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill eval teacher s96 s64 s48 s32   # 4. each model through the browser path
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill pick                    # 5. speed, samples, and the smallest within tolerance
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.distill ladder                  # everything below, in order
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.distill targets                 # 1. the teacher's targets (about 10 minutes on the GPU)
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.distill train --student s64     # 2. each student of the ladder
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.distill polish --student s64    # 3. optional: a short fine-tune on the recordings
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.distill eval teacher s96 s64 s48 s32   # 4. each model through the browser path
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.distill pick                    # 5. speed, samples, and the smallest within tolerance
 ```
 
 1. **Targets** - sequence-level distillation in parameter space. The teacher speaks (tokens, speaker, style) to its
    durations (pauses included) and its 32 synthesizer parameters every 5 ms, as inference does, with no audio rendered.
    The inputs are the training utterances with their own speakers and styles, and every sentence of the recipe's 22
-   Project Gutenberg books (`distill.targets` `texts` - pinned texts, `data/nn/books.json` - in `build/nn/books/`;
+   Project Gutenberg books (`distill.targets` `texts` - pinned texts, `train/data/books.json` - in `build/nn/books/`;
    tokenized by `picovox_train/frontend.py`, split into sentences as inference splits text) spoken twice, each time by a random reader (8% an emotional-corpus actor, 10% a blend of two readers) in
    a neutral or, 30% of the time, an emotional style at a random intensity. The set goes to `build/nn/distill/targets/`
    (frames as float16).
@@ -524,7 +524,7 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill pick  
    speaker, style, and channel-equalizer tables are copied and frozen, so a voice designed as a blend of the teacher's
    speakers is the same voice in a student. A student runs with the teacher's durations (teacher forcing on its length
    regulator) and learns L1 on the normalized parameter frames plus the duration losses against the teacher's duration
-   outputs. The training (`data/nn/train.json`'s `distill.train`) is 12,000 steps of Muon on the hidden matrices
+   outputs. The training (`train/data/train.json`'s `distill.train`) is 12,000 steps of Muon on the hidden matrices
    (AdamW for the rest) with a warmup-stable-decay schedule - constant, then the last 25% cooled down by 1 - sqrt
    (`picovox_train/optim.py`). Runs go to `build/nn/runs/distill-<student>/`.
 3. **Polish** - `picovox_train/trainmulti.py`'s real-audio losses (the spectral loss through the differentiable
@@ -583,24 +583,24 @@ its weights bitwise - though its export and packaging from a checkpoint are.
 
 PicoVox pronounces every word with one small network, `lib/models/g2pModel.js` (`lib/g2p.js` runs it;
 `picovox_train/g2pmodel.py` is its bit-exact Python port, which pronounces the voice model's training data).
-`picovox_train/g2p.py` trains it, with the recipe in `data/nn/train.json`'s `g2p` settings, and `picovox_train.context
+`picovox_train/g2p.py` trains it, with the recipe in `train/data/train.json`'s `g2p` settings, and `picovox_train.context
 export` writes the module, with its context network (below):
 
 ```sh
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.heteronyms --out build/nn/heteronyms  # data/nn/g2p-relabel.json's words (optional)
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p train --out build/nn/g2p-train      # four stages, about 30 minutes on one CPU core
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p evaluate                            # the book-token error of lib/models/g2pModel.js
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.heteronyms --out build/nn/heteronyms  # train/data/g2p-relabel.json's words (optional)
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p train --out build/nn/g2p-train      # four stages, about 30 minutes on one CPU core
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p evaluate                            # the book-token error of lib/models/g2pModel.js
 ```
 
 The network is an autoregressive encoder-decoder (embedding 32, a bidirectional GRU of 96 over the letters, a GRU
 decoder of 192 with attention; 369,767 parameters). It trains on every word of the CMU Pronouncing Dictionary (its
 first pronunciation) but a 2,000-word monitoring set, sampled half uniformly and half by the square root of the word's
 count in 128 Project Gutenberg books, plus - 30% of the samples - 100,812 words the dictionary lacks, labeled by a
-large teacher ensemble or by the spelling and `-s` rules where they apply (`data/nn/g2p-words.json`). A base stage
+large teacher ensemble or by the spelling and `-s` rules where they apply (`train/data/g2p-words.json`). A base stage
 (20,000 steps of 512 at learning rate 3e-3) is polished twice with more of the samples on the most frequent words
 (5,000 steps at 1e-3 over the top 20,000 words, then 5,000 at 5e-4 over the top 12,000). The last stage (focus, 3,000
 steps) teaches the readers' pronunciations of 56 words whose dictionary-first pronunciation isn't the usual reading
-(lead L IY1 D, live L IH1 V, wind W IH1 N D, ... - `data/nn/g2p-relabel.json`; a stage's `relabel` replaces those
+(lead L IY1 D, live L IH1 V, wind W IH1 N D, ... - `train/data/g2p-relabel.json`; a stage's `relabel` replaces those
 words' targets, the rule-labeled words derived from them follow, and `focusBoost` gives them 2% of the samples). The
 export quantizes to 6 bits per weight. Training on the CPU with one thread is deterministic: the recipe reproduces the
 shipped model's weights bit for bit.
@@ -613,16 +613,16 @@ alone, not a function word), and the vowel's formants (or the fricative's voicin
 ### The dictionary audit
 
 The network learns the dictionary's errors too (HOBBES HH AA1 B IY0 Z - "hobbies" - and, from it, "mobbes" M AA1 B
-IY2 Z), so `data/nn/g2p-fixes.json` corrects the dictionary's labels where the evidence says they're wrong; `g2p.py`
+IY2 Z), so `train/data/g2p-fixes.json` corrects the dictionary's labels where the evidence says they're wrong; `g2p.py`
 applies it in every stage, before the relabeled words (the rule-labeled words derived from a fixed word follow - HOBBES'S
 HH AA1 B Z IH0 Z). `picovox_train/g2paudit.py` finds them:
 
 ```sh
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2paudit folds --out build/nn/g2paudit -j 5     # 10 screening models (resumable)
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2paudit suspects --out build/nn/g2paudit \
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2paudit folds --out build/nn/g2paudit -j 5     # 10 screening models (resumable)
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2paudit suspects --out build/nn/g2paudit \
     --books build/nn/books --catalog ../picoshelf/data/catalog.json --heteronyms build/nn/context/labels.json
-HF_HOME=build/nn/cremad/hf PYTHONPATH=train/src build/venv-listeners/bin/python -B -m picovox_train.g2paudit audio --out build/nn/g2paudit
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2paudit adjudicate --out build/nn/g2paudit [--extra EXTRA.json]
+HF_HOME=build/nn/cremad/hf PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2paudit audio --out build/nn/g2paudit
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2paudit adjudicate --out build/nn/g2paudit [--extra EXTRA.json]
 ```
 
 Two partitions of the dictionary into five folds (a word's possessives in its fold) train ten screening models (the
@@ -638,7 +638,7 @@ rest, and a confirmed error needs the votes' Wilson 95% lower bound above one ha
 (both models agree with the label, against a model's second guess) measure the method: no false errors, 1.5% of the
 tokens' votes for the wrong candidate. The audio confirmed 13 errors and 143 labels; the rest have no audio evidence.
 
-The names regression set (`data/nn/names-test.json`, run by `tools/heteronyms.js` as kind `names`): surnames, first
+The names regression set (`train/data/names-test.json`, run by `tools/heteronyms.js` as kind `names`): surnames, first
 names, and place names with verified pronunciations - HOBBES first (the dictionary's own evidence: its second variant,
 HOBBS, and every other -bes word), the audio's confirmed errors and labels, and well-established names. Its minimum is
 the shipped module's score when it was added (63/73), so it can only go up.
@@ -660,31 +660,31 @@ its examples and on unlabeled transfer windows (the ambiguous words' other windo
 dropped at random (`itemDropout`).
 
 ```sh
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.contextlabels books                                # the recipe's books (pinned texts)
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.contextlabels aligned --out build/nn/context      # readers' readings (MFA alignments)
-PYTHONPATH=train/src build/venv-pos/bin/python -B -m picovox_train.contextlabels tag --out build/nn/context         # part-of-speech tags (spaCy)
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.contextlabels labels --out build/nn/context       # the ambiguous words and examples
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context train-g2p --labels build/nn/context/labels.json --init build/nn/g2p-train/focus.pt \
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels books                                # the recipe's books (pinned texts)
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels aligned --out build/nn/context      # readers' readings (MFA alignments)
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels tag --out build/nn/context         # part-of-speech tags (spaCy)
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels labels --out build/nn/context       # the ambiguous words and examples
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context train-g2p --labels build/nn/context/labels.json --init build/nn/g2p-train/focus.pt \
     --out build/nn/context/g2p.pt                                                   # the reading input and ambiguity head
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context train-context --labels build/nn/context/labels.json --out build/nn/context/context.pt -j 4
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context export --g2p build/nn/context/g2p.pt --context build/nn/context/context.pt
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context train-context --labels build/nn/context/labels.json --out build/nn/context/context.pt -j 4
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context export --g2p build/nn/context/g2p.pt --context build/nn/context/context.pt
 node tools/heteronyms.js                                                            # the regression set (exit 1 below the gate)
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.context cross-validate --labels build/nn/context/labels.json --out build/nn/context/folds -j 10
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context cross-validate --labels build/nn/context/labels.json --out build/nn/context/folds -j 10
 ```
 
 (`aligned`, `tag`, `train-context` - its teachers - and `cross-validate` take `-j`, their worker processes - the results
 are the same for any count. `cross-validate` keeps a fold's results only when they are from the same labels and
 settings.)
 
-The settings are `data/nn/train.json`'s `context` section. `make train-g2p` runs all of it (the voice stages use the
+The settings are `train/data/train.json`'s `context` section. `make train-g2p` runs all of it (the voice stages use the
 committed `lib/models/g2pModel.js`) and gates its module with `picovox_train.context check`: identical to the
 committed module below the comment header (the stages are deterministic on the same inputs), else within the recipe's
 tolerances (the regression set, the book error, the top-10K, the monitoring WER) - then `make train-install` replaces
-the committed module only when it differs. The books are pinned (`data/nn/books.json` - see make train), so a clean run reproduces the committed module.
+the committed module only when it differs. The books are pinned (`train/data/books.json` - see make train), so a clean run reproduces the committed module.
 
-The labels (`picovox_train/contextlabels.py`, with the curated part in `data/nn/context-labels.json`) come from three
+The labels (`picovox_train/contextlabels.py`, with the curated part in `train/data/context-labels.json`) come from three
 sources: the LibriTTS-R readers' readings by the forced alignments; part-of-speech tags over the Project Gutenberg books
-(spaCy, training time only - `requirements/pos.txt`), mapped to readings only for words whose mapping agrees with the
+(spaCy, training time only - `train/requirements.txt`), mapped to readings only for words whose mapping agrees with the
 aligned audio on 95% of 10 or more tokens; and hand-written seed sentences and reviewed collocations for the readings
 the tags can't separate (lead the metal, bass, bow, row, does the deer, house the verb) and the pairs the audio doesn't
 validate. The voice training data (`picovox_train.multi build`) takes a heteronym token's reading from the alignment
@@ -702,8 +702,8 @@ them. Everything downloaded is under `downloads/` (gitignored - `make clean` kee
 `downloads/corpora/README.md` records each corpus's source, license, and size:
 
 ```sh
-make build/venv-nn.build                                        # build/venv-nn (corpora.py needs only the standard library)
-build/venv-nn/bin/python -I train/src/picovox_train/corpora.py          # download the corpora and the Whisper model into downloads/
+make build/venv-train.build                                       # build/venv-train (corpora.py needs only the standard library)
+build/venv-train/bin/python -I train/src/picovox_train/corpora.py # download the corpora and the Whisper model into downloads/
 ```
 
 | Corpus | Speakers | Download | License |
@@ -713,7 +713,7 @@ build/venv-nn/bin/python -I train/src/picovox_train/corpora.py          # downlo
 | [LibriTTSLabel](https://github.com/kan-bayashi/LibriTTSLabel) | Montreal Forced Aligner phone alignments of LibriTTS | | none stated - used locally, not redistributed |
 | [CREMA-D](https://github.com/CheyneyComputerScience/CREMA-D) | 91 actors' emotional speech (`picovox_train.cremad fetch`) | | ODbL |
 
-The four labeled ARCTIC speakers' analysis settings (pitch range and formant ceiling, in `data/nn/speakers.json`) were
+The four labeled ARCTIC speakers' analysis settings (pitch range and formant ceiling, in `train/data/speakers.json`) were
 measured by the rule-based synthesizer's calibration tool, `tools/targets.py` (removed in commit 33fbfad; see git
 history).
 
@@ -721,4 +721,5 @@ history).
 ## License
 
 PicoVox is distributed under the [MIT License](LICENSE). The CMU Pronouncing Dictionary, the G2P network's training
-labels (in the repository, not the package), is distributed under its own license, in `data/LICENSE.cmudict`.
+labels, isn't distributed with PicoVox: make train downloads it, pinned, from
+[cmusphinx/cmudict](https://github.com/cmusphinx/cmudict) (its own BSD-style license) into `downloads/cmudict/`.

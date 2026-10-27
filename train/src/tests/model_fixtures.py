@@ -17,7 +17,7 @@ from picovox_train.model import STYLE_NAMES, MultiModel
 from tests import helpers
 
 
-# The tiny checkpoints' speaker table - the readers (data/nn/speakers.json ids 0 and 1), then the emotional corpus's actors
+# The tiny checkpoints' speaker table - the readers (train/data/speakers.json ids 0 and 1), then the emotional corpus's actors
 SPEAKERS = ['arctic-slt', 'arctic-bdl', 'cremad-1001', 'cremad-1002']
 
 

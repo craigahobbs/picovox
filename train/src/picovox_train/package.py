@@ -6,7 +6,7 @@ Packaging - an exported acoustic model (export.py's <voice>.json manifest and <v
 JavaScript module, which lib/package.js loads the same way in Node, the browser, and a Web Worker (a plain import -
 no fetch, no file system):
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.package build/train/export/multi -o build/multi.js
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.package build/train/export/multi -o build/multi.js
 
     import * as voice from './build/multi.js';
     import {loadPackagedModel} from './lib/package.js';
@@ -27,7 +27,7 @@ gzip-served module at least MIN_SAVING smaller. The sizes - the module's bytes a
 printed (JSON).
 
 Provenance (make train's package step): --provenance adds the manifest's "provenance" - the git commit (and whether
-the tree had changes), the recipe's SHA-256 (--recipe, data/nn/train.json), each training data directory's index
+the tree had changes), the recipe's SHA-256 (--recipe, train/data/train.json), each training data directory's index
 SHA-256 (--data DIR ...), and the gate's scores (--scores, the evaluation's result.json: UTMOS, WER, similarity).
 """
 
@@ -189,10 +189,10 @@ def package(model_path, provenance_info=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='python -m picovox_train.package',
                                      description='An exported model as a generated JavaScript module')
-    parser.add_argument('model', help='the exported model (data/nn/<voice>, without extension)')
+    parser.add_argument('model', help='the exported model (train/data/<voice>, without extension)')
     parser.add_argument('-o', '--output', required=True)
     parser.add_argument('--provenance', action='store_true', help='add the manifest\'s provenance (the commit and the below)')
-    parser.add_argument('--recipe', help='the recipe (data/nn/train.json) - its hash in the provenance')
+    parser.add_argument('--recipe', help='the recipe (train/data/train.json) - its hash in the provenance')
     parser.add_argument('--data', nargs='*', default=[], help='training data directories - their index hashes')
     parser.add_argument('--scores', help='the evaluation\'s result.json - its panel scores')
     args = parser.parse_args(argv)

@@ -148,7 +148,7 @@ test('g2p.loadG2p, readers\' pronunciations', async () => {
 });
 
 
-// A listener's reports - gravest (the dictionary's G R AE1 V AH0 S T, fixed - data/nn/g2p-fixes.json), mindset, and
+// A listener's reports - gravest (the dictionary's G R AE1 V AH0 S T, fixed - train/data/g2p-fixes.json), mindset, and
 // paprika (the dictionary's second, P AH0 P R IY1 K AH0)
 test('g2p.loadG2p, a listener\'s reports', async () => {
     const pronounce = await loadG2p(g2pModel);

@@ -137,7 +137,7 @@ pronunciation, as corrected in Sections 9.4, 9.6, and 9.7):
 - **Top-10K wrong** - how many of the 10,000 most frequent book words are wrong.
 - **Monitoring WER** - the word error rate on 2,000 dictionary words held out of training (sampled half uniformly and
   half by frequency); mostly rare names, so its absolute level is high.
-- **Regression sets** (`data/nn/heteronyms-test.json`, `data/nn/names-test.json`, run through the package's front end
+- **Regression sets** (`train/data/heteronyms-test.json`, `train/data/names-test.json`, run through the package's front end
   by `tools/heteronyms.js`): sentences with the word in context and its accepted and rejected pronunciations, by kind -
   *default* (52 sentences: a heteronym's usual reading), *context* (54: the readings only the context decides),
   *missing* (3: readings the dictionary lacks), and *names* (73: names with verified pronunciations). Each kind has a
@@ -282,7 +282,7 @@ over-smoothed bandwidths and excess high-frequency noise read as "tinny" and "st
 The goal was ten voices (five female, five male) for reading many kinds of books - for example a warm literary
 narrator, an older authoritative voice, a young bright voice, a brisk nonfiction voice, and a gentle voice - each
 with emotional styles, from one model of about 1M parameters. The model was trained; it became the teacher of the
-model that ships (Section 8). The ten designed voices were specified then (`data/nn/voices.json`: blends of the speaker
+model that ships (Section 8). The ten designed voices were specified then (`test/voices.json`: blends of the speaker
 table's rows, a style, and parameter transforms) and ship now as `lib/synthesis.js`'s voice and style tables (checked
 against it), beside the model's ARCTIC bdl (male) and slt (female) speakers.
 
@@ -497,7 +497,7 @@ the verb. For each word with several dictionary pronunciations, we counted which
 the forced alignments, and relabeled the word where the readers' majority is statistically clear (the Wilson 95% lower
 bound above one half, from three or more speakers), the difference is lexical (not vowel reduction or stress alone,
 not a function word), and the vowel's formants (or the fricative's voicing) agree where measured. A last training stage
-(3,000 steps) teaches the 56 relabeled words (`data/nn/g2p-relabel.json` - lead L IY1 D, lives L AY1 V Z, live,
+(3,000 steps) teaches the 56 relabeled words (`train/data/g2p-relabel.json` - lead L IY1 D, lives L AY1 V Z, live,
 wind, wound, tears, record, content, subject, address, ...); all 56 come out right, at no cost to the held-out error.
 
 ### 9.5 Heteronyms by context
@@ -554,7 +554,7 @@ reproduces the dictionary reproduces its errors, so we audited the dictionary (`
    setting of the adjudication confirmed one control falsely; the final setting confirmed none.)
 
 The audio confirmed 143 labels and 13 errors; 12,463 suspects had no audio evidence. With HOBBES - on the dictionary's
-own evidence, as it is not in the corpus - the audit made 14 fixes (`data/nn/g2p-fixes.json`, each with its evidence):
+own evidence, as it is not in the corpus - the audit made 14 fixes (`train/data/g2p-fixes.json`, each with its evidence):
 
 | Word | Dictionary | Fixed | Evidence (votes for the fix, speakers) |
 | --- | --- | --- | --- |
@@ -676,7 +676,7 @@ book through the package's front end and its G2P showed three kinds of fault:
 - **Words the dictionary lacks.** Rocinante (188 times) was "RAH-sə-nənt", Cide Hamete "side HAM-et", Luscinda
   "loo-SCHIN-da"; "goatherd" was "goath-erd" and "shouldst" "showldst".
 
-The fixes are data, as the dictionary's were (Section 9.6). A new file, `data/nn/g2p-books.json`, holds the words of
+The fixes are data, as the dictionary's were (Section 9.6). A new file, `train/data/g2p-books.json`, holds the words of
 the books listeners hear: each book's word counts (the front end's words that train - the dictionary's, the labels', and
 their possessives), which join the frequency weights, and labels for its words the dictionary lacks or has wrong -
 61 for Don Quixote, its names as American readers say anglicized Spanish (CMUdict's own convention: QUIXOTE, SENOR) and
@@ -719,7 +719,7 @@ dictionary has them, and the stress of a few unlabeled names.
 
 A listener heard three words wrong. "Gravest" (G R AE1 V AH0 S T - "gravvest") was the dictionary's error, learned: its
 stem and the stem's other forms have EY1 (GRAVE, GRAVER, GRAVELY, GRAVESTONE), as BRAVEST does, so
-`data/nn/g2p-fixes.json` corrects it on the dictionary's own evidence (LibriTTS-R has three of its tokens, too few for
+`train/data/g2p-fixes.json` corrects it on the dictionary's own evidence (LibriTTS-R has three of its tokens, too few for
 the audit's bound). "Mindset" (M IH1 N D S EH2 T) and "paprika" (P AE2 P R IH0 K AA1 AH0) were the network's own errors
 on words the dictionary has right - words the frequency weights barely reach: a dictionary word with no count in the
 128 books is wrong 18.9% of the time (14,074 of 74,332), one counted 6 to 20 times 4.7%, and one counted over 100 times
@@ -754,7 +754,7 @@ text too - is left open.
 ### 10.1 One recipe, one command
 
 `make train` recreates both generated models - `lib/models/g2pModel.js` and `lib/models/voiceModel.js`'s modules, in
-`build/train/` - from a clean checkout, by one recipe, `data/nn/train.json`, which holds every stage's settings and
+`build/train/` - from a clean checkout, by one recipe, `train/data/train.json`, which holds every stage's settings and
 seeds. Each stage is a Makefile target with a stamp, so `make -j train` runs independent stages at once; the GPU stages
 run one at a time under a lock (two at once each run at about half speed), and the CPU stages run beside them:
 
@@ -816,7 +816,7 @@ A retrain never silently replaces what ships:
 The training reads 133 Project Gutenberg texts (the heteronym labels' 132 books and the distillation's 22). Project
 Gutenberg revises its books in place and keeps no old revisions; it revised *Crime and Punishment* (pg2554) on
 2026-10-16, mid-project, which moved the heteronym labels by one example and changed the retrained context network.
-So the texts are pinned: `data/nn/books.json` records each text's source, the SHA-256 and size of its bytes, the date
+So the texts are pinned: `train/data/books.json` records each text's source, the SHA-256 and size of its bytes, the date
 pinned, its Gutenberg revision, and a byte-identical Wayback Machine capture where one exists (50 of 133). A text that
 does not match its pin fails the stage, naming the book and both hashes. The pinned texts are also published as one
 deterministic archive, the fetch's first source
@@ -1202,12 +1202,12 @@ PicoVox is distributed under the MIT License.
 ```sh
 npm install picovox                                             # the package
 make commit                                                     # tests, lint, docs, 100% coverage of lib/ and train/
-make listeners                                                  # the listener panel's environment
+make build/venv-train.build                                     # make train's Python environment (the listener panel's too)
 make -j train                                                   # both models from scratch: the G2P, and the voice - the corpora, the teacher, the student, the gate
 make -j train-g2p                                               # reproduce the G2P chain and check it against the committed module
 make train-check                                                # the package's tests with the trained models, and the voice lab staged to listen
 make train-install                                              # the trained models that differ into lib/models/
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke    # every training entry point, a few steps on the CPU
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.smoke    # every training entry point, a few steps on the CPU
 node tools/unpack.js lib/models/voiceModel.js build/voice && node tools/speak.js -m build/voice "Call me Ishmael." -o ishmael.wav
 ```
 

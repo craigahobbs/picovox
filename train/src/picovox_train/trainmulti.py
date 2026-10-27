@@ -5,17 +5,17 @@
 Training the multi-speaker, multi-style model (model.py's MultiModel) - end-to-end training through the
 differentiable synthesizer (dsynth.py), over many speakers and the emotional styles:
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.trainmulti --name multi-a --recipe teacher.a
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.trainmulti --name multi-b --recipe teacher.b \
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.trainmulti --name multi-a --recipe teacher.a
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.trainmulti --name multi-b --recipe teacher.b \
         --init build/nn/runs/multi-a/last.pt
 
---recipe takes the settings of a section of make train's recipe (data/nn/train.json - its keys are the flags), and
+--recipe takes the settings of a section of make train's recipe (train/data/train.json - its keys are the flags), and
 flags given override them.
 
 The corpora (data.py's format, memory-mapped - the audio is read a crop at a time):
 
 - the American reader pool, build/nn/data/multi/ (multi.py) - LibriTTS-R readers and CMU ARCTIC slt, bdl, clb,
-  rms; each speaker's row in the speaker table is its data/nn/speakers.json id (index.json's speaker 'index')
+  rms; each speaker's row in the speaker table is its train/data/speakers.json id (index.json's speaker 'index')
 - the emotional speech, build/nn/data/cremad/ (cremad.py) - CREMA-D's 91 actors, rows READERS + their index, and
   their six intended emotions: neutral is the zero style; the others are rows of the style table, scaled by the
   intensity (INTENSITY - low, medium, high; unspecified is medium)
@@ -496,7 +496,7 @@ def validate(model, synth, corpus, args, device, sonorants):
     return result
 
 
-# The settings of a section of the recipe (data/nn/train.json; "teacher.a" - a dotted path) as argparse defaults
+# The settings of a section of the recipe (train/data/train.json; "teacher.a" - a dotted path) as argparse defaults
 def recipe_defaults(section, path=RECIPE_PATH):
     with open(path, encoding='utf-8') as file:
         settings = json.load(file)
@@ -511,7 +511,7 @@ def argument_parser():
     # (the training settings' defaults are the recipe's teacher.defaults)
     parser.add_argument('--name', required=True)
     parser.add_argument('--recipe', help='the settings of a section of the recipe (teacher.a), flags overriding them')
-    parser.add_argument('--recipe-file', default=RECIPE_PATH, help='the recipe (default data/nn/train.json)')
+    parser.add_argument('--recipe-file', default=RECIPE_PATH, help='the recipe (default train/data/train.json)')
     parser.add_argument('--steps', type=int, help='the learning rate schedule\'s steps')
     parser.add_argument('--stop', type=int, default=None, help='stop after this many steps (default: --steps)')
     parser.add_argument('--batch', type=int)

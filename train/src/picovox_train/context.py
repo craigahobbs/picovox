@@ -6,7 +6,7 @@ The heteronym models - the G2P network's reading input and ambiguity head, and t
 reading from the neighboring words (lib/g2p.js runs both from lib/models/g2pModel.js; g2pmodel.py is the port). No
 dictionary, word list, or rule at runtime: a word whose ambiguity head fires takes the reading slot the context network
 chooses, and the G2P pronounces the word in that reading. The commands (python is
-PYTHONPATH=train/src build/venv-nn/bin/python -B):
+PYTHONPATH=train/src build/venv-train/bin/python -B):
 
     python -m picovox_train.context train-g2p --labels DIR/labels.json --init G2P.pt --out DIR/g2p.pt
     python -m picovox_train.context train-context --labels DIR/labels.json --out DIR/context.pt [-j N]
@@ -17,7 +17,7 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B):
     python -m picovox_train.context check NEW.js     # make train's G2P gate: identical to lib/models/g2pModel.js,
                                                      # else the quality gate (make train-install installs it - trained.py)
 
-The settings are data/nn/train.json's "context" section (g2p, network, export, gate).
+The settings are train/data/train.json's "context" section (g2p, network, export, gate).
 
 The G2P additions (g2p.py's model):
 
@@ -66,7 +66,7 @@ from .g2p import (EOS, LETTERS, MAX_WORD, MODULE_LINE_LENGTH, PHONES, UPSAMPLE, 
                   model_config, quantize_array, quantize_state, weight_bytes)
 
 
-# The recipe's settings - data/nn/train.json's "context" (labels, g2p, network, export, gate)
+# The recipe's settings - train/data/train.json's "context" (labels, g2p, network, export, gate)
 def load_settings(path=RECIPE_PATH):
     with open(path, encoding='utf-8') as file:
         return json.load(file)['context']

@@ -3,7 +3,7 @@
 
 """
 The pinned book texts - the Project Gutenberg books make train reads (the heteronym labels' books - contextlabels.py -
-and the distillation's - distill.py), each pinned in data/nn/books.json to the exact text the shipped models were
+and the distillation's - distill.py), each pinned in train/data/books.json to the exact text the shipped models were
 trained on: its SHA-256, its size, its source URL, the date it was pinned, and an archived copy of the same bytes (a
 Wayback Machine capture of the source URL, by its raw "id_" URL) where one exists.
 
@@ -21,9 +21,9 @@ recorded in the pins with its SHA-256. It's the fetch's first source - downloade
 verified - so make train reproduces its texts even after Gutenberg revises them; the book's source URL and its archived
 copy are the fallbacks. A re-pinned text needs a new bundle (bundle with a new tag, then make gh-pages).
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.books fetch [NAME ...]   # fetch and verify (default: all)
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.books pin NAME           # re-pin to the books directory's copy
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.books bundle TAG         # bundle every pinned text as TAG
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.books fetch [NAME ...]   # fetch and verify (default: all)
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.books pin NAME           # re-pin to the books directory's copy
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.books bundle TAG         # bundle every pinned text as TAG
     PYTHONPATH=train/src python3 -B -m picovox_train.books publish DIR                          # the bundle into the site (DIR/books/)
 
 A text's name is its file's in the books directory (<name>.txt): pg<id> for a book's revision the labels read, and
@@ -48,7 +48,7 @@ from . import ROOT
 
 
 # The pins, the default books directory, and the fetch's User-Agent
-PINS_PATH = os.path.join(ROOT, 'data', 'nn', 'books.json')
+PINS_PATH = os.path.join(ROOT, 'train', 'data', 'books.json')
 BOOKS_DIR = os.path.join(ROOT, 'build', 'nn', 'books')
 USER_AGENT = 'picovox-train/1.0 (+https://github.com/craigahobbs/picovox)'
 
@@ -70,19 +70,19 @@ def display_path(path):
     return path if relative.startswith('..') else relative
 
 
-# The pins - data/nn/books.json's texts, {name: {id, url, sha256, bytes, pinned, updated, archive}}
+# The pins - train/data/books.json's texts, {name: {id, url, sha256, bytes, pinned, updated, archive}}
 def load_pins(path=PINS_PATH):
     with open(path, encoding='utf-8') as file:
         return json.load(file)['texts']
 
 
-# The pins' bundle - data/nn/books.json's bundle, {tag, url, sha256, bytes}, or None
+# The pins' bundle - train/data/books.json's bundle, {tag, url, sha256, bytes}, or None
 def load_bundle(path=PINS_PATH):
     with open(path, encoding='utf-8') as file:
         return json.load(file).get('bundle')
 
 
-# Write the pins - data/nn/books.json, one text per line (in name order), and its bundle (default: the file's)
+# Write the pins - train/data/books.json, one text per line (in name order), and its bundle (default: the file's)
 def write_pins(texts, path=PINS_PATH, bundle=None):
     with open(path, encoding='utf-8') as file:
         pins = json.load(file)
@@ -324,7 +324,7 @@ def publish_command(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='python -m picovox_train.books', description='The pinned book texts')
-    parser.add_argument('--pins', default=PINS_PATH, help='the pins (default data/nn/books.json)')
+    parser.add_argument('--pins', default=PINS_PATH, help='the pins (default train/data/books.json)')
     parser.add_argument('--books', default=BOOKS_DIR, help='the books directory (default build/nn/books)')
     commands = parser.add_subparsers(dest='command', required=True)
     fetch_parser = commands.add_parser('fetch', help='fetch and verify pinned texts')

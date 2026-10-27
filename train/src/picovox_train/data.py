@@ -55,7 +55,7 @@ MAX_EDGE_SILENCE = 0.2                     # seconds of leading and trailing sil
 FORMAT_VERSION = 1
 CHANNELS = ['f0', 'voiced', 'strength', 'hnr', 'energy', 'f1', 'f2', 'f3', 'f4', 'b1', 'b2', 'b3', 'b4']
 CHANNEL_NOTES = {
-    'f0': 'Praat autocorrelation F0 (Hz), 0 where unvoiced - the speaker\'s range (data/nn/speakers.json)',
+    'f0': 'Praat autocorrelation F0 (Hz), 0 where unvoiced - the speaker\'s range (train/data/speakers.json)',
     'voiced': '1 where Praat finds the frame voiced, else 0',
     'strength': 'Praat pitch strength (autocorrelation peak, 0-1) of the selected candidate, 0 where unvoiced',
     'hnr': 'Harmonics-to-noise ratio (dB, cross-correlation), clipped to [-20, 40] (-20 in silence)',

@@ -89,7 +89,7 @@ const started = new Set(questions.filter((question) => question.id in answers).m
 questions.splice(0, questions.length, ...questions.filter((question) => started.has(question.round)));
 if (unanswered().length === 0) {
     const panelTexts = readJSON(join(repository, 'tools', 'panel-texts.json'), null).texts;
-    const recipe = readJSON(join(repository, 'data', 'nn', 'train.json'), null);
+    const recipe = readJSON(join(repository, 'train', 'data', 'train.json'), null);
     const round = questions.reduce((latest, question) => Math.max(latest, question.round), 0) + 1;
     const texts = [...panelTexts.filter((text) => text.kind === 'harvard'), ...recipe.samples.texts].map((text) => text.text);
     print(`make train-check: choosing the trials - where the voices differ most, of ${voiceTable.length * texts.length} ` +

@@ -30,7 +30,7 @@ class TestExport(unittest.TestCase):
         cls.data_dir = cls.patches.__enter__()
         model_fixtures.write_data(cls.data_dir)
         cls.checkpoint = model_fixtures.write_checkpoint(os.path.join(cls.root, 'teacher.pt'), args={
-            'recipe_file': os.path.join(ROOT, 'data', 'nn', 'train.json'), 'init': 'build/train/runs/a/best.pt',
+            'recipe_file': os.path.join(ROOT, 'train', 'data', 'train.json'), 'init': 'build/train/runs/a/best.pt',
             'init_critic': os.path.join(cls.root, 'critic.pt'), 'steps': 3, 'config': '{}', 'files': ['/a/b', 'c']
         })
 
@@ -96,16 +96,16 @@ class TestExport(unittest.TestCase):
         self.assertEqual(speakers[0]['sex'], 'female')
         self.assertEqual(speakers[2], {'id': 2, 'key': 'cremad-1001', 'sex': 'male', 'corpus': 'CREMA-D', 'role': 'style'})
         self.assertEqual(export.speaker_list({'speakers': ['arctic-slt', 'unknown']})[1]['sex'], None)
-        with self.assertRaisesRegex(ValueError, 'is not its data/nn/speakers.json id'):
+        with self.assertRaisesRegex(ValueError, 'is not its train/data/speakers.json id'):
             export.speaker_list({'speakers': ['arctic-bdl']})
 
     def test_relative_paths(self):
         self.assertEqual(export.relative_paths({
-            'under': os.path.join(ROOT, 'data', 'nn', 'train.json'), 'outside': os.path.join(os.path.dirname(ROOT), 'x.pt'),
+            'under': os.path.join(ROOT, 'train', 'data', 'train.json'), 'outside': os.path.join(os.path.dirname(ROOT), 'x.pt'),
             'relative': 'build/train/runs/a.pt', 'number': 3, 'none': None, 'list': [os.path.join(ROOT, 'a'), 'b', 1],
             'nested': {'path': os.path.join(ROOT, 'lib')}
         }), {
-            'under': 'data/nn/train.json', 'outside': '../x.pt', 'relative': 'build/train/runs/a.pt', 'number': 3, 'none': None,
+            'under': 'train/data/train.json', 'outside': '../x.pt', 'relative': 'build/train/runs/a.pt', 'number': 3, 'none': None,
             'list': ['a', 'b', 1], 'nested': {'path': 'lib'}
         })
         self.assertIsNone(export.relative_paths(None))
@@ -129,7 +129,7 @@ class TestExport(unittest.TestCase):
         # The training record - its paths relative to the repository root, never absolute
         training = manifest['training']
         self.assertEqual(training['step'], 3)
-        self.assertEqual(training['args']['recipe_file'], 'data/nn/train.json')
+        self.assertEqual(training['args']['recipe_file'], 'train/data/train.json')
         self.assertEqual(training['args']['init'], 'build/train/runs/a/best.pt')
         self.assertEqual(training['args']['init_critic'], os.path.relpath(os.path.join(self.root, 'critic.pt'), ROOT))
         self.assertFalse(os.path.isabs(training['args']['files'][0]))

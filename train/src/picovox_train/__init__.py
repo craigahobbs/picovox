@@ -4,17 +4,17 @@
 """
 The neural voice's training pipeline - a small network that maps our front end's phoneme tokens to durations and
 interpretable source-filter parameters, trained end to end through a differentiable synthesizer against recordings,
-and the G2P network that pronounces every word. make train (the Makefile) runs it from the recipe, data/nn/train.json.
+and the G2P network that pronounces every word. make train (the Makefile) runs it from the recipe, train/data/train.json.
 
 The front end and the G2P:
 
 - frontend.py - the token vocabulary (vocab.json) and a Python port of lib/lexicon.js textToPhrases, every word
   pronounced by the app's G2P network (g2pmodel.py - lib/g2p.js's inference, bit for bit, on lib/models/g2pModel.js)
-- g2p.py - the G2P network's training, the recipe in data/nn/train.json; heteronyms.py - its relabeled
-  words from readers' usage (data/nn/g2p-relabel.json); g2paudit.py - the dictionary's label errors, by cross-validated
-  disagreement and the readers' audio (data/nn/g2p-fixes.json)
+- g2p.py - the G2P network's training, the recipe in train/data/train.json; heteronyms.py - its relabeled
+  words from readers' usage (train/data/g2p-relabel.json); g2paudit.py - the dictionary's label errors, by cross-validated
+  disagreement and the readers' audio (train/data/g2p-fixes.json)
 - context.py - the heteronyms by context: the G2P's reading input and ambiguity head, and the context network
-  (picovox_train.context export writes lib/models/g2pModel.js); contextlabels.py - their labels (data/nn/context-labels.json);
+  (picovox_train.context export writes lib/models/g2pModel.js); contextlabels.py - their labels (train/data/context-labels.json);
   readings.py - a heteronym token's reading from the forced alignment, for the voice data
 - lib/tokens.js - the same tokens in JavaScript, from lib/lexicon.js, for browser-side inference
 
@@ -24,12 +24,12 @@ The data:
   labels - align.py - 24 kHz audio, and Praat's auxiliary tracks), and its loader (ArcticData)
 - wav.py - WAV files (16-bit PCM) read with the standard library, exactly as libsndfile reads them
 - multi.py - the American reader pool (LibriTTS-R readers and the CMU ARCTIC speakers)
-  in data.py's format, build/nn/data/multi/, its speaker table data/nn/speakers.json
-- books.py - the pinned book texts (data/nn/books.json): the Project Gutenberg books the heteronym labels and the
+  in data.py's format, build/nn/data/multi/, its speaker table train/data/speakers.json
+- books.py - the pinned book texts (train/data/books.json): the Project Gutenberg books the heteronym labels and the
   distillation read, each fetched once and verified by its SHA-256 - a revised text is never used
 - cremad.py - emotional speech for the style modifiers: CREMA-D fetched, force-aligned (a wav2vec2 phoneme CTC
   recognizer), and built under build/nn/data/cremad/ in data.py's format with emotion and intensity labels (its
-  summary, data/nn/cremad.json)
+  summary, train/data/cremad.json)
 
 The synthesizer:
 
@@ -52,7 +52,7 @@ The network:
 - optim.py - the training step's options for trainmulti.py and distill.py: the lean gradient clip and AdamW step,
   Muon for the hidden matrices (batched Newton-Schulz - the student's optimizer), and the warmup-stable-decay schedule
 - quant.py - the export's 8-bit weight quantization (per row), shared by export.py and lib/model.js
-- distill.py - knowledge distillation of the multi-speaker model into small students (data/nn/train.json's distill)
+- distill.py - knowledge distillation of the multi-speaker model into small students (train/data/train.json's distill)
 - export.py - export to <voice>.bin and .json (8-bit weights - quant.py); package.py - an export
   as a generated JavaScript module (lib/models/voiceModel.js), loaded by lib/package.js (tools/packagecheck.js checks
   it); lib/model.js - the forward pass in JavaScript; lib/transforms.js - the voice and style transforms;
@@ -75,6 +75,7 @@ The pipeline's tools:
 head, the all-convolution encoder, the size search, and the finished experiments' evaluations are in git history.)
 """
 
+import json
 import os
 
 
@@ -83,7 +84,13 @@ import os
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 # make train's recipe - the training settings of every stage
-RECIPE_PATH = os.path.join(ROOT, 'data', 'nn', 'train.json')
+RECIPE_PATH = os.path.join(ROOT, 'train', 'data', 'train.json')
+
+# Read a JSON file - the training's data and settings (the tests give objects for some - tests/helpers.py json_files)
+def read_json(path):
+    with open(path, encoding='utf-8') as file:
+        return json.load(file)
+
 
 # The package's source directory (train/src) - the PYTHONPATH of the pipeline's Python subprocesses
 SOURCE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

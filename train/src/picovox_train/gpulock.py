@@ -5,7 +5,7 @@
 Run a command holding the GPU lock - make train's GPU stages (teacher A and B, the distillation targets, the student,
 its polish) one at a time, while its CPU stages run beside them (two GPU jobs at once each run at about half speed):
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.gpulock build/gpu.lock -- python -m picovox_train.trainmulti ...
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.gpulock build/gpu.lock -- python -m picovox_train.trainmulti ...
 
 The lock is an exclusive flock on the file; waiting for it is logged to stderr. The command then runs in this process
 (exec), holding the lock until it exits - a signal to this process (make train's stage stopped) is the command's, so the

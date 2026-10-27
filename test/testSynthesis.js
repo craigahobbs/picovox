@@ -64,8 +64,8 @@ test('synthesis, constants', () => {
         }
     }
 
-    // The designed voices are data/nn/voices.json's - its names, sexes, descriptions, blends, adjustments, and rates
-    const designed = JSON.parse(readFileSync('data/nn/voices.json', 'utf8')).voices;
+    // The designed voices are test/voices.json's - its names, sexes, descriptions, blends, adjustments, and rates
+    const designed = JSON.parse(readFileSync('test/voices.json', 'utf8')).voices;
     assert.deepEqual(voiceTable.slice(2), designed.map((voice) => ({
         'key': voice.name.toLowerCase(), 'label': voice.name, 'sex': voice.sex, 'rate': voice.rate, 'blend': voice.blend,
         'adjust': voice.adjust, 'description': voice.description
@@ -153,8 +153,8 @@ test('voiceSettings', () => {
 
 
 test('styles', () => {
-    // The styles are data/nn/voices.json's - their keys, labels, kinds, emotions, transforms, rates, and descriptions
-    const designed = JSON.parse(readFileSync('data/nn/voices.json', 'utf8')).styles;
+    // The styles are test/voices.json's - their keys, labels, kinds, emotions, transforms, rates, and descriptions
+    const designed = JSON.parse(readFileSync('test/voices.json', 'utf8')).styles;
     assert.deepEqual(styleTable.map((style) => style.key), designed.map((style) => style.id));
     for (const [style, entry] of styleTable.map((item, index) => [item, designed[index]])) {
         assert.deepEqual([style.label, style.kind, style.description], [entry.label, entry.kind, entry.description]);

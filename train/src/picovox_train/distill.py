@@ -5,7 +5,7 @@
 Knowledge distillation of the multi-speaker acoustic model (model.py's MultiModel) - small students trained to
 imitate a big teacher, the way the project shrinks its voice model at each retrain: train a big teacher, then
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill COMMAND ...
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.distill COMMAND ...
 
     targets [--teacher build/nn/runs/multi-b/best.pt]       # 1. the distillation set
     train --student s64                                     # 2. a student (each one)
@@ -16,7 +16,7 @@ imitate a big teacher, the way the project shrinks its voice model at each retra
     ladder                                                  # 1-5, all of the ladder
 
 The settings - the teacher, the distillation set's sources, the training settings, the student ladder, the polish, the
-evaluation speakers, and the tolerance - are data/nn/train.json's distill (--config another file). The outputs go to
+evaluation speakers, and the tolerance - are train/data/train.json's distill (--config another file). The outputs go to
 NN_DISTILL_DIR (default build/nn/distill/): targets/ (the distillation set), eval/<model>/ (exports, renderings,
 result.json), and summary.json (pick); progress lines go to its code.log, targets.log, students.log, and eval.log. Runs
 go to build/nn/runs/distill-<student>/ (train.log, log.jsonl, best.pt, last.pt), and listening samples to
@@ -102,7 +102,7 @@ ITEM_DTYPE = numpy.dtype([
 # Settings and logs
 #
 
-# The settings - the recipe's (data/nn/train.json) distill
+# The settings - the recipe's (train/data/train.json) distill
 def load_config(path=RECIPE_PATH):
     with open(path, encoding='utf-8') as file:
         return json.load(file)['distill']
@@ -1017,7 +1017,7 @@ def main(argv=None):
     subparsers = parser.add_subparsers(dest='command', required=True)
 
     def add_common(sub):
-        sub.add_argument('--config', default=RECIPE_PATH, help='the recipe (default data/nn/train.json - its distill)')
+        sub.add_argument('--config', default=RECIPE_PATH, help='the recipe (default train/data/train.json - its distill)')
         sub.add_argument('--device', default=None)
 
     sub = subparsers.add_parser('targets', help='the distillation set')

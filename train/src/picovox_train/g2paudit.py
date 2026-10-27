@@ -4,9 +4,8 @@
 """
 The dictionary audit - the CMU Pronouncing Dictionary's label errors the G2P network would learn (HOBBES HH AA1 B IY0
 Z - "hobbies" - beside the dictionary's own HOBBESIAN HH AA1 B Z IY0 AH0 N), found by cross-validated disagreement and
-adjudicated with the LibriTTS-R readers' audio; the confirmed corrections are data/nn/g2p-fixes.json, which g2p.py's
-data applies in every stage (python is PYTHONPATH=train/src build/venv-nn/bin/python -B, listeners the same in
-build/venv-listeners):
+adjudicated with the LibriTTS-R readers' audio; the confirmed corrections are train/data/g2p-fixes.json, which g2p.py's
+data applies in every stage (python is PYTHONPATH=train/src build/venv-train/bin/python -B):
 
     python -m picovox_train.g2paudit folds --out DIR [-j 5]          # the screening models (resumable)
     python -m picovox_train.g2paudit suspects --out DIR --books BOOKS [--catalog CATALOG]
@@ -678,7 +677,7 @@ def corrected(entry, winner):
 
 
 def command_adjudicate(args):
-    """verdicts.json (every suspect's verdict, and the controls' error rate) and fixes.json (data/nn/g2p-fixes.json's
+    """verdicts.json (every suspect's verdict, and the controls' error rate) and fixes.json (train/data/g2p-fixes.json's
     format - the confirmed errors' corrections and their evidence)"""
     with open(os.path.join(args.out, 'suspects.json'), encoding='utf-8') as file:
         suspects = json.load(file)
@@ -770,7 +769,7 @@ def main(argv=None):
     suspects_parser.add_argument('--repeats', type=int, default=REPEATS)
     suspects_parser.add_argument('--books', help='a directory of the books\' texts (the proper-noun shares)')
     suspects_parser.add_argument('--catalog', help='PicoShelf\'s catalog.json (the names it speaks)')
-    suspects_parser.add_argument('--relabel', default=os.path.join(ROOT, 'data', 'nn', 'g2p-relabel.json'))
+    suspects_parser.add_argument('--relabel', default=os.path.join(ROOT, 'train', 'data', 'g2p-relabel.json'))
     suspects_parser.add_argument('--heteronyms', help='the context labels (labels.json) - their words are the heteronym models\'')
     suspects_parser.add_argument('--threads', type=int, default=1)
     suspects_parser.add_argument('--log')

@@ -43,9 +43,9 @@ The license.
 '''
 
 
-# A tiny recipe (data/nn/train.json with tiny distillation settings) - its path
+# A tiny recipe (train/data/train.json with tiny distillation settings) - its path
 def write_config(root, teacher):
-    with open(os.path.join(ROOT, 'data', 'nn', 'train.json'), encoding='utf-8') as file:
+    with open(os.path.join(ROOT, 'train', 'data', 'train.json'), encoding='utf-8') as file:
         recipe = json.load(file)
     books = os.path.join(root, 'books')
     os.makedirs(books, exist_ok=True)
@@ -109,7 +109,7 @@ class TestDistillSettings(DistillCase):
 
     def test_root_path(self):
         self.assertEqual(distill.root_path('/a/b'), '/a/b')
-        self.assertEqual(distill.root_path('data/nn'), os.path.join(ROOT, 'data/nn'))
+        self.assertEqual(distill.root_path('train/data'), os.path.join(ROOT, 'train/data'))
 
     def test_log_line(self):
         with helpers.captured() as (_, stderr):

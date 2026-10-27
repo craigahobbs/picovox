@@ -76,8 +76,7 @@ class TestFrontend(unittest.TestCase):
     def test_main(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, 'vocab.json')
-            with unittest.mock.patch.object(frontend, 'VOCAB_PATH', path), \
-                    unittest.mock.patch.object(frontend.write_vocab, '__defaults__', (path,)), captured() as (stdout, _):
+            with unittest.mock.patch.object(frontend, 'VOCAB_PATH', path), captured() as (stdout, _):
                 self.assertEqual(frontend.main(['vocab']), 0)
             self.assertEqual(stdout.getvalue(), f'Wrote {path} (78 tokens)\n')
             with open(path, encoding='utf-8') as file:

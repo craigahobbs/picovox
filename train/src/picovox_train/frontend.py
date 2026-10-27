@@ -52,8 +52,8 @@ def vocabulary():
     return SPECIALS + CONSONANTS + [f'{vowel}{stress}' for vowel in VOWELS for stress in range(3)]
 
 
-# Write vocab.json
-def write_vocab(path=VOCAB_PATH):
+# Write vocab.json (or path)
+def write_vocab(path=None):
     tokens = vocabulary()
     vocab = {
         'version': 1,
@@ -69,7 +69,7 @@ def write_vocab(path=VOCAB_PATH):
         'vowels': VOWELS,
         'consonants': CONSONANTS
     }
-    with open(path, 'w', encoding='utf-8') as file:
+    with open(path or VOCAB_PATH, 'w', encoding='utf-8') as file:
         file.write(json.dumps(vocab, indent=4) + '\n')
 
 

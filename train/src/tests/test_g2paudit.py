@@ -17,41 +17,39 @@ import warnings
 import numpy
 import torch
 
-from picovox_train import cremad, g2p, g2paudit, heteronyms
+from picovox_train import corpora, cremad, g2p, g2paudit, heteronyms
 
-from . import data_fixtures
+from . import data_fixtures, helpers
 from .helpers import captured, write_wav
 
 
 # The tiny dictionary - a few dozen words, some with variants (hobbes's first is the error)
-DICTIONARY = '''
-cat K AE1 T
-cats K AE1 T S
-cat's K AE1 T S
-dog D AO1 G
-dogs D AO1 G Z
-read R IY1 D
-read(2) R EH1 D
-hobbes HH AA1 B IY0 Z
-hobbes(2) HH AA1 B Z
-hobbs HH AA1 B Z
-sat S AE1 T
-mat M AE1 T
-hat HH AE1 T
-bat B AE1 T
-rat R AE1 T
-log L AO1 G
-fog F AO1 G
-bog B AO1 G
-hog HH AO1 G
-tin T IH1 N
-pin P IH1 N
-win W IH1 N
-bin B IH1 N
-fin F IH1 N
-frog F R AA1 G
-the DH AH0
-'''
+DICTIONARY = {
+    'cat': [['K', 'AE1', 'T']],
+    'cats': [['K', 'AE1', 'T', 'S']],
+    "cat's": [['K', 'AE1', 'T', 'S']],
+    'dog': [['D', 'AO1', 'G']],
+    'dogs': [['D', 'AO1', 'G', 'Z']],
+    'read': [['R', 'IY1', 'D'], ['R', 'EH1', 'D']],
+    'hobbes': [['HH', 'AA1', 'B', 'IY0', 'Z'], ['HH', 'AA1', 'B', 'Z']],
+    'hobbs': [['HH', 'AA1', 'B', 'Z']],
+    'sat': [['S', 'AE1', 'T']],
+    'mat': [['M', 'AE1', 'T']],
+    'hat': [['HH', 'AE1', 'T']],
+    'bat': [['B', 'AE1', 'T']],
+    'rat': [['R', 'AE1', 'T']],
+    'log': [['L', 'AO1', 'G']],
+    'fog': [['F', 'AO1', 'G']],
+    'bog': [['B', 'AO1', 'G']],
+    'hog': [['HH', 'AO1', 'G']],
+    'tin': [['T', 'IH1', 'N']],
+    'pin': [['P', 'IH1', 'N']],
+    'win': [['W', 'IH1', 'N']],
+    'bin': [['B', 'IH1', 'N']],
+    'fin': [['F', 'IH1', 'N']],
+    'frog': [['F', 'R', 'AA1', 'G']],
+    'the': [['DH', 'AH0']]
+}
 
 # The words file - unknown words' labels, the derived words' stems, and the book counts
 WORDS = {
@@ -93,19 +91,10 @@ class TestG2pAudit(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
         directory = self.directory.name
-        dictionary_path = os.path.join(directory, 'cmudict.dict')
-        with open(dictionary_path, 'w', encoding='utf-8') as file:
-            file.write(DICTIONARY)
-        words_path = os.path.join(directory, 'g2p-words.json')
-        with open(words_path, 'w', encoding='utf-8') as file:
-            json.dump(WORDS, file)
-        config_path = os.path.join(directory, 'train.json')
-        with open(config_path, 'w', encoding='utf-8') as file:
-            json.dump({'g2p': CONFIG}, file)
         self.out = os.path.join(directory, 'out')
-        self.patches = [unittest.mock.patch.object(g2p, 'WORDS_PATH', words_path),
-                        unittest.mock.patch.object(g2p.read_pronunciations, '__defaults__', (dictionary_path,)),
-                        unittest.mock.patch.object(g2p.load_config, '__defaults__', (config_path,))]
+        # The G2P's data and settings, as objects
+        self.patches = [helpers.json_files(g2p, {g2p.WORDS_PATH: WORDS, g2p.RECIPE_PATH: {'g2p': CONFIG}}),
+                        unittest.mock.patch.object(corpora, 'read_dictionary', lambda: DICTIONARY)]
         for patch in self.patches:
             patch.start()
 

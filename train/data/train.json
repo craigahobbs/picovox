@@ -13,14 +13,14 @@
             {"name": "polish", "steps": 5000, "lr": 0.001, "warmup": 100, "seed": 3, "topBoost": {"share": 0.3, "count": 20000}},
             {"name": "polish2", "steps": 5000, "lr": 0.0005, "warmup": 100, "seed": 4, "topBoost": {"share": 0.4, "count": 12000}},
             {"name": "focus", "steps": 3000, "lr": 0.0005, "warmup": 100, "seed": 6, "topBoost": {"share": 0.4, "count": 12000},
-             "relabel": "data/nn/g2p-relabel.json", "focusBoost": {"share": 0.02}}
+             "relabel": "train/data/g2p-relabel.json", "focusBoost": {"share": 0.02}}
         ]
     },
     "context": {
-        "description": "The heteronym models (nn/contextlabels.py, nn/context.py): the context labels (the readers' aligned readings; part-of-speech tags over the Project Gutenberg books texts - pinned texts, pins (nn/books.py), fetched to books - where the tag mapping agrees with the audio; the hand-written seeds of data/nn/context-labels.json; and unlabeled transfer windows of the ambiguous words in the books, up to maxTransfer a word), the G2P's reading stage from the g2p recipe's last stage (the reading vectors, the ambiguity head, and the decoder), the context network (distilled from teachers - that many networks of their own seeds - toward their mean probabilities on its examples and the transfer windows, for steadiness), the export to lib/models/g2pModel.js, and the gates - the held-out aligned accuracy over the gate's words (less the S/Z-only pairs), and make train's comparison with the committed module (identical, else within these tolerances)",
+        "description": "The heteronym models (nn/contextlabels.py, nn/context.py): the context labels (the readers' aligned readings; part-of-speech tags over the Project Gutenberg books texts - pinned texts, pins (nn/books.py), fetched to books - where the tag mapping agrees with the audio; the hand-written seeds of train/data/context-labels.json; and unlabeled transfer windows of the ambiguous words in the books, up to maxTransfer a word), the G2P's reading stage from the g2p recipe's last stage (the reading vectors, the ambiguity head, and the decoder), the context network (distilled from teachers - that many networks of their own seeds - toward their mean probabilities on its examples and the transfer windows, for steadiness), the export to lib/models/g2pModel.js, and the gates - the held-out aligned accuracy over the gate's words (less the S/Z-only pairs), and make train's comparison with the committed module (identical, else within these tolerances)",
         "labels": {
             "books": "build/nn/books",
-            "pins": "data/nn/books.json",
+            "pins": "train/data/books.json",
             "texts": ["pg11", "pg23", "pg35", "pg36", "pg42", "pg43", "pg72", "pg74", "pg76", "pg84", "pg98", "pg100",
                 "pg103", "pg108", "pg120", "pg145", "pg158", "pg161", "pg174", "pg175", "pg204", "pg209", "pg219",
                 "pg221", "pg223", "pg224", "pg244", "pg245", "pg345", "pg393", "pg468", "pg564", "pg589", "pg601",
@@ -75,7 +75,7 @@
         "teacher": "build/nn/runs/multi-b/best.pt",
         "targets": {
             "books": "build/nn/books",
-            "pins": "data/nn/books.json",
+            "pins": "train/data/books.json",
             "texts": ["pg2701", "pg1342", "pg84", "pg64317", "pg11", "pg98", "pg1661", "pg345", "pg1400", "pg174", "pg76", "pg74",
                 "pg768", "pg1260", "pg158", "pg161", "pg120", "pg43", "pg219", "pg2554-2026-10-16", "pg36", "pg35"],
             "bookCopies": 2,

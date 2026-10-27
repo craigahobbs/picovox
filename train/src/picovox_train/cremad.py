@@ -7,13 +7,10 @@ each reading 12 fixed sentences as angry, disgusted, fearful, happy, neutral, an
 medium, and high intensity), 7,442 clips, 16 kHz WAV, with crowd-sourced ratings of every clip's emotion and intensity
 (audio alone, video alone, and both - about 10 ratings each).
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.cremad fetch          # downloads/corpora/crema_d/ (650 MB, 7 min)
-    PYTHONPATH=train/src build/venv-listeners/bin/python -B -m picovox_train.cremad align   # build/nn/cremad/alignments.jsonl (GPU)
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.cremad build          # build/nn/data/cremad/, data/nn/cremad.json
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.cremad build --out DIR   # elsewhere, its cremad.json beside it
-
-The align command needs transformers, so it runs in build/venv-listeners; build needs Praat (parselmouth), so it runs
-in build/venv-nn.
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.cremad fetch    # downloads/corpora/crema_d/ (650 MB)
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.cremad align    # build/nn/cremad/alignments.jsonl (GPU)
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.cremad build    # build/nn/data/cremad/, train/data/cremad.json
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.cremad build --out DIR   # its cremad.json beside it
 
 Alignment - CREMA-D has no phone labels. Our tokens (frontend.py) are force-aligned to the CTC posteriors of a
 wav2vec2 phoneme recognizer (facebook/wav2vec2-lv-60-espeak-cv-ft, espeak IPA, 20 ms frames): each of our phones is a
@@ -34,7 +31,7 @@ is excluded, as is one with more than 0.5% of its samples clipped at full scale.
 The data (build/nn/data/cremad/) - data.py's format (ArcticData(directory) loads it), one speaker per actor
 ('cremad-<actor>'), with per-utterance style fields: emotion and emotionId (index of index.json "emotions"), intensity
 and intensityId ("intensities"), and the checks' measures (phoneError, clipped). The split is by actor and sentence (all
-six emotions together), about 5% validation and 5% test. data/nn/cremad.json is the committed summary.
+six emotions together), about 5% validation and 5% test. train/data/cremad.json is the committed summary.
 """
 
 import argparse
@@ -285,7 +282,7 @@ EDGE_EXTEND = 0.15
 def load_ctc(device=None):
     os.environ.setdefault('HF_HOME', HF_HOME)
     import torch  # pylint: disable=import-outside-toplevel
-    # (huggingface_hub and transformers are build/venv-listeners's)
+    # (huggingface_hub and transformers are build/venv-train's)
     from huggingface_hub import snapshot_download  # pylint: disable=import-outside-toplevel,import-error
     from transformers import Wav2Vec2ForCTC  # pylint: disable=import-outside-toplevel,import-error
     if device is None:
@@ -549,7 +546,7 @@ def actors():
 #
 
 DATA_DIR = os.path.join(os.environ.get('NN_DATA_DIR', os.path.join(ROOT, 'build', 'nn', 'data')), 'cremad')
-SUMMARY_PATH = os.path.join(ROOT, 'data', 'nn', 'cremad.json')
+SUMMARY_PATH = os.path.join(ROOT, 'train', 'data', 'cremad.json')
 FORMANT_CEILINGS = {'female': 5500, 'male': 5000}
 
 # Inclusion - the greedy phone error rate above which a clip is too garbled to trust its alignment, the missing tail
@@ -611,7 +608,7 @@ def process_clip(task):
             'report': report, 'audio': pcm, 'tracks': tracks, 'clipped': clipped}
 
 
-# Build build/nn/data/cremad/ (or --out) and data/nn/cremad.json (or the summary beside it)
+# Build build/nn/data/cremad/ (or --out) and train/data/cremad.json (or the summary beside it)
 def build(args):
     import collections  # pylint: disable=import-outside-toplevel
     import multiprocessing  # pylint: disable=import-outside-toplevel
@@ -665,7 +662,7 @@ def build(args):
         realigned = read_realigned() if os.path.exists(realign_path) else {}
         if args.realign or any(realigned.get(clip_id, {}).get('sentence') != sentence for clip_id, sentence in sentences.items()):
             import subprocess  # pylint: disable=import-outside-toplevel
-            python = os.path.join(ROOT, 'build', 'venv-listeners', 'bin', 'python')
+            python = os.path.join(ROOT, 'build', 'venv-train', 'bin', 'python')
             ids = [f'{clip_id}={sentence}' for clip_id, sentence in sentences.items()]
             subprocess.run([python, '-B', '-m', 'picovox_train.cremad', 'realign', *ids], check=True, cwd=ROOT,
                            env={**os.environ, 'PYTHONPATH': SOURCE_DIR})
@@ -825,7 +822,7 @@ def build(args):
     return 0
 
 
-# Write data/nn/cremad.json - the small committed summary: the corpus, its license, the counts by emotion, intensity,
+# Write train/data/cremad.json - the small committed summary: the corpus, its license, the counts by emotion, intensity,
 # and split, the excluded and relabeled clips, the alignment's settings, and the actors (demographics, accent, pitch
 # range, clips included)
 def write_summary(index, path=SUMMARY_PATH):
@@ -895,13 +892,13 @@ def main(argv=None):
     commands = parser.add_subparsers(dest='command', required=True)
     fetch_parser = commands.add_parser('fetch', help='download CREMA-D into downloads/corpora/crema_d/')
     fetch_parser.add_argument('-j', '--jobs', type=int, default=8, help='parallel connections')
-    align_parser = commands.add_parser('align', help='CTC forced alignment of the clips (build/venv-listeners)')
+    align_parser = commands.add_parser('align', help='CTC forced alignment of the clips')
     align_parser.add_argument('--limit', type=int, help='a sample of this many clips (alignments.jsonl.sample)')
     align_parser.add_argument('--device', default=None, help='torch device (default mps if available)')
-    build_parser = commands.add_parser('build', help='build build/nn/data/cremad/ (build/venv-nn)')
+    build_parser = commands.add_parser('build', help='build build/nn/data/cremad/')
     build_parser.add_argument('--limit', type=int, help='a sample of this many clips (a quick test)')
     build_parser.add_argument('--realign', action='store_true', help='realign the relabeled clips again')
-    build_parser.add_argument('--out', help='the data directory (default: build/nn/data/cremad/, its summary data/nn/cremad.json)')
+    build_parser.add_argument('--out', help='the data directory (default: build/nn/data/cremad/, its summary train/data/cremad.json)')
     build_parser.add_argument('-j', '--jobs', type=int, default=None, help='worker processes (default: all cores)')
     realign_parser = commands.add_parser('realign', help='realign clips to another sentence (clip=SENTENCE ...)')
     realign_parser.add_argument('ids', nargs='+')

@@ -83,12 +83,12 @@ class TestPins(BooksCase):
     def test_recipe_pins(self):
         # The recipe's books are pinned - each a Gutenberg URL, a SHA-256, and a date; the labels' books are pg<id> (their
         # names in the labels)
-        with open(os.path.join(ROOT, 'data', 'nn', 'train.json'), encoding='utf-8') as file:
+        with open(os.path.join(ROOT, 'train', 'data', 'train.json'), encoding='utf-8') as file:
             recipe = json.load(file)
         pins = books.load_pins()
         labels, targets = recipe['context']['labels'], recipe['distill']['targets']
         for settings in (labels, targets):
-            self.assertEqual(settings['pins'], 'data/nn/books.json')
+            self.assertEqual(settings['pins'], 'train/data/books.json')
             self.assertTrue(set(settings['texts']) <= set(pins))
         self.assertEqual(len(labels['texts']), 132)
         self.assertEqual(len(targets['texts']), 22)
@@ -212,8 +212,8 @@ class TestPinnedPath(BooksCase):
     def test_not_pinned(self):
         with self.assertRaises(books.PinError) as raised:
             books.pinned_path(self.books, 'pg8', {})
-        self.assertEqual(str(raised.exception), f'book pg8: not pinned in data/nn/books.json - fetch it to {self.books}/pg8.txt and pin it '
-                                                '(python -m picovox_train.books pin pg8)')
+        self.assertEqual(str(raised.exception), f'book pg8: not pinned in train/data/books.json - fetch it to {self.books}/pg8.txt '
+                                                'and pin it (python -m picovox_train.books pin pg8)')
 
 
 class TestArchive(BooksCase):

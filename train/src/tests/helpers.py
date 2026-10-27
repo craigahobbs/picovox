@@ -8,11 +8,13 @@ and packaged model modules' contents
 
 import base64
 import contextlib
+import copy
 import io
 import json
 import os
 import re
 import time
+import unittest.mock
 import wave
 import zlib
 
@@ -41,6 +43,48 @@ def tiny_config(**overrides):
         'speakers': 4, 'styleDim': 4, 'jitter': 0.005, 'shimmer': 0.02, 'positionFeatures': 5, 'kind': 'multi',
         'speakerDim': 4, 'styles': 5, **overrides
     }
+
+
+# JSON files given as objects - a patch of a module's read_json that answers each path in files with a copy of its object
+# (any other path is read from disk); the files are looked up when read, so a test may change them in between
+def json_files(module, files):
+    read = module.read_json
+    return unittest.mock.patch.object(module, 'read_json', lambda path: copy.deepcopy(files[path]) if path in files else read(path))
+
+
+# A tiny pronouncing dictionary (corpora.read_dictionary's form) - the CMU dictionary's entries for TEXTS's words,
+# "record", "lead", and "does" (the tests never read the downloaded dictionary)
+DICTIONARY = {
+    'a': [['AH0'], ['EY1']],
+    'best': [['B', 'EH1', 'S', 'T']],
+    'call': [['K', 'AO1', 'L']],
+    'cat': [['K', 'AE1', 'T']],
+    'cold': [['K', 'OW1', 'L', 'D']],
+    'dark': [['D', 'AA1', 'R', 'K']],
+    'does': [['D', 'AH1', 'Z'], ['D', 'IH0', 'Z']],
+    'here': [['HH', 'IY1', 'R']],
+    'home': [['HH', 'OW1', 'M']],
+    'is': [['IH1', 'Z'], ['IH0', 'Z']],
+    'ishmael': [['IH1', 'SH', 'M', 'IY0', 'L'], ['IH1', 'SH', 'M', 'EY0', 'L']],
+    'it': [['IH1', 'T'], ['IH0', 'T']],
+    'lead': [['L', 'EH1', 'D'], ['L', 'IY1', 'D']],
+    'look': [['L', 'UH1', 'K']],
+    'mat': [['M', 'AE1', 'T']],
+    'me': [['M', 'IY1']],
+    'night': [['N', 'AY1', 'T']],
+    'of': [['AH1', 'V']],
+    'on': [['AA1', 'N'], ['AO1', 'N']],
+    'record': [['R', 'AH0', 'K', 'AO1', 'R', 'D'], ['R', 'EH1', 'K', 'ER0', 'D'], ['R', 'IH0', 'K', 'AO1', 'R', 'D']],
+    'sat': [['S', 'AE1', 'T']],
+    'the': [['DH', 'AH0'], ['DH', 'AH1'], ['DH', 'IY0']],
+    'there': [['DH', 'EH1', 'R']],
+    'times': [['T', 'AY1', 'M', 'Z']],
+    'wait': [['W', 'EY1', 'T']],
+    'was': [['W', 'AA1', 'Z'], ['W', 'AH0', 'Z']],
+    'we': [['W', 'IY1']],
+    'went': [['W', 'EH1', 'N', 'T']],
+    'who': [['HH', 'UW1']]
+}
 
 
 # The texts of the synthetic utterances

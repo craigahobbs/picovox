@@ -15,50 +15,48 @@ import warnings
 import numpy
 import torch
 
-from picovox_train import g2p, g2pmodel
+from picovox_train import corpora, g2p, g2pmodel
 
+from . import helpers
 from .helpers import captured
 
 
-# The tiny dictionary - a few dozen words, some with variants, a comment, and words the G2P can't look up
-DICTIONARY = '''
-;;; a comment
-cat K AE1 T
-cats K AE1 T S
-dog D AO1 G
-dogs D AO1 G Z
-read R IY1 D
-read(2) R EH1 D
-read(3) R IY1 D
-lead L IY1 D
-lead(2) L EH1 D
-the DH AH0 # a function word
-a AH0
-an AE1 N
-and AH0 N D
-sat S AE1 T
-mat M AE1 T
-hat HH AE1 T
-bat B AE1 T
-rat R AE1 T
-log L AO1 G
-fog F AO1 G
-bog B AO1 G
-hog HH AO1 G
-jog JH AA1 G
-cog K AA1 G
-tin T IH1 N
-pin P IH1 N
-win W IH1 N
-bin B IH1 N
-fin F IH1 N
-sin S IH1 N
-kin K IH1 N
-'tis T IH1 Z
-o'clock AH0 K L AA1 K
-x-ray EH1 K S R EY2
-Upper AH1 P ER0
-'''
+# The tiny dictionary (corpora.read_dictionary's form) - a few dozen words, some with variants (one repeated), and words
+# the G2P can't look up
+DICTIONARY = {
+    'cat': [['K', 'AE1', 'T']],
+    'cats': [['K', 'AE1', 'T', 'S']],
+    'dog': [['D', 'AO1', 'G']],
+    'dogs': [['D', 'AO1', 'G', 'Z']],
+    'read': [['R', 'IY1', 'D'], ['R', 'EH1', 'D'], ['R', 'IY1', 'D']],
+    'lead': [['L', 'IY1', 'D'], ['L', 'EH1', 'D']],
+    'the': [['DH', 'AH0']],
+    'a': [['AH0']],
+    'an': [['AE1', 'N']],
+    'and': [['AH0', 'N', 'D']],
+    'sat': [['S', 'AE1', 'T']],
+    'mat': [['M', 'AE1', 'T']],
+    'hat': [['HH', 'AE1', 'T']],
+    'bat': [['B', 'AE1', 'T']],
+    'rat': [['R', 'AE1', 'T']],
+    'log': [['L', 'AO1', 'G']],
+    'fog': [['F', 'AO1', 'G']],
+    'bog': [['B', 'AO1', 'G']],
+    'hog': [['HH', 'AO1', 'G']],
+    'jog': [['JH', 'AA1', 'G']],
+    'cog': [['K', 'AA1', 'G']],
+    'tin': [['T', 'IH1', 'N']],
+    'pin': [['P', 'IH1', 'N']],
+    'win': [['W', 'IH1', 'N']],
+    'bin': [['B', 'IH1', 'N']],
+    'fin': [['F', 'IH1', 'N']],
+    'sin': [['S', 'IH1', 'N']],
+    'kin': [['K', 'IH1', 'N']],
+    "'tis": [['T', 'IH1', 'Z']],
+    "o'clock": [['AH0', 'K', 'L', 'AA1', 'K']],
+    'x-ray': [['EH1', 'K', 'S', 'R', 'EY2']],
+    'Upper': [['AH1', 'P', 'ER0']]
+}
 
 # The words file - unknown words' labels, the derived words' stems, and the book counts
 WORDS = {
@@ -87,22 +85,20 @@ class TestG2p(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
         directory = self.directory.name
-        self.dictionary_path = os.path.join(directory, 'cmudict.dict')
-        with open(self.dictionary_path, 'w', encoding='utf-8') as file:
-            file.write(DICTIONARY)
-        self.words_path = os.path.join(directory, 'g2p-words.json')
-        with open(self.words_path, 'w', encoding='utf-8') as file:
-            json.dump(WORDS, file)
+        self.dictionary = {word: list(variants) for word, variants in DICTIONARY.items()}
+
+        # The data and the settings, as objects (no fixes or books by default)
         self.relabel_path = os.path.join(directory, 'g2p-relabel.json')
-        with open(self.relabel_path, 'w', encoding='utf-8') as file:
-            json.dump({'relabel': {'lead': 'L EH1 D', 'cat': 'K AA1 T', 'unknownword': 'Y UW1'}}, file)
         self.config_path = os.path.join(directory, 'train.json')
-        config = json.loads(json.dumps(CONFIG).replace('RELABEL', self.relabel_path))
-        with open(self.config_path, 'w', encoding='utf-8') as file:
-            json.dump({'g2p': config}, file)
-        self.patches = [unittest.mock.patch.object(g2p, 'WORDS_PATH', self.words_path),
-                        unittest.mock.patch.object(g2p.read_pronunciations, '__defaults__', (self.dictionary_path,)),
-                        unittest.mock.patch.object(g2p.load_data, '__defaults__', (None, None, None))]
+        self.files = {
+            g2p.WORDS_PATH: WORDS,
+            g2p.FIXES_PATH: {'fixes': {}},
+            g2p.BOOKS_PATH: {'labels': {}, 'books': {}},
+            self.relabel_path: {'relabel': {'lead': 'L EH1 D', 'cat': 'K AA1 T', 'unknownword': 'Y UW1'}},
+            self.config_path: {'g2p': json.loads(json.dumps(CONFIG).replace('RELABEL', self.relabel_path))}
+        }
+        self.patches = [helpers.json_files(g2p, self.files),
+                        unittest.mock.patch.object(corpora, 'read_dictionary', lambda: self.dictionary)]
         for patch in self.patches:
             patch.start()
 
@@ -159,10 +155,9 @@ class TestG2p(unittest.TestCase):
         self.assertNotIn('unknownword', data['first'])
 
     def test_load_data_fixes(self):
-        self.assertEqual(g2p.FIXES_PATH, os.path.join(g2p.ROOT, 'data', 'nn', 'g2p-fixes.json'))
+        self.assertEqual(g2p.FIXES_PATH, os.path.join(g2p.ROOT, 'train', 'data', 'g2p-fixes.json'))
         fixes_path = os.path.join(self.directory.name, 'g2p-fixes.json')
-        with open(fixes_path, 'w', encoding='utf-8') as file:
-            json.dump({'fixes': {'cat': 'K AE1 T S', 'dog': 'D AA1 G', 'read': 'R EH1 D', 'lead': 'L IY1 D Z', 'zzz': 'Z'}}, file)
+        self.files[fixes_path] = {'fixes': {'cat': 'K AE1 T S', 'dog': 'D AA1 G', 'read': 'R EH1 D', 'lead': 'L IY1 D Z', 'zzz': 'Z'}}
         data = g2p.load_data(fixes=fixes_path)
 
         # The corrected pronunciation first, the wrong one dropped
@@ -183,15 +178,13 @@ class TestG2p(unittest.TestCase):
         self.assertEqual(data['first']['dog'], ['D', 'AA1', 'G'])
 
     def test_load_data_books(self):
-        self.assertEqual(g2p.BOOKS_PATH, os.path.join(g2p.ROOT, 'data', 'nn', 'g2p-books.json'))
+        self.assertEqual(g2p.BOOKS_PATH, os.path.join(g2p.ROOT, 'train', 'data', 'g2p-books.json'))
         monitored = g2p.load_data()['monitor'][0]
         books_path = os.path.join(self.directory.name, 'g2p-books.json')
-        with open(books_path, 'w', encoding='utf-8') as file:
-            json.dump({'description': 'books', 'labels': {'cat': 'K AA1 T', 'doggo': 'D AA1 G OW2', 'zork': 'Z AO1 R K'},
-                       'books': {'one': {'counts': {'zork': 7, 'zork\'s': 2, 'cat': 3, 'cat\'s': 1}},
-                                 'two': {'counts': {'mat\'s': 1, 'dog\'s': 1, 'nope\'s': 1, monitored: 1}}}}, file)
-        with open(self.dictionary_path, 'a', encoding='utf-8') as file:
-            file.write('dog\'s D AO1 G Z\n')
+        self.files[books_path] = {'description': 'books', 'labels': {'cat': 'K AA1 T', 'doggo': 'D AA1 G OW2', 'zork': 'Z AO1 R K'},
+                                  'books': {'one': {'counts': {'zork': 7, 'zork\'s': 2, 'cat': 3, 'cat\'s': 1}},
+                                            'two': {'counts': {'mat\'s': 1, 'dog\'s': 1, 'nope\'s': 1, monitored: 1}}}}
+        self.dictionary['dog\'s'] = [['D', 'AO1', 'G', 'Z']]
         data = g2p.load_data(books=books_path)
 
         # The labels - a dictionary word's corrected (its derived words follow), and new words, a teacher's label replaced

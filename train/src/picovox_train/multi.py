@@ -5,18 +5,18 @@
 The multi-speaker training data - American audiobook readers: LibriTTS-R (train-clean-100 and dev-clean) speakers
 classified as US English, and the labeled CMU ARCTIC US speakers (slt, bdl, clb, rms), featurized exactly as
 data.py featurizes ARCTIC (the same tokens, alignment, format, and auxiliary tracks), into one corpus directory that
-data.py's ArcticData loads. The pool is the committed speaker table, data/nn/speakers.json (its accents and analysis
+data.py's ArcticData loads. The pool is the committed speaker table, train/data/speakers.json (its accents and analysis
 settings were measured by the former accent classification, settings, and pool commands - see git history).
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.multi build -j 8     # build/nn/data/multi/ (6 minutes, 14 cores)
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.multi build -j 8     # build/nn/data/multi/ (6 minutes, 14 cores)
 
 The corpus (build/nn/data/multi/) has data.py's format (index.json, tokens.npy, durations.npy, seconds.npy,
 audio.npy, frames.npy, alignment.jsonl): load it with ArcticData(os.path.join(DATA_DIR, 'multi')). build --out DIR
 builds it elsewhere, with its speaker table and split (speakers.json, multi-split.json) beside it instead of in
-data/nn/; build --pool TABLE builds another speaker table's pool. Its speakers are
+train/data/; build --pool TABLE builds another speaker table's pool. Its speakers are
 keyed "arctic-<name>" and "libritts-<id>"; each speaker's index.json entry has data.py's analysis settings (sex,
 pitchFloor, pitchCeiling, formantCeiling, sourceSampleRate, bandwidth) plus its index, which is its id in
-data/nn/speakers.json.
+train/data/speakers.json.
 
 The pieces:
 
@@ -37,8 +37,8 @@ The pieces:
   (WORD_MATCH_EXEMPT - the aligner's dictionary reduces them); utterances with no MFA labels are left out.
 - Splits - per speaker: an ARCTIC utterance has data.py's sentence split (sentence_split - the same
   held-out sentences for every speaker); a LibriTTS-R utterance is "test" (2%) or "val" (3%) by a hash of its utterance id, else
-  "train". data/nn/multi-split.json lists the held-out utterance ids per speaker.
-- data/nn/speakers.json - the speaker id table: id (the training index), key, source, corpus speaker, reader, sex,
+  "train". train/data/multi-split.json lists the held-out utterance ids per speaker.
+- train/data/speakers.json - the speaker id table: id (the training index), key, source, corpus speaker, reader, sex,
   accent (top, US posterior, votes), hours (included, per split), median F0, analysis settings, and match rates.
 """
 
@@ -62,8 +62,8 @@ from .frontend import (ABBREVIATIONS, BOUNDARIES, FUNCTION_WORDS, pronounce_text
 
 
 OUT_DIR = os.path.join(DATA_DIR, 'multi')
-SPEAKERS_PATH = os.path.join(ROOT, 'data', 'nn', 'speakers.json')
-SPLIT_PATH = os.path.join(ROOT, 'data', 'nn', 'multi-split.json')
+SPEAKERS_PATH = os.path.join(ROOT, 'train', 'data', 'speakers.json')
+SPLIT_PATH = os.path.join(ROOT, 'train', 'data', 'multi-split.json')
 LIBRITTS_DIR = os.path.join(CORPORA_DIR, 'libritts_r', 'LibriTTS_R')
 
 # The labeled ARCTIC US speakers in the pool, in id order (slt and bdl first, as in the single-speaker data)
@@ -166,7 +166,7 @@ def utterance_split(corpus, sentence):
 # The pool
 #
 
-# The pool of a speaker table (data/nn/speakers.json, which records each kept speaker's accent and analysis settings) -
+# The pool of a speaker table (train/data/speakers.json, which records each kept speaker's accent and analysis settings) -
 # (the kept speakers in id order, their rows)
 def table_pool(path):
     table = sorted(load_json(path, None)['speakers'], key=lambda row: row['id'])
@@ -185,7 +185,7 @@ def table_pool(path):
 # Build
 #
 
-# The paths of a corpus directory's speaker table and split - data/nn/'s for the repository's default directory
+# The paths of a corpus directory's speaker table and split - train/data/'s for the repository's default directory
 # (build/nn/data/multi), else beside it - so a build elsewhere (make train's, with NN_DATA_DIR) never rewrites the
 # committed files
 def table_paths(out_dir):
@@ -194,7 +194,7 @@ def table_paths(out_dir):
     return os.path.join(out_dir, 'speakers.json'), os.path.join(out_dir, 'multi-split.json')
 
 
-# Build build/nn/data/multi/ (or --out), data/nn/speakers.json, and data/nn/multi-split.json
+# Build build/nn/data/multi/ (or --out), train/data/speakers.json, and train/data/multi-split.json
 def build_command(args):
     start_time = time.time()
     out_dir = args.out or OUT_DIR
@@ -392,8 +392,8 @@ def raw_to_npy(raw_path, npy_path, dtype, shape):
     os.remove(raw_path)
 
 
-# Write data/nn/speakers.json - the speaker id table (each speaker's listening score, utmos, kept from the table there,
-# or from data/nn/'s for a new table)
+# Write train/data/speakers.json - the speaker id table (each speaker's listening score, utmos, kept from the table there,
+# or from train/data/'s for a new table)
 def write_speakers(corpus_data, speakers, row_of, edits_by_speaker, missing_labels, path=SPEAKERS_PATH):
     previous = load_json(path if os.path.exists(path) else SPEAKERS_PATH, {'speakers': []})['speakers']
     utmos = {row['key']: row['utmos'] for row in previous if 'utmos' in row}
@@ -455,7 +455,7 @@ def write_speakers(corpus_data, speakers, row_of, edits_by_speaker, missing_labe
     write_json(path, result)
 
 
-# Write data/nn/multi-split.json - the held-out utterance ids per speaker
+# Write train/data/multi-split.json - the held-out utterance ids per speaker
 def write_split(entries, path=SPLIT_PATH):
     split = {'description': 'The multi-speaker split of picovox_train/multi.py - per speaker, the held-out utterances ("val" and "test"); '
                             'ARCTIC speakers by sentence (data.py\'s split), LibriTTS-R by a hash of the utterance id '
@@ -496,8 +496,8 @@ def main(argv=None):
     build_parser.add_argument('--speakers', nargs='+', help='only these pool speakers (a quick test; no speakers.json)')
     build_parser.add_argument('--limit', type=int, help='at most this many utterances per speaker (a quick test)')
     build_parser.add_argument('-j', '--jobs', type=int, default=None, help='worker processes (default: all cores)')
-    build_parser.add_argument('--out', help='the corpus directory (default: build/nn/data/multi/, its tables in data/nn/)')
-    build_parser.add_argument('--pool', default=SPEAKERS_PATH, help='the pool - a speaker table (default: data/nn/speakers.json)')
+    build_parser.add_argument('--out', help='the corpus directory (default: build/nn/data/multi/, its tables in train/data/)')
+    build_parser.add_argument('--pool', default=SPEAKERS_PATH, help='the pool - a speaker table (default: train/data/speakers.json)')
     args = parser.parse_args(argv)
     return build_command(args) or 0
 

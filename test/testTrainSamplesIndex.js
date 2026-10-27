@@ -12,7 +12,7 @@ import {tmpdir} from 'node:os';
 test('trainsamplesindex.parseArgs', () => {
     assert.deepEqual(parseArgs(['--stage', 'teacher-a', '--checkpoint', 'build/train/runs/teacher-a/last.pt', '--out', 'samples']), {
         'stage': 'teacher-a', 'checkpoint': 'build/train/runs/teacher-a/last.pt', 'model': null, 'run': 'teacher-a',
-        'out': 'samples', 'settings': 'data/nn/train.json'
+        'out': 'samples', 'settings': 'train/data/train.json'
     });
     assert.deepEqual(parseArgs(['--stage', 'reference', '--model', 'lib/models/voiceModel.js', '--out', 'samples',
         '--settings', 'other.json']), {

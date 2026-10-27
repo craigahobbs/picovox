@@ -3,25 +3,25 @@
 
 """
 Training the grapheme-to-phoneme (G2P) network - the app's only pronouncer (lib/g2p.js runs lib/models/g2pModel.js for
-every word; g2pmodel.py is its Python port). The recipe is data/nn/train.json's "g2p" settings:
+every word; g2pmodel.py is its Python port). The recipe is train/data/train.json's "g2p" settings:
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p train --out build/nn/g2p-train   # every stage (resumable)
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p evaluate [lib/models/g2pModel.js | CHECKPOINT]
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p book TEXT --name NAME --title TITLE --url URL
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p train --out build/nn/g2p-train   # every stage (resumable)
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p evaluate [lib/models/g2pModel.js | CHECKPOINT]
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p book TEXT --name NAME --title TITLE --url URL
 
 The data:
 
-- every word of the CMU Pronouncing Dictionary (data/cmudict.dict - the lowercase words textToPhrases can look up) with
+- every word of the CMU Pronouncing Dictionary (downloads/cmudict/cmudict.dict - the lowercase words textToPhrases can look up) with
   its first pronunciation (lib/lexicon.js's target), but a 2,000-word monitoring set (validation-split words that occur
   in none of the 128 books), sampled by frequency - "uniform" of the samples uniform over the words, the rest in
-  proportion to count ** "alpha" (data/nn/g2p-words.json evalCounts + weightCounts, the words' counts in 128 Project
+  proportion to count ** "alpha" (train/data/g2p-words.json evalCounts + weightCounts, the words' counts in 128 Project
   Gutenberg books)
-- "unknown" of the samples uniform over 100,812 labeled words the dictionary lacks (data/nn/g2p-words.json labels - a
+- "unknown" of the samples uniform over 100,812 labeled words the dictionary lacks (train/data/g2p-words.json labels - a
   teacher ensemble's, or the spelling and -s rules' where they apply to a dictionary word)
-- in a stage with "relabel" (a JSON file {"relabel": {word: "PH ON ES"}} - data/nn/g2p-relabel.json, heteronyms.py)
+- in a stage with "relabel" (a JSON file {"relabel": {word: "PH ON ES"}} - train/data/g2p-relabel.json, heteronyms.py)
   other targets for some dictionary words - the rule-labeled words derived from them follow - and ("focusBoost":
   {"share"}) a share of the samples uniform over them
-- the words of the books listeners hear (data/nn/g2p-books.json - "book" counts a book's words): labels for its words
+- the words of the books listeners hear (train/data/g2p-books.json - "book" counts a book's words): labels for its words
   the dictionary lacks or has wrong (names - Rocinante, Cide Hamete - and archaic words), each a dictionary word in
   training (a corrected dictionary word's rule-labeled forms following), its possessives the dictionary lacks (the
   stem's target with its -s suffix), and its word counts, which join the frequency weights (the monitoring set is drawn
@@ -50,14 +50,13 @@ import time
 
 import numpy
 
-from . import RECIPE_PATH, ROOT, frontend, g2pmodel
+from . import RECIPE_PATH, ROOT, corpora, frontend, g2pmodel, read_json
 from .frontend import vocabulary
 
 
-DICTIONARY_PATH = os.path.join(ROOT, 'data', 'cmudict.dict')
-WORDS_PATH = os.path.join(ROOT, 'data', 'nn', 'g2p-words.json')
-FIXES_PATH = os.path.join(ROOT, 'data', 'nn', 'g2p-fixes.json')
-BOOKS_PATH = os.path.join(ROOT, 'data', 'nn', 'g2p-books.json')
+WORDS_PATH = os.path.join(ROOT, 'train', 'data', 'g2p-words.json')
+FIXES_PATH = os.path.join(ROOT, 'train', 'data', 'g2p-fixes.json')
+BOOKS_PATH = os.path.join(ROOT, 'train', 'data', 'g2p-books.json')
 MODULE_PATH = g2pmodel.MODULE_PATH
 
 # The dictionary's split (the monitoring set is drawn from its validation words)
@@ -91,10 +90,9 @@ def log_line(path, text):
             file.write(line + '\n')
 
 
-# The settings - data/nn/train.json's "g2p"
+# The settings - train/data/train.json's "g2p"
 def load_config(path=RECIPE_PATH):
-    with open(path, encoding='utf-8') as file:
-        return json.load(file)['g2p']
+    return read_json(path)['g2p']
 
 
 #
@@ -102,18 +100,12 @@ def load_config(path=RECIPE_PATH):
 #
 
 # The dictionary - word to its pronunciations (each a list of phones), for the words textToPhrases can look up
-def read_pronunciations(path=DICTIONARY_PATH):
+def read_pronunciations():
     pronunciations = {}
-    with open(path, encoding='utf-8') as file:
-        for line in file:
-            hash_index = line.find('#')
-            content = (line[:hash_index] if hash_index >= 0 else line).strip()
-            if content == '':
-                continue
-            word, *phones = content.split()
-            word = re.sub(r'\(\d+\)$', '', word)
-            if WORD_REGEX.match(word) and word.strip('\'') == word:
-                pronunciations.setdefault(word, [])
+    for word, variants in corpora.read_dictionary().items():
+        if WORD_REGEX.match(word) and word.strip('\'') == word:
+            pronunciations[word] = []
+            for phones in variants:
                 if phones not in pronunciations[word]:
                     pronunciations[word].append(phones)
     return pronunciations
@@ -130,20 +122,18 @@ def split_words(words):
 
 def load_data(relabel=None, fixes=FIXES_PATH, books=BOOKS_PATH):
     """The data - {first (word: target phones), all (word: every pronunciation), labels (unknown words' phones), stems,
-    evalCounts, weightCounts, monitor, relabeled (the relabeled words)}; fixes (data/nn/g2p-fixes.json - None for the
-    dictionary as it is) corrects the dictionary's label errors first, and books (data/nn/g2p-books.json - None for
+    evalCounts, weightCounts, monitor, relabeled (the relabeled words)}; fixes (train/data/g2p-fixes.json - None for the
+    dictionary as it is) corrects the dictionary's label errors first, and books (train/data/g2p-books.json - None for
     none) adds the listeners' books' words"""
     pronunciations = read_pronunciations()
-    with open(WORDS_PATH, encoding='utf-8') as file:
-        words = json.load(file)
+    words = read_json(WORDS_PATH)
     first = {word: phones[0] for word, phones in pronunciations.items()}
     labels = {word: phones.split() for word, phones in words['labels'].items()}
     stems = words['stems']
 
     # The dictionary's corrected labels (g2paudit.py) - the corrected pronunciation first, the wrong one dropped
     if fixes:
-        with open(fixes, encoding='utf-8') as file:
-            corrections = {word: phones.split() for word, phones in json.load(file)['fixes'].items() if word in first}
+        corrections = {word: phones.split() for word, phones in read_json(fixes)['fixes'].items() if word in first}
         derive_targets(labels, stems, first, corrections)
         for word, phones in corrections.items():
             pronunciations[word] = [phones] + [variant for variant in pronunciations[word] if variant not in (phones, first[word])]
@@ -165,8 +155,7 @@ def load_data(relabel=None, fixes=FIXES_PATH, books=BOOKS_PATH):
     # Other targets for some dictionary words - and the rule-labeled words derived from them
     relabeled = set()
     if relabel:
-        with open(relabel, encoding='utf-8') as file:
-            targets = {word: phones.split() for word, phones in json.load(file)['relabel'].items()}
+        targets = {word: phones.split() for word, phones in read_json(relabel)['relabel'].items()}
         derive_targets(labels, stems, first, targets)
         first.update((word, phones) for word, phones in targets.items() if word in first)
         relabeled = set(targets) & set(first)
@@ -175,13 +164,12 @@ def load_data(relabel=None, fixes=FIXES_PATH, books=BOOKS_PATH):
             'weightCounts': weight_counts, 'monitor': sorted(monitor), 'relabeled': relabeled}
 
 
-# Add the books' words (data/nn/g2p-books.json, in place) - each label (a word the dictionary lacks, or a correction of
+# Add the books' words (train/data/g2p-books.json, in place) - each label (a word the dictionary lacks, or a correction of
 # its label - the rule-labeled words derived from it follow) a dictionary word, and each possessive in the books the
 # dictionary lacks the stem's target with its -s suffix (a teacher's label of the word replaced); returns the books' word
 # counts, summed
 def add_books(path, pronunciations, first, labels, stems):
-    with open(path, encoding='utf-8') as file:
-        books = json.load(file)
+    books = read_json(path)
     targets = {word: phones.split() for word, phones in books['labels'].items()}
     derive_targets(labels, stems, first, {word: phones for word, phones in targets.items() if word in first})
     for word, phones in targets.items():
@@ -577,8 +565,7 @@ def command_book(args):
     trains on (the dictionary's, the labels', and their possessives)"""
     with open(args.text, encoding='utf-8') as file:
         items = frontend.text_items(file.read())
-    with open(args.books, encoding='utf-8') as file:
-        books = json.load(file)
+    books = read_json(args.books)
     known = set(read_pronunciations()) | set(books['labels'])
     counts = collections.Counter(item for item, _ in items if isinstance(item, str))
     kept = {word: count for word, count in sorted(counts.items()) if word in known or (word.endswith('\'s') and word[:-2] in known)}
@@ -615,7 +602,7 @@ def main(argv=None):
     evaluate_parser.add_argument('--threads', type=int, default=4)
     evaluate_parser.add_argument('--out', help='the measures as JSON')
     evaluate_parser.set_defaults(func=command_evaluate)
-    book_parser = commands.add_parser('book', help='count a listened-to book\'s words into data/nn/g2p-books.json')
+    book_parser = commands.add_parser('book', help='count a listened-to book\'s words into train/data/g2p-books.json')
     book_parser.add_argument('text', help='the book\'s text (UTF-8)')
     book_parser.add_argument('--name', required=True, help='the book\'s name (its key)')
     book_parser.add_argument('--title', required=True)

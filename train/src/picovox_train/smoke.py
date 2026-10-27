@@ -5,7 +5,7 @@
 The training pipeline's smoke test - every make-train entry point run for a few steps on the CPU, into a scratch
 directory, each checked to finish and write its outputs:
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke [--out build/nn/smoke] \
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.smoke [--out build/nn/smoke] \
         [--only g2p,context,data,teacher,distill,package]
 
 - g2p - picovox_train.g2p train (each stage 3 steps)
@@ -109,7 +109,7 @@ def main(argv=None):
         os.makedirs(books, exist_ok=True)
         with open(os.path.join(books, 'book.txt'), 'w', encoding='utf-8') as file:
             file.write(BOOK_TEXT)
-        with open(os.path.join(ROOT, 'data', 'nn', 'train.json'), encoding='utf-8') as file:
+        with open(os.path.join(ROOT, 'train', 'data', 'train.json'), encoding='utf-8') as file:
             recipe = json.load(file)
         recipe['distill']['targets'].update({'books': books, 'valItems': 4})
         del recipe['distill']['targets']['texts']

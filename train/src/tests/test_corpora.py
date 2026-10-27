@@ -3,6 +3,7 @@
 
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
+import hashlib
 import io
 import os
 import runpy
@@ -191,23 +192,31 @@ class TestFetch(unittest.TestCase):
         self.assertIn('one: downloading https://x/one.tar.gz\n', stderr.getvalue())
         self.assertIn('one: unpacking 0 MB\none: present\nsplit: downloading https://x/split.tar.gz-0\n', stderr.getvalue())
 
-    def test_fetch_whisper(self):
+    def test_fetch_file(self):
         with tempfile.TemporaryDirectory() as directory:
-            model = os.path.join(directory, 'whisper', 'ggml-base.en.bin')
+            path = os.path.join(directory, 'files', 'model.bin')
             urls = []
 
             def urlopen(request, timeout):
                 urls.append((request.full_url, timeout))
                 return FakeResponse(b'model')
-            with unittest.mock.patch.object(corpora, 'WHISPER_MODEL', model), \
+            files = {'model': {'url': 'https://x/model.bin', 'path': path, 'sha256': hashlib.sha256(b'model').hexdigest(),
+                               'description': 'A model'},
+                     'revised': {'url': 'https://x/revised.bin', 'path': os.path.join(directory, 'revised.bin'), 'sha256': '0' * 64,
+                                 'description': 'A revised file'}}
+            with unittest.mock.patch.dict(corpora.FILES, files, clear=True), \
                     unittest.mock.patch('urllib.request.urlopen', side_effect=urlopen), helpers.captured() as (_, stderr):
-                self.assertEqual(corpora.fetch_whisper(), 5)
-                self.assertEqual(corpora.fetch_whisper(), 0)
-            with open(model, 'rb') as file:
+                self.assertEqual(corpora.fetch_file('model'), 5)
+                self.assertEqual(corpora.fetch_file('model'), 0)
+                # A file other than the pinned one fails, and is removed
+                with self.assertRaisesRegex(IOError, 'revised: SHA-256 .* is not the pinned 0000'):
+                    corpora.fetch_file('revised')
+            with open(path, 'rb') as file:
                 self.assertEqual(file.read(), b'model')
-        self.assertEqual(urls, [(corpora.WHISPER_URL, 60)])
-        self.assertTrue(stderr.getvalue().startswith(f'whisper: downloading {corpora.WHISPER_URL}\n'))
-        self.assertTrue(stderr.getvalue().endswith('whisper: present\n'))
+            self.assertFalse(os.path.exists(os.path.join(directory, 'revised.bin')))
+        self.assertEqual(urls, [('https://x/model.bin', 60), ('https://x/revised.bin', 60)])
+        self.assertTrue(stderr.getvalue().startswith('model: downloading https://x/model.bin\n'))
+        self.assertIn('model: present\n', stderr.getvalue())
 
     def test_write_readme(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -255,6 +264,21 @@ class TestFetch(unittest.TestCase):
         self.assertEqual(second, third)
 
 
+class TestDictionary(unittest.TestCase):
+
+    def test_parse_dictionary(self):
+        lines = [';;; a comment', '', 'read R IY1 D', 'read(2) R EH1 D # past', 'read(3) R IY1 D', "o'clock AH0 K L AA1 K"]
+        self.assertEqual(corpora.parse_dictionary(lines), {
+            'read': [['R', 'IY1', 'D'], ['R', 'EH1', 'D'], ['R', 'IY1', 'D']], "o'clock": [['AH0', 'K', 'L', 'AA1', 'K']]
+        })
+
+    def test_read_dictionary(self):
+        opened = unittest.mock.mock_open(read_data='cat K AE1 T\ncats K AE1 T S\n')
+        with unittest.mock.patch('builtins.open', opened):
+            self.assertEqual(corpora.read_dictionary(), {'cat': [['K', 'AE1', 'T']], 'cats': [['K', 'AE1', 'T', 'S']]})
+        opened.assert_called_once_with(corpora.CMUDICT_PATH, encoding='utf-8')
+
+
 class TestMain(unittest.TestCase):
 
     def test_list(self):
@@ -262,23 +286,30 @@ class TestMain(unittest.TestCase):
                 unittest.mock.patch.dict(corpora.CORPORA, {'one': {'check': directory, 'description': 'One'},
                                                            'two': {'check': os.path.join(directory, 'x'), 'description': 'Two'}},
                                          clear=True), \
+                unittest.mock.patch.dict(corpora.FILES, {'three': {'path': os.path.join(directory, 'y'), 'description': 'Three'}},
+                                         clear=True), \
                 unittest.mock.patch.object(sys, 'argv', ['corpora.py', '--list']), helpers.captured() as (stdout, _):
             corpora.main()
-        self.assertEqual(stdout.getvalue(), f'{"one":28s} present  One\n{"two":28s} missing  Two\n')
+        self.assertEqual(stdout.getvalue(), f'{"one":28s} present  One\n{"two":28s} missing  Two\n{"three":28s} missing  Three\n')
 
     def test_main(self):
         with tempfile.TemporaryDirectory() as directory, \
                 unittest.mock.patch.object(corpora, 'CORPORA_DIR', os.path.join(directory, 'corpora')), \
                 unittest.mock.patch.object(corpora, 'fetch', return_value=2000000) as fetch, \
-                unittest.mock.patch.object(corpora, 'fetch_whisper', return_value=1000000) as fetch_whisper, \
+                unittest.mock.patch.object(corpora, 'fetch_file', return_value=1000000) as fetch_file, \
                 unittest.mock.patch.object(corpora, 'write_readme') as write_readme, helpers.captured() as (_, stderr):
             with unittest.mock.patch.object(sys, 'argv', ['corpora.py', 'arctic-slt', '--keep-archives']):
                 corpora.main()
             self.assertEqual(fetch.call_args_list, [unittest.mock.call('arctic-slt', True)])
-            self.assertEqual(fetch_whisper.call_count, 0)
+            self.assertEqual(fetch_file.call_count, 0)
+            # A file alone - no corpora README
+            with unittest.mock.patch.object(sys, 'argv', ['corpora.py', 'cmudict']):
+                corpora.main()
+            self.assertEqual(fetch_file.call_args_list, [unittest.mock.call('cmudict')])
+            self.assertEqual(write_readme.call_count, 1)
             with unittest.mock.patch.object(sys, 'argv', ['corpora.py']):
                 corpora.main()
-            self.assertEqual(fetch_whisper.call_count, 1)
+            self.assertEqual([call.args[0] for call in fetch_file.call_args_list[1:]], list(corpora.FILES))
             self.assertEqual([call.args[0] for call in fetch.call_args_list[1:]], list(corpora.CORPORA))
             self.assertTrue(os.path.isdir(os.path.join(directory, 'corpora')))
             with unittest.mock.patch.object(sys, 'argv', ['corpora.py', 'nope']), self.assertRaises(SystemExit):

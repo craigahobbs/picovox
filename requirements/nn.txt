@@ -1,9 +1,0 @@
-# The training environment (picovox_train) - build/venv-nn (make build/venv-nn.build)
-#   PyTorch with MPS for training, soxr for resampling the corpora, and Praat (parselmouth) for the auxiliary F0,
-#   voicing, and formant tracks - each needing only numpy; WAV files are read and written with the standard library
-#   (picovox_train/wav.py), and the corpus download (picovox_train/corpora.py) needs only the standard library
-#   (versions match build/venv-listeners; Python 3.12 through 3.14)
-torch==2.14.1
-numpy==2.5.4
-soxr==1.1.0
-praat-parselmouth==0.4.7

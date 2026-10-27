@@ -15,7 +15,7 @@ import warnings
 
 import numpy
 
-from picovox_train import heteronyms
+from picovox_train import corpora, heteronyms
 
 from . import data_fixtures
 from .helpers import captured, write_wav
@@ -78,13 +78,6 @@ class TestHeteronyms(unittest.TestCase):
         path = os.path.join(self.directory, 'a.lab')
         self.write(path, '0.0\t0.1\tthe\n0.1\t0.2\t\nshort\n')
         self.assertEqual(heteronyms.read_lab(path), [(0.0, 0.1, 'the')])
-
-    def test_read_dictionary(self):
-        dictionary = heteronyms.read_dictionary()
-        self.assertEqual(dictionary['read'], [['R', 'EH1', 'D'], ['R', 'IY1', 'D']])
-        self.write(os.path.join(self.directory, 'data', 'cmudict.dict'), ';;; a comment\n\nread R IY1 D\nread(2) R EH1 D # past\n')
-        with unittest.mock.patch.object(heteronyms, 'ROOT', self.directory):
-            self.assertEqual(dict(heteronyms.read_dictionary()), {'read': [['R', 'IY1', 'D'], ['R', 'EH1', 'D']]})
 
     def test_edit_ops(self):
         self.assertEqual(heteronyms.edit_ops(['L', 'IY1', 'D'], ['L', 'EH1', 'D']), [('IY1', 'EH1')])
@@ -154,7 +147,7 @@ class TestHeteronyms(unittest.TestCase):
     def run_readers(self):
         self.write_readers_corpus()
         with unittest.mock.patch.object(heteronyms, 'LABELS', self.labels), \
-                unittest.mock.patch.object(heteronyms, 'read_dictionary', lambda: DICTIONARY), \
+                unittest.mock.patch.object(corpora, 'read_dictionary', lambda: DICTIONARY), \
                 unittest.mock.patch.object(heteronyms.multiprocessing, 'Pool', data_fixtures.FakePool):
             return heteronyms.readers(self.out, 1)
 
@@ -183,7 +176,7 @@ class TestHeteronyms(unittest.TestCase):
     def test_readers_stress_only(self):
         self.write_utterance('100', 0, [('use', [('Y', 0.0, 0.1), ('UW2', 0.1, 0.2), ('Z', 0.2, 0.3)])])
         with unittest.mock.patch.object(heteronyms, 'LABELS', self.labels), \
-                unittest.mock.patch.object(heteronyms, 'read_dictionary', lambda: DICTIONARY), \
+                unittest.mock.patch.object(corpora, 'read_dictionary', lambda: DICTIONARY), \
                 unittest.mock.patch.object(heteronyms.multiprocessing, 'Pool', data_fixtures.FakePool):
             heteronyms.readers(self.out, 1)
         with open(os.path.join(self.out, 'readers.json'), encoding='utf-8') as file:
@@ -372,7 +365,7 @@ class TestHeteronyms(unittest.TestCase):
         def measure(task):
             return {'rel': task[0], 'speaker': task[0].split(os.sep)[1], 'vowels': [], 'targets': []}
         with unittest.mock.patch.object(heteronyms, 'LABELS', self.labels), unittest.mock.patch.object(heteronyms, 'AUDIO', self.audio), \
-                unittest.mock.patch.object(heteronyms, 'read_dictionary', lambda: DICTIONARY), \
+                unittest.mock.patch.object(corpora, 'read_dictionary', lambda: DICTIONARY), \
                 unittest.mock.patch.object(heteronyms, 'measure', measure), \
                 unittest.mock.patch.object(heteronyms.multiprocessing, 'Pool', data_fixtures.FakePool):
             with captured() as (_, stderr):

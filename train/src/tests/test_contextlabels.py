@@ -15,14 +15,14 @@ import types
 import unittest
 import unittest.mock
 
-from picovox_train import contextlabels, g2p
+from picovox_train import contextlabels, corpora, g2p
 from picovox_train.books import load_pins
 
-from . import data_fixtures
+from . import data_fixtures, helpers
 from .helpers import captured
 
 
-# A fake spaCy (build/venv-pos only): the tagger tags "read" VBD after "had" or "I", else VB, "lives" NNS, other words NN
+# A fake spaCy (build/venv-train only): the tagger tags "read" VBD after "had" or "I", else VB, "lives" NNS, other words NN
 class FakeToken:
     def __init__(self, idx, tag):
         self.idx = idx
@@ -132,6 +132,7 @@ class TestContextLabels(unittest.TestCase):
         self.assertFalse(contextlabels.voicing_pair([['K L OW1 S'], ['K L OW1 Z IH0']]))
         self.assertFalse(contextlabels.voicing_pair([['K L OW1 S'], ['K L OW1 T']]))
 
+    @unittest.mock.patch.object(corpora, 'read_dictionary', lambda: helpers.DICTIONARY)
     def test_candidate_words(self):
         inventory = {
             'record': [['R EH1 K ER0 D'], ['R IH0 K AO1 R D']], 'use': [['Y UW1 S'], ['Y UW1 Z']],
@@ -309,10 +310,8 @@ class TestContextLabels(unittest.TestCase):
         self.assertTrue(stderr.getvalue().startswith('tag: book pg1 (Project Gutenberg #1): the copy '))
 
     def test_regression_windows(self):
-        path = self.path('test.json')
-        self.write(path, json.dumps([{'word': 'read', 'text': 'I read what I read.', 'occurrence': 2},
-                                     {'word': 'lives', 'text': 'Their lives were long.'}]))
-        with unittest.mock.patch.object(contextlabels, 'TEST_PATH', path):
+        items = [{'word': 'read', 'text': 'I read what I read.', 'occurrence': 2}, {'word': 'lives', 'text': 'Their lives were long.'}]
+        with helpers.json_files(contextlabels, {contextlabels.TEST_PATH: items}):
             windows = contextlabels.regression_windows()
         self.assertEqual(windows, {('read', 'what', 'i', 'read', '.', '', ''), ('', '', 'their', 'lives', 'were', 'long', '.')})
         self.assertTrue(contextlabels.regression_windows())
@@ -348,7 +347,7 @@ class TestContextLabels(unittest.TestCase):
         def load_data(relabel):
             calls.append(relabel)
             return {'first': first}
-        config = {'stages': [{'relabel': 'data/nn/g2p-relabel.json'}]}
+        config = {'stages': [{'relabel': 'train/data/g2p-relabel.json'}]}
         with unittest.mock.patch.object(g2p, 'load_data', load_data), unittest.mock.patch.object(g2p, 'load_config', lambda: config):
             defaults = contextlabels.default_readings(words)
             config['stages'][-1].pop('relabel')
@@ -357,7 +356,7 @@ class TestContextLabels(unittest.TestCase):
         self.assertEqual(defaults['lives'], 1)
         self.assertIsNone(defaults['lead'])
         self.assertEqual(defaults['bass'], 0)
-        self.assertTrue(calls[0].endswith(os.path.join('data', 'nn', 'g2p-relabel.json')))
+        self.assertTrue(calls[0].endswith(os.path.join('train', 'data', 'g2p-relabel.json')))
         self.assertIsNone(calls[1])
 
     def test_labels(self):

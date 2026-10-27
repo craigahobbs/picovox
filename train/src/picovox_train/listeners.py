@@ -4,7 +4,7 @@
 """
 The listener-model panel - neural listeners that score WAV files, one JSON object per file (JSON lines) on stdout.
 
-    build/venv-listeners/bin/python -I train/src/picovox_train/listeners.py [--no-mos] [--no-embedding]
+    build/venv-train/bin/python -I train/src/picovox_train/listeners.py [--no-mos] [--no-embedding]
         [--device auto|cpu|mps] [--files-from list.txt|-] file.wav ...
 
 Each line is {"file", "seconds", "mos", "embedding"}:
@@ -87,7 +87,7 @@ def to_stderr(function, *args, **kwargs):
 
 
 # Download a Hugging Face model snapshot, or find it in the cache without network access - returns its local directory
-# (the listener models' libraries - huggingface_hub, speechbrain - are build/venv-listeners's)
+# (the listener models' libraries - huggingface_hub, speechbrain - are build/venv-train's)
 def hf_snapshot(repo):
     import huggingface_hub  # pylint: disable=import-outside-toplevel,import-error
     try:

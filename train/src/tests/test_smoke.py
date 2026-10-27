@@ -37,8 +37,8 @@ class SmokeRun:
         self.temp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
         self.root = os.path.join(self.temp.name, 'root')
         self.out = os.path.join(self.temp.name, 'out')
-        os.makedirs(os.path.join(self.root, 'data', 'nn'))
-        shutil.copy(os.path.join(ROOT, 'data', 'nn', 'train.json'), os.path.join(self.root, 'data', 'nn', 'train.json'))
+        os.makedirs(os.path.join(self.root, 'train', 'data'))
+        shutil.copy(os.path.join(ROOT, 'train', 'data', 'train.json'), os.path.join(self.root, 'train', 'data', 'train.json'))
         if labels:
             os.makedirs(os.path.join(self.root, 'build', 'nn', 'context'))
             with open(os.path.join(self.root, 'build', 'nn', 'context', 'labels.json'), 'w', encoding='utf-8') as file:

@@ -23,10 +23,10 @@ function makefileStages(text) {
 
 
 test('trainStages', () => {
-    // data/nn/train-stages.json (the training dashboard's stage graph) has the Makefile's stages, dependencies, and
+    // train/data/train-stages.json (the training dashboard's stage graph) has the Makefile's stages, dependencies, and
     // ordering, each stage a known kind with an expected time
     const makefile = readFileSync(new URL('../Makefile', import.meta.url), 'utf8');
-    const manifest = JSON.parse(readFileSync(new URL('../data/nn/train-stages.json', import.meta.url), 'utf8'));
+    const manifest = JSON.parse(readFileSync(new URL('../train/data/train-stages.json', import.meta.url), 'utf8'));
     const stages = makefileStages(makefile);
     assert.deepEqual(manifest.stages.map((stage) => stage.stage).sort(), Object.keys(stages).sort());
     for (const stage of manifest.stages) {
@@ -46,7 +46,7 @@ test('trainStages', () => {
         assert(new RegExp(stage.progress.pattern).test('train-context: step 10000/10000 (quantized) loss 0.0180'), stage.stage);
         assert(stage.progress.total > 0, stage.stage);
     }
-    const trainRecipe = JSON.parse(readFileSync(new URL('../data/nn/train.json', import.meta.url), 'utf8'));
+    const trainRecipe = JSON.parse(readFileSync(new URL('../train/data/train.json', import.meta.url), 'utf8'));
     const contextStage = manifest.stages.find((stage) => stage.stage === 'context-network');
     assert.equal(contextStage.progress.total, (trainRecipe.context.network.teachers + 1) * (trainRecipe.context.gate.folds + 1));
 

@@ -5,12 +5,12 @@
 The listener panel's scoring - how every evaluation measures speech (no training framework: an exported voice model is
 spoken by the browser path, tools/speak.js):
 
-- listen - UTMOS and the ECAPA speaker embedding (listeners.py in the listener-model environment, build/venv-listeners)
+- listen - UTMOS and the ECAPA speaker embedding (listeners.py, in a process of its own)
 - transcribe - whisper.cpp base.en (downloads/whisper/ggml-base.en.bin), cached beside each WAV; words and edit_distance give
   the word error rate as the former tools/eval.js counted it
 - cosine - the speaker similarity of two embeddings
 - speak - a batch of texts with an exported model (its speed report)
-- score_model - the voice model's evaluation (make train's gate measure): six speakers (data/nn/train.json distill eval) by the
+- score_model - the voice model's evaluation (make train's gate measure): six speakers (train/data/train.json distill eval) by the
   panel's 16 texts (tools/panel-texts.json), each speaker's mean UTMOS, WER, and mean embedding, and against a
   reference result (the teacher's), the speaker similarity - the result JSON distill.py pick compares
 """
@@ -26,7 +26,7 @@ import numpy
 from . import ROOT, corpora
 
 
-LISTENERS_PYTHON = os.path.join(ROOT, 'build', 'venv-listeners', 'bin', 'python')
+LISTENERS_PYTHON = os.path.join(ROOT, 'build', 'venv-train', 'bin', 'python')
 LISTENERS_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'listeners.py')
 WHISPER_MODEL = corpora.WHISPER_MODEL
 TEXTS_PATH = os.path.join(ROOT, 'tools', 'panel-texts.json')

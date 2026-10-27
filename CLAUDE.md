@@ -30,11 +30,13 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   `align.py`, `multi.py`, `cremad.py`, `wav.py`), the differentiable synthesizer (`params.py`, `dsynth.py`, `lf.py`,
   `rng.py`, `spectral.py`), the model and its training (`model.py`, `trainmulti.py`, `losses.py`, `discriminator.py`,
   `quant.py`, `optim.py` - the training step's options), distillation (`distill.py`), export (`export.py`, `package.py`),
-  the listener panel (`panel.py`, and the listener models, `listeners.py` - `build/venv-listeners`),
+  the listener panel (`panel.py`, and the listener models, `listeners.py` - `build/venv-train`),
   and the pipeline's tools (`gpulock.py`, `smoke.py`, `stepcheck.py`, `trained.py` - make train's report and make
   train-install - and `quality.py` - the voices' quality measures against their readers' recordings).
   `picovox_train/__init__.py` documents each module. `make train` runs it from its source (`PYTHONPATH=train/src`) in
-  the training environments (`build/venv-nn`, `venv-listeners`, `venv-pos` - `requirements/*.txt`).
+  its environment (`build/venv-train` - `train/requirements.txt`: the training, the listener models, and spaCy). Its
+  data, `train/data/`: the recipe `train.json`, the stage graph `train-stages.json`, the pinned book texts `books.json`,
+  the speaker pool, and the G2P and heteronym data (the CMU Pronouncing Dictionary is downloaded - `downloads/`).
 - `tools/` - Node development tools on the package's modules (not part of the package): `speak.js` (text to WAV with an
   exported or packaged model - the listener panel's renderer), `loadVoice.js` (a model's loader, for `speak.js` and
   `trainsamples.js`), `unpack.js`, `packagecheck.js`, `pronounceLines.js` (for the Python checks), and `renderLines.js`
@@ -52,12 +54,11 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
 - `test/` - unit tests (`node:test`), one `test<Module>.js` per `lib/` module (`testIndex.js` for the API - including
   `speak` with a fake AudioContext, and the package's browser safety and exports), and the dashboard's and make train's
   (`testTrainDashboard.js`, `testTrainSamplesIndex.js`, `testTrainStages.js`, `testTrainAbReport.js`);
-  `parity-inputs.json` - the parity checks' inputs (below).
-- `data/` - the CMU Pronouncing Dictionary (G2P training only), `data/nn/` (the recipe `train.json`, the pinned book
-  texts `books.json`, the speaker pool, the G2P and heteronym data, and the designed voices - `voices.json`, the design
-  record of `lib/synthesis.js`'s voice and style tables).
-- `downloads/` - gitignored: make train's downloads - the corpora (`picovox_train/corpora.py`, `cremad fetch`), the
-  listener models (on first use), and the Whisper model (with the corpora); `make clean` keeps it
+  `parity-inputs.json` - the parity checks' inputs (below); `voices.json` - the designed voices, the design record of
+  `lib/synthesis.js`'s voice and style tables (`testSynthesis.js` checks them).
+- `downloads/` - gitignored: make train's downloads - the corpora and the pinned files (`picovox_train/corpora.py`: the
+  CMU Pronouncing Dictionary, `downloads/cmudict/`, and the Whisper model; `cremad fetch`), and the listener models (on
+  first use); `make clean` keeps it
 - `paper/` - the paper (`paper.md`; `index.html` renders it with MarkdownUp).
 
 ## javascript-build
@@ -77,7 +78,7 @@ Local Makefile overrides:
 
 `make commit` (test, lint, doc, cover, and the training's gate) is the gate before committing. `npm pack --dry-run`
 lists the package's files (`package.json` `files`: `lib/`). `make -j train` trains both generated models from the recipe
-(`data/nn/train.json`, with its book texts pinned in `data/nn/books.json` - a revised text fails the fetch, never trains):
+(`train/data/train.json`, with its book texts pinned in `train/data/books.json` - a revised text fails the fetch, never trains):
 `make -j train-g2p` (the G2P and the heteronym relabeling, CPU - `G2P_STANDALONE_JOBS` workers alone) and `make -j
 train-voice` at once, each model gated, its module in `build/train/` (`lib/models/` unchanged), then a report
 (`picovox_train.trained`: sizes, the voice's scores against the shipped model's, which modules differ). The flow: `make
@@ -85,7 +86,7 @@ train-voice` at once, each model gated, its module in `build/train/` (`lib/model
 `tools/trainmodels.js`, then the blind A/B of the trained voice in the browser - `tools/trainab.js` - and its report
 and recommendation), then `make train-install` (the trained modules that differ into `lib/models/`; `make
 train-install-voice` and `train-install-g2p`, one). The `train-*` targets just run their commands - none acts on
-another's results. `PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke` runs every training
+another's results. `PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.smoke` runs every training
 entry point for a few steps on the CPU.
 
 ## python-build (train/)
@@ -109,7 +110,7 @@ the python-build skill before running its tests, lint, or coverage, or changing 
   export format, the export checks' models), rewrite them (`PARITY_WRITE=1 make -C train test`). `# pragma: no cover`
   marks only the Apple GPU's (MPS, Metal) paths.
 - The test environment (`train/build/venv/`) installs `train/pyproject.toml`'s dependencies - pinned as
-  `requirements/nn.txt` pins them (`tests/test_package.py` checks); `make train` uses `build/venv-*` and
+  `train/requirements.txt` pins them (`tests/test_package.py` checks); `make train` uses `build/venv-train` and
   `PYTHONPATH=train/src`.
 
 ## Conventions

@@ -2,12 +2,12 @@
 # https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
-The G2P's relabeled words (data/nn/g2p-relabel.json, g2p.py's focus stage) - dictionary words whose first
+The G2P's relabeled words (train/data/g2p-relabel.json, g2p.py's focus stage) - dictionary words whose first
 pronunciation isn't what readers say, from the LibriTTS-R readers' usage of the dictionary's variants (python is
-PYTHONPATH=train/src build/venv-nn/bin/python -B):
+PYTHONPATH=train/src build/venv-train/bin/python -B):
 
     python -m picovox_train.heteronyms --out build/nn/heteronyms [-j 6]                     # every step (resumable)
-    python -m picovox_train.heteronyms --out DIR --check data/nn/g2p-relabel.json           # and the same words?
+    python -m picovox_train.heteronyms --out DIR --check train/data/g2p-relabel.json           # and the same words?
 
 1. readers - for every word with 2+ pronunciations, which variant the readers used, by the MFA word and phone alignments
    (downloads/corpora/libritts_label/lab/{word,phone}/{train-clean-100,dev-clean}): each aligned token's phones are matched
@@ -22,7 +22,7 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B):
    vowel's quality, or the primary stress moving with a quality change - not reduction or stress alone), with the
    aligner's majority share at least --share, and where the acoustic check measured 5+ tokens, its majority share at
    least --share (at 0.5, a simple majority) and schwa no commoner than the majority's vowel unless that vowel is AH
-   (relabel.json - data/nn/g2p-relabel.json's format)
+   (relabel.json - train/data/g2p-relabel.json's format)
 """
 
 import argparse
@@ -37,7 +37,7 @@ import sys
 
 import numpy
 
-from . import ROOT
+from . import ROOT, corpora
 
 
 LABELS = os.path.join(ROOT, 'downloads', 'corpora', 'libritts_label', 'lab')
@@ -77,18 +77,6 @@ def read_lab(path):
             if len(fields) >= 3 and fields[2]:
                 rows.append((float(fields[0]), float(fields[1]), fields[2]))
     return rows
-
-
-# The dictionary - word to its pronunciations (every entry)
-def read_dictionary():
-    pronunciations = collections.defaultdict(list)
-    with open(os.path.join(ROOT, 'data', 'cmudict.dict'), encoding='utf-8') as file:
-        for line in file:
-            content = line.split('#')[0].strip()
-            if content and not content.startswith(';;;'):
-                word, *phones = content.split()
-                pronunciations[re.sub(r'\(\d+\)$', '', word)].append(phones)
-    return pronunciations
 
 
 # The edit alignment of two phone sequences (a stress-only substitution costs half) - the cost table
@@ -154,7 +142,7 @@ def utterance_tokens(task):
 
 def readers(out, jobs):
     """readers.json (per word: variants, exact and stress-only matches, ambiguous, other, speakers) and tokens.jsonl"""
-    multi = {word: variants for word, variants in read_dictionary().items() if len(variants) >= 2}
+    multi = {word: variants for word, variants in corpora.read_dictionary().items() if len(variants) >= 2}
     paths = []
     for subset in SUBSETS:
         for dirpath, _, names in os.walk(os.path.join(LABELS, 'word', subset)):
@@ -510,7 +498,7 @@ def main(argv=None):
     parser.add_argument('-j', '--jobs', type=int, default=6)
     parser.add_argument('--per-word', type=int, default=240, help='the acoustic check\'s tokens a word')
     parser.add_argument('--share', type=float, default=0.5, help='the least majority share, aligner and acoustic (0.5: a majority)')
-    parser.add_argument('--check', help='a relabel file (data/nn/g2p-relabel.json) the result must equal (exit 1 if not)')
+    parser.add_argument('--check', help='a relabel file (train/data/g2p-relabel.json) the result must equal (exit 1 if not)')
     args = parser.parse_args(argv)
     os.makedirs(args.out, exist_ok=True)
     steps = [('readers', 'readers.json', lambda: readers(args.out, args.jobs)),

@@ -12,7 +12,7 @@ import unittest
 import unittest.mock
 import warnings
 
-from picovox_train import data, frontend, readings
+from picovox_train import corpora, data, frontend, readings
 
 from .helpers import captured
 
@@ -67,18 +67,17 @@ class TestReadings(unittest.TestCase):
         self.assertEqual(readings.readings_of(['R IY1 D', 'R EH1 D', 'R IY0 D']), [['R IY1 D', 'R IY0 D'], ['R EH1 D']])
 
     def test_read_variants_inventory(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, 'cmudict.dict')
-            with open(path, 'w', encoding='utf-8') as file:
-                file.write(';;; a comment\nread R IY1 D\nread(2) R EH1 D\nread(3) R IY1 D # a repeat\n\n'
-                           'to T UW1\nto(2) T AH0\nthe DH AH0\nthe(2) DH IY1\nlead L IY1 D\nlead(2) L EH1 D\ncat K AE1 T\ncat(2) K AE0 T\n')
-            variants = readings.read_variants(path)
-            self.assertEqual(variants['read'], ['R IY1 D', 'R EH1 D'])
-            self.assertEqual(variants['cat'], ['K AE1 T', 'K AE0 T'])
-            self.assertEqual(readings.inventory(variants), {'read': [['R IY1 D'], ['R EH1 D']], 'lead': [['L IY1 D'], ['L EH1 D']]})
-            with unittest.mock.patch.object(readings, 'DICTIONARY_PATH', path), \
-                    unittest.mock.patch.object(readings.read_variants, '__defaults__', (path,)):
-                self.assertEqual(sorted(readings.inventory()), ['lead', 'read'])
+        dictionary = {
+            'read': [['R', 'IY1', 'D'], ['R', 'EH1', 'D'], ['R', 'IY1', 'D']], 'to': [['T', 'UW1'], ['T', 'AH0']],
+            'the': [['DH', 'AH0'], ['DH', 'IY1']], 'lead': [['L', 'IY1', 'D'], ['L', 'EH1', 'D']],
+            'cat': [['K', 'AE1', 'T'], ['K', 'AE0', 'T']]
+        }
+        with unittest.mock.patch.object(corpora, 'read_dictionary', lambda: dictionary):
+            variants = readings.read_variants()
+            self.assertEqual(sorted(readings.inventory()), ['lead', 'read'])
+        self.assertEqual(variants['read'], ['R IY1 D', 'R EH1 D'])
+        self.assertEqual(variants['cat'], ['K AE1 T', 'K AE0 T'])
+        self.assertEqual(readings.inventory(variants), {'read': [['R IY1 D'], ['R EH1 D']], 'lead': [['L IY1 D'], ['L EH1 D']]})
 
     def test_sz_only(self):
         self.assertTrue(readings.sz_only('Y UW1 S', 'Y UW1 Z'))

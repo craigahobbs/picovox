@@ -3,7 +3,7 @@
 
 // make train's listening samples - a training stage's final model (a checkpoint, exported by picovox_train.export as the package
 // stage exports the student) or a packaged model (the shipped lib/models/voiceModel.js, the reference) speaking
-// data/nn/train.json's samples texts in its speakers' voices exactly as the package speaks a sentence (lib/synthesis.js
+// train/data/train.json's samples texts in its speakers' voices exactly as the package speaks a sentence (lib/synthesis.js
 // sentenceBlocks, every word pronounced by the G2P network), each scored with UTMOS on the CPU
 // (picovox_train/listeners.py - the GPU is left to training). The WAV files are OUT/<stage>-<speaker>-<text>.wav, and
 // OUT/index.json lists every stage's samples - [{stage, run, checkpoint, step, label, sex, speaker, text, file, seconds,
@@ -13,7 +13,7 @@
 //     node tools/trainsamples.js --stage reference --model lib/models/voiceModel.js --out build/train/samples
 //
 // --run names the checkpoint's training run (default: its directory's name); --settings another recipe (default
-// data/nn/train.json). The export reads the training data (NN_DATA_DIR - make train's TRAIN_ENV) for its token remap.
+// train/data/train.json). The export reads the training data (NN_DATA_DIR - make train's TRAIN_ENV) for its token remap.
 
 import {copyFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync} from 'node:fs';
 import {defaultSampleRate, sentenceBlocks, sentencePause} from '../lib/synthesis.js';
@@ -56,7 +56,7 @@ async function main() {
         checkpoint = relative(dirname(out), resolve(args.checkpoint));
         const copy = join(work, 'checkpoint.pt');
         copyFileSync(args.checkpoint, copy);
-        const python = join(repository, 'build/venv-nn/bin/python');
+        const python = join(repository, 'build/venv-train/bin/python');
         execFileSync(python, ['-B', '-m', 'picovox_train.export', copy, '--voice', 'model', '--out', work],
             {'cwd': repository, 'env': {...process.env, 'PYTHONPATH': join(repository, 'train/src')},
                 'stdio': ['ignore', 'ignore', 'inherit']});
@@ -88,7 +88,7 @@ async function main() {
     log(`${samples.length} samples rendered`);
 
     // UTMOS on the CPU
-    const listeners = join(repository, 'build/venv-listeners/bin/python');
+    const listeners = join(repository, 'build/venv-train/bin/python');
     const output = execFileSync(listeners, ['-I', 'train/src/picovox_train/listeners.py', '--device', 'cpu', '--no-embedding',
         ...samples.map((sample) => join(work, sample.file))], {'cwd': repository, 'encoding': 'utf8',
         'maxBuffer': 16 * 1024 * 1024, 'stdio': ['ignore', 'pipe', 'inherit']});
