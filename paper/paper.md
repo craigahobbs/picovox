@@ -51,11 +51,11 @@ minutes; and Section 12, the package (picovox on npm) and the audiobook player b
 
 ![The speech pipeline, from text to audio](pipeline.svg)
 
-1. **Text to phonemes** (`lib/lexicon.js`, `lib/g2p.js`). The text is normalized (numbers, abbreviations - including the
-   month and day abbreviations, Nov. and Mon. - punctuation), and every word is pronounced by the grapheme-to-phoneme
-   (G2P) network, with phonemes and stress; there is no dictionary at runtime. For a word whose reading depends on its
-   neighbors ("read", "lead", "lives"), the network's ambiguity head says so and a small context network chooses the
-   reading (Section 9).
+1. **Text to phonemes** (`lib/lexicon.js`, `lib/g2p.js`). The text is normalized (numbers - a four-digit number as a
+   year, ordinals, decades, percentages, money, times, Roman numerals; abbreviations - including the month and day
+   abbreviations, Nov. and Mon. - punctuation, an aside's parentheses as commas), and every word is pronounced by the
+   grapheme-to-phoneme (G2P) network, with phonemes and stress; there is no dictionary at runtime. For a word whose reading depends on its neighbors ("read", "lead", "lives"), the network's
+   ambiguity head says so and a small context network chooses the reading (Section 9).
 2. **Phonemes to tokens** (`lib/tokens.js`). A fixed table maps phonemes and prosodic cues to 78 token IDs: the
    phonemes, word boundaries, a start marker, and punctuation tokens (comma, period, question, wh-question, exclamation)
    that tell the network how a phrase should rise, fall, or pause.
@@ -83,7 +83,7 @@ narrative passages with dialogue from public-domain books, two questions, and tw
 | Naturalness | UTMOS22 (strong) | Predicted mean opinion score, 1-5 |
 | Intelligibility | Whisper `base.en` | Word error rate (WER) against the text |
 | Speaker identity | ECAPA-TDNN (VoxCeleb) | 192-dimension speaker embedding; cosine similarity |
-| Style | emotion2vec+ base | Emotion probabilities (angry, disgusted, fearful, happy, neutral, sad, ...) |
+| Style | emotion2vec+ base (opt-in - no result uses it) | Emotion probabilities (angry, disgusted, fearful, happy, neutral, sad, ...) |
 
 We calibrated the panel on human and commercial speech before trusting it:
 
@@ -282,9 +282,9 @@ over-smoothed bandwidths and excess high-frequency noise read as "tinny" and "st
 The goal was ten voices (five female, five male) for reading many kinds of books - for example a warm literary
 narrator, an older authoritative voice, a young bright voice, a brisk nonfiction voice, and a gentle voice - each
 with emotional styles, from one model of about 1M parameters. The model was trained; it became the teacher of the
-model that ships (Section 8). The ten designed voices are specified (`data/nn/voices.json`: blends of the speaker
-table's rows, a style, and parameter transforms) but not yet shipped; the package's two voices are the model's ARCTIC
-bdl (male) and slt (female) speakers.
+model that ships (Section 8). The ten designed voices were specified then (`data/nn/voices.json`: blends of the speaker
+table's rows, a style, and parameter transforms) and ship now as `lib/synthesis.js`'s voice and style tables (checked
+against it), beside the model's ARCTIC bdl (male) and slt (female) speakers.
 
 ### 7.1 Data
 
@@ -395,7 +395,8 @@ s64 architecture trained from scratch with the teacher's own two-stage recipe sc
 all three measures, and below s48. The polish adds 0.025-0.034 UTMOS, most of it to the two ARCTIC voices (bdl and
 slt), which pure distillation loses most; intermediate-feature matching (weight 0.05) adds about 0.02, and the two
 barely stack. In an architecture experiment, quantization-aware training at 4 bits (groups of 64) recovered about 70%
-of the UTMOS that 4-bit weights lose, at a 45% smaller module; the shipped voice weights stay at 8 bits per row.
+of the UTMOS that 4-bit weights lose, at a 45% smaller module; the shipped voice weights stay at 8 bits per row (the
+QAT and the packed 4-7-bit export were removed after 1.6.4 - see git history).
 
 The student's training was later changed - Muon on its hidden matrices with a warmup-stable-decay schedule, 12,000
 steps instead of 20,000 of AdamW and a cosine (Section 11.4) - and that change, not a new size, is most of the
@@ -714,6 +715,40 @@ are rare names - Maritornes, Clemencín, Benengeli, at most 31 times each - a sm
 dictionary has them, and the stress of a few unlabeled names.
 
 
+### 9.11 A listener's reports: gravest, mindset, paprika
+
+A listener heard three words wrong. "Gravest" (G R AE1 V AH0 S T - "gravvest") was the dictionary's error, learned: its
+stem and the stem's other forms have EY1 (GRAVE, GRAVER, GRAVELY, GRAVESTONE), as BRAVEST does, so
+`data/nn/g2p-fixes.json` corrects it on the dictionary's own evidence (LibriTTS-R has three of its tokens, too few for
+the audit's bound). "Mindset" (M IH1 N D S EH2 T) and "paprika" (P AE2 P R IH0 K AA1 AH0) were the network's own errors
+on words the dictionary has right - words the frequency weights barely reach: a dictionary word with no count in the
+128 books is wrong 18.9% of the time (14,074 of 74,332), one counted 6 to 20 times 4.7%, and one counted over 100 times
+almost never. "Mindset" has no count, "paprika" 6.
+
+Retrained with the fix (`make train-g2p`), the module reads all three as the dictionary does - mindset M AY1 N D S EH2
+T, gravest G R EY1 V AH0 S T, paprika the dictionary's second, P AH0 P R IY1 K AH0 - but mindset and paprika came right
+by the retraining's churn, not by a weight of their own: the one changed label moved 740 of the 30,000 most frequent
+words' pronunciations (326 to their targets, 314 from them, mostly a reduced vowel or a secondary stress). The gate
+measures, against the committed module:
+
+| Measure | picovox 1.6.3 | Retrained |
+| --- | --- | --- |
+| Book-token error, distinct words, top-10K wrong | 0.058%, 601, 10 | 0.059%, 604, 9 |
+| Monitoring WER (held out) | 41.75% | 42.25% |
+| Default, context readings; missing, names | 52/52, 52/54; 3/3, 80/86 | 52/52, 51/54; 3/3, 80/86 |
+
+The monitoring WER, ten more of its 2,000 held-out words, is at the reproduction tolerance (0.5 points) - the spread
+between training runs (Section 9.8) - so the check failed by a hair, and the module was adopted over it.
+
+The weights' gap is modern words, and the player reads Wikipedia. On a year of Wikipedia's featured articles and four
+weeks of its most-read (776 articles, 2.9 million dictionary-word tokens), the shipped module's token error is 1.10%
+(the retrained module's 1.05%) - against 0.058% on the books - wrong on putin (P Y UW1 T IH0 N), muslim, psychiatrist,
+debuted, and podcast. Counting Wikipedia's words into the weights as a listeners' "book" fixes most of them - the G2P
+network's stages alone, 0.94% without them, 0.60% with two weeks' articles, 0.36% with the year's (measured on the
+year's) - and paprika exactly (P AE0 P R IY1 K AH0), but costs the books: their book-token error rose from 0.043-0.046%
+to 0.056% and 0.066%, past the gate's tolerance (0.01 points). Taking that trade - and measuring the gate on Wikipedia's
+text too - is left open.
+
 ## 10. Reproducible training: `make train`
 
 ### 10.1 One recipe, one command
@@ -735,8 +770,9 @@ lock (two at once each run at about half speed), and the CPU stages run beside t
 | listening samples of each stage's final model and of the shipped model | CPU, under a minute each |
 
 The voice data is built with the committed G2P module. The G2P chain - the network, the heteronym labels, the context
-network, its cross-validation, and the relabeling of Section 9.4 - is its own target, `make train-check`, which
-reproduces the G2P and checks it against the committed module; `make train-g2p` runs the chain alone for G2P work.
+network, its cross-validation, and the relabeling of Section 9.4 - runs beside the voice stages (`make train-g2p`
+alone): it reproduces the G2P, gates it against the committed module, and installs it only when it differs; `make
+train-g2p-check` and `make train-voice-check` stop each model at its gate.
 
 ### 10.2 Gates and provenance
 
@@ -841,13 +877,18 @@ against 0.0771 s for A). Across 20 timed runs, the slow ones were exactly those 
 the system drawing least (39-45 W against 50-89 W in the fast ones): on a 45 W or 60 W adapter the power controller
 caps the system to charge the battery, while a training run draws 64-87 W. An Apple 140 W adapter (which a 14-inch
 MacBook Pro negotiates at about 94 W) removed it; `make train` now checks the adapter first.
+On that adapter a second slow mode remained, and it is heat: about 2.5 minutes into a GPU stage drawing about 70 W,
+macOS's thermal pressure rises to moderate, then heavy, the system is held near 40 W, and teacher A's step goes from
+0.078 to about 0.12 s - at step about 2,000 in every run, for either seed - so the long GPU stages run throttled nearly
+throughout.
 
 **CPU work beside a GPU stage costs memory bandwidth, not cores.** On Apple's unified memory, three single-core compute
 jobs beside teacher B cost nothing measurable, while three memory-bound jobs (large array copies) slowed it 53% at the
 default scheduling priority, 15% at the utility QoS, and 1.3% at the background QoS. In the first run, teacher B ran
 0.22-0.24 s per step beside the heteronym labels' tagging job against 0.153 alone. So the CPU stages beside the GPU run
 at the utility QoS, and the G2P chain moved out of `make train` to `make train-check`: beside teacher A in the second
-run it cost A about 9 minutes.
+run it cost A about 9 minutes. It later moved back, as `make train-g2p`, so that `make train` trains both models (its
+memory-bound stages after the readers' data build).
 
 ### 11.4 Ideas from the NanoGPT speedrun
 
@@ -1129,8 +1170,8 @@ PicoVox is distributed under the MIT License.
 npm install picovox                                             # the package
 make commit                                                     # tests, lint, docs, 100% coverage of lib/ and train/
 make listeners                                                  # the listener panel's environment
-make train                                                      # the voice model from scratch: the corpora, the teacher, the student, the gate
-make -j train-check                                             # reproduce the G2P chain and check it against the committed module
+make -j train                                                   # both models from scratch: the G2P, and the voice - the corpora, the teacher, the student, the gate
+make -j train-g2p-check                                         # reproduce the G2P chain and check it against the committed module
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke    # every training entry point, a few steps on the CPU
 node nn/js/speak.js -m data/nn/slt "Call me Ishmael." -o ishmael.wav   # the single-speaker slt voice of Section 5
 ```
