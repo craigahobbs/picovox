@@ -71,7 +71,6 @@ MULTI_CONFIG = {
 
 # Token classes (vocab.json): 0 <pad>, 1 <unk>, 2 <bos>, 3 "_" (word boundary), 4-8 phrase ends, 9+ phones
 PAD, UNK, BOS, WORD = 0, 1, 2, 3
-PHRASE_ENDS = (4, 5, 6, 7, 8)
 FIRST_PHONE = 9
 
 # A boundary token pauses at inference when its pause probability is above this (lib/model.js's too)
@@ -84,10 +83,6 @@ FIXED_NAMES = ('jitter', 'shimmer')
 # Whether tokens are boundary tokens - word boundaries and phrase ends (their durations are pauses, often zero)
 def is_boundary(tokens):
     return (tokens >= WORD) & (tokens < FIRST_PHONE)
-
-
-class LayerNorm(torch.nn.LayerNorm):
-    """Layer norm over the channels of [B, T, C]"""
 
 
 class DepthwiseConv(torch.nn.Module):
@@ -106,7 +101,7 @@ class ConvFFN(torch.nn.Module):
 
     def __init__(self, dim, hidden, kernel, dropout):
         super().__init__()
-        self.norm = LayerNorm(dim)
+        self.norm = torch.nn.LayerNorm(dim)
         self.inner = torch.nn.Linear(dim, hidden)
         self.conv = DepthwiseConv(hidden, kernel)
         self.outer = torch.nn.Linear(hidden, dim)
@@ -124,7 +119,7 @@ class SelfAttention(torch.nn.Module):
     def __init__(self, dim, heads, dropout):
         super().__init__()
         self.heads = heads
-        self.norm = LayerNorm(dim)
+        self.norm = torch.nn.LayerNorm(dim)
         self.qkv = torch.nn.Linear(dim, 3 * dim)
         self.out = torch.nn.Linear(dim, dim)
         self.dropout = torch.nn.Dropout(dropout)
@@ -149,6 +144,11 @@ def parameter_count(model):
 def save_checkpoint(state, path):
     torch.save(state, path + '.tmp')
     os.replace(path + '.tmp', path)
+
+
+# The number of trainable parameters of a multi-speaker model without its speaker and channel equalizer tables
+def core_parameter_count(model):
+    return parameter_count(model) - model.speaker.weight.numel() - model.eq_free.numel()
 
 
 #
@@ -206,7 +206,7 @@ class MultiModel(torch.nn.Module):
             layers.append(FiLMConvFFN(dim, dim * cfg['ffnMultiple'], cfg['encoderKernel'], dropout, condition_dim))
             layers.append(SelfAttention(dim, cfg['heads'], dropout))
         self.encoder = torch.nn.ModuleList(layers)
-        self.encoder_norm = LayerNorm(dim)
+        self.encoder_norm = torch.nn.LayerNorm(dim)
 
         # The duration predictor - the condition added, two depthwise-separable convolution layers, then [log(d + 1),
         # pause logit, log(paused d + 1)]
@@ -214,7 +214,7 @@ class MultiModel(torch.nn.Module):
         self.duration_layers = torch.nn.ModuleList()
         for _ in range(2):
             self.duration_layers.append(torch.nn.ModuleDict({
-                'conv': DepthwiseConv(dim, cfg['durationKernel']), 'linear': torch.nn.Linear(dim, dim), 'norm': LayerNorm(dim)
+                'conv': DepthwiseConv(dim, cfg['durationKernel']), 'linear': torch.nn.Linear(dim, dim), 'norm': torch.nn.LayerNorm(dim)
             }))
         self.duration_out = torch.nn.Linear(dim, 3)
         self.duration_dropout = torch.nn.Dropout(cfg['durationDropout'])
@@ -227,7 +227,7 @@ class MultiModel(torch.nn.Module):
             FiLMConvFFN(decoder_dim, decoder_dim * cfg['ffnMultiple'], cfg['decoderKernel'], dropout, condition_dim)
             for _ in range(cfg['decoderLayers'])
         ])
-        self.decoder_norm = LayerNorm(decoder_dim)
+        self.decoder_norm = torch.nn.LayerNorm(decoder_dim)
         self.head = torch.nn.Linear(decoder_dim, cfg['subframes'] * params.COUNT)
         with torch.no_grad():
             self.head.weight.mul_(0.1)
@@ -373,11 +373,3 @@ class MultiModel(torch.nn.Module):
         values = self.parameters_from_unit(self.decode(regulated, positions, frame_mask, condition))
         values = torch.cat([values, values[:, -1:]], dim=1)
         return {'durations': durations, 'values': values, 'frames': durations.sum(dim=1) * self.config['subframes'] + 1}
-
-
-# A model of a config - the multi-speaker model (config 'kind': 'multi'; the single-speaker model and its trainer,
-# nn/train.py, are in git history)
-def build_model(config, priors=None, dropout=0.1):
-    if (config or {}).get('kind') != 'multi':
-        raise ValueError('only the multi-speaker model (config kind "multi") is supported')
-    return MultiModel(config, priors=priors, dropout=dropout)

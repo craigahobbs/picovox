@@ -2,14 +2,18 @@
 # https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
-The unit tests' shared helpers - tiny synthetic corpora (data.py's format), tiny model configurations, and output capture
+The unit tests' shared helpers - tiny synthetic corpora (data.py's format), tiny model configurations, output capture,
+and packaged model modules' contents
 """
 
+import base64
 import contextlib
 import io
 import json
 import os
+import re
 import time
+import zlib
 
 import numpy
 
@@ -120,3 +124,18 @@ def wait_until(predicate, timeout=120):
             return False
         time.sleep(0.01)
     return True
+
+
+# A JavaScript literal of JSON tokens and concatenated string literals (package.py's manifest) - its value
+def js_literal(text):
+    return json.loads(re.sub(r'(?<!\\)"\s*\+\s*"', '', text))
+
+
+# A packaged model module's (package.py's) manifest and weights, as nn/js/unpack.js unpacks it
+def unpack_module(path):
+    with open(path, encoding='utf-8') as file:
+        text = file.read()
+    manifest = js_literal(re.search(r'^export const manifest = (.*?);$', text, re.M | re.S).group(1))
+    encoding = re.search(r"^export const encoding = '([^']*)';$", text, re.M).group(1)
+    weights = base64.b64decode(re.search(r'^export const weights = `(.*?)`;$', text, re.M | re.S).group(1).replace('\n', ''))
+    return manifest, zlib.decompress(weights, -15) if encoding == 'deflate-raw' else weights

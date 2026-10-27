@@ -5,7 +5,6 @@
 
 import math
 import os
-import subprocess
 import tempfile
 import unittest
 import unittest.mock
@@ -13,32 +12,9 @@ import unittest.mock
 import numpy as np
 import torch
 
-from picovox_train import ROOT, g2p, g2pmodel
+from picovox_train import g2p, g2pmodel
 
-
-# Math.exp or Math.tanh in node of doubles (as bits), bit for bit
-NODE_MATH = '''
-const input = require('fs').readFileSync(0, 'utf8').trim().split('\\n');
-const view = new DataView(new ArrayBuffer(8));
-const out = input.slice(1).map((hex) => {
-    view.setBigUint64(0, BigInt('0x' + hex));
-    view.setFloat64(0, Math[input[0]](view.getFloat64(0)));
-    return view.getBigUint64(0).toString(16);
-});
-process.stdout.write(out.join('\\n'));
-'''
-
-
-# Doubles' bits as hex
-def to_hex(values):
-    return [format(int(bits), 'x') for bits in np.asarray(values, dtype=np.float64).view(np.uint64)]
-
-
-# node's Math function of doubles
-def node_math(name, values):
-    process = subprocess.run(['node', '-e', NODE_MATH], input='\n'.join([name] + to_hex(values)), capture_output=True,
-                             text=True, check=True)
-    return np.array([int(text, 16) for text in process.stdout.split('\n')], dtype=np.uint64).view(np.float64)
+from . import parity
 
 
 # Test values for exp and tanh - every range of fdlibm's reductions and special cases
@@ -100,6 +76,8 @@ class TestG2pModel(unittest.TestCase):
             for item in quantized:
                 self.assertTrue(np.array_equal(tensors[item['name']], item['dequantized']), (layout, deflate, group_size, item['name']))
 
+    # (math.fma is Python 3.13's)
+    @unittest.skipUnless(hasattr(math, 'fma'), 'math.fma is Python 3.13+')
     def test_fma(self):
         rng = np.random.default_rng(1)
         first, second, addend = (rng.normal(size=2000) * 10.0 ** rng.integers(-5, 5, 2000) for _ in range(3))
@@ -111,14 +89,16 @@ class TestG2pModel(unittest.TestCase):
             self.assertTrue(np.array_equal(g2pmodel._mul_add(first, second, addend), first * second + addend))
 
     def test_exp_tanh_javascript(self):
-        # Math.exp and Math.tanh bit for bit - node (V8, fdlibm fused on arm64) as this machine's FUSED path
+        # Math.exp and Math.tanh bit for bit (the parity check - tools/parity.js) - V8 (fdlibm fused on arm64) as this
+        # machine's FUSED path
         values = sample_values()
-        with unittest.mock.patch.object(g2pmodel, 'FUSED', g2pmodel.FUSED):
-            for name, function in (('exp', g2pmodel.js_exp), ('tanh', g2pmodel.js_tanh)):
-                expected = node_math(name, values)
-                result = function(values)
-                same = (result.view(np.uint64) == expected.view(np.uint64)) | (np.isnan(result) & np.isnan(expected))
-                self.assertTrue(same.all(), (name, values[~same][:5], result[~same][:5], expected[~same][:5]))
+        parity.inputs(self, 'expTanh', {'values': parity.to_hex(values)})
+        outputs = parity.outputs('expTanh')
+        for name, function in (('exp', g2pmodel.js_exp), ('tanh', g2pmodel.js_tanh)):
+            expected = parity.from_hex(outputs[name])
+            result = function(values)
+            same = (result.view(np.uint64) == expected.view(np.uint64)) | (np.isnan(result) & np.isnan(expected))
+            self.assertTrue(same.all(), (name, values[~same][:5], result[~same][:5], expected[~same][:5]))
 
     def test_exp_tanh_unfused(self):
         # The unfused path (other machines) - within an ulp of the C library's
@@ -135,13 +115,11 @@ class TestG2pModel(unittest.TestCase):
                 self.assertTrue(np.array_equal(result[np.isinf(expected)], expected[np.isinf(expected)]))
 
     def test_pronounce_javascript(self):
-        # The committed module pronounces as lib/g2p.js does (nn/js/pronounceLines.js)
+        # The committed module pronounces as lib/g2p.js does (the parity check - tools/parity.js)
         words = ['hello', 'world', 'ishmael', 'read', 'lead', 'zxqv', 'antidisestablishmentarianism', 'a', 'colonel',
                  'gutenberg', 'wouldn\'t', 'xylophonists', 'q', 'abcdefghijklmnopqrstuvwxyzabcdefghij']
-        process = subprocess.run(['node', os.path.join(ROOT, 'nn', 'js', 'pronounceLines.js'), g2pmodel.MODULE_PATH],
-                                 input=''.join(word + '\n' for word in words), capture_output=True, text=True, check=True)
-        expected = [line.split() for line in process.stdout.split('\n')[:len(words)]]
-        self.assertEqual(g2pmodel.G2p(g2pmodel.read_module()).pronounce_many(words), expected)
+        parity.inputs(self, 'pronounce', {'words': words})
+        self.assertEqual(g2pmodel.G2p(g2pmodel.read_module()).pronounce_many(words), parity.outputs('pronounce'))
 
     def test_g2p(self):
         g2p_model = self.g2p

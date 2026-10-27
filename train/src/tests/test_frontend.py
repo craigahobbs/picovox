@@ -6,15 +6,15 @@
 import json
 import os
 import runpy
-import subprocess
 import sys
 import tempfile
 import unittest
 import unittest.mock
 import warnings
 
-from picovox_train import ROOT, frontend
+from picovox_train import frontend
 
+from . import data_fixtures, parity
 from .helpers import captured
 
 
@@ -55,23 +55,6 @@ class FakeG2p:
 
     def set_state(self, state):
         self.states.append(state)
-
-
-# A fake multiprocessing pool - map in this process
-class FakePool:
-
-    def __init__(self, jobs):
-        self.jobs = jobs
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
-
-    @staticmethod
-    def map(function, items):
-        return list(map(function, items))
 
 
 class TestFrontend(unittest.TestCase):
@@ -123,9 +106,9 @@ class TestFrontend(unittest.TestCase):
 
             # Thousands of new words, in worker processes
             words = [f'w{index:05d}' for index in range(2500)]
-            with unittest.mock.patch.object(frontend.multiprocessing, 'Pool', FakePool) as pool:
+            with unittest.mock.patch.object(frontend.multiprocessing, 'Pool', data_fixtures.FakePool) as pool:
                 result = frontend.pronounce_words(words + ['ab'], jobs=4)
-            self.assertIs(pool, FakePool)
+            self.assertIs(pool, data_fixtures.FakePool)
             self.assertEqual(len(result), 2501)
             self.assertEqual(result['w00001'], ['K'] * 6 + ['AE0'])
             self.assertFalse(fake.ambiguous_words['w00001'])
@@ -170,16 +153,6 @@ class TestFrontend(unittest.TestCase):
         self.assertEqual(pronunciations['lead'], g2p.pronounce('lead'))
         self.assertEqual(set(pronunciations.state), {'readings', 'ambiguous', 'choices'})
         self.assertTrue(any(window[len(window) // 2] == 'lead' for window in pronunciations.state['choices']))
-
-    def test_get_dictionary(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, 'cmudict.dict')
-            with open(path, 'w', encoding='utf-8') as file:
-                file.write('read R IY1 D # a comment\nread(2) R EH1 D\n\n# only a comment\ncat K AE1 T\n')
-            with unittest.mock.patch.object(frontend, '_DICTIONARY', None):
-                dictionary = frontend.get_dictionary(path)
-                self.assertEqual(dictionary, {'read': ['R', 'IY1', 'D'], 'cat': ['K', 'AE1', 'T']})
-                self.assertIs(frontend.get_dictionary(path), dictionary)
 
     def test_number_words(self):
         self.assertEqual(frontend.number_words(0), ['zero'])
@@ -347,12 +320,10 @@ class TestFrontend(unittest.TestCase):
         self.assertEqual(frontend.phone_token({'ph': 'K', 'stress': None}), 'K')
 
     def test_tokenize_javascript(self):
-        # The front end tokenizes as lib/tokens.js does (nn/js/tokenizeLines.js - the package's G2P network and context
-        # network)
-        process = subprocess.run(['node', os.path.join(ROOT, 'nn', 'js', 'tokenizeLines.js')],
-                                 input=''.join(json.dumps(text) + '\n' for text in TEXTS), capture_output=True, text=True,
-                                 check=True, cwd=ROOT)
-        expected = [json.loads(line) for line in process.stdout.splitlines()]
+        # The front end tokenizes as lib/tokens.js does (the parity check - tools/parity.js - with the package's G2P network
+        # and context network)
+        parity.inputs(self, 'tokenize', {'texts': TEXTS})
+        expected = parity.outputs('tokenize')
         self.assertEqual(len(expected), len(TEXTS))
         for text, js_result in zip(TEXTS, expected):
             self.assertEqual(frontend.tokenize(text), js_result, text)

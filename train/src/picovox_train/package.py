@@ -117,11 +117,9 @@ def deflate_raw(data, level=9):
 # The module's text for a manifest and weights (bytes, already encoded per encoding)
 def module_text(manifest, payload, encoding, raw_size):
     voice = manifest.get('voice', 'model')
-    precision = manifest.get('quantization', {'bits': 8, 'group': 0})
-    group = f', groups of {precision["group"]}' if precision.get('group') else ''
     return '\n'.join([
         HEADER,
-        f'// The {voice} acoustic model ({manifest.get("parameterCount")} parameters, {precision["bits"]}-bit weights{group}) for',
+        f'// The {voice} acoustic model ({manifest.get("parameterCount")} parameters, 8-bit weights) for',
         '// lib/package.js loadPackagedModel - the export\'s manifest, and its weights '
         f'({raw_size} bytes{", deflated" if encoding != "raw" else ""}) as base64.',
         '',

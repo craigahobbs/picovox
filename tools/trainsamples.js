@@ -18,14 +18,14 @@
 import {copyFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync} from 'node:fs';
 import {defaultSampleRate, sentenceBlocks, sentencePause} from '../lib/synthesis.js';
 import {dirname, join, relative, resolve} from 'node:path';
-import {fileURLToPath, pathToFileURL} from 'node:url';
 import {parseArgs, parseScores, sampleFile, updateIndex} from './trainsamplesindex.js';
+import {concatBlocks} from '../lib/render.js';
 import {encodeWav} from '../lib/wav.js';
 import {execFileSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {g2pModel} from '../lib/models/g2pModel.js';
 import {loadG2p} from '../lib/g2p.js';
-import {loadModel} from '../lib/model.js';
-import {loadPackagedModel} from '../lib/package.js';
+import {loadVoice} from '../nn/js/loadVoice.js';
 import process from 'node:process';
 import {setPronouncer} from '../lib/lexicon.js';
 
@@ -60,12 +60,10 @@ async function main() {
         execFileSync(python, ['-B', '-m', 'picovox_train.export', copy, '--voice', 'model', '--out', work],
             {'cwd': repository, 'env': {...process.env, 'PYTHONPATH': join(repository, 'train/src')},
                 'stdio': ['ignore', 'ignore', 'inherit']});
-        const bytes = readFileSync(join(work, 'model.bin'));
-        model = loadModel(JSON.parse(readFileSync(join(work, 'model.json'), 'utf8')),
-            bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+        model = await loadVoice(join(work, 'model'));
     } else {
         checkpoint = relative(repository, resolve(args.model));
-        model = await loadPackagedModel(await import(pathToFileURL(resolve(args.model))));
+        model = await loadVoice(args.model);
     }
     const step = model.manifest.training?.step ?? null;
     log(`${args.stage}: ${checkpoint}${step === null ? '' : ` (step ${step})`}`);
@@ -80,11 +78,7 @@ async function main() {
         for (const text of settings.texts) {
             const blocks = [...sentenceBlocks(model, text.text, {'speaker': entry.id, 'seed': 1, 'pause': sentencePause})];
             const sampleRate = defaultSampleRate;
-            const audio = new Float32Array(blocks.reduce((sum, block) => sum + block.length, 0));
-            blocks.reduce((offset, block) => {
-                audio.set(block, offset);
-                return offset + block.length;
-            }, 0);
+            const audio = concatBlocks(blocks);
             const file = sampleFile(args.stage, speaker.key, text.key);
             writeFileSync(join(work, file), encodeWav(audio, sampleRate));
             samples.push({'stage': args.stage, 'run': args.run, checkpoint, step, 'label': speaker.label, 'sex': speaker.sex,

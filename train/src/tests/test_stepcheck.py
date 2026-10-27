@@ -3,6 +3,7 @@
 
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
+import contextlib
 import json
 import os
 import runpy
@@ -11,7 +12,7 @@ import unittest
 import unittest.mock
 import warnings
 
-from picovox_train import stepcheck
+from picovox_train import stepcheck, trainmulti
 
 from . import helpers
 from .test_trainmulti import TrainData
@@ -30,13 +31,20 @@ def tearDownModule():  # pylint: disable=invalid-name
     DATA.cleanup()
 
 
-# Run stepcheck.main in a working directory (the tree it checks), with the tests' data - (its output, stderr)
-def run_stepcheck(directory, *arguments):
+# Run stepcheck.main in a working directory (the tree it checks), with the tests' data (or only its readers) - (its
+# output, stderr)
+def run_stepcheck(directory, *arguments, readers_only=False):
     out = os.path.join(directory, 'out.json')
     previous = os.getcwd()
     os.chdir(directory)
     try:
-        with DATA.patched(), helpers.captured() as (_, stderr):
+        with DATA.patched(), helpers.captured() as (_, stderr), contextlib.ExitStack() as stack:
+            if readers_only:
+                data_dir = os.path.join(directory, 'data')
+                os.makedirs(data_dir, exist_ok=True)
+                if not os.path.exists(os.path.join(data_dir, 'multi')):
+                    os.symlink(os.path.join(DATA.data_dir, 'multi'), os.path.join(data_dir, 'multi'))
+                stack.enter_context(unittest.mock.patch.object(trainmulti, 'DATA_DIR', data_dir))
             status = stepcheck.main(['--init', DATA.run_path('init', 'last.pt'), '--out', out, *arguments])
     finally:
         os.chdir(previous)
@@ -49,8 +57,8 @@ class TestStepcheck(unittest.TestCase):
 
     def test_readers(self):
         with tempfile.TemporaryDirectory() as directory:
-            result, stderr = run_stepcheck(directory, '--batches', '1', '--batch', '2')
-            again, _ = run_stepcheck(directory, '--batches', '1', '--batch', '2')
+            result, stderr = run_stepcheck(directory, '--batches', '1', '--batch', '2', readers_only=True)
+            again, _ = run_stepcheck(directory, '--batches', '1', '--batch', '2', readers_only=True)
         self.assertEqual(result, again)
         self.assertEqual(result['device'], 'cpu')
         self.assertEqual(result['config'], {})
@@ -66,12 +74,8 @@ class TestStepcheck(unittest.TestCase):
         self.assertEqual(json.loads(stderr.splitlines()[0])['corpus'], 'multi')
 
     def test_emotional_corpus(self):
-        # The emotional corpus too, when the tree has built it; a model config override
+        # The emotional corpus too, when it is built; a model config override
         with tempfile.TemporaryDirectory() as directory:
-            cremad = os.path.join(directory, 'build', 'nn', 'data', 'cremad')
-            os.makedirs(cremad)
-            with open(os.path.join(cremad, 'index.json'), 'w', encoding='utf-8') as file:
-                file.write('{}')
             result, _ = run_stepcheck(directory, '--batches', '1', '--batch', '1', '--config', '{"jitter": 0.01}')
         self.assertEqual([row['corpus'] for row in result['batches']], ['multi', 'cremad'])
         self.assertEqual(result['config'], {'jitter': 0.01})

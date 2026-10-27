@@ -282,9 +282,9 @@ over-smoothed bandwidths and excess high-frequency noise read as "tinny" and "st
 The goal was ten voices (five female, five male) for reading many kinds of books - for example a warm literary
 narrator, an older authoritative voice, a young bright voice, a brisk nonfiction voice, and a gentle voice - each
 with emotional styles, from one model of about 1M parameters. The model was trained; it became the teacher of the
-model that ships (Section 8). The ten designed voices are specified (`data/nn/voices.json`: blends of the speaker
-table's rows, a style, and parameter transforms) but not yet shipped; the package's two voices are the model's ARCTIC
-bdl (male) and slt (female) speakers.
+model that ships (Section 8). The ten designed voices were specified then (`data/nn/voices.json`: blends of the speaker
+table's rows, a style, and parameter transforms) and ship now as `lib/synthesis.js`'s voice and style tables (checked
+against it), beside the model's ARCTIC bdl (male) and slt (female) speakers.
 
 ### 7.1 Data
 
@@ -395,7 +395,8 @@ s64 architecture trained from scratch with the teacher's own two-stage recipe sc
 all three measures, and below s48. The polish adds 0.025-0.034 UTMOS, most of it to the two ARCTIC voices (bdl and
 slt), which pure distillation loses most; intermediate-feature matching (weight 0.05) adds about 0.02, and the two
 barely stack. In an architecture experiment, quantization-aware training at 4 bits (groups of 64) recovered about 70%
-of the UTMOS that 4-bit weights lose, at a 45% smaller module; the shipped voice weights stay at 8 bits per row.
+of the UTMOS that 4-bit weights lose, at a 45% smaller module; the shipped voice weights stay at 8 bits per row (the
+QAT and the packed 4-7-bit export were removed after 1.6.4 - see git history).
 
 The student's training was later changed - Muon on its hidden matrices with a warmup-stable-decay schedule, 12,000
 steps instead of 20,000 of AdamW and a cosine (Section 11.4) - and that change, not a new size, is most of the

@@ -40,9 +40,8 @@ import random
 import re
 import sys
 
-from . import g2p
+from . import ROOT, g2p
 from .g2p import log_line
-from .frontend import ROOT
 from .wav import read_wav
 
 

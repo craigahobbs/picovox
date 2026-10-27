@@ -138,12 +138,12 @@ def spectral_balance(samples, rate, times, voiced, bandwidth):
 # Analyze a WAV file - (path, pitch floor, pitch ceiling, bandwidth) -> {path, the measures, bands}
 def analyze(task):
     import numpy  # pylint: disable=import-outside-toplevel
-    import parselmouth  # pylint: disable=import-outside-toplevel
+    import parselmouth  # pylint: disable=import-outside-toplevel, import-error
     from .wav import read_wav  # pylint: disable=import-outside-toplevel
     path, floor, ceiling, bandwidth = task
     samples, rate = read_wav(path)
     samples = samples.mean(axis=1)
-    sound = parselmouth.Sound(samples, sampling_frequency=rate)  # pylint: disable=c-extension-no-member
+    sound = parselmouth.Sound(samples, sampling_frequency=rate)
     pitch = sound.to_pitch_ac(time_step=PITCH_STEP, pitch_floor=floor, pitch_ceiling=ceiling)
     f0 = pitch.selected_array['frequency']
     times = pitch.xs()
@@ -152,7 +152,7 @@ def analyze(task):
 
     # The harmonics-to-noise ratios - the whole and the 2-5 kHz band (None without a periodic frame)
     for name, signal in (('hnr', samples), ('hnr2k', band_pass(samples, rate, 2000, 5000))):
-        band_sound = parselmouth.Sound(signal, sampling_frequency=rate)  # pylint: disable=c-extension-no-member
+        band_sound = parselmouth.Sound(signal, sampling_frequency=rate)
         values = band_sound.to_harmonicity_cc(time_step=0.01, minimum_pitch=floor).values[0]
         values = values[values > -100]
         result[name] = float(numpy.mean(values)) if len(values) else None

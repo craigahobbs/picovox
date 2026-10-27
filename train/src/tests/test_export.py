@@ -3,10 +3,10 @@
 
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
+import base64
 import json
 import os
 import runpy
-import subprocess
 import tempfile
 import unittest
 import unittest.mock
@@ -15,9 +15,9 @@ import warnings
 import numpy
 import torch
 
-from picovox_train import ROOT, export, params, quant
+from picovox_train import ROOT, export, params
 from picovox_train.synthesize import Voice
-from tests import helpers, model_fixtures
+from tests import helpers, model_fixtures, parity
 
 
 class TestExport(unittest.TestCase):
@@ -44,6 +44,12 @@ class TestExport(unittest.TestCase):
         self.assertFalse(model.training)
         self.assertEqual(state['speakers'], model_fixtures.SPEAKERS)
         self.assertEqual(model.config['dim'], 16)
+        # The multi-speaker model only
+        state['config'] = {**state['config'], 'kind': 'single'}
+        path = os.path.join(self.root, 'single.pt')
+        torch.save(state, path)
+        with self.assertRaisesRegex(ValueError, 'only the multi-speaker model'):
+            export.load_model(path)
 
     def test_exported_tensors(self):
         model, _ = export.load_model(self.checkpoint)
@@ -55,31 +61,15 @@ class TestExport(unittest.TestCase):
         self.assertTrue(torch.allclose(tensors['eq_table'], expected))
         self.assertTrue(all(tensor.dtype == torch.float32 for tensor in tensors.values()))
 
-    def test_quantize(self):
-        tensor = torch.tensor([[1.0, -0.5, 0.25], [0.0, 0.0, 0.0]])
-        values, scales = export.quantize(tensor)
-        self.assertEqual(values.dtype, numpy.int8)
-        self.assertEqual(values.tolist(), [[127, -64, 32], [0, 0, 0]])
-        self.assertEqual(scales.dtype, numpy.float32)
-        self.assertAlmostEqual(float(scales[0]), 1 / 127, places=7)
-        self.assertEqual(float(scales[1]), 1.0)
-
-    def test_is_quantized(self):
-        self.assertTrue(export.is_quantized(torch.zeros(32, 32)))
-        self.assertFalse(export.is_quantized(torch.zeros(32, 32), 'eq_table'))
-        self.assertFalse(export.is_quantized(torch.zeros(1024)))
-        self.assertFalse(export.is_quantized(torch.zeros(10, 10)))
-
     def test_quantized_model(self):
         model, _ = export.load_model(self.checkpoint)
-        for bits, group in ((8, 0), (6, 16)):
-            quantized = export.quantized_model(model, bits, group)
-            state, original = quantized.state_dict(), model.state_dict()
-            name = 'embedding.weight'
-            self.assertFalse(torch.equal(state[name], original[name]))
-            self.assertLess(float((state[name] - original[name]).abs().max()), float(original[name].abs().max()) / 2 ** (bits - 2))
-            self.assertTrue(torch.equal(state['head.bias'], original['head.bias']))
-            self.assertTrue(torch.equal(state['eq_free'], original['eq_free']))
+        quantized = export.quantized_model(model)
+        state, original = quantized.state_dict(), model.state_dict()
+        name = 'embedding.weight'
+        self.assertFalse(torch.equal(state[name], original[name]))
+        self.assertLess(float((state[name] - original[name]).abs().max()), float(original[name].abs().max()) / 64)
+        self.assertTrue(torch.equal(state['head.bias'], original['head.bias']))
+        self.assertTrue(torch.equal(state['eq_free'], original['eq_free']))
 
     def test_token_remap(self):
         vocab = ['<pad>', '<unk>', '<question>', 'AA0', 'AA1', 'AA2', 'B', 'CH', 'EH0', 'EH1', 'EH2', '<period>']
@@ -129,7 +119,6 @@ class TestExport(unittest.TestCase):
             binary_size = os.path.getsize(os.path.join(out_dir, 'voice.bin'))
         self.assertEqual(manifest['bytes'], binary_size)
         self.assertEqual(manifest['note'], 'x')
-        self.assertNotIn('quantization', manifest)
         self.assertEqual(manifest['defaultSpeaker'], 1)
         self.assertEqual(manifest['inference'], {'pauseThreshold': 0.5, 'bandwidthScale': 1.0})
         self.assertEqual(len(manifest['eq']), params.EQ_BAND_COUNT)
@@ -147,30 +136,10 @@ class TestExport(unittest.TestCase):
         self.assertFalse(os.path.isabs(training['args']['files'][0]))
         self.assertNotIn(ROOT, json.dumps(manifest))
 
-    def test_export_packed(self):
-        model, state = export.load_model(self.checkpoint)
-        with tempfile.TemporaryDirectory() as out_dir:
-            manifest = export.export(model, state, 'voice', out_dir, bits=5, group=24)
-            with open(os.path.join(out_dir, 'voice.bin'), 'rb') as file:
-                binary = file.read()
-        self.assertEqual(manifest['quantization'], {'bits': 5, 'group': 24})
-        entry = next(tensor for tensor in manifest['tensors'] if tensor['name'] == 'embedding.weight')
-        self.assertEqual((entry['encoding'], entry['bits'], entry['group']), ('packed', 5, 16))
-        self.assertEqual(entry['offset'] % 4, 0)
-        self.assertEqual(entry['scaleOffset'] % 4, 0)
-        # The packed values and float16 scales dequantize to the quantized model's weights
-        tensor = model.state_dict()['embedding.weight']
-        count = tensor.numel()
-        values = quant.unpack(binary[entry['offset']:entry['scaleOffset']], 5, count).reshape(tensor.shape[0], -1)
-        scales = numpy.frombuffer(binary[entry['scaleOffset']:entry['scaleOffset'] + tensor.shape[0] * 2], dtype='<f2').reshape(-1, 1)
-        expected = export.quantized_model(model, 5, 24).state_dict()['embedding.weight'].numpy()
-        self.assertTrue(numpy.array_equal(quant.dequantize_array(values, scales.astype(numpy.float64), tuple(tensor.shape), 24), expected))
-
     def test_main(self):
         with tempfile.TemporaryDirectory() as out_dir, helpers.captured() as (stdout, _):
             self.assertEqual(export.main([self.checkpoint, '--voice', 'model', '--out', out_dir]), 0)
-            self.assertEqual(export.main([self.checkpoint, '--voice', 'small', '--out', out_dir, '--speaker', 'arctic-slt',
-                                          '--bits', '4']), 0)
+            self.assertEqual(export.main([self.checkpoint, '--voice', 'small', '--out', out_dir, '--speaker', 'arctic-slt']), 0)
             with open(os.path.join(out_dir, 'small.json'), encoding='utf-8') as file:
                 small = json.load(file)
             with open(os.path.join(out_dir, 'model.json'), encoding='utf-8') as file:
@@ -180,7 +149,6 @@ class TestExport(unittest.TestCase):
         self.assertEqual(lines[0]['quantized'] + lines[0]['float32'], len(default['tensors']))
         self.assertEqual(default['defaultSpeaker'], 1)
         self.assertEqual(small['defaultSpeaker'], 0)
-        self.assertEqual(small['quantization'], {'bits': 4, 'group': 0})
 
     def test_module_main(self):
         with unittest.mock.patch('sys.argv', ['export', '--help']), helpers.captured() as (stdout, _), \
@@ -193,8 +161,8 @@ class TestExport(unittest.TestCase):
 
 
 class TestExportParity(unittest.TestCase):
-    """lib/model.js (nn/js/speak.js --frames-only) against PyTorch with the export's dequantized weights - the browser
-    path's inference is the exported model's (the former parity.py's check)"""
+    """lib/model.js against PyTorch with the export's dequantized weights - the browser path's inference is the exported
+    model's (the parity check - tools/parity.js: the exported models are its committed inputs)"""
 
     @classmethod
     def setUpClass(cls):
@@ -210,34 +178,28 @@ class TestExportParity(unittest.TestCase):
         cls.patches.__exit__(None, None, None)
         cls.temp.cleanup()
 
-    def check_parity(self, bits, group, speaker, style=None):
+    def check_parity(self, name, speaker, style=None):
         texts = ['Call me Ishmael.', 'It was the best of times, it was the worst of times.', 'Is it cold? Wait here!']
         model, state = export.load_model(self.checkpoint)
-        out_dir = os.path.join(self.root, f'export-{bits}-{group}')
-        export.export(model, state, 'model', out_dir, bits=bits, group=group)
-        batch = [{'text': text, 'params': os.path.join(out_dir, f'{index}.json')} for index, text in enumerate(texts)]
-        with open(os.path.join(out_dir, 'batch.json'), 'w', encoding='utf-8') as file:
-            json.dump(batch, file)
-        style_args = ['--style', style, '--intensity', '0.7'] if style else []
-        subprocess.run(['node', os.path.join(ROOT, 'nn', 'js', 'speak.js'), '-m', os.path.join(out_dir, 'model'), '--batch',
-                        os.path.join(out_dir, 'batch.json'), '--frames-only', '--speaker', str(speaker), *style_args],
-                       check=True, capture_output=True, cwd=ROOT)
-        voice = Voice(self.checkpoint, quantized=True, speaker=speaker, bits=bits, group=group, emotion=style, intensity=0.7)
-        for item, text in zip(batch, texts):
-            with open(item['params'], encoding='utf-8') as file:
-                data = json.load(file)
+        out_dir = os.path.join(self.root, name)
+        manifest = export.export(model, state, 'model', out_dir)
+        with open(os.path.join(out_dir, 'model.bin'), 'rb') as file:
+            binary = base64.b64encode(file.read()).decode('ascii')
+        parity.inputs(self, name, {'manifest': manifest, 'bin': binary, 'speaker': speaker, 'style': style, 'intensity': 0.7,
+                                   'texts': texts})
+        voice = Voice(self.checkpoint, speaker=speaker, emotion=style, intensity=0.7)
+        for text, expected in zip(texts, parity.outputs(name), strict=True):
             values, parts = voice.frames(text)
-            self.assertEqual([duration for sentence in data['sentences'] for duration in sentence['durations']],
-                             [duration for part in parts for duration in part['durations']])
-            js_values = numpy.array(data['frames'], dtype=numpy.float64)
-            self.assertEqual(js_values.shape, values.shape)
+            self.assertEqual(expected['durations'], [duration for part in parts for duration in part['durations']])
+            js_values = numpy.array(expected['frames'], dtype=numpy.float64)
+            self.assertEqual(js_values.shape, values[:, :params.COUNT].shape)
             self.assertGreater(len(values), 10)
-            difference = numpy.abs(params.normalize(js_values) - params.normalize(values))
+            difference = numpy.abs(params.normalize(js_values) - params.normalize(values[:, :params.COUNT]))
             self.assertLess(float(difference.max()), 1e-4)
-            self.assertTrue(numpy.allclose(data['eq'], voice.eq, atol=1e-3))
+            self.assertTrue(numpy.allclose(expected['eq'], voice.eq, atol=1e-3))
 
-    def test_parity_int8(self):
-        self.check_parity(8, 0, 1)
+    def test_parity(self):
+        self.check_parity('export', 1)
 
-    def test_parity_packed(self):
-        self.check_parity(6, 32, 3, style='happy')
+    def test_parity_style(self):
+        self.check_parity('export-style', 3, style='happy')

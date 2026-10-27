@@ -8,6 +8,7 @@ import json
 import os
 import runpy
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -18,6 +19,7 @@ import torch
 
 from picovox_train import ROOT, context, g2p, g2pmodel
 
+from . import data_fixtures
 from .helpers import captured
 
 
@@ -70,24 +72,19 @@ def same_weights(model, other):
                zip(model.state_dict().values(), other.state_dict().values()))
 
 
-# A fake multiprocessing.Pool (run in this process) - each pool made is appended to pools
+# A fake multiprocessing.Pool (data_fixtures.FakePool, run in this process) - each pool made is appended to pools, with
+# the tasks it mapped
 def fake_pool(pools):
-    class FakePool:
+    class RecordingPool(data_fixtures.FakePool):
         def __init__(self, processes):
-            self.processes = processes
+            super().__init__(processes)
             self.tasks = None
             pools.append(self)
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-        def map(self, function, tasks):
-            self.tasks = list(tasks)
-            return list(map(function, self.tasks))
-    return FakePool
+        def map(self, function, iterable, chunksize=1):
+            self.tasks = list(iterable)
+            return super().map(function, self.tasks, chunksize)
+    return RecordingPool
 
 
 class TestContext(unittest.TestCase):
@@ -339,14 +336,14 @@ class TestContext(unittest.TestCase):
             self.assertIn(' fold 1: train-context: ', file.read())
 
         # The recipe's network - its teachers (in worker processes or not - the same), then the student
-        distilled = context.train_distilled(path, None, dict(CONTEXT_TINY, teachers=2), log_path)
+        distilled = context.train_distilled(path, dict(CONTEXT_TINY, teachers=2), log_path)
         with captured():
             teachers = [context.teacher_task((path, None, seed, settings, None)) for seed in (101, 102)]
             student = context.train_student(path, None, dict(CONTEXT_TINY, teachers=2), None, teachers)
         self.assertTrue(same_weights(distilled, student))
         pools = []
         with unittest.mock.patch.object(context.multiprocessing, 'Pool', fake_pool(pools)):
-            pooled = context.train_distilled(path, None, dict(CONTEXT_TINY, teachers=2), log_path, jobs=4)
+            pooled = context.train_distilled(path, dict(CONTEXT_TINY, teachers=2), log_path, jobs=4)
         self.assertEqual([pool.processes for pool in pools], [2])
         self.assertTrue(same_weights(distilled, pooled))
 
@@ -475,14 +472,26 @@ class TestContext(unittest.TestCase):
 
     def test_js_pronouncer_and_heteronym_scores(self):
         module_path = g2pmodel.MODULE_PATH
-        pronounce = context.js_pronouncer(module_path)
-        self.assertEqual(pronounce(['lead', 'hello']), [['L', 'IY1', 'D'], ['HH', 'AH0', 'L', 'OW1']])
         python = g2pmodel.G2p(g2pmodel.read_module())
-        self.assertEqual(pronounce(['cat']), [python.pronounce('cat')])
-        kinds, status = context.heteronym_scores(module_path)
-        self.assertEqual(status, 0)
-        self.assertEqual(set(kinds), {'default', 'context', 'missing', 'names'})
-        self.assertTrue(all(right <= total for right, total in kinds.values()))
+
+        # nn/js/pronounceLines.js (lib/g2p.js - the Python port's pronunciations - the parity check's) and
+        # tools/heteronyms.js (its report)
+        def run(command, **kwargs):
+            if command[1] == os.path.join(ROOT, 'nn', 'js', 'pronounceLines.js'):
+                self.assertEqual(command[2], module_path)
+                self.assertEqual({key: kwargs[key] for key in ('capture_output', 'text', 'check')},
+                                 {'capture_output': True, 'text': True, 'check': True})
+                words = kwargs['input'].split('\n')[:-1]
+                return subprocess.CompletedProcess(command, 0, ''.join(' '.join(python.pronounce(word)) + '\n' for word in words))
+            self.assertEqual(command, ['node', os.path.join(ROOT, 'tools', 'heteronyms.js'), '-m', module_path])
+            return subprocess.CompletedProcess(command, 1, 'default 52/52\ncontext 51/54\nmissing 3/3\nnames 80/86\n')
+        with unittest.mock.patch('subprocess.run', side_effect=run):
+            pronounce = context.js_pronouncer(module_path)
+            self.assertEqual(pronounce(['lead', 'hello']), [['L', 'IY1', 'D'], ['HH', 'AH0', 'L', 'OW1']])
+            self.assertEqual(pronounce(['cat']), [python.pronounce('cat')])
+            kinds, status = context.heteronym_scores(module_path)
+        self.assertEqual(status, 1)
+        self.assertEqual(kinds, {'default': (52, 52), 'context': (51, 54), 'missing': (3, 3), 'names': (80, 86)})
 
     def test_check(self):
         # Identical below the comment header
@@ -606,12 +615,6 @@ class TestContext(unittest.TestCase):
             self.assertIn('sources', json.load(file))
         with open(log_path, encoding='utf-8') as file:
             self.assertIn('train-context: held-out aligned', file.read())
-
-        # A fold held out, the recipe's settings
-        with unittest.mock.patch.dict(context.CONTEXT_SETTINGS, CONTEXT_TINY), captured() as (_, stderr):
-            self.assertEqual(context.main(['train-context', '--labels', path, '--out', self.path('fold.pt'), '--fold', '1']), 0)
-        self.assertIn('fold 1: teacher 101: train-context:', stderr.getvalue())
-        self.assertIn('train-context fold 1:', stderr.getvalue())
 
         # The teachers in worker processes (-j) - the same network
         pools = []

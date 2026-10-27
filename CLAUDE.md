@@ -24,31 +24,35 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   modules (`g2pModel.js`, `voiceModel.js`) that `make train` reproduces (`picovox_train.context export`,
   `picovox_train.package`).
 - `nn/js/` - Node development tools on the package's modules (not part of the package): `speak.js` (text to WAV with an
-  exported model - the listener panel's renderer), `voices.js` (the designed voices, `data/nn/voices.json`) and
-  `voicescheck.js`, `unpack.js`, `packagecheck.js`, `pronounceLines.js` and `tokenizeLines.js` (for the Python checks).
+  exported or packaged model - the listener panel's renderer), `loadVoice.js` (a model's loader, for `speak.js` and
+  `tools/trainsamples.js`), `unpack.js`, `packagecheck.js`, `pronounceLines.js` and `tokenizeLines.js` (for the Python
+  checks).
 - `train/` - the Python training pipeline, the package `picovox_train` (`train/src/picovox_train/`; a python-build
   package - its unit tests in `train/src/tests/`): the front end's port (`frontend.py`, `g2pmodel.py`, `vocab.json`),
-  the G2P and heteronym models (`g2p.py`, `heteronyms.py`, `context.py`, `contextlabels.py`, `readings.py`), the data
-  (`corpora.py` - the corpus download, `books.py` - the pinned book texts, `data.py`, `align.py`, `multi.py`,
-  `cremad.py`, `wav.py`), the differentiable synthesizer (`params.py`, `dsynth.py`, `lf.py`, `rng.py`, `spectral.py`), the model
-  and its training (`model.py`, `trainmulti.py`, `losses.py`, `discriminator.py`, `quant.py`, `optim.py` - the training
-  step's options), distillation (`distill.py`), export (`export.py`, `package.py`, `synthesize.py`), the listener panel
-  (`panel.py`, and the listener models, `listeners.py` - `build/venv-listeners`), and the pipeline's tools (`gpulock.py`,
-  `smoke.py`, `stepcheck.py`, and `quality.py` - the voices' quality measures against their readers' recordings).
+  the G2P and heteronym models (`g2p.py`, `g2paudit.py`, `heteronyms.py`, `context.py`, `contextlabels.py`,
+  `readings.py`), the data (`corpora.py` - the corpus download, `books.py` - the pinned book texts, `data.py`,
+  `align.py`, `multi.py`, `cremad.py`, `wav.py`), the differentiable synthesizer (`params.py`, `dsynth.py`, `lf.py`,
+  `rng.py`, `spectral.py`), the model and its training (`model.py`, `trainmulti.py`, `losses.py`, `discriminator.py`,
+  `quant.py`, `optim.py` - the training step's options), distillation (`distill.py`), export (`export.py`, `package.py`,
+  `synthesize.py`), the listener panel (`panel.py`, and the listener models, `listeners.py` - `build/venv-listeners`),
+  and the pipeline's tools (`gpulock.py`, `smoke.py`, `stepcheck.py`, and `quality.py` - the voices' quality measures
+  against their readers' recordings).
   `picovox_train/__init__.py` documents each module. `make train` runs it from its source (`PYTHONPATH=train/src`) in
   the training environments (`build/venv-nn`, `venv-listeners`, `venv-pos` - `requirements/*.txt`).
 - `tools/` - the training dashboard (`dashboard/`), the performance lab (`perf/` - the playback pipeline timed on a
   phone, and under Node without a JIT), the voice lab (`voicelab/` - the package synthesizing in a page with adjustable
   frame edits, for Claude's blind A/B questions in an artifact; `make voicelab` stages it with `lib/` in `build/voicelab/`), `heteronyms.js` (the heteronym and names regression sets), make train's
   bookkeeping (`trainstage.sh`, `trainutil.sh` - the stage events and logs, the utilization samples, `trainpower.sh`)
-  and listening samples (`trainsamples.js`, `trainsamplesindex.js`), and the panel's texts
-  (`panel-texts.json`).
+  and listening samples (`trainsamples.js`, `trainsamplesindex.js`), the panel's texts (`panel-texts.json`), and the
+  parity checks' outputs (`parity.js` - make parity).
 - `test/` - unit tests (`node:test`), one `test<Module>.js` per `lib/` module (`testIndex.js` for the API - including
   `speak` with a fake AudioContext, and the package's browser safety and exports), and the dashboard's and make train's
-  (`testTrainDashboard.js`, `testTrainSamplesIndex.js`, `testTrainStages.js`).
+  (`testTrainDashboard.js`, `testTrainSamplesIndex.js`, `testTrainStages.js`); `parity-inputs.json` - the parity checks'
+  inputs (below).
 - `data/` - the CMU Pronouncing Dictionary (G2P training only), `data/nn/` (the recipe `train.json`, the pinned book
-  texts `books.json`, the speaker pool, the G2P and heteronym data, and the designed voices), and
-  `data/targets/` (the four labeled ARCTIC speakers' analysis settings).
+  texts `books.json`, the speaker pool, the G2P and heteronym data, and the designed voices - `voices.json`, the design
+  record of `lib/synthesis.js`'s voice and style tables), and `data/targets/` (the four labeled ARCTIC speakers'
+  analysis settings).
 - `paper/` - the paper (`paper.md`; `index.html` renders it with MarkdownUp).
 
 ## javascript-build
@@ -62,7 +66,8 @@ Local Makefile overrides:
 
 - `ESLINT_ARGS` - also `tools/` and `nn/js/` (not the generated `lib/models/`)
 
-- `commit` - also runs the training package's gate (`commit-train`: `make -C train commit`); `make clean` cleans it too
+- `commit` - also runs the training package's gate (`commit-train`: `make -C train commit`, after `make parity`); `make
+  clean` cleans it too
 
 `make commit` (test, lint, doc, cover, and the training's gate) is the gate before committing. `npm pack --dry-run`
 lists the package's files (`package.json` `files`: `lib/`). `make -j train` trains both generated models from the recipe
@@ -81,12 +86,17 @@ the python-build skill before running its tests, lint, or coverage, or changing 
 `train/Makefile` copies python-build's files from `../../python-build` when it exists (`PYTHON_BUILD_DIR`).
 
 - `make -C train commit` - its gate: unittest (`-W error`), pylint (python-build's pylintrc), and 100% branch coverage
-- Local Makefile overrides: `PYLINT_ARGS` - `missing-function-docstring` disabled (a comment above each function is the
-  code's documentation)
+- Local Makefile overrides: `PYTHON_IMAGES_EXCLUDE` - Python 3.11 and 3.15 (the pinned numpy and torch install on 3.12
+  through 3.14); `DOCKER_ENV` - `PARITY_WRITE` into the containers; `PYLINT_ARGS` - `missing-function-docstring`
+  disabled (a comment above each function is the code's documentation)
 - The tests run on the CPU only, fast, with no network: tiny synthetic corpora and models
   (`train/src/tests/helpers.py`), temp directories, and mocks for the downloads, the GPU, the listener models, and the
-  subprocesses that aren't the repository's own Node tools. `# pragma: no cover` marks only the Apple GPU's (MPS, Metal)
-  paths.
+  subprocesses - the repository's Node tools too (the tests never run node). The parity checks
+  (`train/src/tests/parity.py`) test the Python port against `lib/`'s outputs of their inputs: `make parity`
+  (`tools/parity.js`) builds the outputs (`build/parity-outputs.json`) of the committed inputs
+  (`test/parity-inputs.json`), which each check compares with its own - after a change to a check's inputs (or the
+  export format, the export checks' models), rewrite them (`PARITY_WRITE=1 make -C train test`). `# pragma: no cover`
+  marks only the Apple GPU's (MPS, Metal) paths.
 - The test environment (`train/build/venv/`) installs `train/pyproject.toml`'s dependencies - pinned as
   `requirements/nn.txt` pins them (`tests/test_package.py` checks); `make train` uses `build/venv-*` and
   `PYTHONPATH=train/src`.

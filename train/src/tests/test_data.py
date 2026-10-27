@@ -79,6 +79,11 @@ class TestReading(unittest.TestCase):
 
 class TestProcessing(unittest.TestCase):
 
+    # The fake acoustic analysis
+    @classmethod
+    def setUpClass(cls):
+        cls.enterClassContext(data_fixtures.fake_modules(parselmouth=data_fixtures.ANALYSIS))
+
     def test_silent_runs(self):
         rate = 16000
         samples = numpy.concatenate([data_fixtures.buzz(0.3, rate), numpy.zeros(int(0.2 * rate)), data_fixtures.buzz(0.3, rate),
@@ -213,10 +218,6 @@ class TestLoading(unittest.TestCase):
 
 
 class TestTokens(unittest.TestCase):
-
-    def test_js_tokenize(self):
-        texts = ['Call me Ishmael.', 'Is it cold?']
-        self.assertEqual(data.js_tokenize(texts), [frontend.tokenize(text) for text in texts])
 
     def test_js_tokenize_command(self):
         with unittest.mock.patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '{"a": 1}\n[2]\n')) as run:

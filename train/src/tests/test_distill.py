@@ -17,9 +17,9 @@ import warnings
 import numpy
 import torch
 
-from picovox_train import ROOT, distill, export, package, params
+from picovox_train import ROOT, distill, export, frontend, package, params
 from picovox_train.books import PinError
-from tests import helpers, model_fixtures
+from tests import data_fixtures, helpers, model_fixtures
 
 
 # A short public-domain text, as a Gutenberg book (its license header and footer)
@@ -74,13 +74,15 @@ def write_config(root, teacher):
     return path
 
 
-# A distill test's temporary root, directories, data, teacher, and recipe
+# A distill test's temporary root, directories, data, teacher, and recipe (and the book workers' pool in this process)
 class DistillCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
         cls.root = cls.temp.name
+        cls.pool = unittest.mock.patch.object(distill.multiprocessing, 'Pool', data_fixtures.FakePool)
+        cls.pool.start()
         cls.patches = model_fixtures.patched_dirs(cls.root)
         cls.data_dir = cls.patches.__enter__()
         model_fixtures.write_data(cls.data_dir)
@@ -90,6 +92,7 @@ class DistillCase(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.patches.__exit__(None, None, None)
+        cls.pool.stop()
         cls.temp.cleanup()
 
     # Run a distill subcommand quietly (one CPU core for the book workers) - its exit status
@@ -163,6 +166,19 @@ class TestBooks(DistillCase):
         self.assertEqual(paragraphs[2], 'Is it cold? Wait here! The cat sat on the mat.')
         self.assertEqual(distill.book_paragraphs(os.path.join(self.root, 'books', 'plain.txt')),
                          ['We went home. A dark night fell on the town. Oh. Call me Ishmael.'])
+
+    def test_sentences(self):
+        vocab = frontend.vocabulary()
+        ids = frontend.tokenize('Hello there. Who are you? Fine')['ids']
+        parts = distill.sentences(ids, vocab)
+        self.assertEqual(len(parts), 3)
+        self.assertEqual(distill.sentences([2, 20, 21], vocab), [[2, 20, 21]])
+        self.assertTrue(all(part[0] == 2 for part in parts))
+        self.assertEqual([vocab[part[-1]] for part in parts[:2]], ['<period>', '<wh>'])
+        self.assertEqual(sum(len(part) - 1 for part in parts), len(ids) - 1)
+        # (without a leading <bos>; nothing after the last sentence's end)
+        self.assertEqual(distill.sentences(ids[1:5] + [vocab.index('<period>')], vocab), [[2] + ids[1:5] + [vocab.index('<period>')]])
+        self.assertEqual(distill.sentences([2], vocab), [])
 
     def test_book_sentences(self):
         path, sentences = distill.book_sentences(os.path.join(self.root, 'books', 'plain.txt'))
@@ -607,7 +623,17 @@ class TestEvaluation(DistillCase):
         module_path = os.path.join(self.root, 'voiceModel.js')
         with open(module_path, 'w', encoding='utf-8') as file:
             file.write(text)
-        with unittest.mock.patch.object(distill.panel, 'score_model', side_effect=self.score_model):
+
+        # (nn/js/unpack.js - its export)
+        def unpack(command, check):
+            self.assertEqual((command[:3], check), (['node', os.path.join(ROOT, 'nn', 'js', 'unpack.js'), module_path], True))
+            manifest, weights = helpers.unpack_module(command[2])
+            with open(command[3] + '.json', 'w', encoding='utf-8') as file:
+                json.dump(manifest, file)
+            with open(command[3] + '.bin', 'wb') as file:
+                file.write(weights)
+        with unittest.mock.patch.object(distill.panel, 'score_model', side_effect=self.score_model), \
+                unittest.mock.patch.object(distill.subprocess, 'run', side_effect=unpack):
             result = distill.evaluate_model('baseline', module_path, config, reference={'speakers': {}}, whisper_workers=2)
         self.assertEqual(result['checkpoint'], module_path)
         self.assertIsNone(result['step'])
@@ -616,8 +642,9 @@ class TestEvaluation(DistillCase):
         self.assertEqual(result['size']['moduleBytes'], len(text.encode('utf-8')))
         self.assertEqual(result['size']['binBytes'], os.path.getsize(os.path.join(export_dir, 'model.bin')))
         self.assertEqual(result['panel']['mos'], 3.5)
-        result = distill.evaluate_module('baseline', module_path, config, None, False, 2,
-                                         os.path.join(distill.DISTILL_DIR, 'eval', 'baseline'), time.time())
+        with unittest.mock.patch.object(distill.subprocess, 'run', side_effect=unpack):
+            result = distill.evaluate_module('baseline', module_path, config, None, False, 2,
+                                             os.path.join(distill.DISTILL_DIR, 'eval', 'baseline'), time.time())
         self.assertNotIn('panel', result)
 
     def write_export(self, name):

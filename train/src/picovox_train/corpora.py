@@ -226,8 +226,8 @@ def write_readme():
     lines = [
         '# Speech corpora',
         '',
-        'Human speech for calibrating the synthesizer\'s voices, fetched by `tools/corpora.py`. This directory is',
-        'gitignored - the corpora are not redistributed with picovox. Only small derived statistics are committed',
+        'Human speech for calibrating the synthesizer\'s voices, fetched by `train/src/picovox_train/corpora.py`. This directory is',
+        'gitignored - the corpora are not redistributed with PicoVox. Only small derived statistics are committed',
         '(`data/targets/`).',
         ''
     ]

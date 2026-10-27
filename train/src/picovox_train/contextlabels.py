@@ -44,8 +44,8 @@ import os
 import re
 import sys
 
-from .frontend import ROOT, context_sequence, text_items
-from . import books
+from .frontend import context_sequence, text_items
+from . import RECIPE_PATH, ROOT, books, heteronyms
 from . import readings as readings_module
 
 
@@ -53,11 +53,10 @@ SPEC_PATH = os.path.join(ROOT, 'data', 'nn', 'context-labels.json')
 TEST_PATH = os.path.join(ROOT, 'data', 'nn', 'heteronyms-test.json')
 LIBRITTS_DIR = os.path.join(ROOT, 'data', 'corpora', 'libritts_r', 'LibriTTS_R')
 LABEL_DIR = os.path.join(ROOT, 'data', 'corpora', 'libritts_label', 'lab', 'phone')
-CONFIG_PATH = os.path.join(ROOT, 'data', 'nn', 'train.json')
 
 
 # The recipe's label settings - data/nn/train.json's context.labels (and the context network's window)
-def load_settings(path=CONFIG_PATH):
+def load_settings(path=RECIPE_PATH):
     with open(path, encoding='utf-8') as file:
         context = json.load(file)['context']
     return {**context['labels'], 'window': context['network']['window']}
@@ -121,7 +120,7 @@ def word_family(word, readings):
         return 'stress'
     if re.search(r'ates?$', word) and (first_vowels[-1:] + second_vowels[-1:]).count('EY2') == 1:
         return 'ate'
-    if readings_module.consonant_change(first.split(), second.split()):
+    if heteronyms.kind(first.split(), second.split()) == 'consonant':
         return 'consonant'
     return 'vowel'
 
@@ -147,7 +146,7 @@ def family_reading(family, tag, readings):
         if tag in NOUN_TAGS | {'JJ'} and reduced:
             return reduced[0]
     elif family == 'consonant':
-        ops = [(left, right) for left, right in readings_module.edit_ops(readings[0][0].split(), readings[1][0].split())
+        ops = [(left, right) for left, right in heteronyms.edit_ops(readings[0][0].split(), readings[1][0].split())
                if left and right]
         voiced = 1 if ops and ops[0][0] in VOICELESS and ops[0][1] in VOICED else 0
         if tag in {'VB', 'VBP'}:
@@ -160,7 +159,7 @@ def family_reading(family, tag, readings):
 # Whether a family word's readings are a stem-final voicing pair (use, close, excuse, uses - not an accent's S/Z or CH/SH)
 def voicing_pair(readings):
     first, second = readings[0][0].split(), readings[1][0].split()
-    ops = readings_module.edit_ops(first, second)
+    ops = heteronyms.edit_ops(first, second)
     if len(ops) != 1 or None in ops[0] or {ops[0][0], ops[0][1]} != {'S', 'Z'}:
         return False
     position = next(index for index, (left, right) in enumerate(zip(first, second)) if left != right)

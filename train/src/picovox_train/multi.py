@@ -36,8 +36,8 @@ The pieces:
   silence trim, and the exclusion rules (phone match below MIN_MATCH, a word below MIN_WORD_MATCH, a phone with no frames)
   are data.py's, except that LibriTTS-R's word rule skips function words and abbreviation expansions
   (WORD_MATCH_EXEMPT - the aligner's dictionary reduces them); utterances with no MFA labels are left out.
-- Splits - per speaker: an ARCTIC utterance has data.py's sentence split (the same held-out sentences as
-  data/nn/arctic-split.json); a LibriTTS-R utterance is "test" (2%) or "val" (3%) by a hash of its utterance id, else
+- Splits - per speaker: an ARCTIC utterance has data.py's sentence split (sentence_split - the same
+  held-out sentences for every speaker); a LibriTTS-R utterance is "test" (2%) or "val" (3%) by a hash of its utterance id, else
   "train". data/nn/multi-split.json lists the held-out utterance ids per speaker.
 - data/nn/speakers.json - the speaker id table: id (the training index), key, source, corpus speaker, reader, sex,
   accent (top, US posterior, votes), hours (included, per split), median F0, analysis settings, and match rates.
@@ -54,11 +54,11 @@ import time
 
 import numpy as np
 
-from . import data
+from . import ROOT, data
 from . import readings
 from .data import (CORPORA_DIR, DATA_DIR, FORMAT_VERSION, HOP, MAX_EDGE_SILENCE, MIN_MATCH, MIN_WORD_MATCH, SAMPLE_RATE,
                    CHANNELS, CHANNEL_NOTES, LABEL_DIR, SUBSETS, ArcticData, match_rate)
-from .frontend import (ABBREVIATIONS, BOUNDARIES, FUNCTION_WORDS, ROOT, pronounce_texts, set_pronunciations, tokenize,
+from .frontend import (ABBREVIATIONS, BOUNDARIES, FUNCTION_WORDS, pronounce_texts, set_pronunciations, tokenize,
                        vocabulary)
 
 
@@ -459,7 +459,7 @@ def write_speakers(corpus_data, speakers, row_of, edits_by_speaker, missing_labe
 # Write data/nn/multi-split.json - the held-out utterance ids per speaker
 def write_split(entries, path=SPLIT_PATH):
     split = {'description': 'The multi-speaker split of picovox_train/multi.py - per speaker, the held-out utterances ("val" and "test"); '
-                            'ARCTIC speakers by sentence (as data/nn/arctic-split.json), LibriTTS-R by a hash of the utterance id '
+                            'ARCTIC speakers by sentence (data.py\'s split), LibriTTS-R by a hash of the utterance id '
                             f'({TEST_PERCENT}% test, {VAL_PERCENT}% validation); the rest is training',
              'val': collections.defaultdict(list), 'test': collections.defaultdict(list)}
     for entry in entries:

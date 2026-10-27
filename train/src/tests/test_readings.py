@@ -50,28 +50,6 @@ def write_labels(phone_path):
 
 class TestReadings(unittest.TestCase):
 
-    def test_base(self):
-        self.assertEqual(readings.base('AH0'), 'AH')
-        self.assertEqual(readings.base('K'), 'K')
-        self.assertEqual(readings.unstressed('R IY1 D'), 'R IY D')
-
-    def test_edit_ops(self):
-        self.assertEqual(readings.edit_ops('R IY1 D'.split(), 'R IY1 D'.split()), [])
-        self.assertEqual(readings.edit_ops('R IY1 D'.split(), 'R IY0 D'.split()), [('IY1', 'IY0')])
-        self.assertEqual(readings.edit_ops('K AE1 T'.split(), 'K AE1 T S'.split()), [(None, 'S')])
-        self.assertEqual(readings.edit_ops('K AE1 T S'.split(), 'K AE1 T'.split()), [('S', None)])
-        self.assertEqual(readings.edit_ops('S K AE1 T'.split(), 'K AE1 T'.split()), [('S', None)])
-        self.assertEqual(readings.edit_ops([], ['K']), [(None, 'K')])
-
-    def test_consonant_change(self):
-        self.assertFalse(readings.consonant_change('R IY1 D'.split(), 'R IY0 D'.split()))
-        self.assertFalse(readings.consonant_change('R AH0 D'.split(), 'R IH0 D'.split()))
-        self.assertFalse(readings.consonant_change('K AE1 T'.split(), 'K AE1 T S'.split()))
-        self.assertFalse(readings.consonant_change('K AE1 T'.split(), 'K AE1 T AH0'.split()))
-        self.assertFalse(readings.consonant_change('F AY1 ER0'.split(), 'F AY1 R'.split()))
-        self.assertFalse(readings.consonant_change('R IY1 D'.split(), 'R EH1 D'.split()))
-        self.assertTrue(readings.consonant_change('K L OW1 S'.split(), 'K L OW1 Z'.split()))
-
     def test_vowel_pairs(self):
         self.assertEqual(readings.vowel_pairs('R IY1 D', 'R EH1 D'), [('IY1', 'EH1')])
         self.assertEqual(readings.vowel_pairs('K AE1 T', 'K AH0 AE1 T'), [])

@@ -51,16 +51,10 @@ The training step's options (optim.py; off by default - without them, training i
   steps cooled down to the floor
 - --crop-warmup STEPS:SECONDS - shorter rendered crops for the first steps
 - --zero-init-proj - the residual output projections zero-initialized (a model from scratch)
-
-Quantization-aware training (off by default - without it, training is unchanged):
-
-- --qat-bits B [--qat-group G] - quantization-aware training: the forward pass sees the weights fake-quantized as the
-  export at B bits will quantize them (quant.py; per row, or per group of G), with the straight-through estimator
 """
 
 import argparse
 import collections
-import contextlib
 import copy
 import json
 import math
@@ -74,9 +68,9 @@ import numpy
 import soxr
 import torch
 
-from . import ROOT, discriminator, dsynth, optim, params, quant
+from . import RECIPE_PATH, ROOT, discriminator, dsynth, optim, params
 from .data import DATA_DIR, ArcticData
-from .model import FIRST_PHONE, INTENSITY, STYLE_NAMES, MultiModel, parameter_count, save_checkpoint
+from .model import FIRST_PHONE, INTENSITY, STYLE_NAMES, MultiModel, core_parameter_count, parameter_count, save_checkpoint
 from .losses import F_INDEX, PRIORS, duration_loss, f0_track, render_values, spectral_loss
 
 
@@ -85,9 +79,6 @@ SOURCE_RATE = 24000
 
 # The runs' directory (checkpoints and logs)
 RUNS_DIR = os.environ.get('NN_RUNS_DIR', os.path.join(ROOT, 'build', 'nn', 'runs'))
-
-# make train's recipe
-RECIPE_PATH = os.path.join(ROOT, 'data', 'nn', 'train.json')
 
 # The most training steps the CPU runs ahead of the GPU (MPS)
 IN_FLIGHT = 2
@@ -507,13 +498,6 @@ def frame_tokens(durations, frame_count):
     return token_index, (frames[None].float() - start + 0.5) / duration
 
 
-# The quantization-aware training context of a model (the weights fake-quantized - quant.py), or none
-def qat_context(model, args):
-    if getattr(args, 'qat_bits', 0):
-        return quant.fake_quantized(model, args.qat_bits, args.qat_group)
-    return contextlib.nullcontext()
-
-
 # The validation losses and statistics of a corpus (no gradients; the model in eval mode) - mean losses and quality
 # statistics (fixed crops and seeds), and the F0 error
 @torch.no_grad()
@@ -527,8 +511,7 @@ def validate(model, synth, corpus, args, device, sonorants):
     for start in range(0, len(order), args.batch):
         indices = order[start:start + args.batch]
         batch = collate(corpus, indices, device)
-        with qat_context(model, args):
-            losses, _, _, stats, values = batch_losses(model, synth, batch, args, rng, 99, 1.0, sonorants, with_values=True)
+        losses, _, _, stats, values = batch_losses(model, synth, batch, args, rng, 99, 1.0, sonorants, with_values=True)
         stats = {key: value for key, value in ((key, float(value)) for key, value in stats.items()) if not math.isnan(value)}
         for key, value in {**losses, **stats}.items():
             sums[key] = sums.get(key, 0) + float(value) * len(indices)
@@ -603,8 +586,6 @@ def argument_parser():
     parser.add_argument('--init', default=None, help='initialize the weights from a checkpoint')
     parser.add_argument('--init-critic', default=None, help='initialize the critic from a checkpoint\'s (with --adversarial)')
     parser.add_argument('--seed', type=int)
-    parser.add_argument('--qat-bits', type=int, default=0, help='quantization-aware training at this bit width (0: none)')
-    parser.add_argument('--qat-group', type=int, default=0, help='QAT per-group scales of this many weights (0: per row)')
     parser.add_argument('--lean-clip', action='store_true', help='the lean clip and AdamW step (optim.py)')
     parser.add_argument('--optimizer', choices=['adamw', 'muon'], default='adamw', help='muon: Muon for the hidden matrices')
     parser.add_argument('--ema', type=float, default=0.0, help='an EMA of the weights at this decay, validated beside them')
@@ -726,7 +707,7 @@ def main(argv=None):
                 group['fused'] = fused or None
             critic_optimizer.load_state_dict(state['criticOptimizer'])
         rng = numpy.random.default_rng(args.seed + step)
-    core = parameter_count(model) - model.speaker.weight.numel() - model.eq_free.numel()
+    core = core_parameter_count(model)
     print(f'model: {parameter_count(model)} parameters ({core} without the speaker and equalizer tables); {args.name}: '
           f'{args.steps} steps from {step}', file=sys.stderr, flush=True)
 
@@ -765,13 +746,11 @@ def main(argv=None):
         corpus = prepared['corpusName']
         batch = upload(prepared['batch'], device)
         if args.speaker_noise > 0:
-            with qat_context(model, args):
-                vectors = model.speaker_vector(batch['speaker'])
+            vectors = model.speaker_vector(batch['speaker'])
             batch['speakerVector'] = vectors + args.speaker_noise * torch.randn_like(vectors)
         progress = step / args.steps
         guide = max(args.guide_floor, 1 - (1 - args.guide_floor) * progress / args.guide_steps)
-        with qat_context(model, args):
-            losses, audio, target, stats = batch_losses(model, synth, batch, args, None, prepared['seed'], guide, sonorants, prepared)
+        losses, audio, target, stats = batch_losses(model, synth, batch, args, None, prepared['seed'], guide, sonorants, prepared)
         if critic is not None and corpus == 'multi':
             # The critic's step (on the rendering, detached), then the generator's adversarial and feature-matching
             # losses (after --adversarial-start steps of the critic alone). The discriminators' input spectrograms don't

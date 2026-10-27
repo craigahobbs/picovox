@@ -3,7 +3,6 @@
 
 import * as train from '../tools/dashboard/train.js';
 import {strict as assert} from 'node:assert';
-import {readFileSync} from 'node:fs';
 import test from 'node:test';
 
 
@@ -66,7 +65,7 @@ test('train.stageStates, a later run', () => {
         '{"stage": "check", "event": "fail", "time": 170, "status": 2}',
         '{"stage": "teacher", "event": "start", "time": 160}'
     ].join('\n'));
-    const states = train.stageStates(manifest, {events, 'stamps': new Map(), 'segments': [], 'alive': true, 'started': 300000,
+    const states = train.stageStates(manifest, {events, 'alive': true, 'started': 300000,
         'target': 'train'});
     assert.equal(states.get('data').status, 'done');
     assert.equal(states.get('check').status, 'waiting');
@@ -90,30 +89,6 @@ test('train.parseStageEvents', () => {
         'teacher': {'start': 170000, 'end': null, 'fail': 180000, 'failure': 'exit status 1'},
         'eval': {'start': null, 'end': null, 'fail': 190000, 'failure': 'terminated'}
     });
-});
-
-
-test('train.parseMakeLog', () => {
-    const text = [
-        'before any start',
-        '2026-10-16 08:20:51 start: make -j4 train in a clean worktree',
-        'make: Entering directory `/repo\'',
-        'make: Leaving directory `/repo\'',
-        '2026-10-16 09:42:51 restart: the voice chain (make -j4 build/train/student.done)',
-        'make: Entering directory `/repo\'',
-        '2026-10-16 10:15:50 start: the check (make check.done, its log elsewhere)',
-        'make: Leaving directory `/other\'',
-        'make: Leaving directory `/repo\'',
-        '2026-10-16 10:20:00 start: something else'
-    ].join('\n');
-    const segments = train.parseMakeLog(text);
-    assert.deepEqual(segments.map(({start, target, directory, ended}) => [start, target, directory, ended]), [
-        [time('08:20:51'), 'train', '/repo', true],
-        [time('09:42:51'), 'student', '/repo', true],
-        [time('10:15:50'), 'check', null, false],
-        [time('10:20:00'), 'train', null, false]
-    ]);
-    assert.equal(segments[0].text, 'make: Entering directory `/repo\'\nmake: Leaving directory `/repo\'');
 });
 
 
@@ -188,7 +163,7 @@ test('train.stageStates, events', () => {
         '{"stage": "eval", "event": "start", "time": 200}',
         '{"stage": "eval", "event": "fail", "time": 210, "status": 2}'
     ].join('\n'));
-    const run = {events, 'stamps': new Map(), 'segments': [], 'alive': true, 'queued': new Set(['student'])};
+    const run = {events, 'alive': true, 'queued': new Set(['student'])};
     const states = train.stageStates(manifest, run);
     assert.deepEqual(Object.fromEntries(states), {
         'data': {'status': 'done', 'start': 100000, 'end': 160000},
@@ -200,47 +175,10 @@ test('train.stageStates, events', () => {
     });
 
     // Make stopped: the started stages stopped; a target leaves the others out
-    const stopped = train.stageStates(manifest, {events, 'stamps': new Map(), 'segments': [], 'alive': false, 'target': 'student'});
+    const stopped = train.stageStates(manifest, {events, 'alive': false, 'target': 'student'});
     assert.equal(stopped.get('check').status, 'stopped');
     assert.equal(stopped.get('student').status, 'stopped');
     assert.equal(stopped.get('package').status, 'skipped');
-});
-
-
-test('train.stageStates, stamps and make\'s log', () => {
-    const segments = train.parseMakeLog([
-        '2026-10-16 08:00:00 start: make -j4 train',
-        'make: Entering directory `/repo\'',
-        'make: *** [build/train/check.done] Error 1',
-        'make: Leaving directory `/repo\'',
-        '2026-10-16 09:00:00 restart: make -j4 build/train/student.done',
-        'make: Entering directory `/repo\''
-    ].join('\n'));
-    const stamps = new Map([['data', time('09:10:00')], ['teacher', time('09:30:00')]]);
-    const states = train.stageStates(manifest, {'events': new Map(), stamps, segments, 'errorTexts': ['make: *** [x/eval.done] Error 2']});
-    assert.deepEqual(Object.fromEntries(states), {
-        'data': {'status': 'done', 'start': time('09:00:00'), 'end': time('09:10:00')},
-        'check': {'status': 'skipped', 'start': null, 'end': null},
-        'teacher': {'status': 'done', 'start': time('09:10:00'), 'end': time('09:30:00')},
-        'student': {'status': 'running', 'start': time('09:30:00'), 'end': null},
-        'eval': {'status': 'failed', 'start': null, 'end': null, 'failure': 'make reported an error'},
-        'package': {'status': 'skipped', 'start': null, 'end': null}
-    });
-
-    // A stamp without a make run or dependencies - its start unknown; the latest run's failure; no runs - every stage
-    const alone = train.stageStates(manifest, {'events': new Map(), 'stamps': new Map([['data', 5000]]), 'segments': []});
-    assert.deepEqual(alone.get('data'), {'status': 'done', 'start': null, 'end': 5000});
-    const early = train.stageStates(manifest, {'events': new Map(), 'stamps': new Map([['teacher', 5000]]), 'segments': []});
-    assert.deepEqual(early.get('teacher'), {'status': 'done', 'start': null, 'end': 5000});
-    assert.equal(alone.get('package').status, 'waiting');
-    const failed = train.stageStates(manifest, {'events': new Map(), 'stamps': new Map(), 'segments': segments.slice(0, 1)});
-    assert.equal(failed.get('check').status, 'failed');
-    assert.equal(failed.get('data').status, 'waiting');
-
-    // An open run with no start in its log (a stage with no dependencies)
-    const open = [{'start': -Infinity, 'target': 'train', 'directory': null, 'ended': false, 'text': ''}];
-    const opened = train.stageStates(manifest, {'events': new Map(), 'stamps': new Map(), 'segments': open});
-    assert.deepEqual(opened.get('data'), {'status': 'running', 'start': null, 'end': null});
 });
 
 
@@ -309,13 +247,3 @@ test('train.listenModels', () => {
     ]);
 });
 
-
-test('pipeline.json names no run', () => {
-    // The committed dashboard settings follow make train's default TRAIN_DIR (build/train): a run elsewhere - another
-    // worktree's, an experiment's - is opened with the page's ?train=DIR, never written into pipeline.json, where it
-    // outlives the run and leaves the Train tab waiting on a directory that's gone
-    const pipeline = JSON.parse(readFileSync(new URL('../tools/dashboard/pipeline.json', import.meta.url), 'utf8'));
-    for (const key of ['dir', 'log', 'logs', 'util', 'target']) {
-        assert.equal(pipeline.train?.[key], undefined, key);
-    }
-});

@@ -191,21 +191,6 @@ def _stack(columns, like):
 
 
 #
-# Parameter files - JSON {"frameRate": 200, "names": [...], "frames": [[value, ...], ...], "eq": [dB, ...] (optional)},
-# shared with nn/js
-#
-
-# Write parameter frames (a [T, COUNT] array-like) to a JSON parameter file, with an optional channel equalizer (dB)
-def write_params(path, frames, eq=None):
-    rows = [[round(float(value), 4) for value in row[:COUNT]] for row in frames]
-    data = {'frameRate': FRAME_RATE, 'names': NAMES, 'frames': rows}
-    if eq is not None:
-        data['eq'] = [round(float(value), 3) for value in eq]
-    with open(path, 'w', encoding='utf-8') as file:
-        json.dump(data, file, separators=(',', ':'))
-
-
-#
 # The JavaScript copy - lib/params.js
 #
 

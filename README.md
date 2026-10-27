@@ -281,9 +281,7 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke   # ever
 ```sh
 node nn/js/unpack.js lib/models/voiceModel.js out/voice                 # a packaged model back to its export
 node nn/js/speak.js -m out/voice "Hello, world." -o out/hello.wav       # an exported model (<voice>.json and .bin)
-node nn/js/speak.js -m out/voice "Hello." -o out/hello.wav --voice narrator-f   # a designed voice (data/nn/voices.json)
 node nn/js/packagecheck.js lib/models/voiceModel.js out/voice           # check a packaged model against its export
-node nn/js/voicescheck.js [lib/models/voiceModel.js]                    # check the designed voices
 node tools/heteronyms.js                                                # the heteronym and names regression sets
 ```
 
@@ -301,42 +299,27 @@ another app (PicoShelf, with its `?timing&log=URL` timeline posted to `build/per
 
 `nn/js/speak.js` speaks with an exported model (`picovox_train.export CHECKPOINT --voice NAME` writes
 `data/nn/NAME.json` and `.bin`; `nn/js/unpack.js` makes one of the package's multi-speaker model), every word pronounced by the
-G2P network as the package pronounces (`-r` rate, `-s` seed, `--params` the parameter frames, `--batch` a list of
-items); the multi-speaker model takes a speaker (`--speaker`, `--blend`), a style (`--style`, `--intensity`), or a
-designed voice and style (`--voice`, `--voice-style` - `nn/js/voices.js`, the designed voices of `data/nn/voices.json`,
-each a blend of the model's speakers with a style and transforms).
+G2P network as the package pronounces (`-r` rate, `-s` seed, `--params` the parameter frames, `--rate` the duration
+multiplier, `--batch` a list of items); `-m` also takes a packaged module (`lib/models/voiceModel.js`). The
+multi-speaker model takes a speaker (`--speaker`, `--blend`) and a style (`--style`, `--intensity`).
 
-The training dashboard, `tools/dashboard/`, follows `make train` and the neural voices' training as they run: serve the
-repository (`python3 -m http.server`) and open http://localhost:8000/tools/dashboard/ (its monitor, `node
-tools/dashboard/monitor.js`, adds the processes working in the repository and the experiment runs' checkpoint samples -
-`make train` needs none). It has five tabs (each linkable, e.g. `#listen`): Train, Listen, Runs, Logs,
-and Archive. Train is a `make train` run (`tools/dashboard/pipeline.json`'s `train`: its `TRAIN_DIR`, default
-`build/train`; the default tab while it runs): the run's state, its ETA and critical path; the CPU and GPU utilization
-over the run with each stage as a band (the GPU's idle time shaded, the forecast faded); every stage of
-`data/nn/train-stages.json` in collapsible groups - its state (waiting, queued for the GPU, running, done, failed,
-stopped, or not in the run's make target), its start, end, and time against the expected time, and its mean CPU and
-GPU use; the training runs' curves (the teacher's compared with the earlier teacher runs); and the gates (the
-heteronym and G2P checks, the listener panel's scores, and the pick). A run without the stage events (from before the
-bookkeeping) is inferred from its stamps and make's log (`pipeline.json`'s `train.log`). Listen plays the `make train` run's
-listening samples (each training stage's final model beside the shipped model - see make train, below; the stages not
-rendered yet listed as waiting), the monitor's checkpoint samples (below), and other samples in `build/nn/`, and marks
-new samples until they're heard. Runs has the runs in
-`build/nn/runs/` (their `log.jsonl` and `train.log`) with charts of their losses, validation, pitch error, and step
-times. Logs has the tails
-of `make train`'s logs and the logs in `build/nn/` updated in the last hour (all of them with "Show older logs").
-Archive shows the earlier experiment pipelines (`tools/dashboard/pipelines/`): each phase is a group with its progress,
-what's happening now, and how many of its steps are done, and it opens to its rows - the workflow's agents, the planned
-steps (each tracked by a log, the newest training run, an output file, and its process), and the work that appeared
-during it. It refreshes every second, read-only, re-fetching only what changed, and reloads itself when its own code
-changes.
-
-The monitor writes `build/nn/activity.json` every second: the Python and Node processes working in the repository for
-10 seconds or more (with their multiprocessing workers folded in), running now or before, and the workflow's agents
-(`pipeline.json`'s workflow, else the newest workflow in `~/.claude/projects/`) - so the dashboard shows the steps that
-write no log. It also renders each new checkpoint of the pipeline's runs (`build/nn/runs/<run>/step-*.pt`) with
-`pipeline.json`'s sample speakers and text, scores the samples with UTMOS on the CPU (leaving the GPU to training), and
-lists them in `build/nn/samples-progress/index.json` with the package's voices as a reference; the dashboard's Checkpoint
-samples section plays them, newest first.
+The training dashboard, `tools/dashboard/`, follows `make train` as it runs: serve the repository (`python3 -m
+http.server`) and open http://localhost:8000/tools/dashboard/ (with `?train=DIR` for a run in another `TRAIN_DIR` -
+another checkout's or worktree's; default `build/train`). It has five tabs (each linkable, e.g. `#listen`): Train,
+Listen, Runs, Logs, and Archive. Train is the `make train` run (the default tab while it runs): the run's state, its
+ETA and critical path; the CPU and GPU utilization over the run with each stage as a band (the GPU's idle time shaded,
+the forecast faded); every stage of `data/nn/train-stages.json` in collapsible groups - its state (waiting, queued for
+the GPU, running, done, failed, stopped, or not in the run's make target, from `TRAIN_DIR/stages.jsonl`), its start,
+end, and time against the expected time, and its mean CPU and GPU use; the training runs' curves; and the gates (the
+heteronym and G2P checks, the listener panel's scores, and the pick). Listen plays the `make train` run's listening
+samples (each training stage's final model beside the shipped model - see make train, below; the stages not rendered
+yet listed as waiting) and other samples in `build/nn/`, and marks new samples until they're heard. Runs has the
+`make train` run's training runs (`TRAIN_DIR/runs/`, their `log.jsonl` and `train.log`) with charts of all their
+measurements - losses, validation, pitch error, and step times. Logs has the tails of `make train`'s logs and the logs
+in `build/nn/` updated in the last hour (all of them with "Show older logs"). Archive shows the earlier experiment
+pipelines (`tools/dashboard/pipelines/`) as they were planned: each phase a group with its share of the expected time,
+opening to its steps and what tracked each (a log, a training run, an output file, a process). It refreshes every
+second, read-only, re-fetching only what changed, and reloads itself when its own code changes.
 
 
 ## The listener panel

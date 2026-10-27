@@ -611,8 +611,8 @@ def clip_split(actor, sentence):
 # First-pass F0 of a clip (Praat, 60-700 Hz) - the voiced values (a worker task)
 def first_pass_f0(path):
     import numpy as np  # pylint: disable=import-outside-toplevel
-    import parselmouth  # pylint: disable=import-outside-toplevel
-    sound = parselmouth.Sound(path)  # pylint: disable=c-extension-no-member
+    import parselmouth  # pylint: disable=import-outside-toplevel, import-error
+    sound = parselmouth.Sound(path)
     f0 = sound.to_pitch_ac(time_step=0.01, pitch_floor=60, pitch_ceiling=700).selected_array['frequency']
     return f0[f0 > 0].astype(np.float32)
 

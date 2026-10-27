@@ -54,15 +54,14 @@ import zlib
 
 import numpy
 
-from . import frontend, g2pmodel
-from .frontend import ROOT, vocabulary
+from . import RECIPE_PATH, ROOT, frontend, g2pmodel
+from .frontend import vocabulary
 
 
 DICTIONARY_PATH = os.path.join(ROOT, 'data', 'cmudict.dict')
 WORDS_PATH = os.path.join(ROOT, 'data', 'nn', 'g2p-words.json')
 FIXES_PATH = os.path.join(ROOT, 'data', 'nn', 'g2p-fixes.json')
 BOOKS_PATH = os.path.join(ROOT, 'data', 'nn', 'g2p-books.json')
-CONFIG_PATH = os.path.join(ROOT, 'data', 'nn', 'train.json')
 MODULE_PATH = g2pmodel.MODULE_PATH
 
 # The dictionary's split (the monitoring set is drawn from its validation words)
@@ -97,7 +96,7 @@ def log_line(path, text):
 
 
 # The settings - data/nn/train.json's "g2p"
-def load_config(path=CONFIG_PATH):
+def load_config(path=RECIPE_PATH):
     with open(path, encoding='utf-8') as file:
         return json.load(file)['g2p']
 
@@ -716,13 +715,13 @@ def main(argv=None):
     commands = parser.add_subparsers(dest='command', required=True)
     train_parser = commands.add_parser('train', help='every stage of the recipe (resumable)')
     train_parser.add_argument('--out', required=True, help='the output directory')
-    train_parser.add_argument('--config', default=CONFIG_PATH)
+    train_parser.add_argument('--config', default=RECIPE_PATH)
     train_parser.add_argument('--steps', type=int, help='each stage this many steps (a smoke test)')
     train_parser.set_defaults(func=command_train)
     export_parser = commands.add_parser('export', help='write the generated module from a checkpoint')
     export_parser.add_argument('checkpoint', help='a checkpoint, or a train output directory (its last stage)')
     export_parser.add_argument('--out', default=MODULE_PATH)
-    export_parser.add_argument('--config', default=CONFIG_PATH)
+    export_parser.add_argument('--config', default=RECIPE_PATH)
     export_parser.add_argument('--bits', type=int, help='the matrices\' bits (default: the settings\')')
     export_parser.add_argument('--comment', action='append', default=[], help='another line of the module\'s comment')
     export_parser.set_defaults(func=command_export)

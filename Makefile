@@ -55,8 +55,15 @@ voicelab:
 # pylint, and 100% branch coverage - make -C train commit), and make clean cleans it
 .PHONY: commit-train
 commit: commit-train
-commit-train:
+commit-train: parity
 	$(MAKE) -C train commit
+
+
+# The package's outputs of the parity checks' inputs (tools/parity.js - build/parity-outputs.json), which the training
+# package's tests check its Python port against
+.PHONY: parity
+parity:
+	$(NODE_SHELL) node tools/parity.js
 
 
 # Python virtual environments for make train - build/venv-<name> from requirements/<name>.txt (for example,

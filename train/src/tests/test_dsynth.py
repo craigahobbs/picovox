@@ -3,9 +3,7 @@
 
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring, protected-access
 
-import json
 import math
-import subprocess
 import types
 import unittest
 import unittest.mock
@@ -13,7 +11,9 @@ import unittest.mock
 import numpy
 import torch
 
-from picovox_train import ROOT, dsynth, params
+from picovox_train import dsynth, params
+
+from . import parity
 
 
 # A frame of parameter values (the defaults, with overrides) as a list in parameter order
@@ -616,16 +616,13 @@ class TestDSynth(unittest.TestCase):
         self.assertEqual(dsynth.DSynth(1000000)._harmonic_count(f0, numpy.zeros((1, 3))), params.LF_HARMONICS - 1)
 
     def test_javascript(self):
-        # lib/render.js renders the same frames to the same samples (its counter noise; float32 output)
+        # lib/render.js renders the same frames to the same samples (its counter noise; float32 output - the parity check,
+        # tools/parity.js)
         values = speech_frames()
-        script = ("import {render} from './lib/render.js';"
-                  "const [frames, eq] = JSON.parse(process.argv[1]);"
-                  "console.log(JSON.stringify([Array.from(render(frames, {'sampleRate': 24000, 'seed': 7})),"
-                  " Array.from(render(frames, {'sampleRate': 24000, 'seed': 7, eq}))]));")
         eq = [float(value) for value in numpy.linspace(-6, 6, params.EQ_BAND_COUNT)]
-        process = subprocess.run(['node', '--input-type=module', '-e', script, json.dumps([values, eq])], capture_output=True, text=True,
-                                 check=True, cwd=ROOT)
-        plain, equalized = (numpy.array(samples) for samples in json.loads(process.stdout))
+        parity.inputs(self, 'render', {'sampleRate': 24000, 'seed': 7, 'frames': values, 'eq': eq})
+        expected = parity.outputs('render')
+        plain, equalized = numpy.array(expected['samples']), numpy.array(expected['samplesEq'])
         synth = dsynth.DSynth(24000, noise='counter').double()
         audio = synth(torch.tensor(values, dtype=torch.float64), seed=7).numpy()
         audio_eq = synth(torch.tensor(values, dtype=torch.float64), seed=7, eq=torch.tensor(eq, dtype=torch.float64)).numpy()

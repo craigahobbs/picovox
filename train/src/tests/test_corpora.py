@@ -16,21 +16,9 @@ import warnings
 
 from picovox_train import corpora
 from tests import helpers
+from tests.data_fixtures import FakeResponse
 
 
-# A response of the fake urlopen - its status, headers, and body
-class FakeResponse(io.BytesIO):
-
-    def __init__(self, body, status=200, length=True):
-        super().__init__(body)
-        self.status = status
-        self.headers = {'Content-Length': str(len(body))} if length else {}
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc_info):
-        self.close()
 
 
 # Write a tar.gz archive of {name: bytes}

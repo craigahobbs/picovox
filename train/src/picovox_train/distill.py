@@ -77,15 +77,14 @@ import torch
 from .data import DATA_DIR, ArcticData
 from .export import export, load_model, token_remap, training_token_counts
 from .frontend import pronounce_texts, set_pronunciations, tokenize, vocabulary
-from .model import BOS, FIRST_PHONE, FIXED_NAMES, INTENSITY, PAD, STYLE_NAMES, MultiModel, is_boundary, parameter_count, save_checkpoint
-from .synthesize import sentences
-from . import ROOT, books, optim, panel, params
+from .model import (BOS, FIRST_PHONE, FIXED_NAMES, INTENSITY, PAD, STYLE_NAMES, MultiModel, core_parameter_count, is_boundary,
+                    parameter_count, save_checkpoint)
+from .trainmulti import RUNS_DIR
+from . import RECIPE_PATH, ROOT, books, optim, panel, params, trainmulti
 
 
-CONFIG_PATH = os.path.join(ROOT, 'data', 'nn', 'train.json')
 DISTILL_DIR = os.environ.get('NN_DISTILL_DIR', os.path.join(ROOT, 'build', 'nn', 'distill'))
-RUNS_DIR = os.environ.get('NN_RUNS_DIR', os.path.join(ROOT, 'build', 'nn', 'runs'))
-SAMPLES_DIR = os.environ.get('NN_DISTILL_SAMPLES', os.path.join(ROOT, 'build', 'nn', 'distill-samples'))
+SAMPLES_DIR = os.path.join(ROOT, 'build', 'nn', 'distill-samples')
 
 # (NNPACK's depthwise 1-D convolution on the CPU is about 8x slower than PyTorch's own)
 torch.backends.nnpack.set_flags(False)
@@ -93,6 +92,8 @@ torch.backends.nnpack.set_flags(False)
 # The distillation set's sources
 SOURCES = ('readers', 'actors', 'books')
 
+# The sentence-ending tokens - inference speaks a text a sentence at a time
+SENTENCE_ENDS = {'<period>', '<question>', '<wh>', '<exclamation>'}
 
 # The distillation set's per-item record
 ITEM_DTYPE = numpy.dtype([
@@ -107,7 +108,7 @@ ITEM_DTYPE = numpy.dtype([
 #
 
 # The settings - the recipe's (data/nn/train.json) distill
-def load_config(path=CONFIG_PATH):
+def load_config(path=RECIPE_PATH):
     with open(path, encoding='utf-8') as file:
         return json.load(file)['distill']
 
@@ -129,6 +130,20 @@ def log_line(log, text):
 # The device - mps when available, else cpu
 def default_device():
     return 'mps' if torch.backends.mps.is_available() else 'cpu'
+
+
+# Split token ids into sentences, each starting with <bos> (as lib/model.js speaks them)
+def sentences(ids, vocab):
+    out = []
+    current = [BOS]
+    for token_id in ids[1:] if ids and ids[0] == BOS else ids:
+        current.append(token_id)
+        if vocab[token_id] in SENTENCE_ENDS:
+            out.append(current)
+            current = [BOS]
+    if len(current) > 1:
+        out.append(current)
+    return out
 
 
 #
@@ -709,7 +724,7 @@ def train_student(args):
         train_log.write(text + '\n')
         train_log.flush()
     count = parameter_count(model)
-    core = count - model.speaker.weight.numel() - model.eq_free.numel()
+    core = core_parameter_count(model)
     say(f'model: {count} parameters ({core} without the speaker and equalizer tables); distill-{name}: {steps} steps from 0')
     say(f'student {json.dumps(student_cfg)}; teacher {targets.index["teacher"]} (step {targets.index["teacherStep"]}); targets '
         f'{targets.directory} ({targets.index["count"]} items); copied from the teacher: {", ".join(copied)}; '
@@ -829,7 +844,6 @@ class Tee:
 
 def polish(args):
     """The polish subcommand - trainmulti.py from a distilled student, its critic from the teacher's"""
-    from . import trainmulti  # pylint: disable=import-outside-toplevel
     config = load_config(args.config)
     args.student = args.student or config['student']
     settings = {**config['polish'], **({'steps': args.steps} if args.steps else {})}
@@ -898,7 +912,7 @@ def evaluate_model(name, checkpoint, config, reference=None, listen_panel=True, 
     result = {'name': name, 'checkpoint': checkpoint, 'step': state.get('step'),
               'config': {key: model.config[key] for key in ('dim', 'decoderDim', 'encoderLayers', 'decoderLayers', 'heads', 'ffnMultiple')},
               'parameters': parameter_count(model),
-              'parametersCore': parameter_count(model) - model.speaker.weight.numel() - model.eq_free.numel()}
+              'parametersCore': core_parameter_count(model)}
     export(model, state, 'model', out_dir, speaker=state['speakers'].index('arctic-bdl'))
     _, sizes = package(os.path.join(out_dir, 'model'))
     result['size'] = {'binBytes': sizes['binBytes'], 'manifestBytes': sizes['manifestBytes'], 'encoding': sizes['chosen'],
@@ -1099,7 +1113,7 @@ def main(argv=None):
     subparsers = parser.add_subparsers(dest='command', required=True)
 
     def add_common(sub):
-        sub.add_argument('--config', default=CONFIG_PATH, help='the recipe (default data/nn/train.json - its distill)')
+        sub.add_argument('--config', default=RECIPE_PATH, help='the recipe (default data/nn/train.json - its distill)')
         sub.add_argument('--device', default=None)
 
     sub = subparsers.add_parser('targets', help='the distillation set')

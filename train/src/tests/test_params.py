@@ -3,7 +3,6 @@
 
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
-import json
 import os
 import runpy
 import sys
@@ -47,22 +46,6 @@ class TestParams(unittest.TestCase):
         self.assertIsInstance(values, torch.Tensor)
         self.assertEqual(values.shape, (2, 3, params.COUNT))
         self.assertTrue(torch.allclose(params.normalize(values), unit))
-
-    def test_write_params(self):
-        frames = [[params.DEFAULTS[name] + 0.123456 for name in params.NAMES] + [99.0]] * 2
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, 'frames.json')
-            params.write_params(path, frames)
-            with open(path, encoding='utf-8') as file:
-                written = json.load(file)
-            self.assertEqual(written['frameRate'], 200)
-            self.assertEqual(written['names'], params.NAMES)
-            self.assertEqual(len(written['frames'][0]), params.COUNT)
-            self.assertEqual(written['frames'][0][0], round(100.123456, 4))
-            self.assertNotIn('eq', written)
-            params.write_params(path, frames, eq=[1.23456, -2.0])
-            with open(path, encoding='utf-8') as file:
-                self.assertEqual(json.load(file)['eq'], [1.235, -2.0])
 
     def test_javascript_current(self):
         # lib/params.js is generated from the parameter set - and current

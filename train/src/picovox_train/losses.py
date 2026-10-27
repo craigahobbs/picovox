@@ -109,13 +109,7 @@ def duration_loss(outputs, tokens, durations, edge_weight=0.1):
     return phone_loss, pause_loss, paused_loss
 
 
-# A silent parameter frame (normalized and in parameter units)
-def silent_values(device):
-    values = torch.tensor([params.DEFAULTS[name] for name in params.NAMES], dtype=torch.float32, device=device)
-    return values
-
-
-# The silent frame and the mask of the levels that silence it (av, ah, af) on a device - made once per device
+# The silent frame (the parameters' defaults) and the mask of the levels that silence it (av, ah, af) on a device - made once per device
 _SILENCE = {}
 
 
@@ -125,7 +119,8 @@ def _silence(device):
         silence_mask = torch.zeros(params.COUNT, device=device)
         for name in ('av', 'ah', 'af'):
             silence_mask[params.INDEX[name]] = 1
-        _SILENCE[key] = (silent_values(device), silence_mask)
+        silent = torch.tensor([params.DEFAULTS[name] for name in params.NAMES], dtype=torch.float32, device=device)
+        _SILENCE[key] = (silent, silence_mask)
     return _SILENCE[key]
 
 
