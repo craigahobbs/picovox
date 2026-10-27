@@ -42,7 +42,8 @@ ESLINT_ARGS := $(ESLINT_ARGS) tools/ nn/js/ --ignore-pattern 'lib/models/**'
 
 
 # The voice lab (tools/voicelab/) staged with the package's lib/ in build/voicelab/ - published as an artifact (Claude's
-# questions and the answers in its db store; index.html the page, the rest its files) or served locally (Explore only).
+# questions and the answers in its db store; index.html the page, the rest its files) or served locally (make train-check's
+# blind A/B - tools/trainab.js).
 # VOICELAB_TRAINED - a directory with a trained voice (make train-check's TRAIN_DIR), staged beside the shipped models
 # as build/voicelab/trained/voiceModel.js
 VOICELAB_TRAINED ?=

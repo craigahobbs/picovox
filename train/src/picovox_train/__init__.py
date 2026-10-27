@@ -10,7 +10,7 @@ The front end and the G2P:
 
 - frontend.py - the token vocabulary (vocab.json) and a Python port of lib/lexicon.js textToPhrases, every word
   pronounced by the app's G2P network (g2pmodel.py - lib/g2p.js's inference, bit for bit, on lib/models/g2pModel.js)
-- g2p.py - the G2P network's training and export, the recipe in data/nn/train.json; heteronyms.py - its relabeled
+- g2p.py - the G2P network's training, the recipe in data/nn/train.json; heteronyms.py - its relabeled
   words from readers' usage (data/nn/g2p-relabel.json); g2paudit.py - the dictionary's label errors, by cross-validated
   disagreement and the readers' audio (data/nn/g2p-fixes.json)
 - context.py - the heteronyms by context: the G2P's reading input and ambiguity head, and the context network
@@ -22,7 +22,7 @@ The data:
 
 - data.py - the training data's featurization and format (tokens, durations reconciled with the corpus's phone
   labels - align.py - 24 kHz audio, and Praat's auxiliary tracks), and its loader (ArcticData)
-- wav.py - WAV files (16-bit PCM) read and written with the standard library, exactly as libsndfile does
+- wav.py - WAV files (16-bit PCM) read with the standard library, exactly as libsndfile reads them
 - multi.py - the American reader pool (LibriTTS-R readers and the CMU ARCTIC speakers)
   in data.py's format, build/nn/data/multi/, its speaker table data/nn/speakers.json
 - books.py - the pinned book texts (data/nn/books.json): the Project Gutenberg books the heteronym labels and the
@@ -49,16 +49,14 @@ The network:
   voices) and a style table (emotions scaled by intensity) conditioning the network (FiLM), trained on the American
   reader pool and CREMA-D with an adversarial spectrogram critic (discriminator.py) against the over-smoothing; the
   losses are losses.py's
-- optim.py - the training step's options for trainmulti.py and distill.py (all off by default): the lean gradient
-  clip and AdamW step, Muon for the hidden matrices (batched Newton-Schulz), the flat EMA of the weights, the
-  warmup-stable-decay schedule, and zero-initialized residual projections
+- optim.py - the training step's options for trainmulti.py and distill.py: the lean gradient clip and AdamW step,
+  Muon for the hidden matrices (batched Newton-Schulz - the student's optimizer), and the warmup-stable-decay schedule
 - quant.py - the export's 8-bit weight quantization (per row), shared by export.py and lib/model.js
 - distill.py - knowledge distillation of the multi-speaker model into small students (data/nn/train.json's distill)
 - export.py - export to <voice>.bin and .json (8-bit weights - quant.py); package.py - an export
   as a generated JavaScript module (lib/models/voiceModel.js), loaded by lib/package.js (nn/js/packagecheck.js checks
   it); lib/model.js - the forward pass in JavaScript; lib/transforms.js - the voice and style transforms;
   nn/js/speak.js - text to WAV (Node)
-- synthesize.py - inference in PyTorch with the exported weights (the export's parity check)
 
 The pipeline's tools:
 

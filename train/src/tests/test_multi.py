@@ -322,47 +322,22 @@ class TestBuild(unittest.TestCase):
         self.assertIn('2% test, 3% validation', split['description'])
 
 
-class TestVerifyTokens(unittest.TestCase):
-
-    def test_verify_tokens(self):
-        with tempfile.TemporaryDirectory() as directory, helpers.captured() as (stdout, _):
-            helpers.write_corpus(directory)
-            # (lib/tokens.js - the front end's tokens - the parity check's)
-            with unittest.mock.patch.object(multi, 'OUT_DIR', directory), \
-                    unittest.mock.patch.object(data, 'js_tokenize', side_effect=lambda texts: [frontend.tokenize(text) for text in texts]):
-                status = multi.verify_tokens_command(argparse.Namespace(out=None, jobs=1))
-        self.assertEqual(status, 0)
-        texts = len(set(helpers.TEXTS[:5]))
-        self.assertRegex(stdout.getvalue(), rf'verify-tokens: {texts} pool texts, \d+ tokens: {texts} identical, 0 different\n')
-
-    def test_verify_tokens_mismatch(self):
-        with tempfile.TemporaryDirectory() as directory, helpers.captured() as (stdout, _):
-            helpers.write_corpus(directory, speakers={f'arctic-{number}': {'index': number} for number in range(3)})
-            with unittest.mock.patch.object(data, 'js_tokenize', side_effect=lambda texts: [{'ids': [1, 2]} for _ in texts]):
-                status = multi.verify_tokens_command(argparse.Namespace(out=directory, jobs=1))
-        self.assertEqual(status, 1)
-        lines = stdout.getvalue().splitlines()
-        self.assertEqual(sum(line.startswith('MISMATCH: ') for line in lines), 5)
-        self.assertRegex(lines[-1], r'verify-tokens: (\d+) pool texts, \d+ tokens: 0 identical, \1 different')
-
-
 class TestMain(unittest.TestCase):
 
     def test_load_json(self):
         self.assertEqual(multi.load_json('/nonexistent/x.json', {'a': 1}), {'a': 1})
 
     def test_main(self):
-        with unittest.mock.patch.object(multi, 'build_command', return_value=None) as build, \
-                unittest.mock.patch.object(multi, 'verify_tokens_command', return_value=1) as verify:
+        with unittest.mock.patch.object(multi, 'build_command', return_value=None) as build:
             self.assertEqual(multi.main(['build', '--limit', '2', '--speakers', 'a', 'b']), 0)
-            self.assertEqual(multi.main(['verify-tokens', '--out', 'x', '-j', '2']), 1)
         self.assertEqual(build.call_args.args[0], argparse.Namespace(command='build', speakers=['a', 'b'], limit=2, jobs=None, out=None,
                                                                      pool=multi.SPEAKERS_PATH))
-        self.assertEqual(verify.call_args.args[0], argparse.Namespace(command='verify-tokens', out='x', jobs=2))
 
     def test_module_main(self):
-        with unittest.mock.patch.object(sys, 'argv', ['multi', 'verify-tokens', '--out', '/nonexistent']), \
-                self.assertRaises(FileNotFoundError), warnings.catch_warnings():
+        with unittest.mock.patch.object(sys, 'argv', ['multi']), helpers.captured() as (_, stderr), \
+                self.assertRaises(SystemExit) as raised, warnings.catch_warnings():
             # (runpy warns that the module is already imported - it runs a fresh copy as __main__)
             warnings.filterwarnings('ignore', message='.*found in sys.modules', category=RuntimeWarning)
             runpy.run_module('picovox_train.multi', run_name='__main__', alter_sys=False)
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn('the following arguments are required: command', stderr.getvalue())

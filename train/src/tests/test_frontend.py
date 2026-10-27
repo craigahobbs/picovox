@@ -300,8 +300,7 @@ class TestFrontend(unittest.TestCase):
         phones = {'who': ['HH', 'UW1'], 'is': ['IH1', 'Z'], 'it': ['IH1', 'T'], 'go': ['G', 'OW1']}
         phrases = frontend.text_to_phrases('Who is it? Go!', phones.get)
         self.assertEqual([phrase['end'] for phrase in phrases], ['wh', 'exclamation'])
-        self.assertEqual(phrases[0]['words'][1], {'text': 'is', 'phones': [{'ph': 'IH', 'stress': 0}, {'ph': 'Z', 'stress': None}],
-                                                  'isFunction': True, 'syllables': 1})
+        self.assertEqual(phrases[0]['words'][1], {'text': 'is', 'phones': [{'ph': 'IH', 'stress': 0}, {'ph': 'Z', 'stress': None}]})
         self.assertEqual(phrases[1]['words'][0]['phones'][1], {'ph': 'OW', 'stress': 1})
         self.assertEqual([phrase['end'] for phrase in frontend.text_to_phrases('Is it?', phones.get)], ['question'])
 

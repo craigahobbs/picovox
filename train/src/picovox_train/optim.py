@@ -2,8 +2,7 @@
 # https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
-The training step's options (trainmulti.py and distill.py; every one off by default - without them, training is
-unchanged):
+The training step's options (trainmulti.py and distill.py):
 
 - the lean step (--lean-clip) - the gradient clip and the AdamW step in a few kernel launches: the global gradient norm
   of one concatenation of the gradients (not a norm per tensor), the clip passed to fused AdamW as its grad_scale (the
@@ -11,27 +10,20 @@ unchanged):
   one per tensor, each incremented and, with found_inf, decremented on its own). On MPS, which has no foreach kernels,
   the default clip and step counters are a launch per tensor - about 700 a teacher step, 600 a student step. The
   results match the default's up to rounding (the clip's multiply is the kernel's divide).
-- Muon (--optimizer muon) - the hidden Linear matrices (the conv-FFN blocks, attention, FiLM, the condition and duration
-  maps, the decoder's input) orthogonalized by Newton-Schulz, the rest AdamW (the tables, the head, the depthwise
-  convolutions, the norms, and the biases); all the matrices at once, zero-padded to one [N, rows, columns] batch (the
-  odd polynomial keeps the zero blocks zero) - about 150 launches a step, against torch.optim.Muon's loop per matrix.
-  The update is scaled to AdamW's RMS (0.2 sqrt(max(rows, columns)) - match_rms_adamw), so the AdamW learning rate and
-  weight decay carry over; Nesterov momentum, warmed up from 0.85 to 0.95 over the first 300 steps. It takes the lean
-  step's clip and skips a non-finite step on the device, as fused AdamW does.
-- the flat EMA of the weights (FlatEMA, --ema DECAY) - one buffer of every parameter, updated in two launches a step;
-  validated beside the raw weights (its own best checkpoint, ema-best.pt)
-- the learning rate schedule (lr_factor, --schedule wsd --cooldown F --cooldown-shape linear|1-sqrt) - the default
-  linear warmup then cosine to 0.05, or warmup-stable-decay: constant after the warmup, then the last F of the steps
-  cooled down to 0.05, linearly or by 1 - sqrt
-- zero-initialized residual output projections (zero_init_projections, --zero-init-proj) - each conv-FFN block's outer
-  and each attention block's output projection start at zero, so every block starts as the identity
+- Muon (the student's optimizer) - the hidden Linear matrices (the conv-FFN blocks, attention, FiLM, the condition and
+  duration maps, the decoder's input) orthogonalized by Newton-Schulz, the rest AdamW (the tables, the head, the
+  depthwise convolutions, the norms, and the biases); all the matrices at once, zero-padded to one [N, rows, columns]
+  batch (the odd polynomial keeps the zero blocks zero) - about 150 launches a step, against torch.optim.Muon's loop
+  per matrix. The update is scaled to AdamW's RMS (0.2 sqrt(max(rows, columns)) - match_rms_adamw), so the AdamW
+  learning rate and weight decay carry over; Nesterov momentum, warmed up from 0.85 to 0.95 over the first 300 steps.
+  It takes the lean step's clip and skips a non-finite step on the device, as fused AdamW does.
+- the learning rate schedule (lr_factor, --schedule wsd --cooldown F) - the default linear warmup then cosine to 0.05,
+  or warmup-stable-decay: constant after the warmup, then the last F of the steps cooled down to 0.05 by 1 - sqrt
 """
 
 import math
 
 import torch
-
-from .model import ConvFFN, SelfAttention
 
 
 # The learning rate schedule's floor (a factor of the peak)
@@ -51,9 +43,9 @@ MUON_MOMENTUM_WARMUP = 300
 
 
 # The learning rate factor of a step - the linear warmup, then the cosine to the floor (the default - its arithmetic
-# unchanged), or warmup-stable-decay (wsd): constant, then the last cooldown share of the steps down to the floor,
-# linearly or by 1 - sqrt
-def lr_factor(step, steps, warmup, schedule='cosine', cooldown=0.0, cooldown_shape='linear'):
+# unchanged), or warmup-stable-decay (wsd): constant, then the last cooldown share of the steps down to the floor by
+# 1 - sqrt
+def lr_factor(step, steps, warmup, schedule='cosine', cooldown=0.0):
     if step < warmup:
         return (step + 1) / warmup
     if schedule == 'cosine':
@@ -65,22 +57,7 @@ def lr_factor(step, steps, warmup, schedule='cosine', cooldown=0.0, cooldown_sha
     if step < decay_start:
         return 1.0
     progress = min(1.0, (step - decay_start) / max(1, steps - decay_start))
-    if cooldown_shape == '1-sqrt':
-        return LR_FLOOR + (1 - LR_FLOOR) * (1 - math.sqrt(progress))
-    return LR_FLOOR + (1 - LR_FLOOR) * (1 - progress)
-
-
-# Zero the residual output projections of a model's blocks (weights and biases) - each block starts as the identity
-@torch.no_grad()
-def zero_init_projections(model):
-    count = 0
-    for module in model.modules():
-        projection = module.outer if isinstance(module, ConvFFN) else module.out if isinstance(module, SelfAttention) else None
-        if projection is not None:
-            projection.weight.zero_()
-            projection.bias.zero_()
-            count += 1
-    return count
+    return LR_FLOOR + (1 - LR_FLOOR) * (1 - math.sqrt(progress))
 
 
 # The hidden Linear matrices of a MultiModel (Muon's parameters) - every trainable 2-D Linear weight but the head, the
@@ -94,10 +71,10 @@ def hidden_matrices(model):
     return matrices
 
 
-# The optimizer's param groups for a model's trainable parameters plus extra ones - one AdamW group, or with muon the
-# hidden matrices as a second group
-def param_groups(model, extra=(), muon=False):
-    trainable = [parameter for parameter in model.parameters() if parameter.requires_grad] + list(extra)
+# The optimizer's param groups for a model's trainable parameters - one AdamW group, or with muon the hidden matrices as
+# a second group
+def param_groups(model, muon=False):
+    trainable = [parameter for parameter in model.parameters() if parameter.requires_grad]
     if not muon:
         return [{'params': trainable}]
     matrices = {id(parameter) for parameter in hidden_matrices(model)}
@@ -225,32 +202,3 @@ class LeanOptimizer(torch.optim.Optimizer):
                 for parameter in group['params'][1:]:
                     if 'step' in self.state[parameter] and 'step' in first:
                         self.state[parameter]['step'] = first['step']
-
-
-class FlatEMA:
-    """An exponential moving average of parameters in one flat buffer - two launches a step (the concatenation and the
-    lerp); copy_to writes it into another model's parameters (the same order and shapes)"""
-
-    def __init__(self, parameters, decay):
-        self.parameters = list(parameters)
-        self.decay = decay
-        with torch.no_grad():
-            self.shadow = torch.cat([parameter.detach().reshape(-1).float() for parameter in self.parameters])
-
-    @torch.no_grad()
-    def update(self):
-        self.shadow.lerp_(torch.cat([parameter.detach().reshape(-1) for parameter in self.parameters]), 1 - self.decay)
-
-    @torch.no_grad()
-    def copy_to(self, parameters):
-        offset = 0
-        for parameter in parameters:
-            count = parameter.numel()
-            parameter.copy_(self.shadow[offset:offset + count].view_as(parameter))
-            offset += count
-
-    def state_dict(self):
-        return {'decay': self.decay, 'shadow': self.shadow}
-
-    def load_state_dict(self, state):
-        self.shadow.copy_(state['shadow'])

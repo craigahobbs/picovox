@@ -42,9 +42,8 @@ def parse_module(text):
     body = re.sub(r'`[^`]*`', lambda match, counter=iter(range(len(blocks))): f'\'`{next(counter)}\'', body)
     body = re.sub(r'\btrue\b', 'True', re.sub(r'\bfalse\b', 'False', body))
     model = ast.literal_eval(body)
-    for section in (model, model.get('context')):
-        if section is not None:
-            section['weights'] = blocks[int(section['weights'][1:])]
+    for section in (model, model['context']):
+        section['weights'] = blocks[int(section['weights'][1:])]
     return model
 
 
@@ -60,17 +59,15 @@ def unpack_tensors(model):
     if model['deflate']:
         data = zlib.decompress(data, -15)
     data = np.frombuffer(data, dtype=np.uint8)
-    group_size = model['groupSize']
     shapes = [(1, shape[0]) if len(shape) == 1 else tuple(shape) for shape in (tensor['shape'] for tensor in model['tensors'])]
 
-    # The scales - bfloat16
+    # The scales - bfloat16, one a row
     offset = 0
     scales = []
-    for rows, columns in shapes:
-        count = rows * (-(-columns // group_size) if group_size else 1)
-        codes = data[offset:offset + 2 * count].view('<u2').astype(np.uint32) << 16
+    for rows, _ in shapes:
+        codes = data[offset:offset + 2 * rows].view('<u2').astype(np.uint32) << 16
         scales.append(codes.view(np.float32).astype(np.float64))
-        offset += 2 * count
+        offset += 2 * rows
 
     # The values
     tensors = {}
@@ -86,11 +83,7 @@ def unpack_tensors(model):
             unsigned = (stream.reshape(count, bits).astype(np.int64) << np.arange(bits)).sum(1)
             offset += byte_count
         values = (unsigned - ((1 << (bits - 1)) - 1)).astype(np.float64).reshape(rows, columns)
-        if group_size:
-            groups = np.repeat(tensor_scales.reshape(rows, -1), group_size, axis=1)[:, :columns]
-        else:
-            groups = tensor_scales.reshape(rows, 1)
-        tensors[tensor['name']] = (values * groups).reshape(tensor['shape'])
+        tensors[tensor['name']] = (values * tensor_scales.reshape(rows, 1)).reshape(tensor['shape'])
     return tensors
 
 
@@ -355,12 +348,10 @@ class Context:
 
 class G2p:
     """A loaded G2P model - pronounce(word, reading=0) gives the word's ARPAbet phones with stress in a reading, cached per
-    word and reading; with a context network, ambiguous(word) (the ambiguity head) and choose_reading(items, index) (the
-    context network's reading) - lib/g2p.js loadG2p"""
+    word and reading; ambiguous(word) (the ambiguity head) and choose_reading(items, index) (the context network's
+    reading) - lib/g2p.js loadG2p"""
 
     def __init__(self, model):
-        if model['design'] != 'ar':
-            raise ValueError(f'Unsupported G2P model design {model["design"]}')
         self.model = model
         tensors = unpack_tensors(model)
         self.hidden, self.decoder = model['hidden'], model['decoder']
@@ -381,18 +372,17 @@ class G2p:
         self.bridge_columns = np.ascontiguousarray(tensors['bridge.weight'].T)
         self.bridge_bias = tensors['bridge.bias']
         self.letter_ids = {letter: index + 1 for index, letter in enumerate(model['letters'])}
-        self.readings = model.get('readings', 1)
-        self.reading_weights = tensors.get('reading.weight')
-        ambiguity = tensors.get('ambiguity.weight')
-        self.ambiguity_columns = None if ambiguity is None else np.ascontiguousarray(ambiguity.T)
-        self.ambiguity_bias = tensors.get('ambiguity.bias')
-        self.ambiguity_layer_columns = None if ambiguity is None else np.ascontiguousarray(tensors['ambiguity_layer.weight'].T)
-        self.ambiguity_layer_bias = tensors.get('ambiguity_layer.bias')
+        self.readings = model['readings']
+        self.reading_weights = tensors['reading.weight']
+        self.ambiguity_columns = np.ascontiguousarray(tensors['ambiguity.weight'].T)
+        self.ambiguity_bias = tensors['ambiguity.bias']
+        self.ambiguity_layer_columns = np.ascontiguousarray(tensors['ambiguity_layer.weight'].T)
+        self.ambiguity_layer_bias = tensors['ambiguity_layer.bias']
         self.caches = [{} for _ in range(self.readings)]
         self.cache = self.caches[0]
         self.ambiguous_words = {}
         self.last_ambiguous = []
-        self.context = Context(model['context']) if 'context' in model else None
+        self.context = Context(model['context'])
 
     # The letter ids of a word - its known letters, at most maxLetters
     def word_ids(self, word):
@@ -425,10 +415,8 @@ class G2p:
             encoded[:, step, hidden:] = np.where(valid, state, 0.0)
         ends[:, hidden:] = state
         state = js_tanh(_matrix_vectors(self.bridge_columns, ends, self.bridge_bias))
-        self.last_ambiguous = [False] * count
-        if self.ambiguity_columns is not None:
-            ambiguity_hidden = js_tanh(_matrix_vectors(self.ambiguity_layer_columns, ends, self.ambiguity_layer_bias))
-            self.last_ambiguous = (_matrix_vectors(self.ambiguity_columns, ambiguity_hidden, self.ambiguity_bias)[:, 0] > 0).tolist()
+        ambiguity_hidden = js_tanh(_matrix_vectors(self.ambiguity_layer_columns, ends, self.ambiguity_layer_bias))
+        self.last_ambiguous = (_matrix_vectors(self.ambiguity_columns, ambiguity_hidden, self.ambiguity_bias)[:, 0] > 0).tolist()
         if reading > 0:
             state = state + self.reading_weights[reading - 1]
 
@@ -498,10 +486,8 @@ class G2p:
             phones = self.pronounce_many([word], reading)[0]
         return phones
 
-    # Whether a word's reading depends on its neighbors (the ambiguity head; never without a context network)
+    # Whether a word's reading depends on its neighbors (the ambiguity head)
     def ambiguous(self, word):
-        if self.context is None:
-            return False
         if word not in self.ambiguous_words:
             self.pronounce_many([word])
         return self.ambiguous_words[word]
@@ -517,13 +503,11 @@ class G2p:
     # The caches' state - {readings: [{word: phones}], ambiguous: {word: decision}, choices: {window: slot}} (for
     # worker processes - set_state)
     def state(self):
-        return {'readings': self.caches, 'ambiguous': self.ambiguous_words,
-                'choices': self.context.choices if self.context else {}}
+        return {'readings': self.caches, 'ambiguous': self.ambiguous_words, 'choices': self.context.choices}
 
     # Add a state's caches
     def set_state(self, state):
         for cache, pronunciations in zip(self.caches, state['readings']):
             cache.update(pronunciations)
         self.ambiguous_words.update(state['ambiguous'])
-        if self.context is not None:
-            self.context.choices.update(state['choices'])
+        self.context.choices.update(state['choices'])

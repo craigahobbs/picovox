@@ -446,39 +446,18 @@ class TestMain(unittest.TestCase):
 
 class TestStepOptions(unittest.TestCase):
 
-    def test_step_crop_frames(self):
-        args = argparse.Namespace(crop_frames=400, crop_warmup='2:0.5')
-        self.assertEqual([trainmulti.step_crop_frames(args, step) for step in range(4)], [100, 100, 400, 400])
-        self.assertEqual(trainmulti.step_crop_frames(argparse.Namespace(crop_frames=400), 0), 400)
-
-    def test_short_crop_spectral_loss(self):
-        # (--crop-warmup's short crops' loss - compiled on the Apple GPU - is the spectral loss)
-        generator = torch.Generator().manual_seed(0)
-        audio, target = torch.randn(2, 2400, generator=generator), torch.randn(2, 2400, generator=generator)
-        self.assertTrue(torch.equal(trainmulti.short_crop_spectral_loss(audio, target, 24000, 10500, 1e-9),
-                                    trainmulti.spectral_loss(audio, target, 24000, 10500, mel_eps=1e-9)))
-
     def test_options(self):
         # Stage B (the critic, the emotional speech's validation) with every training step option, stopped and resumed
         init = tiny_checkpoint()
-        options = ['--recipe', 'teacher.b', '--init', init, '--lean-clip', '--optimizer', 'muon', '--ema', '0.9', '--schedule',
-                   'wsd', '--cooldown', '0.5', '--cooldown-shape', '1-sqrt', '--crop-warmup', '2:0.05', '--val-every', '1']
+        options = ['--recipe', 'teacher.b', '--init', init, '--lean-clip', '--schedule', 'wsd', '--cooldown', '0.5', '--val-every', '1']
         self.assertEqual(DATA.train('options', *options, '--stop', '2', '--resume'), 0)
         self.assertEqual(DATA.train('options', *options, '--resume'), 0)
         self.assertIn('options: 3 steps from 2', DATA.last_log)
-        self.assertIn('EMA VAL', DATA.last_log)
         last = torch.load(DATA.run_path('options', 'last.pt'), weights_only=False)
-        ema_last = torch.load(DATA.run_path('options', 'ema-last.pt'), weights_only=False)
-        self.assertEqual((last['step'], ema_last['step']), (3, 3))
-        self.assertIn('ema', last)
-        self.assertIn('cremad.score', ema_last['val'])
-        self.assertFalse(torch.equal(last['model']['head.weight'], ema_last['model']['head.weight']))
-        self.assertTrue(os.path.exists(DATA.run_path('options', 'ema-best.pt')))
-        with open(DATA.run_path('options', 'log.jsonl'), encoding='utf-8') as file:
-            rows = [json.loads(line) for line in file]
-        self.assertEqual([row['emaVal']['step'] for row in rows if 'emaVal' in row], [1, 2, 3])
-        # (the lean optimizer's state - Muon's momentum buffer, AdamW's shared step count)
-        self.assertTrue(any('momentum_buffer' in state for state in last['optimizer']['state'].values()))
+        self.assertEqual(last['step'], 3)
+        self.assertIn('cremad.score', last['val'])
+        # (the lean optimizer's state - AdamW's shared step count)
+        self.assertTrue(all(state['step'].item() == 3 for state in last['optimizer']['state'].values()))
 
     def test_lean_clip(self):
         # The lean step alone (AdamW's groups only); a non-finite step skipped on the device
@@ -489,40 +468,3 @@ class TestStepOptions(unittest.TestCase):
             self.assertEqual(DATA.train('lean', '--lean-clip', '--steps', '1'), 0)
         state = torch.load(DATA.run_path('lean', 'last.pt'), weights_only=False)
         self.assertTrue(all(value['step'].item() == 0 for value in state['optimizer']['state'].values()))
-
-    def test_zero_init_projections(self):
-        with unittest.mock.patch.object(trainmulti.optim, 'zero_init_projections',
-                                        wraps=trainmulti.optim.zero_init_projections) as zero_init:
-            self.assertEqual(DATA.train('zero-init', '--zero-init-proj', '--steps', '1'), 0)
-        zero_init.assert_called_once()
-
-    def test_ema_best(self):
-        # The EMA's best kept only when its score improves (the EMA validated first, then the raw weights)
-        scores = iter([2.0, 2.5, 3.0, 1.0])
-
-        def validate(*_args):
-            return {'score': next(scores)}
-        with unittest.mock.patch.object(trainmulti, 'validate', side_effect=validate):
-            self.assertEqual(DATA.train('ema-best', '--ema', '0.5', '--steps', '2', '--val-every', '1'), 0)
-        ema_best = torch.load(DATA.run_path('ema-best', 'ema-best.pt'), weights_only=False)
-        self.assertEqual((ema_best['step'], ema_best['val']), (1, {'score': 2.0}))
-        best = torch.load(DATA.run_path('ema-best', 'best.pt'), weights_only=False)
-        self.assertEqual((best['step'], best['val']), (2, {'score': 1.0}))
-        self.assertEqual(best['emaBest'], 2.0)
-
-    def test_resume_with_ema(self):
-        # A run without the EMA resumed with it - the EMA starts from the resumed weights
-        self.assertEqual(DATA.train('resume-ema', '--stop', '1'), 0)
-        resumed = torch.load(DATA.run_path('resume-ema', 'last.pt'), weights_only=False)['model']
-        starts = []
-
-        class Recording(trainmulti.optim.FlatEMA):
-            def __init__(self, parameters, decay):
-                super().__init__(parameters, decay)
-                starts.append(self.shadow.clone())
-        with unittest.mock.patch.object(trainmulti.optim, 'FlatEMA', Recording):
-            self.assertEqual(DATA.train('resume-ema', '--ema', '0.9', '--resume', '--steps', '2'), 0)
-        names = [name for name, _ in MultiModel({**helpers.tiny_config(), 'speakers': 4}).named_parameters()]
-        self.assertEqual(len(starts), 2)
-        self.assertTrue(torch.equal(starts[1], torch.cat([resumed[name].reshape(-1) for name in names])))
-        self.assertIn('ema', torch.load(DATA.run_path('resume-ema', 'last.pt'), weights_only=False))

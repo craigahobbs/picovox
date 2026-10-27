@@ -81,7 +81,6 @@ const words = ['queequeg', 'longbourn', 'netherfield', 'clerval', 'raskolnikov',
 test('g2p.unpackTensors, packed per row', () => {
     // A 4-bit 2x3 matrix (zero is 7) and an 8-bit vector (zero is 127); bfloat16 scales 1, 0.5, and 2
     const model = {
-        'groupSize': 0,
         'layout': 'packed',
         'tensors': [{'name': 'matrix', 'shape': [2, 3], 'bits': 4}, {'name': 'vector', 'shape': [2], 'bits': 8}]
     };
@@ -98,11 +97,11 @@ test('g2p.unpackTensors, packed per row', () => {
 });
 
 
-test('g2p.unpackTensors, bytes per group', () => {
-    // A 1x3 matrix of 5-bit values (zero is 15) in groups of 2 - scales 1 and 0.25
-    const model = {'groupSize': 2, 'layout': 'bytes', 'tensors': [{'name': 'matrix', 'shape': [1, 3], 'bits': 5}]};
-    const bytes = new Uint8Array([0x80, 0x3f, 0x80, 0x3e, 16, 13, 30]);
-    assert.deepEqual([...unpackTensors(model, bytes).get('matrix')], [1, -2, 3.75]);
+test('g2p.unpackTensors, bytes', () => {
+    // A 1x3 matrix of 5-bit values (zero is 15), a byte each - scale 0.25
+    const model = {'layout': 'bytes', 'tensors': [{'name': 'matrix', 'shape': [1, 3], 'bits': 5}]};
+    const bytes = new Uint8Array([0x80, 0x3e, 16, 13, 30]);
+    assert.deepEqual([...unpackTensors(model, bytes).get('matrix')], [0.25, -0.5, 3.75]);
 });
 
 
@@ -176,11 +175,10 @@ test('g2p.loadG2p, heteronym readings', async () => {
     assert.equal(pronounce.ambiguous('book'), false);
     assert.equal(pronounce.ambiguous('éé'), false);
 
-    // Each reading's pronunciation, cached per reading; a reading the model lacks is the default
+    // Each reading's pronunciation, cached per reading
     const readings = [0, 1].map((reading) => pronounce('read', reading).join(' '));
     assert.deepEqual(readings.toSorted(), ['R EH1 D', 'R IY1 D']);
     assert.equal(pronounce('read', 1), pronounce('read', 1));
-    assert.equal(pronounce('read', 9), pronounce('read', 0));
 
     // The reading of the word at an index in a text's items (its words and phrase-end marks), cached per window
     const reading = (items, index) => pronounce(items[index], pronounce.chooseReading(items, index)).join(' ');
@@ -193,21 +191,6 @@ test('g2p.loadG2p, heteronym readings', async () => {
     // At the text's edges, and with characters outside the context network's alphabet
     assert(pronounce.chooseReading(['read'], 0) < g2pModel.context.slots);
     assert(pronounce.chooseReading(['éé', 'read', '.'], 1) < g2pModel.context.slots);
-});
-
-
-test('g2p.loadG2p, no context network', async () => {
-    // A model without the context section has no ambiguous words; one without the ambiguity head never finds one
-    const pronounce = await loadG2p({...g2pModel, 'context': undefined});
-    assert.equal(pronounce.ambiguous, undefined);
-    assert.deepEqual(pronounce('read'), (await loadG2p(g2pModel))('read'));
-    const headTensors = new Set(['ambiguity.weight', 'ambiguity_layer.bias']);
-    const rename = (tensor) => (headTensors.has(tensor.name) ? {...tensor, 'name': `unused ${tensor.name}`} : tensor);
-    const tensors = g2pModel.tensors.map(rename);
-    const headless = await loadG2p({...g2pModel, tensors});
-    assert.equal(headless.ambiguous('read'), false);
-    const readingless = await loadG2p({...g2pModel, 'readings': undefined, 'context': undefined});
-    assert.equal(readingless('read', 1), readingless('read', 0));
 });
 
 
@@ -224,14 +207,8 @@ test('g2p.loadG2p, context network not deflated', async () => {
 // The shipped model's format - per-row scales, a byte per value (6-bit values deflate smaller than bit-packed), deflated
 test('g2p.g2pModel format', () => {
     assert.equal(g2pModel.design, 'ar');
-    assert.equal(g2pModel.groupSize, 0);
     assert.equal(g2pModel.layout, 'bytes');
     assert.equal(g2pModel.deflate, true);
-});
-
-
-test('g2p.loadG2p, unsupported design', async () => {
-    await assert.rejects(loadG2p({...g2pModel, 'design': 'ctc'}), {'message': 'Unsupported G2P model design ctc'});
 });
 
 
@@ -239,7 +216,7 @@ test('g2p.loadG2p, deflated and not', async () => {
     const bytes = decodeBase64(g2pModel.weights);
     const other = {...g2pModel, 'deflate': false, 'weights': bytesBase64(await streamBytes(bytes, new DecompressionStream('deflate-raw')))};
     const [pronounce, pronounceOther] = await Promise.all([loadG2p(g2pModel), loadG2p(other)]);
-    assert.deepEqual(words.map(pronounceOther), words.map(pronounce));
+    assert.deepEqual(words.map((word) => pronounceOther(word)), words.map((word) => pronounce(word)));
 });
 
 
@@ -260,5 +237,5 @@ test('g2p.loadG2p, both layouts', async () => {
         assertArraysEqual(otherTensors.get(name), values, name);
     }
     const [pronounce, pronounceOther] = await Promise.all([loadG2p(g2pModel), loadG2p(other)]);
-    assert.deepEqual(words.map(pronounceOther), words.map(pronounce));
+    assert.deepEqual(words.map((word) => pronounceOther(word)), words.map((word) => pronounce(word)));
 });

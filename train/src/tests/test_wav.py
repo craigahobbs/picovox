@@ -10,7 +10,8 @@ import wave
 
 import numpy
 
-from picovox_train.wav import read_wav, write_wav
+from picovox_train.wav import read_wav
+from tests.helpers import write_wav
 
 
 class TestWav(unittest.TestCase):

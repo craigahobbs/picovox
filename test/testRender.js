@@ -1,8 +1,8 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-import {DEFAULTS, FLOOR_DB, NAMES, PARAMETERS} from '../lib/params.js';
-import {concatBlocks, createRenderer, frameValues, noiseFftSize, render, sampleCount} from '../lib/render.js';
+import {FLOOR_DB, PARAMETERS} from '../lib/params.js';
+import {concatBlocks, createRenderer, noiseFftSize, render, sampleCount} from '../lib/render.js';
 import {Buffer} from 'node:buffer';
 import {strict as assert} from 'node:assert';
 import test from 'node:test';
@@ -16,18 +16,24 @@ function sameSamples(actual, expected) {
 }
 
 
-// A voiced vowel frame (an object of parameters), varied over time
-function vowel(index, values = {}) {
-    return {
+// A frame - an object of parameters as an array in parameter order, the parameters not given at their defaults
+function frameOf(values) {
+    return PARAMETERS.map((parameter) => values[parameter.name] ?? parameter.default);
+}
+
+
+// A voiced vowel frame, varied over time
+function vowel(index) {
+    return frameOf({
         'f0': 110 + 20 * Math.sin(index / 15), 'av': -8, 'rd': 1.1, 'shelf': 2, 'jitter': 0.005, 'shimmer': 0.02, 'ah': -45,
-        'f1': 650 + 100 * Math.sin(index / 9), 'f2': 1100, 'f3': 2500, 'b1': 80, 'b2': 90, 'b3': 150, ...values
-    };
+        'f1': 650 + 100 * Math.sin(index / 9), 'f2': 1100, 'f3': 2500, 'b1': 80, 'b2': 90, 'b3': 150
+    });
 }
 
 
 // A fricative frame - frication, no voicing
-function fricative(values = {}) {
-    return {'av': FLOOR_DB, 'af': -10, 'ap2': -5, 'fp2': 4500, 'bp2': 600, 'ab': -30, 'ah': -200, ...values};
+function fricative() {
+    return frameOf({'av': FLOOR_DB, 'af': -10, 'ap2': -5, 'fp2': 4500, 'bp2': 600, 'ab': -30, 'ah': -200});
 }
 
 
@@ -41,7 +47,7 @@ function phrase(count = 120) {
         } else if (part === 1) {
             frames.push(fricative());
         } else {
-            frames.push({'ah': -200, 'af': -200});
+            frames.push(frameOf({'ah': -200, 'af': -200}));
         }
     }
     return frames;
@@ -62,23 +68,6 @@ test('render.sampleCount', () => {
     assert.equal(sampleCount(2, 24000), 120);
     assert.equal(sampleCount(201, 44100), 44100);
     assert.equal(sampleCount(3, 44100), 441);
-});
-
-
-test('render.frameValues', () => {
-    // An object - missing and null parameters take their defaults
-    const values = frameValues({'f0': 150, 'av': null, 'f1': undefined});
-    assert(values instanceof Float64Array);
-    assert.equal(values.length, NAMES.length);
-    assert.equal(values[0], 150);
-    assert.deepEqual(Array.from(values.slice(1)), PARAMETERS.slice(1).map((parameter) => parameter.default));
-    assert.deepEqual(Array.from(frameValues({})), NAMES.map((name) => DEFAULTS[name]));
-
-    // An array or a typed array, in parameter order
-    const array = NAMES.map((_name, ix) => ix + 0.5);
-    assert.deepEqual(Array.from(frameValues(array)), array);
-    assert.deepEqual(Array.from(frameValues(Float32Array.from(array))), array);
-    assert.deepEqual(Array.from(frameValues([7])).slice(0, 2), [7, PARAMETERS[1].default]);
 });
 
 
@@ -107,6 +96,9 @@ test('render', () => {
     // No frames, one frame
     assert.deepEqual(render([]), new Float32Array(0));
     assert.deepEqual(render([vowel(0)]), new Float32Array(0));
+
+    // Typed-array frames, and frames with values after the parameters (the model's), the same samples
+    assert(sameSamples(render(frames.map((frame) => Float64Array.from([...frame, 99])), {'sampleRate': 24000, 'seed': 3}), samples));
 });
 
 
@@ -122,27 +114,16 @@ test('render, channel equalizer', () => {
 });
 
 
-test('render, onBlock', () => {
-    const frames = phrase();
-    const blocks = [];
-    const samples = render(frames, {'sampleRate': 16000, 'blockSize': 1000, 'onBlock': (block) => blocks.push(block.slice())});
-    assert(blocks.slice(0, -1).every((block) => block.length === 1000));
-    assert(blocks[blocks.length - 1].length <= 1000);
-    const joined = concatBlocks(blocks);
-    assert(sameSamples(joined, samples));
-});
-
-
 test('render, voicing onsets and offsets', () => {
     // A frame's voicing table is made with its pair's (frames 2n and 2n + 1) - voicing starting and stopping at either
     // frame of a pair, streamed a frame at a time or whole, the same samples
     for (const onset of [10, 11]) {
-        const frames = Array.from({'length': 60}, (_value, ix) => (ix >= onset && ix < onset + 30 ? vowel(ix) : {'av': FLOOR_DB}));
+        const frames = Array.from({'length': 60}, (_value, ix) => (ix >= onset && ix < onset + 30 ? vowel(ix) : frameOf({'av': FLOOR_DB})));
         const whole = render(frames, {'sampleRate': 24000});
         const renderer = createRenderer({'sampleRate': 24000, 'onBlock': (block) => blocks.push(block.slice())});
         const blocks = [];
         for (const frame of frames) {
-            renderer.push(frame);
+            renderer.push([frame]);
         }
         renderer.end();
         const streamed = concatBlocks(blocks);
@@ -155,13 +136,13 @@ test('render, voicing onsets and offsets', () => {
 
 test('render, silence', () => {
     // Long silence - no voicing, no noise - renders exact zeros
-    const frames = new Array(300).fill({'av': FLOOR_DB, 'ah': -200, 'af': -200});
+    const frames = new Array(300).fill(frameOf({'av': FLOOR_DB, 'ah': -200, 'af': -200}));
     const samples = render(frames, {'sampleRate': 24000});
     assert.equal(samples.length, sampleCount(300, 24000));
     assert(samples.every((value) => value === 0));
 
     // Aspiration alone, frication alone
-    const aspiration = render(new Array(40).fill({'av': FLOOR_DB, 'ah': -20, 'af': -200}), {'sampleRate': 24000});
+    const aspiration = render(new Array(40).fill(frameOf({'av': FLOOR_DB, 'ah': -20, 'af': -200})), {'sampleRate': 24000});
     const frication = render(new Array(40).fill(fricative()), {'sampleRate': 24000});
     assert(aspiration.some((value) => value !== 0));
     assert(frication.some((value) => value !== 0));
@@ -170,16 +151,13 @@ test('render, silence', () => {
 
 
 test('createRenderer', () => {
-    // Streaming - frames pushed one at a time, as arrays, as typed arrays, or in lists (an empty list pushes none) - is
-    // rendering whole
+    // Streaming - frames pushed in lists (an empty list pushes none), as arrays or typed arrays - is rendering whole
     const frames = phrase(400);
     const whole = render(frames, {'sampleRate': 24000, 'seed': 9});
     const blocks = [];
     const renderer = createRenderer({'sampleRate': 24000, 'seed': 9, 'blockSize': 777, 'onBlock': (block) => blocks.push(block.slice())});
-    assert.equal(renderer.sampleRate, 24000);
-    renderer.push(frames[0]);
-    renderer.push(NAMES.map((name) => frameValues(frames[1])[NAMES.indexOf(name)]));
-    renderer.push(frameValues(frames[2]));
+    renderer.push([frames[0]]);
+    renderer.push([Float64Array.from(frames[1]), Float64Array.from(frames[2])]);
     renderer.push(frames.slice(3, 100));
     renderer.push([]);
     for (const frame of frames.slice(100)) {
@@ -205,7 +183,6 @@ test('createRenderer', () => {
 test('createRenderer, defaults', () => {
     // No block callback, 44.1 kHz - the total only
     const renderer = createRenderer();
-    assert.equal(renderer.sampleRate, 44100);
     renderer.push(phrase(20));
     assert.equal(renderer.end(), sampleCount(20, 44100));
 

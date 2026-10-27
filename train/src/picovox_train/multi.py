@@ -9,12 +9,11 @@ data.py's ArcticData loads. The pool is the committed speaker table, data/nn/spe
 settings were measured by the former accent classification, settings, and pool commands - see git history).
 
     PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.multi build -j 8     # build/nn/data/multi/ (6 minutes, 14 cores)
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.multi verify-tokens  # lib/tokens.js == frontend.py
 
 The corpus (build/nn/data/multi/) has data.py's format (index.json, tokens.npy, durations.npy, seconds.npy,
 audio.npy, frames.npy, alignment.jsonl): load it with ArcticData(os.path.join(DATA_DIR, 'multi')). build --out DIR
 builds it elsewhere, with its speaker table and split (speakers.json, multi-split.json) beside it instead of in
-data/nn/ (verify-tokens takes the same --out); build --pool TABLE builds another speaker table's pool. Its speakers are
+data/nn/; build --pool TABLE builds another speaker table's pool. Its speakers are
 keyed "arctic-<name>" and "libritts-<id>"; each speaker's index.json entry has data.py's analysis settings (sex,
 pitchFloor, pitchCeiling, formantCeiling, sourceSampleRate, bandwidth) plus its index, which is its id in
 data/nn/speakers.json.
@@ -24,8 +23,8 @@ The pieces:
 - Speakers - a LibriTTS-R speaker's sex is from the corpus's speakers.tsv; its pitch range is Hirst's two-pass range
   (0.75 x the first quartile to 1.5 x the third quartile of a 60-600 Hz first pass), and its formant ceiling Escudero's
   (the ceiling with the least within-vowel variance of log F1 and log F2 over the stressed vowels' midpoints, from the
-  MFA labels), both over up to 60 utterances. The ARCTIC speakers keep their data/targets/ settings (measured by the
-  former tools/targets.py - see git history).
+  MFA labels), both over up to 60 utterances. The ARCTIC speakers' settings are those the former tools/targets.py
+  measured (see git history).
 - The accent filter - a LibriTTS-R speaker is kept when the CommonAccent classifier's top accent is "us" with a mean
   posterior of at least US_THRESHOLD over its utterances; the ARCTIC speakers are US English by the
   corpus's documentation (and the classifier agrees). The rhoticity measure of data.py's survey (the median F3 of
@@ -469,29 +468,6 @@ def write_split(entries, path=SPLIT_PATH):
 
 
 #
-# Token parity
-#
-
-# Verify lib/tokens.js and frontend.py agree on every pool text
-def verify_tokens_command(args):
-    corpus_data = ArcticData(args.out or OUT_DIR)
-    texts = sorted({entry['text'] for entry in corpus_data.index['utterances']})
-    pronounce_texts(texts, args.jobs)
-    mismatches = 0
-    tokens = 0
-    for start in range(0, len(texts), 5000):
-        chunk = texts[start:start + 5000]
-        for text, js_result in zip(chunk, data.js_tokenize(chunk)):
-            tokens += len(js_result['ids'])
-            if data.tokenize(text) != js_result:
-                mismatches += 1
-                if mismatches <= 5:
-                    print(f'MISMATCH: {text!r}')
-    print(f'verify-tokens: {len(texts)} pool texts, {tokens} tokens: {len(texts) - mismatches} identical, {mismatches} different')
-    return 1 if mismatches else 0
-
-
-#
 # Utilities
 #
 
@@ -522,12 +498,8 @@ def main(argv=None):
     build_parser.add_argument('-j', '--jobs', type=int, default=None, help='worker processes (default: all cores)')
     build_parser.add_argument('--out', help='the corpus directory (default: build/nn/data/multi/, its tables in data/nn/)')
     build_parser.add_argument('--pool', default=SPEAKERS_PATH, help='the pool - a speaker table (default: data/nn/speakers.json)')
-    verify_parser = commands.add_parser('verify-tokens', help='check lib/tokens.js against frontend.py on the pool texts')
-    verify_parser.add_argument('--out', help='the corpus directory (default: build/nn/data/multi/)')
-    verify_parser.add_argument('-j', '--jobs', type=int, default=None, help='worker processes (default: all cores)')
     args = parser.parse_args(argv)
-    handler = {'build': build_command, 'verify-tokens': verify_tokens_command}
-    return handler[args.command](args) or 0
+    return build_command(args) or 0
 
 
 if __name__ == '__main__':

@@ -17,9 +17,8 @@ The weights are quantized to 8 bits: every weight matrix, convolution kernel, an
 float32 scale per output channel (row) - symmetric, the scale the row's largest magnitude / 127; the biases and layer
 norm parameters, a small fraction of the model, stay float32. The .bin is the tensors' data back to back (each
 tensor's int8 data, then its float32 scales; or its float32 data), aligned to 4 bytes; the .json manifest lists each
-tensor's name, shape, encoding, and byte offsets, with the model config, the vocabulary remap, the channel equalizer,
-and the format's fixed inference defaults (the pause threshold, and a formant bandwidth scale of 1 - lib/model.js reads
-neither; they stay so the committed module reproduces from its checkpoint).
+tensor's name, shape, encoding, and byte offsets, with the model config, the vocabulary remap, and the default speaker's
+channel equalizer (the command's - arctic-bdl's).
 
 The quantization (quant.py) is the only lossy step - quantized_model() gives the PyTorch model with the exported
 weights (dequantized), which lib/model.js must match.
@@ -176,7 +175,6 @@ def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0):
         'config': model.config, 'parameterNames': params.NAMES, 'frameRate': params.FRAME_RATE,
         'speakers': speaker_list(state), 'styles': list(STYLE_NAMES), 'defaultSpeaker': speaker,
         'eq': eq, 'remap': token_remap(vocab, counts), 'vocab': vocab,
-        'inference': {'pauseThreshold': 0.5, 'bandwidthScale': 1.0},
         'parameterCount': parameter_count(model),
         'parameterCountCore': core_parameter_count(model),
         'bytes': len(binary), 'tensors': tensors,
@@ -202,11 +200,9 @@ def main(argv=None):
     parser.add_argument('checkpoint')
     parser.add_argument('--voice', required=True)
     parser.add_argument('--out', default=OUT_DIR)
-    parser.add_argument('--speaker', default=None, help='the default speaker and its channel equalizer (default: arctic-bdl)')
     args = parser.parse_args(argv)
     model, state = load_model(args.checkpoint)
-    speaker = state['speakers'].index(args.speaker if args.speaker else 'arctic-bdl')
-    manifest = export(model, state, args.voice, args.out, speaker=speaker)
+    manifest = export(model, state, args.voice, args.out, speaker=state['speakers'].index('arctic-bdl'))
     sizes = {suffix: os.path.getsize(os.path.join(args.out, f'{args.voice}.{suffix}')) for suffix in ('bin', 'json')}
     print(json.dumps({'voice': args.voice, 'parameters': manifest['parameterCount'], 'bytes': sizes,
                       'quantized': sum(1 for tensor in manifest['tensors'] if tensor['encoding'] == 'int8'),

@@ -6,7 +6,6 @@ Training the grapheme-to-phoneme (G2P) network - the app's only pronouncer (lib/
 every word; g2pmodel.py is its Python port). The recipe is data/nn/train.json's "g2p" settings:
 
     PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p train --out build/nn/g2p-train   # every stage (resumable)
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p export build/nn/g2p-train --out lib/models/g2pModel.js
     PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p evaluate [lib/models/g2pModel.js | CHECKPOINT]
     PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p book TEXT --name NAME --title TITLE --url URL
 
@@ -30,8 +29,8 @@ The data:
 
 Each stage trains from the previous one's weights (AdamW, linear warmup then cosine decay to 2%, gradient clipping at
 1) with its own seed, learning rate, and sampling ("topBoost": {"share", "count"} - a share of the dictionary samples
-uniform over the most frequent words). The export quantizes to "bits" per weight (bfloat16 scales per row, 8-bit
-biases) and writes the smallest encoding as a JavaScript module (MODULE_LINE_LENGTH columns).
+uniform over the most frequent words). The network is exported with the heteronym models (picovox_train.context
+export, by the quantization here - "bits" per weight, bfloat16 scales per row, 8-bit biases).
 
 The measures: the book-token error (the share of the 22 evaluation books' dictionary-word tokens whose prediction isn't
 the first pronunciation; "any" - none of the word's pronunciations), the top-10K's wrong words, and the monitoring
@@ -41,8 +40,6 @@ set's word error (any pronunciation).
 import argparse
 import collections
 import datetime
-import gzip
-import hashlib
 import json
 import math
 import os
@@ -50,7 +47,6 @@ import random
 import re
 import sys
 import time
-import zlib
 
 import numpy
 
@@ -477,7 +473,7 @@ def command_train(args):
 
     def log(text):
         log_line(log_path, text)
-    settings = {key: value for key, value in config.items() if key not in ('stages', 'export')}
+    settings = {key: value for key, value in config.items() if key != 'stages'}
     init = None
     results = {}
     for stage in config['stages']:
@@ -496,10 +492,10 @@ def command_train(args):
 
 
 #
-# The export - each tensor's values are symmetric integers of its bits (matrices "bits", vectors - biases - "biasBits")
-# with a bfloat16 scale per row (or per group of "groupSize" values of a row); each scale is the best of CLIP_RATIOS by
-# squared error. The bytes are every scale, then every tensor's values - bit-packed, or a byte each - deflated when that
-# makes the module smaller.
+# The export's quantization (context.py export) - each tensor's values are symmetric integers of its bits (matrices
+# "bits", vectors - biases - "biasBits") with a bfloat16 scale per row; each scale is the best of CLIP_RATIOS by squared
+# error. The bytes are every scale, then every tensor's values - bit-packed, or a byte each - deflated when that makes
+# the module smaller.
 #
 
 # Round float32 values to bfloat16 (nearest, ties to even) - (uint16 codes, values as float64)
@@ -509,22 +505,16 @@ def bfloat16(values):
     return codes, (codes.astype(numpy.uint32) << 16).view(numpy.float32).astype(numpy.float64)
 
 
-# Quantize a 2-D array - (integers, scale codes [rows * groups], dequantized values)
-def quantize_array(values, bits, group_size):
-    rows, columns = values.shape
-    groups = -(-columns // group_size) if group_size else 1
-    width = group_size if group_size else columns
-    padded = numpy.zeros((rows, groups * width))
-    padded[:, :columns] = values
-    grouped = padded.reshape(rows * groups, width)
+# Quantize a 2-D array - (integers, scale codes [rows], dequantized values)
+def quantize_array(values, bits):
     limit = (1 << (bits - 1)) - 1
-    peak = numpy.abs(grouped).max(1)
+    peak = numpy.abs(values).max(1)
     best_error, best_codes, best_scales = None, None, None
     for ratio in CLIP_RATIOS:
         codes, scales = bfloat16(peak * ratio / limit)
         safe = numpy.where(scales > 0, scales, 1.0)
-        integers = numpy.clip(numpy.round(grouped / safe[:, None]), -limit, limit) * (scales > 0)[:, None]
-        error = ((integers * scales[:, None] - grouped) ** 2).sum(1)
+        integers = numpy.clip(numpy.round(values / safe[:, None]), -limit, limit) * (scales > 0)[:, None]
+        error = ((integers * scales[:, None] - values) ** 2).sum(1)
         if best_error is None:
             best_error, best_codes, best_scales = error, codes, scales
         else:
@@ -533,9 +523,8 @@ def quantize_array(values, bits, group_size):
             best_codes = numpy.where(better, codes, best_codes)
             best_scales = numpy.where(better, scales, best_scales)
     safe = numpy.where(best_scales > 0, best_scales, 1.0)
-    integers = (numpy.clip(numpy.round(grouped / safe[:, None]), -limit, limit) * (best_scales > 0)[:, None]).astype(numpy.int64)
-    dequantized = (integers * best_scales[:, None]).reshape(rows, groups * width)[:, :columns]
-    return integers.reshape(rows, groups * width)[:, :columns], best_codes, dequantized
+    integers = (numpy.clip(numpy.round(values / safe[:, None]), -limit, limit) * (best_scales > 0)[:, None]).astype(numpy.int64)
+    return integers, best_codes, integers * best_scales[:, None]
 
 
 # Quantize a model's state - [{name, shape, bits, integers, codes, dequantized}] in state order
@@ -544,8 +533,7 @@ def quantize_state(state, spec):
     for name, tensor in state.items():
         values = tensor.detach().double().cpu().numpy()
         bits = spec['bits'] if values.ndim == 2 else spec.get('biasBits', 8)
-        integers, codes, dequantized = quantize_array(values.reshape(1, -1) if values.ndim == 1 else values, bits,
-                                                      spec.get('groupSize', 0))
+        integers, codes, dequantized = quantize_array(values.reshape(1, -1) if values.ndim == 1 else values, bits)
         quantized.append({'name': name, 'shape': list(values.shape), 'bits': bits, 'integers': integers, 'codes': codes,
                           'dequantized': dequantized.reshape(values.shape)})
     return quantized
@@ -562,103 +550,6 @@ def weight_bytes(quantized, layout):
             stream = ((unsigned[:, None] >> numpy.arange(item['bits'])) & 1).astype(numpy.uint8).reshape(-1)
             parts.append(numpy.packbits(stream, bitorder='little').tobytes())
     return b''.join(parts)
-
-
-# The generated module's text
-def module_text(config, quantized, spec, layout, deflate, data, comment):
-    import base64  # pylint: disable=import-outside-toplevel
-    encoded = base64.b64encode(data).decode('ascii')
-    config = model_config(config)
-    tensors = ',\n'.join(f'        {{\'name\': \'{item["name"]}\', \'shape\': {json.dumps(item["shape"])}, '
-                         f'\'bits\': {item["bits"]}}}' for item in quantized)
-    phone_lines = []
-    for phone in (f'\'{phone}\'' for phone in PHONES):
-        if phone_lines and 8 + len(phone_lines[-1]) + len(phone) + 3 <= MODULE_LINE_LENGTH:
-            phone_lines[-1] += f', {phone}'
-        else:
-            phone_lines.append(phone)
-    lines = [
-        '// Generated by picovox_train.g2p export - do not edit',
-        '//',
-        *[f'// {line}' for line in comment],
-        '',
-        'export const g2pModel = {',
-        '    \'version\': 1,',
-        f'    \'design\': \'{config["design"]}\',',
-        '    \'letters\': "' + ''.join(LETTERS[1:]) + '",',
-        '    \'phones\': [',
-        ',\n'.join(f'        {line}' for line in phone_lines),
-        '    ],',
-        f'    \'embed\': {config["embed"]},',
-        f'    \'hidden\': {config["hidden"]},',
-        f'    \'decoder\': {config["decoder"]},',
-        f'    \'upsample\': {UPSAMPLE},',
-        f'    \'maxLetters\': {MAX_WORD},',
-        f'    \'groupSize\': {spec.get("groupSize", 0)},',
-        f'    \'layout\': \'{layout}\',',
-        f'    \'deflate\': {"true" if deflate else "false"},',
-        '    \'tensors\': [',
-        tensors,
-        '    ],',
-        '    \'weights\': `',
-        *[encoded[index:index + MODULE_LINE_LENGTH] for index in range(0, len(encoded), MODULE_LINE_LENGTH)],
-        '`',
-        '};',
-        ''
-    ]
-    return '\n'.join(lines)
-
-
-# The smallest module for a quantized state - (text, {layout, deflate, bytes, gzip})
-def smallest_module(config, quantized, spec, comment):
-    candidates = []
-    for layout in ('packed', 'bytes'):
-        data = weight_bytes(quantized, layout)
-        compressor = zlib.compressobj(9, zlib.DEFLATED, -15)
-        deflated = compressor.compress(data) + compressor.flush()
-        for deflate, payload in ((False, data), (True, deflated)):
-            if layout == 'bytes' and not deflate:
-                continue
-            text = module_text(config, quantized, spec, layout, deflate, payload, comment)
-            candidates.append((len(text.encode('utf-8')), layout, deflate, text))
-    size, layout, deflate, text = min(candidates, key=lambda candidate: candidate[0])
-    return text, {'layout': layout, 'deflate': deflate, 'bytes': size, 'gzip': len(gzip.compress(text.encode('utf-8'), 9))}
-
-
-def command_export(args):
-    """Write the generated module from a checkpoint - its weights checked to round-trip exactly"""
-    import torch  # pylint: disable=import-outside-toplevel
-    spec = load_config(args.config)['export']
-    if args.bits:
-        spec = {**spec, 'bits': args.bits}
-    path = args.checkpoint
-    if os.path.isdir(path):
-        with open(os.path.join(path, 'done.json'), encoding='utf-8') as file:
-            path = json.load(file)['checkpoint']
-    checkpoint = torch.load(path, map_location='cpu', weights_only=False)
-    config, state = checkpoint['config'], checkpoint['state']
-    quantized = quantize_state(state, spec)
-    parameters = sum(item['integers'].size for item in quantized)
-    digest = hashlib.sha256(b''.join(tensor.detach().cpu().numpy().tobytes() for tensor in state.values())).hexdigest()[:16]
-    comment = [
-        f'The neural grapheme-to-phoneme model run by lib/g2p.js (and picovox_train/g2pmodel.py) - {config["design"]} design, embedding '
-        f'{config["embed"]},',
-        f'hidden {config["hidden"]}, {parameters} parameters, {spec["bits"]}-bit weights; trained by picovox_train.g2p (weights '
-        f'sha256 {digest}).',
-        'Regenerate: python -m picovox_train.g2p train --out DIR; python -m picovox_train.g2p export DIR',
-        '(the recipe: data/nn/train.json g2p)',
-        *args.comment
-    ]
-    text, info = smallest_module(config, quantized, spec, comment)
-    tensors = g2pmodel.unpack_tensors(g2pmodel.parse_module(text))
-    if not all((tensors[item['name']] == item['dequantized']).all() for item in quantized):
-        log_line(None, 'export: the module\'s weights differ from the quantized weights')
-        return 1
-    with open(args.out, 'w', encoding='utf-8') as file:
-        file.write(text)
-    log_line(None, f'export: wrote {args.out} - {parameters} parameters, {spec["bits"]}-bit, {info["layout"]}'
-                   f'{" + deflate" if info["deflate"] else ""}, {info["bytes"]} bytes ({info["gzip"]} gzipped)')
-    return 0
 
 
 def command_evaluate(args):
@@ -711,20 +602,13 @@ def write_books(path, books):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog='python -m picovox_train.g2p', description='Train and export the G2P network')
+    parser = argparse.ArgumentParser(prog='python -m picovox_train.g2p', description='Train and evaluate the G2P network')
     commands = parser.add_subparsers(dest='command', required=True)
     train_parser = commands.add_parser('train', help='every stage of the recipe (resumable)')
     train_parser.add_argument('--out', required=True, help='the output directory')
     train_parser.add_argument('--config', default=RECIPE_PATH)
     train_parser.add_argument('--steps', type=int, help='each stage this many steps (a smoke test)')
     train_parser.set_defaults(func=command_train)
-    export_parser = commands.add_parser('export', help='write the generated module from a checkpoint')
-    export_parser.add_argument('checkpoint', help='a checkpoint, or a train output directory (its last stage)')
-    export_parser.add_argument('--out', default=MODULE_PATH)
-    export_parser.add_argument('--config', default=RECIPE_PATH)
-    export_parser.add_argument('--bits', type=int, help='the matrices\' bits (default: the settings\')')
-    export_parser.add_argument('--comment', action='append', default=[], help='another line of the module\'s comment')
-    export_parser.set_defaults(func=command_export)
     evaluate_parser = commands.add_parser('evaluate', help='the measures of a module or a checkpoint')
     evaluate_parser.add_argument('model', nargs='?', default=MODULE_PATH)
     evaluate_parser.add_argument('--relabel', help='the relabel file the targets follow')

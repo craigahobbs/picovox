@@ -4,7 +4,7 @@
 """
 The network's input tokens - the vocabulary (vocab.json) and a Python port of the text front end,
 lib/lexicon.js textToPhrases, so training data is tokenized exactly as the app tokenizes at inference
-(lib/tokens.js with the G2P network; `python -m picovox_train.multi verify-tokens` checks that the two agree).
+(lib/tokens.js with the G2P network; the parity check - tests/test_frontend.py - checks that the two agree).
 
 A token sequence is:
 
@@ -34,7 +34,7 @@ from . import g2pmodel
 
 VOCAB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vocab.json')
 
-# The ARPAbet phones (lib/phonemes.js) - the vowels carry stress 0, 1, or 2
+# The ARPAbet phones - the vowels carry stress 0, 1, or 2
 VOWELS = ['AA', 'AE', 'AH', 'AO', 'AW', 'AY', 'EH', 'ER', 'EY', 'IH', 'IY', 'OW', 'OY', 'UH', 'UW']
 CONSONANTS = ['B', 'CH', 'D', 'DH', 'F', 'G', 'HH', 'JH', 'K', 'L', 'M', 'N', 'NG', 'P', 'R', 'S', 'SH', 'T', 'TH',
               'V', 'W', 'Y', 'Z', 'ZH']
@@ -406,7 +406,7 @@ def context_sequence(items):
     return [item if isinstance(item, str) else PHRASE_MARKS[item['end']] for item, _ in items]
 
 
-# Tokenize text into phrases (textToPhrases) - [{words: [{text, phones: [{ph, stress}], isFunction, syllables}], end}];
+# Tokenize text into phrases (textToPhrases) - [{words: [{text, phones: [{ph, stress}]}], end}];
 # pronounce_word(word) gives a word's ARPAbet phones (default: the G2P network's - lib/lexicon.js setPronouncer with
 # lib/g2p.js loadG2p, as the app does: a word the network finds ambiguous takes the reading its context network chooses
 # from the neighboring words); readings ({position: phones}, a word's index in the text's words) replaces words' phones
@@ -437,13 +437,11 @@ def text_to_phrases(text, pronounce_word=None, readings=None):
         for phone in word_phones:
             match = PHONE_REGEX.match(phone)
             phones.append({'ph': match.group(1), 'stress': None if match.group(2) is None else int(match.group(2))})
-        is_function = item in FUNCTION_WORDS
-        if is_function:
+        if item in FUNCTION_WORDS:
             for phone in phones:
                 if phone['stress'] is not None:
                     phone['stress'] = 0
-        words.append({'text': item, 'phones': phones, 'isFunction': is_function,
-                      'syllables': sum(1 for phone in phones if phone['ph'] in VOWELS)})
+        words.append({'text': item, 'phones': phones})
         position += 1
     return phrases
 

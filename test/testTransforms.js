@@ -1,7 +1,7 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-import {DEFAULTS, FLOOR_DB, NAMES, TRACT_FREQUENCIES} from '../lib/params.js';
+import {FLOOR_DB, NAMES, PARAMETERS, TRACT_FREQUENCIES} from '../lib/params.js';
 import {
     applyTransforms, effort, frication, level, pitchRange, pitchScale, press, rdScale, shelf, tractScale, whisper
 } from '../lib/transforms.js';
@@ -12,7 +12,7 @@ import test from 'node:test';
 // A frame of parameter values (the defaults, with some voicing)
 const IX = Object.fromEntries(NAMES.map((name, ix) => [name, ix]));
 function frame(values = {}) {
-    const out = Float64Array.from(NAMES, (name) => DEFAULTS[name]);
+    const out = Float64Array.from(PARAMETERS, (parameter) => parameter.default);
     for (const [name, value] of Object.entries({'f0': 120, 'av': -6, 'ah': -40, 'jitter': 0.01, 'shimmer': 0.04, ...values})) {
         out[IX[name]] = value;
     }

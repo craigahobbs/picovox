@@ -306,21 +306,18 @@ multi-speaker model takes a speaker (`--speaker`, `--blend`) and a style (`--sty
 
 The training dashboard, `tools/dashboard/`, follows `make train` as it runs: serve the repository (`python3 -m
 http.server`) and open http://localhost:8000/tools/dashboard/ (with `?train=DIR` for a run in another `TRAIN_DIR` -
-another checkout's or worktree's; default `build/train`). It has five tabs (each linkable, e.g. `#listen`): Train,
-Listen, Runs, Logs, and Archive. Train is the `make train` run (the default tab while it runs): the run's state, its
-ETA and critical path; the CPU and GPU utilization over the run with each stage as a band (the GPU's idle time shaded,
+another checkout's or worktree's; default `build/train`). It has three tabs (each linkable, e.g. `#listen`): Train,
+Listen, and Logs. Train is the `make train` run (the default tab while it runs): the run's state, its ETA and critical
+path; the CPU and GPU utilization over the run with each stage as a band (the GPU's idle time shaded,
 the forecast faded); every stage of `data/nn/train-stages.json` in collapsible groups - its state (waiting, queued for
 the GPU, running, done, failed, stopped, or not in the run's make target, from `TRAIN_DIR/stages.jsonl`), its start,
-end, and time against the expected time, and its mean CPU and GPU use; the training runs' curves; and the gates (the
-heteronym and G2P checks, the listener panel's scores, and the pick). Listen plays the `make train` run's listening
-samples (each training stage's final model beside the shipped model - see make train, below; the stages not rendered
-yet listed as waiting) and other samples in `build/nn/`, and marks new samples until they're heard. Runs has the
-`make train` run's training runs (`TRAIN_DIR/runs/`, their `log.jsonl` and `train.log`) with charts of all their
-measurements - losses, validation, pitch error, and step times. Logs has the tails of `make train`'s logs and the logs
-in `build/nn/` updated in the last hour (all of them with "Show older logs"). Archive shows the earlier experiment
-pipelines (`tools/dashboard/pipelines/`) as they were planned: each phase a group with its share of the expected time,
-opening to its steps and what tracked each (a log, a training run, an output file, a process). It refreshes every
-second, read-only, re-fetching only what changed, and reloads itself when its own code changes.
+end, and time against the expected time, and its mean CPU and GPU use; the training runs (`TRAIN_DIR/runs/`, their
+`log.jsonl` and `train.log`) with charts of all their measurements - losses, validation, pitch error, and step times;
+and the gates (the heteronym and G2P checks, the listener panel's scores, and the pick). Listen plays the `make train`
+run's listening samples (each training stage's final model beside the shipped model - see make train, below; the
+stages not rendered yet listed as waiting), and marks new samples until they're heard. Logs has the tails of `make
+train`'s 12 most recently updated logs (all of them with "Show older logs"). It refreshes every second, read-only,
+re-fetching only what changed, and reloads itself when its own code changes.
 
 
 ## The listener panel
@@ -527,8 +524,7 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill pick  
    speaker, style, and channel-equalizer tables are copied and frozen, so a voice designed as a blend of the teacher's
    speakers is the same voice in a student. A student runs with the teacher's durations (teacher forcing on its length
    regulator) and learns L1 on the normalized parameter frames plus the duration losses against the teacher's duration
-   outputs. `--init-teacher` copies every teacher tensor of the same shape; `--feature-weight` adds intermediate-feature
-   matching. The training (`data/nn/train.json`'s `distill.train`) is 12,000 steps of Muon on the hidden matrices
+   outputs. The training (`data/nn/train.json`'s `distill.train`) is 12,000 steps of Muon on the hidden matrices
    (AdamW for the rest) with a warmup-stable-decay schedule - constant, then the last 25% cooled down by 1 - sqrt
    (`picovox_train/optim.py`). Runs go to `build/nn/runs/distill-<student>/`.
 3. **Polish** - `picovox_train/trainmulti.py`'s real-audio losses (the spectral loss through the differentiable
@@ -544,8 +540,7 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill pick  
    baseline=lib/models/voiceModel.js` speaks the packaged module, as the package loads it (`nn/js/unpack.js`) - so a new
    student must be no worse than what ships, and a better teacher never fails it.
 
-Progress lines go to `build/nn/distill/` (`targets.log`, `students.log`, `eval.log`), which the training dashboard
-follows.
+Progress lines go to `build/nn/distill/` (`targets.log`, `students.log`, `eval.log`).
 
 The first distillation (October 2026), from stage B's best checkpoint (`multi-b` step 19,000): 294,678 sentence-speaker
 pairs - 40,624 training utterances and 254,054 book sentences - 397 hours of teacher speech, 18.5 GB, made in 9
@@ -588,12 +583,12 @@ its weights bitwise - though its export and packaging from a checkpoint are.
 
 PicoVox pronounces every word with one small network, `lib/models/g2pModel.js` (`lib/g2p.js` runs it;
 `picovox_train/g2pmodel.py` is its bit-exact Python port, which pronounces the voice model's training data).
-`picovox_train/g2p.py` trains and exports it, with the recipe in `data/nn/train.json`'s `g2p` settings:
+`picovox_train/g2p.py` trains it, with the recipe in `data/nn/train.json`'s `g2p` settings, and `picovox_train.context
+export` writes the module, with its context network (below):
 
 ```sh
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.heteronyms --out build/nn/heteronyms  # data/nn/g2p-relabel.json's words (optional)
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p train --out build/nn/g2p-train      # four stages, about 30 minutes on one CPU core
-PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p export build/nn/g2p-train --out lib/models/g2pModel.js
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.g2p evaluate                            # the book-token error of lib/models/g2pModel.js
 ```
 
@@ -713,14 +708,13 @@ build/venv-nn/bin/python -I train/src/picovox_train/corpora.py          # downlo
 | Corpus | Speakers | Download | License |
 | --- | --- | --- | --- |
 | [CMU ARCTIC](http://festvox.org/cmu_arctic/) 0.95 releases | bdl, rms (male); slt, clb (female) - 1,132 sentences each, 16 kHz, with phone labels | 460 MB | CMU ARCTIC free license (any use, keep the notice) |
-| CMU ARCTIC packed | aew (male); eey, ljm, lnh (female) - WAV and text only | 260 MB | CMU ARCTIC free license |
 | [LibriTTS-R](https://www.openslr.org/141/) | LibriVox audiobook readers, 24 kHz | | CC BY 4.0 |
 | [LibriTTSLabel](https://github.com/kan-bayashi/LibriTTSLabel) | Montreal Forced Aligner phone alignments of LibriTTS | | none stated - used locally, not redistributed |
 | [CREMA-D](https://github.com/CheyneyComputerScience/CREMA-D) | 91 actors' emotional speech (`picovox_train.cremad fetch`) | | ODbL |
 
-The four labeled ARCTIC speakers' analysis settings (pitch range and formant ceiling, `data/targets/arctic-*.json`) were
+The four labeled ARCTIC speakers' analysis settings (pitch range and formant ceiling, in `data/nn/speakers.json`) were
 measured by the rule-based synthesizer's calibration tool, `tools/targets.py` (removed in commit 33fbfad; see git
-history); `picovox_train/data.py` featurizes their recordings with them.
+history).
 
 
 ## License

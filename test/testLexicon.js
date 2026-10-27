@@ -91,7 +91,7 @@ test('lexicon.setPronouncer, readings from context', async () => {
     lexicon.setPronouncer(pronounce);
     const phrases = lexicon.textToPhrases('I will read; I read it. Read!');
     assert.deepEqual(phrases.map(wordPhones), [['W ER0 D', 'W ER0 D', 'R IY1 D'], ['W ER0 D', 'R EH1 D', 'W ER0 D'], ['R EH1 D']]);
-    assert.deepEqual(phrases.map((phrase) => [phrase.end, phrase.major]), [['comma', true], ['period', false], ['exclamation', false]]);
+    assert.deepEqual(phrases.map((phrase) => phrase.end), ['comma', 'period', 'exclamation']);
     const items = ['i', 'will', 'read', ',', 'i', 'read', 'it', '.', 'read', '!'];
     assert.deepEqual(choices, [[items, 2], [items, 5], [items, 8]]);
 });
@@ -101,8 +101,6 @@ test('lexicon.textToPhrases, the G2P network', () => {
     const [phrase] = textToPhrases('Hello world');
     assert.deepEqual(wordTexts(phrase), ['hello', 'world']);
     assert.deepEqual(wordPhones(phrase), ['HH AH0 L OW1', 'W ER1 L D']);
-    assert.deepEqual(phrase.words.map((word) => word.syllables), [2, 1]);
-    assert.deepEqual(phrase.words.map((word) => word.isFunction), [false, false]);
     assert.equal(phrase.end, 'period');
 
     // Words no dictionary has, and a heteronym read from its context
@@ -116,7 +114,6 @@ test('lexicon.textToPhrases, function words', async () => {
     const lexicon = await freshLexicon('function-words');
     lexicon.setPronouncer(miniPronouncer);
     const [phrase] = lexicon.textToPhrases('have the box');
-    assert.deepEqual(phrase.words.map((word) => word.isFunction), [true, true, false]);
 
     // Function words are unaccented - their vowels' stress is reduced
     assert.deepEqual(wordPhones(phrase), ['HH AE0 V', 'DH AH0', 'B AA1 K S']);
@@ -131,7 +128,6 @@ test('lexicon.textToPhrases, phrase ends', () => {
     assert.deepEqual(phrases.map((phrase) => phrase.end), [
         'comma', 'comma', 'comma', 'period', 'question', 'wh', 'wh', 'exclamation', 'period'
     ]);
-    assert.deepEqual(phrases.map((phrase) => phrase.major), [false, true, true, false, false, false, false, false, false]);
 });
 
 
@@ -141,9 +137,7 @@ test('lexicon.textToPhrases, parentheses', () => {
     assert.deepEqual(phrases.map(wordTexts), [
         ['he', 'left', 'the', 'room'], ['quietly'], ['as', 'always'], ['and', 'closed', 'the', 'door']
     ]);
-    assert.deepEqual(phrases.map((phrase) => [phrase.end, phrase.major]), [
-        ['comma', false], ['comma', false], ['comma', false], ['period', false]
-    ]);
+    assert.deepEqual(phrases.map((phrase) => phrase.end), ['comma', 'comma', 'comma', 'period']);
 
     // A punctuation mark right after a parenthesis ends the phrase (the parenthesis adds no break)
     phrases = textToPhrases('She was born (1818), lived (long); and died (old). Was it (really)? (Aside.) The end (truly)');
@@ -151,9 +145,8 @@ test('lexicon.textToPhrases, parentheses', () => {
         ['she', 'was', 'born'], ['eighteen', 'eighteen'], ['lived'], ['long'], ['and', 'died'], ['old'], ['was', 'it'], ['really'],
         ['aside'], ['the', 'end'], ['truly']
     ]);
-    assert.deepEqual(phrases.map((phrase) => [phrase.end, phrase.major]), [
-        ['comma', false], ['comma', false], ['comma', false], ['comma', true], ['comma', false], ['period', false],
-        ['comma', false], ['question', false], ['period', false], ['comma', false], ['period', false]
+    assert.deepEqual(phrases.map((phrase) => phrase.end), [
+        'comma', 'comma', 'comma', 'comma', 'comma', 'period', 'comma', 'question', 'period', 'comma', 'period'
     ]);
 });
 

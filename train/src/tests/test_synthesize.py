@@ -9,8 +9,9 @@ import unittest.mock
 import numpy
 import torch
 
-from picovox_train import export, params, synthesize
+from picovox_train import export, params
 
+from . import synthesize
 from .test_trainmulti import TrainData
 
 

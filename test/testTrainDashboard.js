@@ -238,12 +238,5 @@ test('train.listenModels', () => {
     states.set('samples-teacher', {'status': 'skipped'});
     assert.deepEqual(train.listenModels(listenManifest, states, [teacher]).map((model) => [model.key, model.status]),
         [['reference', 'waiting'], ['teacher', 'done']]);
-
-    // A run before the samples stages - only the index's models (an unknown one last)
-    const other = {'stage': 'other', 'file': 'other.wav', 'mos': null};
-    assert.deepEqual(train.listenModels(manifest, new Map(), [other, teacher]), [
-        {'key': 'teacher', 'stage': null, 'status': 'done', 'samples': [teacher]},
-        {'key': 'other', 'stage': null, 'status': 'done', 'samples': [other]}
-    ]);
 });
 

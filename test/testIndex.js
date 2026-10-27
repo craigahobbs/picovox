@@ -339,15 +339,15 @@ class FakeAudioContext {
 FakeAudioContext.instances = [];
 
 
-// Run a function with a global AudioContext class (or webkitAudioContext) - Node has neither
-async function withAudioContext(name, callback) {
-    assert.equal(globalThis[name], undefined);
-    globalThis[name] = FakeAudioContext;
+// Run a function with a global AudioContext class - Node has none
+async function withAudioContext(callback) {
+    assert.equal(globalThis.AudioContext, undefined);
+    globalThis.AudioContext = FakeAudioContext;
     FakeAudioContext.instances = [];
     try {
         await callback();
     } finally {
-        delete globalThis[name];
+        delete globalThis.AudioContext;
     }
 }
 
@@ -412,7 +412,7 @@ test('speak, Node', () => {
 
 
 test('speak', async () => {
-    await withAudioContext('AudioContext', async () => {
+    await withAudioContext(async () => {
         const shortText = 'Hello there. How are you?';
         const {samples} = await synthesize(shortText, {'voice': 'female'});
         const playback = speak(shortText, {'voice': 'female'});
@@ -445,7 +445,7 @@ test('speak', async () => {
 
 
 test('speak, ahead of playback', async () => {
-    await withAudioContext('AudioContext', async () => {
+    await withAudioContext(async () => {
         // Synthesis stays at most a few seconds ahead of playback
         const longText = 'It was the best of times, it was the worst of times, it was the age of wisdom, it was the age of ' +
             'foolishness, it was the epoch of belief, it was the epoch of incredulity, it was the season of light.';
@@ -472,7 +472,7 @@ test('speak, ahead of playback', async () => {
 
 
 test('speak, stop', async () => {
-    await withAudioContext('AudioContext', async () => {
+    await withAudioContext(async () => {
         // Stopped while ahead of playback - the scheduled blocks are stopped, no more are synthesized
         const longText = 'It was the best of times, it was the worst of times, it was the age of wisdom, it was the age of ' +
             'foolishness, it was the epoch of belief, it was the epoch of incredulity.';
@@ -498,7 +498,7 @@ test('speak, stop', async () => {
 
 
 test('speak, stop at once', async () => {
-    await withAudioContext('AudioContext', async () => {
+    await withAudioContext(async () => {
         // Stopped before the first block - nothing is played
         const playback = speak(text);
         playback.stop();
@@ -521,18 +521,6 @@ test('speak, a given context', async () => {
     assert.equal(context.closed, 0);
     assert.deepEqual(context.samples(), (await synthesize('Hello.', {'seed': 5, 'sampleRate': 16000})).samples);
     assert(context.sources.every((source) => source.buffer.sampleRate === 16000));
-});
-
-
-test('speak, webkitAudioContext', async () => {
-    await withAudioContext('webkitAudioContext', async () => {
-        const playback = speak('Hello.', {'sampleRate': 16000});
-        const [context] = FakeAudioContext.instances;
-        await playThrough(context, playback);
-        assert.equal(context.sampleRate, 16000);
-        assert(context.sources.length > 0);
-        assert.equal(context.closed, 1);
-    });
 });
 
 

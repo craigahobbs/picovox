@@ -16,10 +16,9 @@ import warnings
 import numpy
 
 from picovox_train import heteronyms
-from picovox_train.wav import write_wav
 
 from . import data_fixtures
-from .helpers import captured
+from .helpers import captured, write_wav
 
 
 # The tiny dictionary - word to its pronunciations

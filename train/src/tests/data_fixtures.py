@@ -15,7 +15,9 @@ import types
 import numpy
 
 from picovox_train import frontend
-from picovox_train.wav import read_wav, write_wav
+from picovox_train.wav import read_wav
+
+from .helpers import write_wav
 
 
 class FakeResponse(io.BytesIO):

@@ -21,8 +21,8 @@ import warnings
 import numpy
 import torch
 
-from picovox_train.wav import write_wav as write_pcm
 from tests import data_fixtures, helpers
+from tests.helpers import write_wav as write_pcm
 
 
 # (listeners.py sets the model caches' environment variables when imported - kept out of the tests' environment)

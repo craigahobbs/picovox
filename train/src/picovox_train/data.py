@@ -30,7 +30,6 @@ import hashlib
 import json
 import os
 import re
-import subprocess
 
 import numpy as np
 
@@ -56,7 +55,7 @@ MAX_EDGE_SILENCE = 0.2                     # seconds of leading and trailing sil
 FORMAT_VERSION = 1
 CHANNELS = ['f0', 'voiced', 'strength', 'hnr', 'energy', 'f1', 'f2', 'f3', 'f4', 'b1', 'b2', 'b3', 'b4']
 CHANNEL_NOTES = {
-    'f0': 'Praat autocorrelation F0 (Hz), 0 where unvoiced - speaker-adaptive range from data/targets/arctic-<speaker>.json',
+    'f0': 'Praat autocorrelation F0 (Hz), 0 where unvoiced - the speaker\'s range (data/nn/speakers.json)',
     'voiced': '1 where Praat finds the frame voiced, else 0',
     'strength': 'Praat pitch strength (autocorrelation peak, 0-1) of the selected candidate, 0 where unvoiced',
     'hnr': 'Harmonics-to-noise ratio (dB, cross-correlation), clipped to [-20, 40] (-20 in silence)',
@@ -148,13 +147,6 @@ def arctic_utterances(speaker):
 def sentence_split(sentence):
     bucket = int(hashlib.sha1(sentence.encode('utf-8')).hexdigest(), 16) % 100
     return 'test' if bucket < 5 else ('val' if bucket < 10 else 'train')
-
-
-# A speaker's analysis settings from data/targets/arctic-<speaker>.json - (pitch floor, pitch ceiling, formant ceiling)
-def speaker_settings(speaker):
-    with open(os.path.join(ROOT, 'data', 'targets', f'arctic-{speaker}.json'), encoding='utf-8') as file:
-        analysis = json.load(file)['analysis']
-    return analysis['pitchFloor'], analysis['pitchCeiling'], analysis['formantCeiling']
 
 
 # Typical label durations (seconds) by comparison key over a speaker's labels - for splitting alignment blocks
@@ -353,15 +345,3 @@ class ArcticData:
             'audio': np.array(self.audio[samples], dtype=np.float32) / 32768.0,
             'frames': np.array(self.frames[frames], dtype=np.float32)
         }
-
-
-#
-# Token verification - lib/tokens.js against frontend.py
-#
-
-# Tokenize texts with lib/tokens.js
-def js_tokenize(texts):
-    process = subprocess.run(['node', os.path.join(ROOT, 'nn', 'js', 'tokenizeLines.js')],
-                             input=''.join(json.dumps(text) + '\n' for text in texts), capture_output=True,
-                             text=True, check=True, cwd=ROOT)
-    return [json.loads(line) for line in process.stdout.splitlines()]

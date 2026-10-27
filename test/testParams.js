@@ -1,7 +1,7 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-import {DB_NAMES, DEFAULTS, EQ_BAND_COUNT, FRAME_RATE, NAMES, PARAMETERS, REF_RATE, TRACT_FREQUENCIES} from '../lib/params.js';
+import {DB_NAMES, EQ_BAND_COUNT, FRAME_RATE, NAMES, PARAMETERS, REF_RATE, TRACT_FREQUENCIES} from '../lib/params.js';
 import {strict as assert} from 'node:assert';
 import test from 'node:test';
 
@@ -17,7 +17,6 @@ test('params', () => {
     for (const parameter of PARAMETERS) {
         assert(['log', 'linear'].includes(parameter.scale));
         assert(parameter.low <= parameter.default && parameter.default <= parameter.high, parameter.name);
-        assert.equal(DEFAULTS[parameter.name], parameter.default);
         assert(parameter.doc);
     }
     assert(DB_NAMES.every((name) => NAMES.includes(name)));

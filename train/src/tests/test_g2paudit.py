@@ -18,10 +18,9 @@ import numpy
 import torch
 
 from picovox_train import cremad, g2p, g2paudit, heteronyms
-from picovox_train.wav import write_wav
 
 from . import data_fixtures
-from .helpers import captured
+from .helpers import captured, write_wav
 
 
 # The tiny dictionary - a few dozen words, some with variants (hobbes's first is the error)
@@ -64,7 +63,7 @@ WORDS = {
 
 # The settings - a tiny model
 CONFIG = {'model': {'embed': 4, 'hidden': 4}, 'batch': 8, 'alpha': 0.5, 'uniform': 0.5, 'unknown': 0.3, 'threads': 1,
-          'stages': [{'name': 'base', 'steps': 2, 'lr': 0.003, 'warmup': 1, 'seed': 1}], 'export': {'bits': 6}}
+          'stages': [{'name': 'base', 'steps': 2, 'lr': 0.003, 'warmup': 1, 'seed': 1}]}
 
 
 # A tiny screening model (untrained, seeded)

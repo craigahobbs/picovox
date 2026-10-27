@@ -255,22 +255,18 @@ export function forecast(manifest, states, remaining, now) {
 
 
 // The listening samples by model - [{key, stage, status, samples}] for each model with a samples stage in the manifest
-// (data/nn/train-stages.json's samples - teacher-a, teacher-b, student, polish) or samples in the index
-// ($(TRAIN_DIR)/samples/index.json, tools/trainsamples.js), in the order of the training stages they follow (the samples
-// key is the training stage's name), the reference (the shipped model - key reference) first. stage is the samples stage
-// (null for an index-only model - a run before the samples stages), status its state (done when its samples are in the
-// index), and samples its index entries ([] until rendered). A model whose samples stage isn't in the run's make target
-// (skipped) and has no samples isn't listed.
+// (data/nn/train-stages.json's samples - teacher-a, teacher-b, student, polish), in the order of the training stages they
+// follow (the samples key is the training stage's name), the reference (the shipped model - key reference) first. stage is
+// the samples stage, status its state (done when its samples are in the index - $(TRAIN_DIR)/samples/index.json,
+// tools/trainsamples.js), and samples its index entries ([] until rendered). A model whose samples stage isn't in the
+// run's make target (skipped) and has no samples isn't listed.
 export function listenModels(manifest, states, index) {
     const entries = Array.isArray(index) ? index : [];
-    const stageOf = new Map(manifest.stages.filter((stage) => stage.samples).map((stage) => [stage.samples, stage.stage]));
-    const keys = [...new Set([...stageOf.keys(), ...entries.map((entry) => entry.stage)])];
     const order = stageOrder(manifest).map((stage) => stage.stage);
-    const rank = (key) => (key === 'reference' ? -1 : order.indexOf(key) === -1 ? order.length : order.indexOf(key));
-    keys.sort((first, second) => rank(first) - rank(second));
-    return keys.map((key) => {
+    const rank = (key) => (key === 'reference' ? -1 : order.indexOf(key));
+    const stages = manifest.stages.filter((stage) => stage.samples).toSorted((first, second) => rank(first.samples) - rank(second.samples));
+    return stages.map(({samples: key, stage}) => {
         const samples = entries.filter((entry) => entry.stage === key);
-        const stage = stageOf.get(key) ?? null;
         const status = samples.length !== 0 ? 'done' : (states.get(stage)?.status ?? 'waiting');
         return {key, stage, status, samples};
     }).filter((model) => model.status !== 'skipped');

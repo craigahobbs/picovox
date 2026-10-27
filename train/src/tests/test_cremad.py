@@ -20,9 +20,9 @@ import numpy
 import torch
 
 from picovox_train import cremad, data, frontend
-from picovox_train.wav import write_wav
 from tests import data_fixtures, helpers
 from tests.data_fixtures import FakeResponse
+from tests.helpers import write_wav
 
 
 # A recognizer vocabulary - the blank and specials, then every IPA token
@@ -138,12 +138,6 @@ def tiny_cremad():
             file.write(''.join(json.dumps(record) + '\n' for record in records))
         with open(os.path.join(cremad_dir, 'VideoDemographics.csv'), 'w', encoding='utf-8') as file:
             file.write('ActorID,Age,Sex,Race,Ethnicity\n1001,51,Male,Caucasian,Not Hispanic\n1002,21,Female,Asian,Not Hispanic\n')
-        with open(os.path.join(cremad_dir, 'finishedResponses.csv'), 'w', encoding='utf-8') as file:
-            file.write('localid,sessionNums,queryType,questNum,respEmo,respLevel,dispEmo,dispVal,clipNum,clipName\n'
-                       '1,1,1,1,A,80,A,80,1,1001_IEO_ANG_HI\n2,1,1,1,A,60,A,60,1,1001_IEO_ANG_HI\n'
-                       '3,1,1,1,N,,N,0,1,1001_IEO_ANG_HI\n4,1,2,1,A,50,A,50,1,1001_IEO_ANG_HI\n'
-                       '5,1,1,1,X,50,A,50,1,1001_IEO_ANG_HI\n6,1,1,1,H,40,H,40,1,1002_IWW_SAD_XX\n'
-                       '7,1,1,1,N,,N,0,1,1002_IWW_SAD_XX\n')
         with unittest.mock.patch.object(cremad, 'CREMAD_DIR', cremad_dir), \
                 unittest.mock.patch.object(cremad, 'WAV_DIR', wav_dir), \
                 unittest.mock.patch.object(cremad, 'BUILD_DIR', build_dir), \
@@ -267,19 +261,12 @@ class TestClips(unittest.TestCase):
         with tiny_cremad():
             items = cremad.clips()
             actors = cremad.actors()
-            ratings = cremad.voice_ratings()
         self.assertEqual([item['id'] for item in items], sorted(CLIPS))
         self.assertEqual({key: value for key, value in items[0].items() if key != 'wav'},
                          {'id': '1001_IEO_ANG_HI', 'actor': '1001', 'sentence': 'IEO', 'emotion': 'angry', 'intensity': 'high',
                           'text': 'It\'s eleven o\'clock.'})
         self.assertEqual(actors, {'1001': {'sex': 'male', 'age': 51, 'race': 'Caucasian', 'ethnicity': 'Not Hispanic'},
                                   '1002': {'sex': 'female', 'age': 21, 'race': 'Asian', 'ethnicity': 'Not Hispanic'}})
-        self.assertEqual(ratings['1001_IEO_ANG_HI'], {
-            'votes': {'angry': 2, 'disgusted': 0, 'fearful': 0, 'happy': 0, 'neutral': 1, 'sad': 0}, 'count': 3, 'vote': 'angry',
-            'agreement': 0.667, 'level': 70.0})
-        self.assertEqual(ratings['1002_IWW_SAD_XX'], {
-            'votes': {'angry': 0, 'disgusted': 0, 'fearful': 0, 'happy': 1, 'neutral': 1, 'sad': 0}, 'count': 2,
-            'vote': 'happy:neutral', 'agreement': 0.0, 'level': None})
 
     def test_clip_split(self):
         splits = [cremad.clip_split(f'{1001 + number}', 'IEO') for number in range(200)]
@@ -509,9 +496,7 @@ class TestBuild(unittest.TestCase):
         self.assertEqual((relabeled['sentence'], relabeled['text'], relabeled['relabeled']), ('DFA', cremad.SENTENCES['DFA'], True))
         angry = entries['cremad/1001_IEO_ANG_HI']
         self.assertEqual((angry['emotion'], angry['emotionId'], angry['intensity'], angry['intensityId']), ('angry', 0, 'high', 2))
-        self.assertEqual((angry['voiceVote'], angry['voiceAgreement'], angry['voiceLevel'], angry['voiceRatings']),
-                         ('angry', 0.667, 70.0, 3))
-        self.assertEqual(entries['cremad/1002_TAI_ANG_XX']['voiceRatings'], 0)
+        self.assertEqual((angry['phoneError'], angry['clipped']), (0.0, 0.0))
         for entry in index['utterances']:
             arrays = corpus.arrays(entry)
             self.assertEqual(arrays['tokens'].tolist(), frontend.tokenize(entry['text'])['ids'])

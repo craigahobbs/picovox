@@ -264,13 +264,6 @@
     .phase[open] .phase-count::before {
         content: "▾ ";
     }
-    .phase:not([open]) .phase-detail {
-        display: none;
-    }
-    .phase-detail {
-        font-size: 0.8rem;
-        color: var(--muted);
-    }
     .steps {
         display: grid;
         gap: 6px;
@@ -512,20 +505,6 @@
         white-space: pre-wrap;
         overflow-wrap: anywhere;
     }
-    .samples {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-        gap: 8px;
-    }
-    .sample {
-        display: grid;
-        gap: 4px;
-        font-size: 0.8rem;
-        min-width: 0;
-    }
-    .sample span {
-        overflow-wrap: anywhere;
-    }
     audio {
         width: 100%;
         height: 32px;
@@ -559,19 +538,6 @@
     #trainGates .step {
         min-height: 2.4rem;
     }
-    .archive-select {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: baseline;
-        gap: 8px;
-        font-weight: 600;
-    }
-    .archive-select select {
-        min-width: 0;
-        max-width: 100%;
-        font: inherit;
-        font-weight: 400;
-    }
     .empty {
         color: var(--muted);
         margin: 0;
@@ -582,7 +548,7 @@
 <main>
     <header>
         <h1>Training Dashboard</h1>
-        <span class="muted">PicoVox - make train (build/train/) and experiments (build/nn/)</span>
+        <span class="muted">PicoVox - make train (build/train/)</span>
         <span id="updated" class="updated"></span>
     </header>
     <nav class="tabs" role="tablist" aria-label="Dashboard pages">
@@ -592,14 +558,8 @@
         <button type="button" role="tab" id="tab-listen" data-tab="listen" aria-controls="panel-listen">
             Listen <span class="tab-fact" id="tabFactListen"></span><span class="tab-dot" id="tabDotListen" hidden></span>
         </button>
-        <button type="button" role="tab" id="tab-runs" data-tab="runs" aria-controls="panel-runs">
-            Runs <span class="tab-fact" id="tabFactTraining"></span>
-        </button>
         <button type="button" role="tab" id="tab-logs" data-tab="logs" aria-controls="panel-logs">
             Logs <span class="tab-fact" id="tabFactLogs"></span>
-        </button>
-        <button type="button" role="tab" id="tab-archive" data-tab="archive" aria-controls="panel-archive">
-            Archive <span class="tab-fact" id="tabFactArchive"></span>
         </button>
     </nav>
     <div class="tab-panel" id="panel-train" role="tabpanel" aria-labelledby="tab-train">
@@ -634,23 +594,6 @@
             <ul id="trainGates" class="steps"></ul>
         </section>
     </div>
-    <div class="tab-panel" id="panel-archive" role="tabpanel" aria-labelledby="tab-archive" hidden>
-        <section>
-            <label class="archive-select">Archived pipeline
-                <select id="archiveSelect"></select>
-            </label>
-            <p class="muted checkpoint-note">The earlier experiment pipelines (tools/dashboard/pipelines/), each as it was
-                planned - its phases and steps, and what tracked each. Their runs moved to build/archive/runs/
-                (build/archive/MOVED.md).</p>
-        </section>
-        <section id="pipelineSection" hidden>
-            <div class="pipeline-head">
-                <h2 id="pipelineTitle">Pipeline</h2>
-                <span id="pipelineFacts" class="facts"></span>
-            </div>
-            <div id="phases" class="phases"></div>
-        </section>
-    </div>
     <div class="tab-panel" id="panel-listen" role="tabpanel" aria-labelledby="tab-listen" hidden>
         <section id="trainSamplesSection" hidden>
             <div class="pipeline-head">
@@ -661,20 +604,6 @@
                 model - the newest first; UTMOS, 1-5 (real recordings score about 4.1-4.3).</p>
             <div id="trainSamples" class="checkpoints"></div>
         </section>
-        <section>
-            <h2>Other samples</h2>
-            <div id="samples" class="samples"><p class="empty">No samples yet.</p></div>
-        </section>
-    </div>
-    <div class="tab-panel" id="panel-runs" role="tabpanel" aria-labelledby="tab-runs" hidden>
-        <section>
-            <h2 id="runsTitle">Runs</h2>
-            <div id="runs" class="runs"><p class="empty">Looking for make train's runs...</p></div>
-        </section>
-        <section>
-            <h2 id="chartsTitle">Curves</h2>
-            <div id="charts" class="charts"></div>
-        </section>
     </div>
     <div class="tab-panel" id="panel-logs" role="tabpanel" aria-labelledby="tab-logs" hidden>
         <section>
@@ -682,7 +611,7 @@
                 <h2>Activity logs</h2>
                 <label class="facts"><input type="checkbox" id="olderLogs"> Show older logs <span id="olderCount"></span></label>
             </div>
-            <div id="logs" class="logs"><p class="empty">Looking for logs in build/nn/...</p></div>
+            <div id="logs" class="logs"><p class="empty">Looking for make train's logs...</p></div>
         </section>
     </div>
 </main>

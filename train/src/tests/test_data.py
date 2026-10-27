@@ -4,7 +4,6 @@
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
 import os
-import subprocess
 import tempfile
 import unittest
 import unittest.mock
@@ -12,8 +11,9 @@ import unittest.mock
 import numpy
 
 from picovox_train import data, frontend
-from picovox_train.wav import read_wav, write_wav
+from picovox_train.wav import read_wav
 from tests import data_fixtures, helpers
+from tests.helpers import write_wav
 
 
 class TestReading(unittest.TestCase):
@@ -61,11 +61,6 @@ class TestReading(unittest.TestCase):
         splits = {data.sentence_split(f'arctic_a{number:04d}') for number in range(200)}
         self.assertEqual(splits, {'train', 'val', 'test'})
         self.assertEqual(data.sentence_split('arctic_a0001'), data.sentence_split('arctic_a0001'))
-
-    def test_speaker_settings(self):
-        floor, ceiling, formant = data.speaker_settings('slt')
-        self.assertLess(floor, ceiling)
-        self.assertGreater(formant, 4000)
 
     def test_mean_label_seconds(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -215,13 +210,3 @@ class TestLoading(unittest.TestCase):
             self.assertEqual(len(arrays['audio']), entry['sampleCount'])
             self.assertLessEqual(float(numpy.abs(arrays['audio']).max()), 1.0)
             self.assertEqual(arrays['frames'].shape, (entry['frameCount'], len(data.CHANNELS)))
-
-
-class TestTokens(unittest.TestCase):
-
-    def test_js_tokenize_command(self):
-        with unittest.mock.patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '{"a": 1}\n[2]\n')) as run:
-            self.assertEqual(data.js_tokenize(['x', 'y']), [{'a': 1}, [2]])
-        command = run.call_args
-        self.assertEqual(command.args[0], ['node', os.path.join(data.ROOT, 'nn', 'js', 'tokenizeLines.js')])
-        self.assertEqual(command.kwargs['input'], '"x"\n"y"\n')

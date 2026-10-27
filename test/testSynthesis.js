@@ -2,12 +2,12 @@
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 import {autoStyles, paragraphBeats} from '../lib/style.js';
+import {concatBlocks, render} from '../lib/render.js';
 import {
-    blockSize, createSentenceRenderer, defaultSampleRate, defaultVoice, modelLoader, outputGain, paragraphPause, sentenceBlocks,
+    createSentenceRenderer, defaultSampleRate, defaultVoice, modelLoader, outputGain, paragraphPause, sentenceBlocks,
     sentenceFrames, sentencePause, softLimit, sourceShelf, spanFrames, styleSettings, styleTable, textBlocks, voiceSettings,
     voiceSpeaker, voiceTable
 } from '../lib/synthesis.js';
-import {concatBlocks, render} from '../lib/render.js';
 import {speechText, splitSentences} from '../lib/sentences.js';
 import {Buffer} from 'node:buffer';
 import {applyTransforms} from '../lib/transforms.js';
@@ -46,7 +46,6 @@ function directSentence(text, {speaker, rate = 1, seed = 1, pause = 0, sampleRat
 
 test('synthesis, constants', () => {
     assert.equal(defaultSampleRate, 24000);
-    assert.equal(blockSize, 2048);
     assert.equal(outputGain, 1.3);
     assert.equal(sentencePause, 0.24);
     assert.equal(paragraphPause, 0.4);
@@ -301,8 +300,8 @@ test('sentenceBlocks', () => {
     const blocks = [...sentenceBlocks(model, text, options)];
     assert.equal(blocks[0].length, Math.round(defaultSampleRate * paragraphPause / 1.2));
     assert(blocks[0].every((value) => value === 0));
-    assert(blocks.slice(1, -1).every((block) => block.length === blockSize));
-    assert(blocks[blocks.length - 1].length <= blockSize);
+    assert(blocks.slice(1, -1).every((block) => block.length === 2048));
+    assert(blocks[blocks.length - 1].length <= 2048);
     assert.deepEqual(concatBlocks(blocks), directSentence(text, options));
 
     // Another sample rate
@@ -329,7 +328,7 @@ test('sentenceBlocks, streaming', () => {
     const second = iterator.next();
     const firstMs = performance.now() - startFirst;
     assert.equal(first.value.length, Math.round(defaultSampleRate * sentencePause));
-    assert.equal(second.value.length, blockSize);
+    assert.equal(second.value.length, 2048);
     const rest = [...iterator];
     const startWhole = performance.now();
     const whole = directSentence(text, options);

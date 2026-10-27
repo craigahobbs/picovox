@@ -37,9 +37,8 @@ bidirectional GRU runs over the window's vectors; a tanh layer of its outputs at
 layer of the word's own vector - so a word can flip a shared context feature (a noun's position means reading 0 for one
 word and 1 for another) - gives the reading slots' logits. Slot k is the G2P's reading k, so the network is
 word-independent - the word's spelling is part of its input. Trained with cross entropy on the labels (words balanced -
-a word's share of the samples grows as its examples ** "balance"; optionally ("prior"), a reading's share within a word
-follows its count in running text; dropout, weight decay, and "itemDropout" - context items dropped as beyond the text),
-then "quantSteps" of quantization-aware training at the export's bits.
+a word's share of the samples grows as its examples ** "balance"; dropout, weight decay, and "itemDropout" - context
+items dropped as beyond the text), then "quantSteps" of quantization-aware training at the export's bits.
 
 Distilled from an ensemble, for steadiness: a single network's choices in contexts its labels don't cover depend on its
 seed (five seeds of the same data differed on 14% of unlabeled book windows and 9 of the regression set's cases a
@@ -413,7 +412,7 @@ class WeightQuantizer:
         self.saved = [parameter.data.clone() for _, parameter in self.parameters]
         for _, parameter in self.parameters:
             values = parameter.data.double().numpy()
-            _, _, dequantized = quantize_array(values, self.spec['bits'], self.spec['groupSize'])
+            _, _, dequantized = quantize_array(values, self.spec['bits'])
             parameter.data.copy_(torch.from_numpy(dequantized).float())
 
     def restore(self):
@@ -460,21 +459,9 @@ def train_context(labels, settings, log, teachers=None):
     examples = [example for example in labels['examples'] if example['split'] == 'train']
     examples += [example for example in examples if example['source'] == 'seed'] * (int(settings['seedRepeat']) - 1)
     # Each word's share of the samples grows as its examples ** balance; within a word, the readings' shares are their
-    # examples' (seeds repeated seedRepeat times), or with prior, a reading's natural count (the aligned and tagged
-    # examples - running text) plus one, to the power prior (the seeds show a reading's contexts, not how common it is)
+    # examples' (seeds repeated seedRepeat times)
     counts = collections.Counter(example['word'] for example in examples)
-    slot_examples = collections.Counter((example['word'], example['slot']) for example in examples)
-    natural = collections.Counter((example['word'], example['slot']) for example in examples if example['source'] in ('aligned', 'silver'))
-    shares = {}
-    for word in counts:
-        slots = sorted(slot for (other, slot) in slot_examples if other == word)
-        powers = {slot: (natural[(word, slot)] + 1) ** float(settings['prior'] or 0) for slot in slots}
-        shares.update({(word, slot): power / sum(powers.values()) for slot, power in powers.items()})
-    if settings['prior'] is None:
-        weights = numpy.array([counts[example['word']] ** (float(settings['balance']) - 1) for example in examples])
-    else:
-        weights = numpy.array([counts[example['word']] ** float(settings['balance']) * shares[(example['word'], example['slot'])] /
-                               slot_examples[(example['word'], example['slot'])] for example in examples])
+    weights = numpy.array([counts[example['word']] ** (float(settings['balance']) - 1) for example in examples])
     probabilities = weights / weights.sum()
     chars, lengths = window_arrays([example['window'] for example in examples])
     slots = numpy.array([example['slot'] for example in examples])
@@ -644,7 +631,7 @@ def base64_lines(text):
     return [text[index:index + MODULE_LINE_LENGTH] for index in range(0, len(text), MODULE_LINE_LENGTH)]
 
 
-def module_text(g2p_config, g2p_quantized, context_config, context_quantized, spec, comment):
+def module_text(g2p_config, g2p_quantized, context_config, context_quantized, comment):
     """The generated module's text - g2p.py's G2P module with 'readings' and the reading tensors, and a 'context'
     section (the context network's manifest and weights)"""
     config = model_config(g2p_config)
@@ -674,7 +661,6 @@ def module_text(g2p_config, g2p_quantized, context_config, context_quantized, sp
         f'    \'upsample\': {UPSAMPLE},',
         f'    \'maxLetters\': {MAX_WORD},',
         f'    \'readings\': {g2p_config["readings"]},',
-        f'    \'groupSize\': {spec.get("groupSize", 0)},',
         f'    \'layout\': \'{g2p_encoding["layout"]}\',',
         f'    \'deflate\': {"true" if g2p_encoding["deflate"] else "false"},',
         '    \'tensors\': [',
@@ -689,7 +675,6 @@ def module_text(g2p_config, g2p_quantized, context_config, context_quantized, sp
         f'        \'hidden\': {context_config["hidden"]},',
         f'        \'layer\': {context_config["layer"]},',
         f'        \'slots\': {context_config["slots"]},',
-        f'        \'groupSize\': {spec.get("groupSize", 0)},',
         f'        \'layout\': \'{context_encoding["layout"]}\',',
         f'        \'deflate\': {"true" if context_encoding["deflate"] else "false"},',
         '        \'tensors\': [',
@@ -713,9 +698,8 @@ def command_export(args):
     import torch  # pylint: disable=import-outside-toplevel
     g2p_checkpoint = torch.load(args.g2p, map_location='cpu', weights_only=False)
     context_checkpoint = torch.load(args.context, map_location='cpu', weights_only=False)
-    spec = {**EXPORT, **({'bits': args.bits} if args.bits else {})}
-    g2p_quantized = quantize_state(g2p_checkpoint['state'], spec)
-    context_quantized = quantize_state(context_checkpoint['state'], spec)
+    g2p_quantized = quantize_state(g2p_checkpoint['state'], EXPORT)
+    context_quantized = quantize_state(context_checkpoint['state'], EXPORT)
     g2p_parameters = sum(item['integers'].size for item in g2p_quantized)
     context_parameters = sum(item['integers'].size for item in context_quantized)
     digests = []
@@ -727,11 +711,10 @@ def command_export(args):
         f'The neural grapheme-to-phoneme model run by lib/g2p.js (and picovox_train/g2pmodel.py) - {config["design"]} design,',
         f'embedding {config["embed"]}, hidden {config["hidden"]}, {g2p_parameters} parameters with the reading input '
         f'({config["readings"]} readings) and the',
-        f'ambiguity head; and the context network, {context_parameters} parameters; {spec["bits"]}-bit weights; trained by',
-        f'picovox_train.g2p and picovox_train.context (checkpoints sha256 {digests[0]}, {digests[1]}).',
-        *args.comment
+        f'ambiguity head; and the context network, {context_parameters} parameters; {EXPORT["bits"]}-bit weights; trained by',
+        f'picovox_train.g2p and picovox_train.context (checkpoints sha256 {digests[0]}, {digests[1]}).'
     ]
-    text = module_text(config, g2p_quantized, context_checkpoint['config'], context_quantized, spec, comment)
+    text = module_text(config, g2p_quantized, context_checkpoint['config'], context_quantized, comment)
     model = g2pmodel.parse_module(text)
     tensors = g2pmodel.unpack_tensors(model)
     context_tensors = g2pmodel.unpack_tensors(model['context'])
@@ -742,7 +725,7 @@ def command_export(args):
     with open(args.out, 'w', encoding='utf-8') as file:
         file.write(text)
     log_line(None, f'export: wrote {args.out} - G2P {g2p_parameters} parameters, context {context_parameters} parameters, '
-                   f'{spec["bits"]}-bit, {len(text.encode("utf-8"))} bytes ({len(gzip.compress(text.encode("utf-8"), 9))} gzipped)')
+                   f'{EXPORT["bits"]}-bit, {len(text.encode("utf-8"))} bytes ({len(gzip.compress(text.encode("utf-8"), 9))} gzipped)')
     return 0
 
 
@@ -890,7 +873,7 @@ def command_train_g2p(args):
     labels = load_labels(args.labels)
     config = g2p.load_config(args.config)
     stage = config['stages'][-1]
-    settings = {key: value for key, value in config.items() if key not in ('stages', 'export')}
+    settings = {key: value for key, value in config.items() if key != 'stages'}
     settings = {**settings, **stage}
     data = g2p.load_data(settings.get('relabel') and os.path.join(g2p.ROOT, settings['relabel']))
     items, probabilities = g2p.training_items(data, settings)
@@ -1021,8 +1004,6 @@ def main(argv=None):
     export_parser.add_argument('--g2p', required=True)
     export_parser.add_argument('--context', required=True)
     export_parser.add_argument('--out', default=g2pmodel.MODULE_PATH)
-    export_parser.add_argument('--bits', type=int)
-    export_parser.add_argument('--comment', action='append', default=[])
     export_parser.set_defaults(func=command_export)
     check_parser = commands.add_parser('check', help='make train\'s check - a retrained module against the committed one')
     check_parser.add_argument('model')

@@ -99,7 +99,7 @@ def train_fold(task):
     data = g2p.load_data(fixes=None, books=None)
     folds = partition(sorted(data['first']), repeat)
     data['monitor'] = sorted(word for word, index in folds.items() if index == fold)
-    settings = {key: value for key, value in config.items() if key not in ('stages', 'export')}
+    settings = {key: value for key, value in config.items() if key != 'stages'}
     settings.update({key: value for key, value in SCREEN.items() if key in ('unknown', 'threads')})
     stage = {'name': name, 'steps': steps or SCREEN['steps'], 'lr': SCREEN['lr'], 'warmup': SCREEN['warmup'],
              'seed': 100 + 10 * repeat + fold}

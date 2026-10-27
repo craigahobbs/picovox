@@ -16,8 +16,8 @@ import warnings
 import numpy
 
 from picovox_train import multi, quality
-from picovox_train.wav import write_wav
 from tests import data_fixtures, helpers
+from tests.helpers import write_wav
 
 
 # A clean harmonic tone (harmonics below 2 kHz, no noise)

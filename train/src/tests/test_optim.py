@@ -50,15 +50,13 @@ class TestSchedule(unittest.TestCase):
         self.assertEqual(optim.lr_factor(5, 5, 5), 0.05 + 0.95 * 0.5 * (1 + math.cos(0.0)))
 
     def test_wsd(self):
-        # Constant after the warmup, then the last quarter cooled down linearly or by 1 - sqrt
+        # Constant after the warmup, then the last quarter cooled down by 1 - sqrt
         self.assertEqual(optim.lr_factor(0, 100, 10, 'wsd', 0.25), 0.1)
         self.assertEqual(optim.lr_factor(74, 100, 10, 'wsd', 0.25), 1.0)
         self.assertEqual(optim.lr_factor(75, 100, 10, 'wsd', 0.25), 1.0)
-        self.assertAlmostEqual(optim.lr_factor(87.5, 100, 10, 'wsd', 0.25), 0.525)
+        self.assertAlmostEqual(optim.lr_factor(81.25, 100, 10, 'wsd', 0.25), 0.05 + 0.95 * 0.5)
         self.assertAlmostEqual(optim.lr_factor(100, 100, 10, 'wsd', 0.25), optim.LR_FLOOR)
         self.assertAlmostEqual(optim.lr_factor(150, 100, 10, 'wsd', 0.25), optim.LR_FLOOR)
-        self.assertAlmostEqual(optim.lr_factor(81.25, 100, 10, 'wsd', 0.25, '1-sqrt'), 0.05 + 0.95 * 0.5)
-        self.assertAlmostEqual(optim.lr_factor(100, 100, 10, 'wsd', 0.25, '1-sqrt'), optim.LR_FLOOR)
         # (no cooldown - constant to the end)
         self.assertEqual(optim.lr_factor(100, 100, 10, 'wsd'), 1.0)
 
@@ -68,20 +66,6 @@ class TestSchedule(unittest.TestCase):
 
 
 class TestModelParameters(unittest.TestCase):
-
-    def test_zero_init_projections(self):
-        model = MultiModel(helpers.tiny_config())
-        count = optim.zero_init_projections(model)
-        # (each encoder and decoder layer's conv-FFN, and each encoder layer's attention)
-        self.assertEqual(count, 3)
-        for module in model.modules():
-            for name in ('outer', 'out'):
-                projection = getattr(module, name, None)
-                if isinstance(projection, torch.nn.Linear):
-                    self.assertEqual(projection.weight.abs().sum().item(), 0.0)
-                    self.assertEqual(projection.bias.abs().sum().item(), 0.0)
-        # (every block starts as the identity - the model still runs)
-        self.assertGreater(model.head.weight.abs().sum().item(), 0.0)
 
     def test_hidden_matrices(self):
         model = MultiModel(helpers.tiny_config())
@@ -95,17 +79,15 @@ class TestModelParameters(unittest.TestCase):
 
     def test_param_groups(self):
         model = MultiModel(helpers.tiny_config())
-        extra = torch.nn.Parameter(torch.zeros(3))
-        groups = optim.param_groups(model, [extra])
+        groups = optim.param_groups(model)
         self.assertEqual(len(groups), 1)
-        self.assertEqual(len(groups[0]['params']), len(list(model.parameters())) + 1)
-        groups = optim.param_groups(model, [extra], muon=True)
+        self.assertEqual(len(groups[0]['params']), len(list(model.parameters())))
+        groups = optim.param_groups(model, muon=True)
         self.assertEqual(len(groups), 2)
         self.assertTrue(groups[1]['muon'])
         self.assertEqual({id(parameter) for parameter in groups[1]['params']},
                          {id(matrix) for matrix in optim.hidden_matrices(model)})
-        self.assertIn(id(extra), {id(parameter) for parameter in groups[0]['params']})
-        self.assertEqual(len(groups[0]['params']) + len(groups[1]['params']), len(list(model.parameters())) + 1)
+        self.assertEqual(len(groups[0]['params']) + len(groups[1]['params']), len(list(model.parameters())))
 
 
 class TestNewtonSchulz(unittest.TestCase):
@@ -249,23 +231,3 @@ class TestLeanOptimizer(unittest.TestCase):
         # (the state is by position - the stepped one's is the first parameter's now)
         self.assertIn('step', loaded.state[model.tall.bias])
         self.assertNotIn('step', loaded.state[model.scale])
-
-
-class TestFlatEMA(unittest.TestCase):
-
-    def test_ema(self):
-        model, shadow = Small(), Small()
-        ema = optim.FlatEMA(model.parameters(), 0.5)
-        initial = [parameter.detach().clone() for parameter in model.parameters()]
-        with torch.no_grad():
-            for parameter in model.parameters():
-                parameter.add_(2.0)
-        ema.update()
-        ema.copy_to(shadow.parameters())
-        for parameter, start in zip(shadow.parameters(), initial):
-            self.assertTrue(torch.allclose(parameter, start + 1.0))
-        # (its state saved and loaded)
-        other = optim.FlatEMA(Small().parameters(), 0.5)
-        other.load_state_dict(ema.state_dict())
-        self.assertTrue(torch.equal(other.shadow, ema.shadow))
-        self.assertEqual(ema.state_dict()['decay'], 0.5)

@@ -28,8 +28,8 @@ and a style embedding (an emotion row of the style table, scaled by its intensit
 the duration predictor's input, and the decoder's input, and modulates every conv-FFN block (FiLM). (The first,
 single-speaker model and its trainer, nn/train.py, are in git history.)
 
-No absolute positional encoding - order comes from the convolutions - so any length works; synthesize.py and
-lib/model.js speak long texts a sentence at a time, like the training data.
+No absolute positional encoding - order comes from the convolutions - so any length works; lib/model.js (and the
+export's parity reference, tests/synthesize.py) speaks long texts a sentence at a time, like the training data.
 
 Every layer is one lib/model.js implements: embedding, linear, depthwise 1-D convolution ('same' padding), layer
 norm, SiLU, tanh, and multi-head self-attention with a key padding mask. (The spectral correction head and the

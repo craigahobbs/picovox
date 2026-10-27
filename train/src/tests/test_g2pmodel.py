@@ -3,16 +3,18 @@
 
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring, protected-access
 
+import base64
 import math
 import os
 import tempfile
 import unittest
 import unittest.mock
+import zlib
 
 import numpy as np
 import torch
 
-from picovox_train import g2p, g2pmodel
+from picovox_train import context, g2p, g2pmodel
 
 from . import parity
 
@@ -35,26 +37,15 @@ def sample_values():
     return np.concatenate([np.array(special)] + ranges)
 
 
-# The module text of a tiny G2P model (g2p.py's export) in a layout, with or without deflate, group size, and the
-# reading and ambiguity tensors
-def tiny_module(layout='packed', deflate=False, group_size=0, readings=False):
+# A tiny G2P model with its reading heads and context network, as context.py exports it - (the module text, the G2P's
+# quantized tensors)
+def tiny_module():
     torch.manual_seed(3)
-    model = g2p.build_model({'embed': 4, 'hidden': 4, 'decoder': 6})
-    state = model.state_dict()
-    if readings:
-        state = {**state, 'reading.weight': torch.randn(2, 6), 'ambiguity_layer.weight': torch.randn(5, 8),
-                 'ambiguity_layer.bias': torch.randn(5), 'ambiguity.weight': torch.randn(1, 5), 'ambiguity.bias': torch.tensor([0.5])}
-    spec = {'bits': 6, 'biasBits': 8, 'groupSize': group_size}
-    quantized = g2p.quantize_state(state, spec)
-    text = g2p.module_text(model.config, quantized, spec, layout, deflate, b'', ['test'])
-    data = g2p.weight_bytes(quantized, layout)
-    if deflate:
-        compressor = g2p.zlib.compressobj(9, g2p.zlib.DEFLATED, -15)
-        data = compressor.compress(data) + compressor.flush()
-    text = g2p.module_text(model.config, quantized, spec, layout, deflate, data, ['test'])
-    if readings:
-        text = text.replace("    'groupSize'", "    'readings': 3,\n    'groupSize'")
-    return text, quantized
+    g2p_model = context.add_reading_heads(g2p.build_model({'embed': 4, 'hidden': 4, 'decoder': 6}))
+    context_model = context.build_context({'embed': 4, 'hidden': 4, 'layer': 4})
+    quantized = g2p.quantize_state(g2p_model.state_dict(), context.EXPORT)
+    context_quantized = g2p.quantize_state(context_model.state_dict(), context.EXPORT)
+    return context.module_text(g2p_model.config, quantized, context_model.config, context_quantized, ['test']), quantized
 
 
 class TestG2pModel(unittest.TestCase):
@@ -71,16 +62,23 @@ class TestG2pModel(unittest.TestCase):
         self.assertIn('weights', model['context'])
         self.assertFalse('`' in model['weights'] or '`' in model['context']['weights'])
         model = g2pmodel.parse_module(tiny_module()[0])
-        self.assertFalse(model['deflate'])
-        self.assertNotIn('context', model)
+        self.assertEqual((model['hidden'], model['decoder'], model['readings']), (4, 6, 3))
+        self.assertFalse('`' in model['weights'] or '`' in model['context']['weights'])
 
     def test_unpack_tensors(self):
-        # Every layout, with and without deflate and groups - the module's weights are the quantized weights
-        for layout, deflate, group_size in (('packed', False, 0), ('packed', True, 3), ('bytes', True, 0), ('bytes', False, 5)):
-            text, quantized = tiny_module(layout, deflate, group_size)
-            tensors = g2pmodel.unpack_tensors(g2pmodel.parse_module(text))
-            for item in quantized:
-                self.assertTrue(np.array_equal(tensors[item['name']], item['dequantized']), (layout, deflate, group_size, item['name']))
+        # Every layout, with and without deflate - the weights are the quantized weights
+        _, quantized = tiny_module()
+        manifest = [{'name': item['name'], 'shape': item['shape'], 'bits': item['bits']} for item in quantized]
+        for layout in ('packed', 'bytes'):
+            for deflate in (False, True):
+                data = g2p.weight_bytes(quantized, layout)
+                if deflate:
+                    compressor = zlib.compressobj(9, zlib.DEFLATED, -15)
+                    data = compressor.compress(data) + compressor.flush()
+                model = {'weights': base64.b64encode(data).decode('ascii'), 'layout': layout, 'deflate': deflate, 'tensors': manifest}
+                tensors = g2pmodel.unpack_tensors(model)
+                for item in quantized:
+                    self.assertTrue(np.array_equal(tensors[item['name']], item['dequantized']), (layout, deflate, item['name']))
 
     # (math.fma is Python 3.13's)
     @unittest.skipUnless(hasattr(math, 'fma'), 'math.fma is Python 3.13+')
@@ -167,33 +165,9 @@ class TestG2pModel(unittest.TestCase):
         self.assertEqual(other.cache['cat'], ['K', 'AE1', 'T'])
         self.assertEqual(other.context.choices, g2p_model.context.choices)
 
-    def test_g2p_tiny(self):
-        # A model without a context network or readings (g2p.py's export)
-        g2p_model = g2pmodel.G2p(g2pmodel.parse_module(tiny_module()[0]))
-        self.assertIsNone(g2p_model.context)
-        self.assertFalse(g2p_model.ambiguous('cat'))
-        phones = g2p_model.pronounce_many(['cat', 'dog'])
-        self.assertEqual(len(phones), 2)
-        self.assertTrue(all(len(item) <= 3 * 3 + 6 for item in phones))
-        self.assertEqual(g2p_model.state()['choices'], {})
-        g2p_model.set_state({'readings': [{'x': ['K']}], 'ambiguous': {'x': False}, 'choices': {}})
-        self.assertEqual(g2p_model.pronounce('x'), ['K'])
-
-        # With readings and the ambiguity head but no context network
-        g2p_model = g2pmodel.G2p(g2pmodel.parse_module(tiny_module(readings=True)[0]))
-        self.assertEqual(g2p_model.readings, 3)
-        self.assertEqual(len(g2p_model.pronounce_many(['cat'], 2)), 1)
-        self.assertFalse(g2p_model.ambiguous('cat'))
-
-        # Another design
-        model = g2pmodel.parse_module(tiny_module()[0])
-        model['design'] = 'ctc'
-        with self.assertRaisesRegex(ValueError, 'Unsupported G2P model design ctc'):
-            g2pmodel.G2p(model)
-
     def test_read_module(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, 'g2pModel.js')
             with open(path, 'w', encoding='utf-8') as file:
                 file.write(tiny_module()[0])
-            self.assertEqual(g2pmodel.read_module(path)['hidden'], 4)
+            self.assertEqual(g2pmodel.read_module(path)['decoder'], 6)

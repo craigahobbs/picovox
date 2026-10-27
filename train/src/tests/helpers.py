@@ -13,11 +13,24 @@ import json
 import os
 import re
 import time
+import wave
 import zlib
 
 import numpy
 
 from picovox_train import data, frontend
+
+
+# Write samples ([frames], or [frames, channels]; -1 to 1 - beyond are clipped) as a 16-bit PCM WAV file, exactly as
+# libsndfile (soundfile) writes them: round(x * 2^31) (half to even, clipped to 32 bits) shifted right 16 bits
+def write_wav(path, samples, rate):
+    samples = numpy.asarray(samples, dtype=numpy.float64)
+    scaled = numpy.clip(numpy.rint(samples * 2 ** 31), -2 ** 31, 2 ** 31 - 1)
+    with wave.Wave_write(path) as file:
+        file.setnchannels(1 if samples.ndim == 1 else samples.shape[1])
+        file.setsampwidth(2)
+        file.setframerate(rate)
+        file.writeframes((scaled.astype(numpy.int64) >> 16).astype('<i2').tobytes())
 
 
 # A tiny MultiModel configuration (model.py) - a few thousand parameters, fast on the CPU

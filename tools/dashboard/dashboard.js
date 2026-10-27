@@ -1,12 +1,10 @@
 // The training dashboard - reads make train's bookkeeping (TRAIN_DIR - build/train, or the page's ?train=DIR:
-// stages.jsonl, util.log, logs/, runs/, samples/; tools/dashboard/train.js models it), the other logs (build/nn/**/*.log)
-// and samples (build/nn/**/*.wav), and the archived pipelines (tools/dashboard/pipelines/) through python3 -m
-// http.server's directory listings, and refreshes every second. Read-only: it never touches the training.
+// stages.jsonl, util.log, logs/, runs/, samples/; tools/dashboard/train.js models it) served by python3 -m http.server,
+// and refreshes every second. Read-only: it never touches the training.
 
 
 // Where the repository and the build live relative to this page, and timing (ms)
 const rootUrl = new URL('../../', import.meta.url);
-const buildUrl = new URL('build/nn/', rootUrl);
 const refreshMs = 1000;
 const stalledMs = 3 * 60 * 1000;
 const stoppedMs = 30 * 60 * 1000;
@@ -17,20 +15,11 @@ const trainModel = await import(`./train.js?v=${Date.now()}`);
 
 
 // Elements
-const runsElement = document.getElementById('runs');
-const chartsElement = document.getElementById('charts');
-const chartsTitle = document.getElementById('chartsTitle');
 const logsElement = document.getElementById('logs');
-const samplesElement = document.getElementById('samples');
-const pipelineSection = document.getElementById('pipelineSection');
-const pipelineTitle = document.getElementById('pipelineTitle');
-const pipelineFacts = document.getElementById('pipelineFacts');
-const phasesElement = document.getElementById('phases');
 const updatedElement = document.getElementById('updated');
 
 
-// State - the Runs tab's selected run, and fetched files by URL
-let selectedRun = null;
+// State - fetched files by URL
 const fileCache = new Map();
 
 
@@ -48,25 +37,6 @@ function make(tag, className = '', text = '') {
         created.textContent = text;
     }
     return created;
-}
-
-
-// List a directory (python's http.server listing) - [{name, isDirectory}]
-async function listDirectory(url) {
-    try {
-        const response = await fetch(url, {'cache': 'no-store'});
-        if (!response.ok) {
-            return [];
-        }
-        const html = await response.text();
-        const document = new DOMParser().parseFromString(html, 'text/html');
-        return [...document.querySelectorAll('li a')].map((link) => {
-            const href = link.getAttribute('href');
-            return {'name': decodeURIComponent(href.replace(/\/$/, '')), 'isDirectory': href.endsWith('/')};
-        }).filter((entry) => !entry.name.startsWith('.'));
-    } catch {
-        return [];
-    }
 }
 
 
@@ -176,7 +146,7 @@ function median(values) {
 
 
 // A run's card - or, if its log can't be shown, a card saying so (one odd run never blanks the dashboard)
-function safeRunCard(run, onSelect = selectRun, selected = selectedRun) {
+function safeRunCard(run, onSelect, selected) {
     try {
         return runCard(run, onSelect, selected);
     } catch (error) {
@@ -215,43 +185,9 @@ function runStatus(run) {
 }
 
 
-// The Runs tab's runs - make train's training runs (TRAIN_DIR/runs/, loaded with the Train tab), in the stages' order
-const selectedKey = 'training-dashboard-run-v1';
+// make train's training runs (TRAIN_DIR/runs/), in the stages' order
 function runList() {
     return trainData ? trainData.manifest.stages.filter((stage) => stage.run).map((stage) => trainRuns.get(stage.run)) : [];
-}
-
-
-// Select a run - remembered per browser
-function selectRun(name) {
-    selectedRun = name;
-    storageSet(selectedKey, name);
-    renderRuns();
-    renderCharts(true);
-}
-
-
-// Render the run cards - the selected run, else the remembered one, else the live run, else the latest started, else the
-// first
-function renderRuns() {
-    const list = runList();
-    const [live] = list.filter((run) => runStatus(run) === 'live');
-    if (!trainRuns.has(selectedRun)) {
-        const remembered = storageGet(selectedKey);
-        selectedRun = trainRuns.has(remembered) ? remembered : (live ?? list.filter((run) => !run.waiting).pop() ?? list[0])?.name ?? null;
-    }
-    // The Runs tab's fact - the live run's progress
-    const liveLast = live ? (live.entries.train || []).slice(-1)[0] : null;
-    let trainingFact = '';
-    if (live) {
-        trainingFact = live.info.targetSteps && liveLast ? `${Math.round(100 * liveLast.step / live.info.targetSteps)}%` : 'live';
-    }
-    setTabFact('tabFactTraining', trainingFact);
-    if (list.length === 0) {
-        runsElement.replaceChildren(make('p', 'empty', 'No runs yet - make train writes them to TRAIN_DIR/runs/<run>/.'));
-        return;
-    }
-    runsElement.replaceChildren(...list.map((run) => safeRunCard(run)));
 }
 
 
@@ -348,27 +284,8 @@ const chartHelp = {
         'natural-sounding detail than the spectral loss can.',
     'matching': 'Feature matching (stage B) - the voice matching the critic\'s internal features of real recordings; ' +
         'steadies the adversarial training.',
-    'corrL2': 'The spectral correction head\'s size penalty (an optional architecture feature).',
-    'corrSmooth': 'The spectral correction head\'s smoothness penalty, over time and frequency.',
     'frames': 'Distillation: how far the student\'s synthesizer parameters are from the teacher\'s, per frame.',
-    'features': 'Distillation: how far the student\'s internal features are from the teacher\'s (feature matching).',
-    'durationErrorFrames': 'Distillation: how far the student\'s phone durations are from the teacher\'s, in 10 ms frames.',
-    'book': 'G2P: the share of word tokens in the evaluation books whose predicted pronunciation is wrong (weighted by how ' +
-        'often each word occurs - what a listener hears).',
-    'bookAny': 'G2P: book-token error, counting any of the dictionary\'s pronunciations as right.',
-    'bookSeen': 'G2P: book-token error on words the model trained on.',
-    'bookSeenAny': 'G2P: book-token error on trained words, any listed pronunciation counting as right.',
-    'bookStripped': 'G2P: book-token error after stripping suffixes.',
-    'bookWrongDistinct': 'G2P: the number of distinct book words pronounced wrong (each word counted once).',
-    'top10kWrong': 'G2P: how many of the 10,000 most frequent book words are pronounced wrong.',
-    'top10kWrongSeen': 'G2P: how many of the 10,000 most frequent words, among those trained on, are wrong.',
-    'wer': 'G2P: word error rate - the share of words with any phone wrong.',
-    'per': 'G2P: phone error rate - the share of phones wrong.',
-    'testWer': 'G2P: word error rate on held-out dictionary words the model never saw (generalization to new spellings).',
-    'testWerFirst': 'G2P: held-out word error rate against only each word\'s first listed pronunciation.',
-    'testPer': 'G2P: phone error rate on held-out words.',
-    'trainWer': 'G2P: word error rate on the training words.',
-    'monitorWer': 'G2P: word error rate on a fixed monitoring sample, tracked during training.'
+    'durationErrorFrames': 'Distillation: how far the student\'s phone durations are from the teacher\'s, in 10 ms frames.'
 };
 
 
@@ -409,15 +326,6 @@ function helpTip(key, text) {
     wrap.append(button, note);
     return wrap;
 }
-
-
-// The Runs heading's explanation - the run cards' facts
-document.getElementById('runsTitle').append(' ', helpTip('runs', 'Each card is one of make train\'s training runs: its status ' +
-    '(live - updating; stalled - quiet for minutes; stopped - quiet for long; finished - reached its target; waiting - its ' +
-    'stage not started), steps done of its target, seconds per step and the time left at that pace, the latest training ' +
-    'total loss and validation loss (lower is better - the spectral loss for training on recordings; for the student\'s ' +
-    'runs, distill-student and distill-student-polish, the loss against the teacher, on its own small scale), and when its ' +
-    'log last changed. Select a card for its curves; each chart\'s (?) explains its measurement.'));
 
 
 // An exponential moving average of a series' values
@@ -506,20 +414,9 @@ function drawChart(canvas, series, {logScale = false} = {}) {
 }
 
 
-// Render the selected run's charts (the Runs tab) - only when its data changed, unless forced
-function renderCharts(force = false) {
-    if (currentTab !== 'runs') {
-        return;
-    }
-    const run = trainRuns.get(selectedRun);
-    drawRunCharts(chartsElement, chartsTitle, run && !run.waiting ? run : null, force);
-}
-
-
-// Draw a run's charts into an element (its title into titleElement) - only when its data changed, unless forced; with
-// extras (a list), only those of the other measurements' charts
+// Draw a run's charts into an element (its title into titleElement) - only when its data changed, unless forced
 const chartKeys = new Map();
-function drawRunCharts(element, titleElement, run, force = false, extras = null) {
+function drawRunCharts(element, titleElement, run, force = false) {
     const dataKey = run ? [run.name, run.modified, (run.entries.train || []).length, (run.entries.val || []).length,
         element.clientWidth].join(' ') : '';
     if (!force && dataKey === chartKeys.get(element)) {
@@ -558,8 +455,7 @@ function drawRunCharts(element, titleElement, run, force = false, extras = null)
 
     // Any other numeric training or validation keys become extra charts (e.g. adversarial losses)
     const known = new Set(['step', 'lr', 'secondsPerStep', 'total', 'spectral', 'durPhone', 'durPause', 'durPaused', 'f0Cents', 'guide']);
-    const extraKeys = [...new Set([...train, ...val].flatMap((entry) => Object.keys(entry)))].
-        filter((key) => !known.has(key) && (extras === null || extras.includes(key)));
+    const extraKeys = [...new Set([...train, ...val].flatMap((entry) => Object.keys(entry)))].filter((key) => !known.has(key));
     for (const key of extraKeys) {
         charts.push({'title': key, 'help': key, 'logScale': false, 'series': [
             ['train (smoothed)', 'train', key, true, colors[0]], ['val', 'val', key, false, colors[1]]
@@ -595,156 +491,14 @@ function drawRunCharts(element, titleElement, run, force = false, extras = null)
 }
 
 
-// Find the files under build/nn/ (not in runs/), two levels deep - [{path, url}]. The subdirectories are listed every
-// 10 seconds (their files are fetched every second).
-const listingCache = new Map();
-async function findFiles() {
-    const found = [];
-    const top = await listDirectory(buildUrl);
-    for (const entry of top) {
-        if (entry.isDirectory && entry.name !== 'runs') {
-            let listing = listingCache.get(entry.name);
-            if (!listing || Date.now() - listing.time > 10000) {
-                listing = {'time': Date.now(), 'entries': await listDirectory(new URL(`${encodeURIComponent(entry.name)}/`, buildUrl))};
-                listingCache.set(entry.name, listing);
-            }
-            const nested = listing.entries;
-            for (const item of nested.filter((other) => !other.isDirectory)) {
-                const url = new URL(`${encodeURIComponent(entry.name)}/${encodeURIComponent(item.name)}`, buildUrl);
-                found.push({'path': `${entry.name}/${item.name}`, url});
-            }
-        } else if (!entry.isDirectory) {
-            found.push({'path': entry.name, 'url': new URL(encodeURIComponent(entry.name), buildUrl)});
-        }
-    }
-    return found;
-}
-
-
-// The archived pipelines (tools/dashboard/pipelines/*.json - earlier experiment pipelines: phases of steps, each tracked
-// by a log, a training run, an output file (or a file containing a text), or a process) and the selected one, newest
-// first - the archive selector's choice, remembered per browser
-const archiveKey = 'training-dashboard-archive-v1';
-const archiveSelect = document.getElementById('archiveSelect');
-let archived = null;
-let archiveNames = [];
-let archiveListed = 0;
-archiveSelect.addEventListener('change', () => {
-    storageSet(archiveKey, archiveSelect.value);
-    archived = null;
-    renderArchive();
-});
-async function loadArchive() {
-    if (Date.now() - archiveListed > 30000) {
-        archiveListed = Date.now();
-        const entries = await listDirectory(new URL('pipelines/', import.meta.url));
-        const names = entries.filter((entry) => entry.name.endsWith('.json')).map((entry) => entry.name.slice(0, -5)).sort().reverse();
-        if (names.join() !== archiveNames.join()) {
-            archiveNames = names;
-            archiveSelect.replaceChildren(...names.map((name) => {
-                const option = make('option', '', name);
-                option.value = name;
-                return option;
-            }));
-            const remembered = storageGet(archiveKey);
-            archiveSelect.value = names.includes(remembered) ? remembered : names[0] ?? '';
-        }
-    }
-    if (archiveSelect.value === '') {
-        archived = null;
-        return;
-    }
-    const result = await fetchText(new URL(`pipelines/${encodeURIComponent(archiveSelect.value)}.json`, import.meta.url));
-    try {
-        archived = result === null ? null : JSON.parse(result.text);
-    } catch {
-        archived = null;
-    }
-}
-
-
-// The phases open in the archived pipeline (by title), remembered per browser
-const openKey = 'training-dashboard-open-v1';
-let openPhases = new Set();
-try {
-    openPhases = new Set(JSON.parse(storageGet(openKey)) || []);
-} catch {
-    openPhases = new Set();
-}
-
-
-// What an archived step tracked - its log, its training run (the newest whose name starts with its prefix), or its output
-// file (or the text the file came to contain), and its process
-function archivedTracker(step) {
-    let tracked = step.file;
-    if (step.log) {
-        tracked = step.log;
-    } else if (step.run) {
-        tracked = typeof step.run === 'string' ? `the newest training run ${step.run}*` : 'the newest training run';
-    } else if (step.contains) {
-        tracked = `${step.file} containing ${step.contains}`;
-    }
-    return step.process ? `${tracked} · process ${step.process}` : tracked;
-}
-
-
-// Render the archived pipeline - its plan, as it was archived: each phase a group (its detail and its share of the
-// expected time) that opens to its planned steps and what tracked each. The experiments are finished and their runs and
-// logs moved (build/archive/), so nothing is tracked live. Rebuilt when the archive changes.
-let archiveShown = null;
-async function renderArchive() {
-    if (currentTab !== 'archive') {
-        return;
-    }
-    await loadArchive();
-    pipelineSection.hidden = archived === null;
-    const key = archived === null ? null : JSON.stringify(archived);
-    if (archived === null || key === archiveShown) {
-        return;
-    }
-    archiveShown = key;
-    const totalWeight = archived.phases.reduce((sum, phase) => sum + phase.weight, 0);
-    phasesElement.replaceChildren(...archived.phases.map((phase) => {
-        const element = make('details', 'phase');
-        element.open = openPhases.has(phase.title);
-        element.addEventListener('toggle', () => {
-            if (element.open) {
-                openPhases.add(phase.title);
-            } else {
-                openPhases.delete(phase.title);
-            }
-            storageSet(openKey, JSON.stringify([...openPhases]));
-        });
-        const summary = make('summary');
-        const head = make('div', 'pipeline-head');
-        const share = `${Math.round(100 * phase.weight / totalWeight)}% of the expected time`;
-        head.append(make('h3', '', phase.title), make('span', 'facts', share));
-        summary.append(head, make('div', 'phase-count', `${phase.steps.length} step${phase.steps.length === 1 ? '' : 's'}`));
-        const list = make('ul', 'steps');
-        list.append(...phase.steps.map((step) => {
-            const item = make('li', 'step');
-            const line = make('div', 'progress-line', archivedTracker(step));
-            item.append(make('span', 'icon', '·'), make('span', '', step.title), make('span', 'facts', ''), line);
-            return item;
-        }));
-        element.append(summary, make('div', 'phase-detail', phase.detail), list);
-        return element;
-    }));
-    pipelineTitle.textContent = archived.title;
-    const steps = archived.phases.reduce((sum, phase) => sum + phase.steps.length, 0);
-    pipelineFacts.textContent = `${archived.phases.length} phases · ${steps} steps · started ${new Date(archived.since).toLocaleString()}`;
-}
-
-
 // A log's heading - its path and age
 function logHeading(file, result) {
     return `${file.path} · updated ${formatDuration((Date.now() - result.modified) / 1000)} ago`;
 }
 
 
-// Fetch the logs under build/nn/ - [{file, result, lines}], the most recently updated first
-async function loadLogs(allFiles) {
-    const files = allFiles.filter((file) => file.path.endsWith('.log'));
+// Fetch make train's logs - [{file, result, lines}], the most recently updated first
+async function loadLogs(files) {
     const logs = (await Promise.all(files.map(async (file) => ({file, 'result': await fetchText(file.url)})))).
         filter((item) => item.result !== null).sort((first, second) => second.result.modified - first.result.modified);
     for (const log of logs) {
@@ -754,11 +508,11 @@ async function loadLogs(allFiles) {
 }
 
 
-// Render the activity logs - make train's logs, then the others updated in the last hour (all of them with "Show
-// older logs"), the most recently updated first, each one's tail - rebuilt only when they change
+// Render the activity logs - make train's 12 most recently updated (all of them with "Show older logs"), each one's
+// tail - rebuilt only when they change
 let logsKey = null;
 let logHeads = [];
-const recentMs = 60 * 60 * 1000;
+const recentCount = 12;
 const olderKey = 'training-dashboard-older-logs-v1';
 const olderToggle = document.getElementById('olderLogs');
 olderToggle.checked = storageGet(olderKey) === 'true';
@@ -769,11 +523,8 @@ olderToggle.addEventListener('change', () => {
 function renderLogs(allLogs) {
     const activeLogs = allLogs.filter(({result}) => Date.now() - result.modified < stalledMs).length;
     setTabFact('tabFactLogs', activeLogs === 0 ? '' : `${activeLogs} active`);
-    const isTrain = (log) => log.file.path.startsWith('make train: ');
-    const recent = allLogs.filter((log) => isTrain(log) || Date.now() - log.result.modified < recentMs);
-    const shown = olderToggle.checked ? allLogs : recent;
-    document.getElementById('olderCount').textContent = `(${allLogs.length - recent.length} more)`;
-    const logs = [...shown.filter(isTrain), ...shown.filter((log) => !isTrain(log))].slice(0, olderToggle.checked ? 40 : 12);
+    document.getElementById('olderCount').textContent = `(${Math.max(0, allLogs.length - recentCount)} more)`;
+    const logs = olderToggle.checked ? allLogs : allLogs.slice(0, recentCount);
     const key = logs.map(({file, result}) => `${file.path} ${result.modified} ${result.text.length}`).join('\n');
     if (key === logsKey && logs.length !== 0) {
         logs.forEach(({file, result}, index) => {
@@ -887,7 +638,7 @@ async function renderTrainSamples() {
         head.append(title);
         element.append(head);
         if (model.samples.length === 0) {
-            const stageName = model.stage ?? model.key;
+            const stageName = model.stage;
             const status = {
                 'waiting': `waiting - rendered when the ${model.key === 'reference' ? 'readers\' data' : model.key} stage finishes`,
                 'queued': 'rendering...', 'running': 'rendering...', 'stopped': 'stopped - make train isn\'t running',
@@ -954,30 +705,6 @@ async function renderTrainSamples() {
         {'key': `${samplesUrl.href} ${newest.key}`, 'title': listenTitles[newest.key] ?? newest.key};
     setTabFact('tabFactListen', newestTrainSamples?.title.toLowerCase() ?? '');
     updateListenDot();
-}
-
-
-// Render the samples - WAV files under build/nn/
-function renderSamples(allFiles) {
-    const files = allFiles.filter((file) => file.path.endsWith('.wav'));
-    if (files.length === 0) {
-        samplesElement.replaceChildren(make('p', 'empty', 'No samples yet.'));
-        return;
-    }
-    const existing = new Set([...samplesElement.querySelectorAll('audio')].map((audio) => audio.dataset.path));
-    if (files.length === existing.size && files.every((file) => existing.has(file.path))) {
-        return;
-    }
-    samplesElement.replaceChildren(...files.slice(-60).map((file) => {
-        const wrap = make('div', 'sample');
-        const audio = make('audio');
-        audio.controls = true;
-        audio.preload = 'none';
-        audio.src = file.url;
-        audio.dataset.path = file.path;
-        wrap.append(make('span', '', file.path), audio);
-        return wrap;
-    }));
 }
 
 
@@ -1374,11 +1101,6 @@ function gateState(gate, data) {
 }
 
 
-// The Train tab's curves beyond the main six (the Runs tab has them all) - the critic's, the formant bandwidths, the
-// emotional speech's spectral loss, the validation score, and distillation's
-const trainChartExtras = ['score', 'critic', 'adversarial', 'b1', 'cremad.spectral', 'frames', 'features', 'durationErrorFrames'];
-
-
 // Select a make train run's curves - remembered per browser
 function selectTrainRun(name) {
     trainSelectedRun = name;
@@ -1497,7 +1219,7 @@ function renderTrain(force = false) {
     if (currentTab === 'train') {
         const run = trainRuns.get(trainSelectedRun) ?? null;
         drawRunCharts(document.getElementById('trainCharts'), document.getElementById('trainChartsTitle'),
-            run && !run.waiting ? run : null, force, trainChartExtras);
+            run && !run.waiting ? run : null, force);
         renderUtilization(data, force);
     }
 }
@@ -1671,8 +1393,7 @@ document.getElementById('utilLegend').append(...[
 
 // Tabs - the selected tab is in the URL's hash (and remembered per browser); the Listen tab marks new samples until it's
 // viewed
-const tabNames = ['train', 'listen', 'runs', 'logs', 'archive'];
-const tabAliases = {'progress': 'archive', 'training': 'runs'};
+const tabNames = ['train', 'listen', 'logs'];
 const tabKey = 'training-dashboard-tab-v1';
 const heardKey = 'training-dashboard-heard-v1';
 let currentTab = 'train';
@@ -1691,8 +1412,7 @@ function storageSet(key, value) {
     }
 }
 function selectTab(name, {updateHash = true} = {}) {
-    const wanted = tabAliases[name] ?? name;
-    currentTab = tabNames.includes(wanted) ? wanted : 'train';
+    currentTab = tabNames.includes(name) ? name : 'train';
     for (const tab of tabNames) {
         const button = document.getElementById(`tab-${tab}`);
         button.setAttribute('aria-selected', String(tab === currentTab));
@@ -1704,14 +1424,8 @@ function selectTab(name, {updateHash = true} = {}) {
         window.history.replaceState(null, '', `#${currentTab}`);
     }
     // The charts draw at their visible size
-    if (currentTab === 'runs') {
-        renderCharts(true);
-    }
     if (currentTab === 'train') {
         renderTrain(true);
-    }
-    if (currentTab === 'archive') {
-        renderArchive();
     }
     if (currentTab === 'listen') {
         markHeard();
@@ -1796,14 +1510,9 @@ async function refresh() {
         }
         firstRefresh = false;
         renderTrain();
-        renderRuns();
-        renderCharts();
-        const files = await findFiles();
-        const logs = await loadLogs([...trainData?.logFiles ?? [], ...files]);
+        const logs = await loadLogs(trainData?.logFiles ?? []);
         lastLogs = logs;
-        await renderArchive();
         renderLogs(logs);
-        renderSamples(files);
         await renderTrainSamples();
         updatedElement.textContent = `Updated ${new Date().toLocaleTimeString()} · every second`;
     } finally {
@@ -1812,6 +1521,5 @@ async function refresh() {
 }
 refresh();
 window.addEventListener('resize', () => {
-    renderCharts(true);
     renderTrain(true);
 });

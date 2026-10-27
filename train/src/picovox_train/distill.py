@@ -39,12 +39,8 @@ The method:
   its length regulator), L1 on the normalized parameter frames (all but the constant jitter and shimmer) plus the
   duration losses against the teacher's duration outputs: phones' log durations (MSE), the pause decision (the KL
   divergence from the teacher's pause probability), and the paused durations (MSE weighted by the teacher's pause
-  probability). Options: --init-teacher (copy every teacher tensor of the same name and shape) and --feature-weight
-  (intermediate-feature matching: the student's encoder output and last decoder features, projected to the teacher's
-  widths, against the teacher's). The training step's options (optim.py; off by default): --lean-clip, --optimizer
-  muon, --ema DECAY (the EMA weights validated beside the raw ones - ema-best.pt), --schedule wsd --cooldown F
-  --cooldown-shape, and --zero-init-proj - or the recipe's train settings leanClip, optimizer, ema, schedule, cooldown,
-  cooldownShape, and zeroInitProj.
+  probability). The optimizer is Muon for the hidden matrices (optim.py), with the recipe's learning rate schedule
+  (schedule, cooldown - wsd: constant, then the last cooldown share of the steps cooled down by 1 - sqrt).
 - Polish - an optional short fine-tune with the real-audio losses (trainmulti.py: the multi-resolution spectral
   loss through the differentiable synthesizer on the recordings, and the adversarial critic and feature matching as
   stage B used them, the critic starting from the teacher's).
@@ -56,7 +52,6 @@ The method:
 """
 
 import argparse
-import copy
 import datetime
 import gzip
 import json
@@ -528,19 +523,9 @@ class BatchPrefetcher:
 # Students
 #
 
-# The decoder's features before its norm and head, and the normalized frames - (features [B, F, D], unit [B, 2F, COUNT])
-def decode_features(model, regulated, positions, mask, condition):
-    x = (model.decoder_in(regulated) + model.position_in(positions) + model.condition_decoder(condition)) * mask
-    for layer in model.decoder:
-        x = layer(x, mask, condition)
-    logits = model.head(model.decoder_norm(x))
-    batch, frames, _ = logits.shape
-    return x, torch.sigmoid(logits.reshape(batch, frames * model.config['subframes'], params.COUNT))
-
-
 def run_model(model, batch, durations=None):
     """A model's forward pass on a distillation batch with the teacher's durations - {duration [B, N, 3], unit [B, 2F,
-    COUNT], encoded [B, N, D], decoded [B, F, D], frameMask [B, F, 1]}"""
+    COUNT], frameMask [B, F, 1]}"""
     table = model.speaker.weight
     speaker_vector = blend_vectors(table, batch['speakerA'], batch['speakerB'], batch['blend'])
     condition = model.condition(None, batch['emotion'], batch['intensity'], speaker_vector)
@@ -548,8 +533,8 @@ def run_model(model, batch, durations=None):
     duration_outputs = model.durations(features, mask, condition)
     durations = batch['durations'] if durations is None else durations
     regulated, positions, frame_mask = model.regulate(features, durations, batch['frameCount'])
-    decoded, unit = decode_features(model, regulated, positions, frame_mask, condition)
-    return {'duration': duration_outputs, 'unit': unit, 'encoded': features, 'decoded': decoded, 'frameMask': frame_mask}
+    unit = model.decode(regulated, positions, frame_mask, condition)
+    return {'duration': duration_outputs, 'unit': unit, 'frameMask': frame_mask}
 
 
 def distill_losses(outputs, batch, column_mask):
@@ -582,9 +567,9 @@ def student_config(config, name):
     raise ValueError(f'unknown student {name} (the ladder: {", ".join(student["name"] for student in config["students"])})')
 
 
-def build_student(student_cfg, teacher, teacher_state, dropout, init_teacher=False):
-    """A student - the teacher's config with the student's widths and depths, the teacher's speaker, style, and
-    equalizer tables (copied, frozen), and with init_teacher every teacher tensor of the same name and shape"""
+def build_student(student_cfg, teacher, teacher_state, dropout):
+    """A student - the teacher's config with the student's widths and depths, and the teacher's speaker, style, and
+    equalizer tables (copied, frozen)"""
     config = dict(teacher_state['config'])
     config.update(student_cfg)
     model = MultiModel(config, priors=teacher_state.get('priors'), dropout=dropout)
@@ -592,38 +577,13 @@ def build_student(student_cfg, teacher, teacher_state, dropout, init_teacher=Fal
     state = model.state_dict()
     copied = []
     for name, tensor in state.items():
-        shared = name in ('speaker.weight', 'style', 'eq_free')
-        if name in teacher_tensors and teacher_tensors[name].shape == tensor.shape and (shared or init_teacher):
+        if name in ('speaker.weight', 'style', 'eq_free') and teacher_tensors[name].shape == tensor.shape:
             state[name] = teacher_tensors[name].detach().clone().to(tensor.dtype)
             copied.append(name)
     model.load_state_dict(state)
     for parameter in (model.speaker.weight, model.style, model.eq_free):
         parameter.requires_grad_(False)
     return model, copied
-
-
-# (a holder of the maps, never called itself - no forward)
-class FeatureProjections(torch.nn.Module):  # pylint: disable=abstract-method
-    """Linear maps from a student's encoder and decoder features to the teacher's widths (intermediate-feature matching)"""
-
-    def __init__(self, student, teacher):
-        super().__init__()
-        self.encoder = torch.nn.Linear(student.config['dim'], teacher.config['dim'])
-        self.decoder = torch.nn.Linear(student.config['decoderDim'], teacher.config['decoderDim'])
-
-
-# The feature-matching loss - the projected student features against the teacher's (layer-normed, so scale-free), MSE
-def feature_loss(projections, outputs, teacher_outputs_, batch):
-    token_mask = (batch['tokens'] != PAD).float()[..., None]
-    frame_mask = outputs['frameMask']
-    norm = torch.nn.functional.layer_norm
-    encoder_target = norm(teacher_outputs_['encoded'], teacher_outputs_['encoded'].shape[-1:])
-    decoder_target = norm(teacher_outputs_['decoded'], teacher_outputs_['decoded'].shape[-1:])
-    encoder = norm(projections.encoder(outputs['encoded']), encoder_target.shape[-1:])
-    decoder = norm(projections.decoder(outputs['decoded']), decoder_target.shape[-1:])
-    encoder_loss = (((encoder - encoder_target) ** 2).mean(-1, keepdim=True) * token_mask).sum() / token_mask.sum()
-    decoder_loss = (((decoder - decoder_target) ** 2).mean(-1, keepdim=True) * frame_mask).sum() / frame_mask.sum()
-    return encoder_loss + decoder_loss
 
 
 @torch.no_grad()
@@ -663,11 +623,9 @@ def train_student(args):
     """The train subcommand - a student distilled from the teacher's targets"""
     config = load_config(args.config)
     args.student = args.student or config['student']
-    settings = {'leanClip': False, 'optimizer': 'adamw', 'ema': 0.0, 'schedule': 'cosine', 'cooldown': 0.0, 'cooldownShape': 'linear',
-                'zeroInitProj': False, **config['train']}
+    settings = dict(config['train'])
     for key, setting in (('steps', 'steps'), ('batch', 'batch'), ('lr', 'lr'), ('warmup', 'warmup'), ('max_frames', 'maxFrames'),
-                         ('lean_clip', 'leanClip'), ('optimizer', 'optimizer'), ('ema', 'ema'), ('schedule', 'schedule'),
-                         ('cooldown', 'cooldown'), ('cooldown_shape', 'cooldownShape'), ('zero_init_proj', 'zeroInitProj')):
+                         ('cooldown', 'cooldown')):
         if getattr(args, key, None) is not None:
             settings[setting] = getattr(args, key)
     name = args.name or args.student
@@ -679,38 +637,16 @@ def train_student(args):
     targets = Targets(args.targets or os.path.join(DISTILL_DIR, 'targets'))
     teacher, teacher_state = load_model(targets.index['teacher'] if not args.teacher else root_path(args.teacher), device)
     student_cfg = json.loads(args.student_config) if args.student_config else student_config(config, args.student)
-    model, copied = build_student(student_cfg, teacher.cpu(), teacher_state, settings['dropout'], args.init_teacher)
-    if settings['zeroInitProj']:
-        # (the projections the teacher's weights didn't initialize)
-        with torch.no_grad():
-            kept = {name: tensor.clone() for name, tensor in model.state_dict().items() if name in copied}
-            optim.zero_init_projections(model)
-            model.load_state_dict(kept, strict=False)
+    model, copied = build_student(student_cfg, teacher.cpu(), teacher_state, settings['dropout'])
     model = model.to(device)
-    teacher = teacher.to(device)
-    projections = FeatureProjections(model, teacher).to(device) if args.feature_weight > 0 else None
-    trainable = [parameter for parameter in model.parameters() if parameter.requires_grad]
-    if projections is not None:
-        trainable += list(projections.parameters())
-    fused = device.type in ('mps', 'cuda')
-    # (the lean step - and Muon, which takes its clip - optim.py)
-    lean = settings['leanClip'] or settings['optimizer'] == 'muon'
-    if lean:
-        groups = optim.param_groups(model, projections.parameters() if projections is not None else (),
-                                    muon=settings['optimizer'] == 'muon')
-        optimizer = optim.LeanOptimizer(groups, lr=settings['lr'], weight_decay=settings['weightDecay'], betas=(0.9, 0.98))
-    else:
-        optimizer = torch.optim.AdamW(trainable, lr=settings['lr'], weight_decay=settings['weightDecay'], betas=(0.9, 0.98),
-                                      fused=fused or None)
+    # (Muon for the hidden matrices, AdamW for the rest, with the lean step's clip - optim.py)
+    optimizer = optim.LeanOptimizer(optim.param_groups(model, muon=True), lr=settings['lr'], weight_decay=settings['weightDecay'],
+                                    betas=(0.9, 0.98))
     steps = settings['steps']
 
     def learning_rate(step):
-        return optim.lr_factor(step, steps, settings['warmup'], settings['schedule'], settings['cooldown'], settings['cooldownShape'])
+        return optim.lr_factor(step, steps, settings['warmup'], settings['schedule'], settings['cooldown'])
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, learning_rate)
-    # (the EMA of the weights, and a model to validate it in)
-    ema = optim.FlatEMA(model.parameters(), settings['ema']) if settings['ema'] else None
-    ema_model = copy.deepcopy(model) if ema else None
-    ema_best = math.inf
     column_mask = torch.ones(params.COUNT, device=device)
     for fixed in FIXED_NAMES:
         column_mask[params.INDEX[fixed]] = 0
@@ -728,7 +664,7 @@ def train_student(args):
     say(f'model: {count} parameters ({core} without the speaker and equalizer tables); distill-{name}: {steps} steps from 0')
     say(f'student {json.dumps(student_cfg)}; teacher {targets.index["teacher"]} (step {targets.index["teacherStep"]}); targets '
         f'{targets.directory} ({targets.index["count"]} items); copied from the teacher: {", ".join(copied)}; '
-        f'feature weight {args.feature_weight}; settings {json.dumps(settings)}')
+        f'settings {json.dumps(settings)}')
     log_line('students', f'{name}: training - {count} parameters, {json.dumps(student_cfg)}, {steps} steps')
 
     train_indices = targets.split(0)
@@ -740,33 +676,16 @@ def train_student(args):
     pending = []
     last_time = start_time = time.time()
     model.train()
-    if projections is not None:
-        teacher.eval()
     while step < steps:
         host = prefetcher.next()
         batch = {key: value.to(device, non_blocking=True) if torch.is_tensor(value) else value for key, value in host.items()}
         outputs = run_model(model, batch)
         losses = distill_losses(outputs, batch, column_mask)
         total = losses['frames'] + settings['durationWeight'] * (losses['durPhone'] + losses['durPause'] + losses['durPaused'])
-        if projections is not None:
-            with torch.no_grad():
-                teacher_result = run_model(teacher, batch)
-            losses['features'] = feature_loss(projections, outputs, teacher_result, batch)
-            total = total + args.feature_weight * losses['features']
         losses['total'] = total
         optimizer.zero_grad()
         total.backward()
-        if lean:
-            optimizer.step()
-        else:
-            norm = torch.nn.utils.clip_grad_norm_(trainable, 1.0)
-            if fused:
-                optimizer.found_inf = (~torch.isfinite(norm)).float()  # pragma: no cover - (the GPU's fused AdamW only)
-                optimizer.step()  # pragma: no cover
-            elif torch.isfinite(norm):
-                optimizer.step()
-        if ema is not None:
-            ema.update()
+        optimizer.step()
         scheduler.step()
         step += 1
         pending.append(torch.stack([value.detach().float() for value in losses.values()]))
@@ -780,21 +699,6 @@ def train_student(args):
             say(' '.join(f'{key} {value:.4g}' if isinstance(value, float) else f'{key} {value}' for key, value in row.items()))
             log.write(json.dumps({'train': row}) + '\n')
             log.flush()
-        if ema is not None and (step % settings['valEvery'] == 0 or step == steps):
-            # The EMA weights' validation (an emaVal row) and checkpoints - ema-best.pt (the lowest total), ema-last.pt
-            ema.copy_to(ema_model.parameters())
-            ema_result = validate_student(ema_model, targets, val_indices, device, column_mask)
-            ema_result['total'] = ema_result['frames'] + settings['durationWeight'] * (
-                ema_result['durPhone'] + ema_result['durPause'] + ema_result['durPaused'])
-            say('  EMA VAL ' + ' '.join(f'{key} {value:.4g}' for key, value in ema_result.items()))
-            log.write(json.dumps({'emaVal': {'step': step, **ema_result}}) + '\n')
-            log.flush()
-            ema_state = checkpoint_state(ema_model, teacher_state, step, args_dict, ema_result,
-                                         {'distill': {'student': student_cfg, 'targets': targets.directory}})
-            if ema_result['total'] < ema_best:
-                ema_best = ema_result['total']
-                save_checkpoint(ema_state, os.path.join(directory, 'ema-best.pt'))
-            save_checkpoint(ema_state, os.path.join(directory, 'ema-last.pt'))
         if step % settings['valEvery'] == 0 or step == steps:
             result = validate_student(model, targets, val_indices, device, column_mask)
             result['total'] = result['frames'] + settings['durationWeight'] * (result['durPhone'] + result['durPause'] +
@@ -1138,15 +1042,7 @@ def main(argv=None):
     sub.add_argument('--lr', type=float, default=None)
     sub.add_argument('--warmup', type=int, default=None)
     sub.add_argument('--max-frames', type=int, default=None, help='the most padded frames in a batch')
-    sub.add_argument('--lean-clip', action='store_true', default=None, help='the lean clip and AdamW step (optim.py)')
-    sub.add_argument('--optimizer', choices=['adamw', 'muon'], default=None, help='muon: Muon for the hidden matrices')
-    sub.add_argument('--ema', type=float, default=None, help='an EMA of the weights at this decay, validated beside them')
-    sub.add_argument('--schedule', choices=['cosine', 'wsd'], default=None, help='the learning rate schedule')
     sub.add_argument('--cooldown', type=float, default=None, help="wsd: the cooldown's share of the steps")
-    sub.add_argument('--cooldown-shape', choices=['linear', '1-sqrt'], default=None)
-    sub.add_argument('--zero-init-proj', action='store_true', default=None, help='zero-initialize the residual output projections')
-    sub.add_argument('--init-teacher', action='store_true', help='copy every teacher tensor of the same name and shape')
-    sub.add_argument('--feature-weight', type=float, default=0.0, help='intermediate-feature matching weight (0: none)')
     sub.add_argument('--log-every', type=int, default=50)
     sub.add_argument('--keep-every', type=int, default=0, help='keep ckpt-<step>.pt every this many steps (0: none)')
     sub.add_argument('--seed', type=int, default=1)
@@ -1159,7 +1055,7 @@ def main(argv=None):
     sub.add_argument('--teacher', default=None, help='the critic\'s source (default the targets\' teacher)')
     sub.add_argument('--name', default=None, help='the run name (distill-<name>; default <student>-polish)')
     sub.add_argument('--steps', type=int, default=None)
-    sub.add_argument('--train-args', default='', help="trainmulti.py flags added to the recipe's (e.g. '--ema 0.995 --lean-clip')")
+    sub.add_argument('--train-args', default='', help="trainmulti.py flags added to the recipe's (e.g. '--lean-clip')")
     sub.set_defaults(func=polish)
 
     sub = subparsers.add_parser('eval', help='evaluate models through the browser path')

@@ -6,7 +6,7 @@ Download and unpack the human speech corpora used as calibration targets, idempo
 
     build/venv-nn/bin/python -I train/src/picovox_train/corpora.py [--list] [--keep-archives] [name ...]
 
-The corpora (names): the CMU ARCTIC US English speakers (arctic-<speaker>), the LibriTTS-R dev-clean audiobook
+The corpora (names): the labeled CMU ARCTIC US English speakers (arctic-<speaker>), the LibriTTS-R dev-clean audiobook
 and train-clean-100 subsets (libritts-r-dev-clean, libritts-r-train-clean-100), and the LibriTTSLabel forced alignments
 of LibriTTS (libritts-label-dev-clean, libritts-label-train-clean-100).
 With no names, all of them are fetched. A corpus already unpacked is skipped; an interrupted download resumes.
@@ -29,39 +29,31 @@ CORPORA_DIR = os.path.join(ROOT, 'data', 'corpora')
 DOWNLOADS_DIR = os.path.join(CORPORA_DIR, 'downloads')
 USER_AGENT = 'picovox-corpora/1.0 (+https://github.com/craigahobbs/picovox; research calibration)'
 
-ARCTIC_URL = 'http://festvox.org/cmu_arctic/packed/cmu_us_{speaker}_arctic.tar.bz2'
 ARCTIC_RELEASE_URL = 'http://festvox.org/cmu_arctic/cmu_arctic/packed/cmu_us_{speaker}_arctic-0.95-release.tar.bz2'
 ARCTIC_LICENSE = (
     'CMU ARCTIC databases, Carnegie Mellon University, Language Technologies Institute (Kominek and Black, 2003). '
     'A free license - "free for use for any purpose (commercial or otherwise)": permission to use, copy, modify, and '
     'license without fee, provided the copyright notice is retained, modifications are marked, and the original '
-    'authors\' names are kept (the full text is in each 0.95 release\'s COPYING file; the WAV-only packed speakers are '
-    'distributed from the same festvox.org page under the same terms)'
+    'authors\' names are kept (the full text is in each 0.95 release\'s COPYING file)'
 )
 
-# The US English ARCTIC speakers (per festvox.org/cmu_arctic): sex, notes, and whether a 0.95 release with phone
-# labels exists (the others are only packed as WAV and text)
+# The US English ARCTIC speakers with a 0.95 release's phone labels (per festvox.org/cmu_arctic): sex and notes
 ARCTIC_SPEAKERS = {
-    'bdl': ('male', 'US English, experienced voice talent', True),
-    'rms': ('male', 'US English', True),
-    'aew': ('male', 'US English', False),
-    'slt': ('female', 'US English, experienced voice talent', True),
-    'clb': ('female', 'US English', True),
-    'eey': ('female', 'US English', False),
-    'ljm': ('female', 'US English', False),
-    'lnh': ('female', 'US English', False)
+    'bdl': ('male', 'US English, experienced voice talent'),
+    'rms': ('male', 'US English'),
+    'slt': ('female', 'US English, experienced voice talent'),
+    'clb': ('female', 'US English')
 }
 
 # The corpora - name: {url(s), destination, size note, license, and an optional member filter}
 CORPORA = {}
-for _speaker, (_sex, _note, _labeled) in ARCTIC_SPEAKERS.items():
+for _speaker, (_sex, _note) in ARCTIC_SPEAKERS.items():
     CORPORA[f'arctic-{_speaker}'] = {
-        'urls': [(ARCTIC_RELEASE_URL if _labeled else ARCTIC_URL).format(speaker=_speaker)],
+        'urls': [ARCTIC_RELEASE_URL.format(speaker=_speaker)],
         'dest': os.path.join(CORPORA_DIR, 'arctic'),
-        'check': os.path.join(CORPORA_DIR, 'arctic', f'cmu_us_{_speaker}_arctic', 'lab' if _labeled else 'wav'),
-        'description': f'CMU ARCTIC {_speaker} ({_sex}, {_note}) - phonetically balanced sentences, 16 kHz WAV' +
-                       (', EGG, and phone labels (lab/*.lab, xwaves format, 10 ms resolution)' if _labeled else
-                        ' and text only (no phone labels)'),
+        'check': os.path.join(CORPORA_DIR, 'arctic', f'cmu_us_{_speaker}_arctic', 'lab'),
+        'description': f'CMU ARCTIC {_speaker} ({_sex}, {_note}) - phonetically balanced sentences, 16 kHz WAV, EGG, and phone '
+                       'labels (lab/*.lab, xwaves format, 10 ms resolution)',
         'license': ARCTIC_LICENSE
     }
 CORPORA['libritts-r-dev-clean'] = {
@@ -228,7 +220,7 @@ def write_readme():
         '',
         'Human speech for calibrating the synthesizer\'s voices, fetched by `train/src/picovox_train/corpora.py`. This directory is',
         'gitignored - the corpora are not redistributed with PicoVox. Only small derived statistics are committed',
-        '(`data/targets/`).',
+        '(`data/nn/speakers.json`, `data/nn/cremad.json`).',
         ''
     ]
     for name, corpus in CORPORA.items():

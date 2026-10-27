@@ -14,8 +14,8 @@ import unittest.mock
 import numpy
 
 from picovox_train import ROOT, export, panel
-from picovox_train.wav import write_wav
 from tests import model_fixtures
+from tests.helpers import write_wav
 
 
 TEXTS = [{'id': 'one', 'text': 'Call me Ishmael.'}, {'id': 'two', 'text': 'Is it cold?'}]

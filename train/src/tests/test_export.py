@@ -16,8 +16,8 @@ import numpy
 import torch
 
 from picovox_train import ROOT, export, params
-from picovox_train.synthesize import Voice
 from tests import helpers, model_fixtures, parity
+from tests.synthesize import Voice
 
 
 class TestExport(unittest.TestCase):
@@ -120,7 +120,6 @@ class TestExport(unittest.TestCase):
         self.assertEqual(manifest['bytes'], binary_size)
         self.assertEqual(manifest['note'], 'x')
         self.assertEqual(manifest['defaultSpeaker'], 1)
-        self.assertEqual(manifest['inference'], {'pauseThreshold': 0.5, 'bandwidthScale': 1.0})
         self.assertEqual(len(manifest['eq']), params.EQ_BAND_COUNT)
         encodings = {tensor['name']: tensor['encoding'] for tensor in manifest['tensors']}
         self.assertEqual(encodings['embedding.weight'], 'int8')
@@ -139,16 +138,12 @@ class TestExport(unittest.TestCase):
     def test_main(self):
         with tempfile.TemporaryDirectory() as out_dir, helpers.captured() as (stdout, _):
             self.assertEqual(export.main([self.checkpoint, '--voice', 'model', '--out', out_dir]), 0)
-            self.assertEqual(export.main([self.checkpoint, '--voice', 'small', '--out', out_dir, '--speaker', 'arctic-slt']), 0)
-            with open(os.path.join(out_dir, 'small.json'), encoding='utf-8') as file:
-                small = json.load(file)
             with open(os.path.join(out_dir, 'model.json'), encoding='utf-8') as file:
                 default = json.load(file)
         lines = [json.loads(line) for line in stdout.getvalue().splitlines()]
-        self.assertEqual([line['voice'] for line in lines], ['model', 'small'])
+        self.assertEqual([line['voice'] for line in lines], ['model'])
         self.assertEqual(lines[0]['quantized'] + lines[0]['float32'], len(default['tensors']))
         self.assertEqual(default['defaultSpeaker'], 1)
-        self.assertEqual(small['defaultSpeaker'], 0)
 
     def test_module_main(self):
         with unittest.mock.patch('sys.argv', ['export', '--help']), helpers.captured() as (stdout, _), \

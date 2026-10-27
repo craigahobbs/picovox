@@ -33,10 +33,8 @@ is excluded, as is one with more than 0.5% of its samples clipped at full scale.
 
 The data (build/nn/data/cremad/) - data.py's format (ArcticData(directory) loads it), one speaker per actor
 ('cremad-<actor>'), with per-utterance style fields: emotion and emotionId (index of index.json "emotions"), intensity
-and intensityId ("intensities"), the crowd's audio-only voiceVote,
-voiceAgreement, and voiceLevel, alignment quality (alignScore, phoneConfidence, heard, phoneError), and recording
-measures (clipped, peakDb, levelDb, noiseFloorDb). The split is by actor and sentence (all six emotions together),
-about 5% validation and 5% test. data/nn/cremad.json is the committed summary.
+and intensityId ("intensities"), and the checks' measures (phoneError, clipped). The split is by actor and sentence (all
+six emotions together), about 5% validation and 5% test. data/nn/cremad.json is the committed summary.
 """
 
 import argparse
@@ -532,7 +530,7 @@ def greedy_decode(log_posteriors, vocab):
 
 
 #
-# Metadata - the actors and the crowd's audio-only ratings
+# Metadata - the actors
 #
 
 # The actors' demographics - {actor: {sex, age, race, ethnicity}}
@@ -543,40 +541,6 @@ def actors():
         for row in csv.DictReader(file):
             result[row['ActorID']] = {'sex': row['Sex'].lower(), 'age': int(row['Age']), 'race': row['Race'],
                                       'ethnicity': row['Ethnicity']}
-    return result
-
-
-RATING_EMOTIONS = {'A': 'angry', 'D': 'disgusted', 'F': 'fearful', 'H': 'happy', 'N': 'neutral', 'S': 'sad'}
-
-
-# The crowd's audio-only (voice) ratings of each clip (finishedResponses.csv, queryType 1) - {clip: {votes {emotion:
-# count}, count, vote (the plurality emotion, ties joined by ':'), agreement (the share voting the intended emotion),
-# level (the mean rated intensity, 0-100, of the votes for the intended emotion; None without any)}}
-def voice_ratings():
-    import csv  # pylint: disable=import-outside-toplevel
-    votes = {}
-    levels = {}
-    with open(os.path.join(CREMAD_DIR, 'finishedResponses.csv'), encoding='utf-8') as file:
-        for row in csv.DictReader(file):
-            if row['queryType'] != '1' or row['respEmo'] not in RATING_EMOTIONS:
-                continue
-            emotion = RATING_EMOTIONS[row['respEmo']]
-            clip_votes = votes.setdefault(row['clipName'], {name: 0 for name in RATING_EMOTIONS.values()})
-            clip_votes[emotion] += 1
-            if row['respLevel'].isdigit():
-                levels.setdefault((row['clipName'], emotion), []).append(int(row['respLevel']))
-    result = {}
-    for clip_id, clip_votes in votes.items():
-        intended = EMOTIONS[clip_id.split('_')[2]]
-        count = sum(clip_votes.values())
-        most = max(clip_votes.values())
-        intended_levels = levels.get((clip_id, intended), [])
-        result[clip_id] = {
-            'votes': clip_votes, 'count': count,
-            'vote': ':'.join(name for name, value in clip_votes.items() if value == most),
-            'agreement': round(clip_votes[intended] / count, 3) if count else None,
-            'level': round(sum(intended_levels) / len(intended_levels), 1) if intended_levels else None
-        }
     return result
 
 
@@ -643,12 +607,8 @@ def process_clip(task):
     tracks = data.frame_tracks(audio, frame_count, *settings)
     pcm = np.clip(np.round(audio * 32768), -32768, 32767).astype(np.int16)
     clipped = float(np.mean(np.abs(samples) >= 0.999))
-    energy = tracks[:, data.CHANNELS.index('energy')]
     return {'item': item, 'tokens': tokens, 'seconds': seconds, 'frames': frames, 'cutStart': cut_start,
-            'report': report, 'audio': pcm, 'tracks': tracks, 'clipped': clipped,
-            'peakDb': round(float(20 * np.log10(max(1e-9, np.max(np.abs(samples))))), 2),
-            'levelDb': round(float(np.percentile(energy, 95)), 2),
-            'noiseFloorDb': round(float(np.percentile(energy, 5) - np.percentile(energy, 95)), 2)}
+            'report': report, 'audio': pcm, 'tracks': tracks, 'clipped': clipped}
 
 
 # Build build/nn/data/cremad/ (or --out) and data/nn/cremad.json (or the summary beside it)
@@ -663,7 +623,6 @@ def build(args):
     os.makedirs(out_dir, exist_ok=True)
     items = clips()
     actor_info = actors()
-    ratings = voice_ratings()
     with open(ALIGNMENTS_PATH, encoding='utf-8') as file:
         alignments = {record['id']: record for record in map(json.loads, file)}
     sentence_tokens = {code: tokenize(text)['tokens'] for code, text in SENTENCES.items()}
@@ -787,8 +746,6 @@ def build(args):
             if any(count == 0 for token, count in zip(result['tokens'], result['frames']) if token not in BOUNDARIES):
                 reasons.append('a phone with no frames')
             frame_count = sum(result['frames'])
-            rating = ratings.get(item['id'], {})
-            confidences = record['confidences']
             entry = {
                 'id': f'cremad/{item["id"]}',
                 'speaker': f'cremad-{item["actor"]}',
@@ -808,18 +765,8 @@ def build(args):
                 'emotionId': emotion_ids[item['emotion']],
                 'intensity': item['intensity'],
                 'intensityId': intensity_ids[item['intensity']],
-                'voiceVote': rating.get('vote'),
-                'voiceAgreement': rating.get('agreement'),
-                'voiceLevel': rating.get('level'),
-                'voiceRatings': rating.get('count', 0),
-                'alignScore': record['score'],
-                'phoneConfidence': round(sum(confidences) / len(confidences), 3),
-                'heard': round(sum(1 for value in confidences if value >= 0.3) / len(confidences), 3),
                 'phoneError': round(check['phoneError'], 3),
                 'clipped': round(result['clipped'], 5),
-                'peakDb': result['peakDb'],
-                'levelDb': result['levelDb'],
-                'noiseFloorDb': result['noiseFloorDb'],
                 'relabeled': check['sentence'] != item['sentence']
             }
             entries.append(entry)
@@ -832,7 +779,7 @@ def build(args):
             frame_offset += frame_count
             alignment_file.write(json.dumps({'id': entry['id'], 'tokens': ' '.join(result['tokens']),
                                              'frames': result['frames'], 'greedy': record['greedy'],
-                                             'confidences': confidences}, ensure_ascii=False) + '\n')
+                                             'confidences': record['confidences']}, ensure_ascii=False) + '\n')
     np.save(os.path.join(out_dir, 'tokens.npy'), np.concatenate(tokens))
     np.save(os.path.join(out_dir, 'durations.npy'), np.concatenate(durations))
     np.save(os.path.join(out_dir, 'seconds.npy'), np.concatenate(seconds))
@@ -857,12 +804,7 @@ def build(args):
         'styleNotes': {
             'emotion': 'the intended emotion (the file name) - emotionId indexes "emotions"',
             'intensity': 'the intended intensity - low/medium/high only for sentence IEO, else unspecified',
-            'voiceVote': 'the crowd\'s plurality emotion for the audio alone (ties joined by ":")',
-            'voiceAgreement': 'the share of audio-only raters choosing the intended emotion',
-            'voiceLevel': 'the mean rated intensity (0-100) of the audio-only votes for the intended emotion',
-            'heard': 'the share of phones the recognizer found (best posterior >= 0.3) - a clarity measure',
             'phoneError': 'the recognizer\'s greedy phone error rate against the sentence',
-            'noiseFloorDb': '5th- minus 95th-percentile frame energy (dB) - higher is noisier',
             'relabeled': 'the actor read another of the sentences than the file name says (text corrected)'
         },
         'speakers': speakers,
@@ -884,8 +826,8 @@ def build(args):
 
 
 # Write data/nn/cremad.json - the small committed summary: the corpus, its license, the counts by emotion, intensity,
-# and split, the actors (demographics, accent, pitch range, clips included), the alignment's check against ARCTIC, and
-# the emotion classifier's recognition of the recordings
+# and split, the excluded and relabeled clips, the alignment's settings, and the actors (demographics, accent, pitch
+# range, clips included)
 def write_summary(index, path=SUMMARY_PATH):
     import collections  # pylint: disable=import-outside-toplevel
     entries = index['utterances']

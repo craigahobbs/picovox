@@ -57,8 +57,8 @@ def write_config(root, teacher):
         'teacher': teacher,
         'targets': {'books': books, 'bookCopies': 2, 'actorShare': 0.3, 'blendShare': 0.5, 'emotionShare': 0.5,
                     'intensity': [0.25, 1.0], 'minTokens': 4, 'maxTokens': 256, 'valItems': 3, 'seed': 1},
-        'train': {'steps': 3, 'batch': 4, 'maxFrames': 4000, 'lr': 0.001, 'warmup': 1, 'durationWeight': 0.25,
-                  'dropout': 0.05, 'weightDecay': 0.0001, 'valEvery': 2},
+        'train': {'steps': 3, 'batch': 4, 'maxFrames': 4000, 'lr': 0.001, 'warmup': 1, 'schedule': 'wsd', 'cooldown': 0.25,
+                  'durationWeight': 0.25, 'dropout': 0.05, 'weightDecay': 0.0001, 'valEvery': 2},
         'student': 'tiny',
         'students': [{'name': 'tiny', 'config': {'dim': 8, 'decoderDim': 8, 'encoderLayers': 1, 'decoderLayers': 1}},
                      {'name': 'small', 'config': {'dim': 12, 'decoderDim': 12, 'encoderLayers': 1, 'decoderLayers': 1}}],
@@ -373,10 +373,6 @@ class TestTraining(DistillCase):
         self.assertEqual(model.config['dim'], 8)
         self.assertFalse(model.speaker.weight.requires_grad)
         self.assertTrue(torch.equal(model.style, teacher.style))
-        model, copied = distill.build_student({'decoderDim': 8}, teacher, state, 0.05, init_teacher=True)
-        self.assertIn('embedding.weight', copied)
-        self.assertNotIn('head.weight', copied)
-        self.assertTrue(torch.equal(model.embedding.weight, teacher.embedding.weight))
 
     def test_losses(self):
         targets = distill.Targets(self.targets)
@@ -386,7 +382,6 @@ class TestTraining(DistillCase):
         column_mask = torch.ones(params.COUNT)
         outputs = distill.run_model(student, batch)
         self.assertEqual(outputs['unit'].shape, batch['unit'].shape)
-        self.assertEqual(outputs['decoded'].shape[-1], 8)
         losses = distill.distill_losses(outputs, batch, column_mask)
         self.assertEqual(set(losses), {'frames', 'durPhone', 'durPause', 'durPaused'})
         self.assertTrue(all(float(value.detach()) >= 0 for value in losses.values()))
@@ -398,22 +393,6 @@ class TestTraining(DistillCase):
         self.assertLess(abs(float(teacher_losses['durPause'])), 1e-3)
         # (the predicted durations - the duration outputs' - given)
         self.assertEqual(distill.run_model(student, batch, batch['durations'] + 1)['unit'].shape[1], batch['unit'].shape[1])
-        # The feature-matching loss
-        projections = distill.FeatureProjections(student, teacher)
-        loss = distill.feature_loss(projections, outputs, teacher_outputs, batch)
-        self.assertGreater(float(loss.detach()), 0)
-
-    def test_decode_features(self):
-        teacher, _ = export.load_model(self.teacher)
-        regulated = torch.randn(1, 5, 16)
-        positions = torch.rand(1, 5, 5)
-        mask = torch.ones(1, 5, 1)
-        condition = teacher.condition(torch.tensor([0]))
-        with torch.no_grad():
-            features, unit = distill.decode_features(teacher, regulated, positions, mask, condition)
-            expected = teacher.decode(regulated, positions, mask, condition)
-        self.assertEqual(features.shape, (1, 5, 16))
-        self.assertTrue(torch.allclose(unit, expected))
 
     def test_validate_student(self):
         targets = distill.Targets(self.targets)
@@ -462,65 +441,26 @@ class TestTraining(DistillCase):
         self.assertEqual(rows[0]['train']['step'], 2)
 
     def test_train_student_options(self):
-        # A JSON config, the teacher's tensors, feature matching, the settings overridden, a skipped non-finite step
-        clip = torch.nn.utils.clip_grad_norm_
+        # A JSON config, the teacher given, the settings overridden, a skipped non-finite step
+        grad_norm = distill.optim.LeanOptimizer.grad_norm
         norms = []
 
-        def clip_once_infinite(*args, **kwargs):
-            norm = clip(*args, **kwargs)
+        def norm_once_infinite(optimizer):
+            norm = grad_norm(optimizer)
             norms.append(norm)
             return torch.tensor(float('inf')) if len(norms) == 1 else norm
-        with unittest.mock.patch('torch.nn.utils.clip_grad_norm_', side_effect=clip_once_infinite), \
-                unittest.mock.patch('torch.backends.mps.is_available', return_value=False), warnings.catch_warnings():
-            # (the skipped first step - torch's warning that the schedule stepped before the optimizer)
-            warnings.filterwarnings('ignore', 'Detected call of `lr_scheduler.step\\(\\)` before', UserWarning)
+        with unittest.mock.patch.object(distill.optim.LeanOptimizer, 'grad_norm', norm_once_infinite), \
+                unittest.mock.patch('torch.backends.mps.is_available', return_value=False):
             self.assertEqual(self.run_main(['train', '--config', self.config, '--student-config', '{"decoderDim": 8}',
                                             '--name', 'options', '--teacher', self.teacher, '--steps', '2', '--batch', '2',
-                                            '--lr', '0.01', '--warmup', '0', '--init-teacher', '--feature-weight', '0.5',
+                                            '--lr', '0.01', '--warmup', '0', '--max-frames', '3000', '--cooldown', '0.5',
                                             '--log-every', '1']), 0)
         state = torch.load(os.path.join(distill.RUNS_DIR, 'distill-options', 'best.pt'), weights_only=False)
-        self.assertEqual(state['args']['settings']['steps'], 2)
-        self.assertEqual(state['args']['settings']['batch'], 2)
+        settings = state['args']['settings']
+        self.assertEqual((settings['steps'], settings['batch'], settings['lr'], settings['warmup'], settings['maxFrames'],
+                          settings['cooldown']), (2, 2, 0.01, 0, 3000, 0.5))
         self.assertEqual(state['config']['dim'], 16)
-        with open(os.path.join(distill.RUNS_DIR, 'distill-options', 'log.jsonl'), encoding='utf-8') as file:
-            rows = [json.loads(line) for line in file]
-        self.assertIn('features', rows[0]['train'])
-
-    def test_train_student_step_options(self):
-        # Every training step option (Muon and the lean step, the EMA, the wsd schedule, zero-initialized projections
-        # past the teacher's tensors); each validation worse than the last - the EMA's best stays the first's
-        validate = distill.validate_student
-        calls = []
-
-        def worse(*args, **kwargs):
-            result = validate(*args, **kwargs)
-            calls.append(result)
-            result['frames'] += len(calls)
-            return result
-        with unittest.mock.patch.object(distill, 'validate_student', side_effect=worse), \
-                unittest.mock.patch.object(distill.optim, 'zero_init_projections', wraps=distill.optim.zero_init_projections) as zero:
-            self.assertEqual(self.run_main(['train', '--config', self.config, '--device', 'cpu', '--targets', self.targets,
-                                            '--name', 'step-options', '--optimizer', 'muon', '--ema', '0.9', '--schedule', 'wsd',
-                                            '--cooldown', '0.5', '--cooldown-shape', '1-sqrt', '--zero-init-proj', '--init-teacher',
-                                            '--max-frames', '3000']), 0)
-        zero.assert_called_once()
-        directory = os.path.join(distill.RUNS_DIR, 'distill-step-options')
-        ema_best = torch.load(os.path.join(directory, 'ema-best.pt'), weights_only=False)
-        ema_last = torch.load(os.path.join(directory, 'ema-last.pt'), weights_only=False)
-        self.assertEqual((ema_best['step'], ema_last['step']), (2, 3))
-        settings = ema_best['args']['settings']
-        self.assertEqual((settings['optimizer'], settings['ema'], settings['schedule'], settings['cooldown'], settings['cooldownShape'],
-                          settings['zeroInitProj'], settings['maxFrames'], settings['leanClip']),
-                         ('muon', 0.9, 'wsd', 0.5, '1-sqrt', True, 3000, False))
-        with open(os.path.join(directory, 'log.jsonl'), encoding='utf-8') as file:
-            rows = [json.loads(line) for line in file]
-        self.assertEqual([list(row)[0] for row in rows], ['emaVal', 'val', 'emaVal', 'val'])
-
-        # The lean step alone, with feature matching's projections
-        self.assertEqual(self.run_main(['train', '--config', self.config, '--device', 'cpu', '--targets', self.targets,
-                                        '--name', 'lean', '--lean-clip', '--feature-weight', '0.5', '--steps', '1']), 0)
-        state = torch.load(os.path.join(distill.RUNS_DIR, 'distill-lean', 'best.pt'), weights_only=False)
-        self.assertTrue(state['args']['settings']['leanClip'])
+        self.assertEqual(len(norms), 2)
 
     def test_tee(self):
         first, second = io.StringIO(), io.StringIO()
@@ -555,11 +495,10 @@ class TestTraining(DistillCase):
         self.assertEqual(state['step'], 1)
 
         # trainmulti.py's flags added (--train-args)
-        self.assertEqual(self.run_main(['polish', '--config', self.config, '--init', init, '--device', 'cpu', '--name', 'shine-ema',
-                                        '--train-args', '--ema 0.9 --lean-clip']), 0)
-        state = torch.load(os.path.join(distill.RUNS_DIR, 'distill-shine-ema', 'last.pt'), weights_only=False)
-        self.assertEqual((state['args']['ema'], state['args']['lean_clip']), (0.9, True))
-        self.assertTrue(os.path.exists(os.path.join(distill.RUNS_DIR, 'distill-shine-ema', 'ema-best.pt')))
+        self.assertEqual(self.run_main(['polish', '--config', self.config, '--init', init, '--device', 'cpu', '--name', 'shine-lean',
+                                        '--train-args=--lean-clip']), 0)
+        state = torch.load(os.path.join(distill.RUNS_DIR, 'distill-shine-lean', 'last.pt'), weights_only=False)
+        self.assertTrue(state['args']['lean_clip'])
 
 
 class TestEvaluation(DistillCase):

@@ -5,7 +5,7 @@
 Inference in PyTorch - text to parameter frames with an exported voice's weights (export.py's quantized_model), the
 same steps as lib/model.js: tokens (frontend.py), split into sentences (each with its own <bos>), rare tokens remapped
 (the export manifest's remap), durations, frames. The export's parity check (tests/test_export.py) compares
-lib/model.js with it.
+lib/model.js with it - the reference, a test module.
 
 The voice is a speaker (a key or an id of the speaker table), and its style an emotion (model.py's STYLE_NAMES, or
 neutral) at an intensity (0-1).
@@ -14,11 +14,11 @@ neutral) at an intensity (0-1).
 import numpy
 import torch
 
-from . import params
-from .distill import sentences
-from .export import load_model, quantized_model, token_remap, training_token_counts
-from .frontend import tokenize
-from .model import STYLE_NAMES
+from picovox_train import params
+from picovox_train.distill import sentences
+from picovox_train.export import load_model, quantized_model, token_remap, training_token_counts
+from picovox_train.frontend import tokenize
+from picovox_train.model import STYLE_NAMES
 
 
 class Voice:

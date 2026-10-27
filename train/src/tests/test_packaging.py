@@ -131,7 +131,9 @@ class TestPackage(unittest.TestCase):
         cls.temp.cleanup()
 
     def test_package_encodings(self):
-        text, sizes = package.package(self.model_path, 'never')
+        # Deflated when it saves at least MIN_SAVING of the gzip-served module
+        with unittest.mock.patch.object(package, 'MIN_SAVING', 1):
+            text, sizes = package.package(self.model_path)
         self.assertEqual(sizes['chosen'], 'raw')
         self.assertIn("export const encoding = 'raw';", text)
         self.assertEqual(sizes['binBytes'], os.path.getsize(self.model_path + '.bin'))
@@ -139,26 +141,22 @@ class TestPackage(unittest.TestCase):
         self.assertEqual(sizes['raw']['payloadBytes'], sizes['binBytes'])
         self.assertLess(sizes['deflate-raw']['payloadBytes'], sizes['binBytes'])
         self.assertEqual(sizes['deflateSaving'], round(1 - sizes['deflate-raw']['gzipBytes'] / sizes['raw']['gzipBytes'], 4))
-        text, sizes = package.package(self.model_path, 'always')
+        with unittest.mock.patch.object(package, 'MIN_SAVING', -1):
+            text, sizes = package.package(self.model_path)
         self.assertEqual(sizes['chosen'], 'deflate-raw')
         self.assertIn("export const encoding = 'deflate-raw';", text)
-        # auto - deflate when it saves at least min_saving of the gzip-served module
-        _, sizes = package.package(self.model_path, 'auto', min_saving=-1)
-        self.assertEqual(sizes['chosen'], 'deflate-raw')
-        _, sizes = package.package(self.model_path, 'auto', min_saving=1)
-        self.assertEqual(sizes['chosen'], 'raw')
         text, sizes = package.package(self.model_path, provenance_info={'commit': 'abc'})
         self.assertIn('"provenance":{"commit":"abc"}', text)
         self.assertTrue(all(len(line) <= package.LINE_LENGTH for line in text.split('\n')))
 
     def test_main_round_trip(self):
         # The module, unpacked, is the export (lib/package.js's loading of package.py's modules - test/testPackage.js)
-        for compress in ('always', 'never'):
-            output = os.path.join(self.root, 'out', f'voiceModel-{compress}.js')
-            with helpers.captured() as (stdout, _), \
+        for min_saving in (-1, 1):
+            output = os.path.join(self.root, 'out', f'voiceModel-{min_saving}.js')
+            with helpers.captured() as (stdout, _), unittest.mock.patch.object(package, 'MIN_SAVING', min_saving), \
                     unittest.mock.patch.object(package, 'provenance', return_value={'commit': 'abc', 'dirty': False}) as provenance:
-                self.assertEqual(package.main([self.model_path, '-o', output, '--compress', compress, '--provenance',
-                                               '--recipe', 'data/nn/train.json', '--data', 'a', 'b', '--scores', 'result.json']), 0)
+                self.assertEqual(package.main([self.model_path, '-o', output, '--provenance', '--recipe', 'data/nn/train.json',
+                                               '--data', 'a', 'b', '--scores', 'result.json']), 0)
             provenance.assert_called_once_with('data/nn/train.json', ['a', 'b'], 'result.json')
             self.assertEqual(json.loads(stdout.getvalue())['output'], output)
             manifest, weights = helpers.unpack_module(output)

@@ -41,21 +41,16 @@ Checkpoints and the log go to build/nn/runs/<name>/ (last.pt every --save-every 
 validation score, validated every --val-every steps from --val-from and at the end, step-<n>.pt every --keep-every steps,
 log.jsonl).
 
-The training step's options (optim.py; off by default - without them, training is unchanged):
+The training step's options (optim.py):
 
 - --lean-clip - the gradient clip and the AdamW step in a few kernel launches (the global norm of one concatenation,
   the clip as fused AdamW's grad_scale, one shared step counter) - the same up to rounding
-- --optimizer muon - Muon for the hidden Linear matrices (batched, zero-padded Newton-Schulz), AdamW for the rest
-- --ema DECAY - an exponential moving average of the weights, validated beside them (ema-best.pt, ema-last.pt)
-- --schedule wsd --cooldown F --cooldown-shape linear|1-sqrt - warmup-stable-decay: constant, then the last F of the
-  steps cooled down to the floor
-- --crop-warmup STEPS:SECONDS - shorter rendered crops for the first steps
-- --zero-init-proj - the residual output projections zero-initialized (a model from scratch)
+- --schedule wsd --cooldown F - warmup-stable-decay: constant, then the last F of the steps cooled down to the floor by
+  1 - sqrt
 """
 
 import argparse
 import collections
-import copy
 import json
 import math
 import os
@@ -275,25 +270,6 @@ def crop(values, batch, crop_frames, rate, rng):
 compiled_spectral_loss = torch.compile(spectral_loss)
 
 
-# The spectral loss of --crop-warmup's short crops (its own compiled function - one fixed crop length each)
-def short_crop_spectral_loss(audio, target, rate, max_hz, mel_eps):
-    return spectral_loss(audio, target, rate, max_hz, mel_eps=mel_eps)
-
-
-compiled_short_crop_spectral_loss = torch.compile(short_crop_spectral_loss)
-
-
-# The rendered crop's length (parameter frames - 200 a second) of a training step - --crop-warmup's short crop for its
-# first steps, else --crop's
-def step_crop_frames(args, step):
-    warmup = getattr(args, 'crop_warmup', None)
-    if warmup:
-        steps, seconds = warmup.split(':')
-        if step < int(steps):
-            return int(round(float(seconds) * params.FRAME_RATE))
-    return args.crop_frames
-
-
 # Low-pass audio [B, N] at a cutoff per item (Hz) - zeroing the FFT bins above it (so the magnitude spectra of the
 # losses and the critic take a small epsilon - a magnitude of exactly zero has an infinite gradient); cutoff_tensor is
 # the cutoffs as a float32 tensor on the audio's device, if the caller has it
@@ -315,9 +291,8 @@ class Prefetcher:
     plan_cycles - the rendered frames' F0 is the recording's, and their jitter the model's constant). next() returns
     the steps' data in order."""
 
-    def __init__(self, corpora, streams, args, rng, synth, jitter, depth=3, step=0):
+    def __init__(self, corpora, streams, args, rng, synth, jitter, depth=3):
         self.corpora = corpora
-        self.step = step
         self.streams = streams
         self.args = args
         self.rng = rng
@@ -348,8 +323,7 @@ class Prefetcher:
         batch = collate_host(self.corpora[name], next(self.streams[name]), getattr(args, 'bucket_ratio', 0))
         seed = int(self.rng.integers(1 << 30))
         total = 2 * batch['frameCount'] + 1
-        starts, length = crop_starts(batch['items'], total, step_crop_frames(args, self.step), self.rng)
-        self.step += 1
+        starts, length = crop_starts(batch['items'], total, args.crop_frames, self.rng)
         host = batch['host']
         host['target'] = torch.from_numpy(crop_audio(batch['corpus'], batch['items'], starts, length, args.rate))
         cutoffs = [0.95 * item['bandwidth'] for item in batch['items']]
@@ -463,17 +437,12 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
     audio = band_limit(audio, cutoffs, args.rate, batch.get('cutoffs'))
     target = band_limit(target, cutoffs, args.rate, batch.get('cutoffs'))
     full_crop = audio.shape[1] == round(args.crop * args.rate)
-    short_crop = bool(getattr(args, 'crop_warmup', None)) and audio.shape[1] == round(float(args.crop_warmup.split(':')[1]) * args.rate)
-    if audio.device.type == 'mps' and (full_crop or short_crop):  # pragma: no cover - the Apple GPU only
-        # (the full-length crops - nearly every step - through the compiled loss, the batch size a dynamic dimension;
-        # --crop-warmup's short crops through their own compiled loss)
+    if audio.device.type == 'mps' and full_crop:  # pragma: no cover - the Apple GPU only
+        # (the full-length crops - nearly every step - through the compiled loss, the batch size a dynamic dimension)
         # (torch's API for a dynamic dimension is torch._dynamo's)
         torch._dynamo.mark_dynamic(audio, 0)  # pylint: disable=protected-access
         torch._dynamo.mark_dynamic(target, 0)  # pylint: disable=protected-access
-        if full_crop:
-            losses['spectral'] = compiled_spectral_loss(audio, target, args.rate, args.max_hz, mel_eps=1e-9)
-        else:
-            losses['spectral'] = compiled_short_crop_spectral_loss(audio, target, args.rate, args.max_hz, 1e-9)
+        losses['spectral'] = compiled_spectral_loss(audio, target, args.rate, args.max_hz, mel_eps=1e-9)
     else:
         losses['spectral'] = spectral_loss(audio, target, args.rate, args.max_hz, mel_eps=1e-9)
 
@@ -587,13 +556,8 @@ def argument_parser():
     parser.add_argument('--init-critic', default=None, help='initialize the critic from a checkpoint\'s (with --adversarial)')
     parser.add_argument('--seed', type=int)
     parser.add_argument('--lean-clip', action='store_true', help='the lean clip and AdamW step (optim.py)')
-    parser.add_argument('--optimizer', choices=['adamw', 'muon'], default='adamw', help='muon: Muon for the hidden matrices')
-    parser.add_argument('--ema', type=float, default=0.0, help='an EMA of the weights at this decay, validated beside them')
     parser.add_argument('--schedule', choices=['cosine', 'wsd'], default='cosine', help='the learning rate schedule')
     parser.add_argument('--cooldown', type=float, default=0.0, help="wsd: the cooldown's share of --steps")
-    parser.add_argument('--cooldown-shape', choices=['linear', '1-sqrt'], default='linear')
-    parser.add_argument('--crop-warmup', default=None, help='STEPS:SECONDS - shorter rendered crops for the first steps')
-    parser.add_argument('--zero-init-proj', action='store_true', help='zero-initialize the residual output projections')
     parser.set_defaults(**recipe_defaults('teacher.defaults'))
     return parser
 
@@ -645,8 +609,6 @@ def main(argv=None):
     # The model, the critic, and the optimizers
     config = {'speakers': len(speaker_keys), 'vocab': len(readers.data.index['vocab']), **json.loads(args.config)}
     model = MultiModel(config, priors=MULTI_PRIORS, dropout=args.dropout).to(device)
-    if args.zero_init_proj:
-        optim.zero_init_projections(model)
     if args.init:
         state = torch.load(args.init, map_location=device, weights_only=False)
         missing, unexpected = model.load_state_dict(state['model'], strict=False)
@@ -664,22 +626,17 @@ def main(argv=None):
     fused = device.type in ('mps', 'cuda')
     critic_optimizer = torch.optim.AdamW(critic.parameters(), lr=args.critic_lr, betas=(0.8, 0.99),
                                          fused=fused or None) if critic else None
-    # (the lean step - and Muon, which takes its clip - optim.py)
-    lean = args.lean_clip or args.optimizer == 'muon'
+    # (the lean step - optim.py)
+    lean = args.lean_clip
     if lean:
-        optimizer = optim.LeanOptimizer(optim.param_groups(model, muon=args.optimizer == 'muon'), lr=args.lr,
-                                        weight_decay=args.weight_decay, betas=(0.9, 0.98))
+        optimizer = optim.LeanOptimizer(optim.param_groups(model), lr=args.lr, weight_decay=args.weight_decay, betas=(0.9, 0.98))
     else:
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, betas=(0.9, 0.98),
                                       fused=fused or None)
 
     def learning_rate(step):
-        return optim.lr_factor(step, args.steps, args.warmup, args.schedule, args.cooldown, args.cooldown_shape)
+        return optim.lr_factor(step, args.steps, args.warmup, args.schedule, args.cooldown)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, learning_rate)
-    # (the EMA of the weights, and a model to validate it in)
-    ema = optim.FlatEMA(model.parameters(), args.ema) if args.ema else None
-    ema_model = copy.deepcopy(model) if ema else None
-    ema_best = math.inf
 
     step = 0
     best = math.inf
@@ -695,12 +652,6 @@ def main(argv=None):
         scheduler.load_state_dict(state['scheduler'])
         step = state['step']
         best = state.get('best', math.inf)
-        if ema is not None and 'ema' in state:
-            ema.load_state_dict(state['ema'])
-            ema_best = state.get('emaBest', math.inf)
-        elif ema is not None:
-            # (a run without the EMA resumed with it - the EMA starts from the resumed weights)
-            ema = optim.FlatEMA(model.parameters(), args.ema)
         if critic is not None and 'critic' in state:
             critic.load_state_dict(state['critic'])
             for group in state['criticOptimizer']['param_groups']:
@@ -711,12 +662,10 @@ def main(argv=None):
     print(f'model: {parameter_count(model)} parameters ({core} without the speaker and equalizer tables); {args.name}: '
           f'{args.steps} steps from {step}', file=sys.stderr, flush=True)
 
-    def save(path, extra=None, weights=None):
+    def save(path, extra=None):
         if critic is not None:
             extra = {**(extra or {}), 'critic': critic.state_dict(), 'criticOptimizer': critic_optimizer.state_dict()}
-        if ema is not None:
-            extra = {**(extra or {}), 'ema': ema.state_dict(), 'emaBest': ema_best}
-        save_checkpoint({'model': (weights or model).state_dict(), 'optimizer': optimizer.state_dict(),
+        save_checkpoint({'model': model.state_dict(), 'optimizer': optimizer.state_dict(),
                          'scheduler': scheduler.state_dict(), 'step': step, 'best': best, 'config': model.config,
                          'priors': MULTI_PRIORS, 'speakers': speaker_keys, 'readerCount': reader_count,
                          'styles': list(STYLE_NAMES), 'args': vars(args), **(extra or {})}, path)
@@ -736,7 +685,7 @@ def main(argv=None):
     model.train()
     # The steps' data, made ahead on a thread - all the draws from rng are its, in the order the steps made them
     jitter = float(model.fixed[params.INDEX['jitter']].cpu())
-    prefetcher = Prefetcher(corpora, streams, args, rng, synth, jitter, step=step)
+    prefetcher = Prefetcher(corpora, streams, args, rng, synth, jitter)
     # The recent steps' data - their host tensors are the sources of non-blocking uploads, so each is kept until the
     # GPU is past its step (an event after it): on MPS the steps don't read the device (the synthesizer finishes its
     # plans made ahead there), so the CPU runs up to IN_FLIGHT steps ahead of the GPU
@@ -790,8 +739,6 @@ def main(argv=None):
                 optimizer.step()
             elif torch.isfinite(norm):
                 optimizer.step()
-        if ema is not None:
-            ema.update()
         scheduler.step()
         step += 1
         if device.type == 'mps':  # pragma: no cover - the Apple GPU only
@@ -836,21 +783,6 @@ def main(argv=None):
         # the schedule doesn't change the training.)
         validating = step == stop or (step % args.val_every == 0 and step >= args.val_from)
         extra = None
-        if ema is not None and validating:
-            # The EMA weights' validation (an emaVal row) and checkpoints - ema-best.pt (the lowest reader score), ema-last.pt
-            ema.copy_to(ema_model.parameters())
-            ema_results = {name: validate(ema_model, synth, corpus_set, args, device, sonorants) for name, corpus_set in val_sets.items()}
-            ema_result = dict(ema_results['multi'])
-            for name, other in ema_results.items():
-                if name != 'multi':
-                    ema_result.update({f'{name}.{key}': value for key, value in other.items()})
-            print('  EMA VAL ' + ' '.join(f'{key} {value:.4g}' for key, value in ema_result.items()), file=sys.stderr, flush=True)
-            log.write(json.dumps({'emaVal': {'step': step, **ema_result}}) + '\n')
-            log.flush()
-            if ema_result['score'] < ema_best:
-                ema_best = ema_result['score']
-                save(os.path.join(directory, 'ema-best.pt'), {'val': ema_result}, ema_model)
-            save(os.path.join(directory, 'ema-last.pt'), {'val': ema_result}, ema_model)
         if validating:
             results = {name: validate(model, synth, corpus_set, args, device, sonorants) for name, corpus_set in val_sets.items()}
             result = dict(results['multi'])
