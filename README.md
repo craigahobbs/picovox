@@ -397,12 +397,12 @@ The flow:
 3. `make train-check` - the package's tests with the trained models in place of `lib/models/`'s
    (`tools/trainmodels.js`, a module hook), then the blind A/B of the trained voice against the shipped one, in your
    browser (`tools/trainab.js` serves the voice lab locally, with the trained voice in `build/voicelab/trained/`; both
-   sides speak with the shipped G2P, so the A/B is the voice's alone): each of the package's voices speaks the two of
+   sides speak with the shipped G2P, so the A/B is the voice's alone): each of the package's voices speaks the one of
    its candidate texts (the panel's Harvard sentences and the recipe's listening samples texts) where the two voices
    differ most - the distance of their parameter frames (pitch, voicing, pulse shape, tilt, the noises, the lower
    formants and bandwidths, each scaled to its range), aligned by dynamic time warping - so an audible difference is
-   heard if there is one. The trials are shuffled, with 6 repeats - 30 forced choices (or Same), about 8 minutes; after
-   8 Same answers in a row the page offers to finish early (no audible difference). The answers are saved as you go
+   heard if there is one. The trials are shuffled, with 3 repeats - 15 forced choices (or Same), about 4 minutes; after
+   6 Same answers in a row the page offers to finish early (no audible difference). The answers are saved as you go
    (`build/train/listen/` - a rerun resumes; a rerun after a finished round starts another, and the report counts every
    round). At the end it prints the report (`tools/trainabreport.js`): the trained voice's win rate over the decided
    trials with its 95% interval and sign test, the repeats' agreement, each voice's counts, the panel's scores, and a

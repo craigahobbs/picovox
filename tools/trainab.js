@@ -3,11 +3,11 @@
 
 // make train-check's blind A/B - the voice lab (build/voicelab - make voicelab VOICELAB_TRAINED) served locally with its
 // trials (tools/trainabreport.js): the trained voice against the shipped one, each of the package's voices speaking the
-// two of its candidate texts (the panel's Harvard sentences and the recipe's listening samples texts) where the two
-// voices' parameter frames differ most, with repeats. The answers are saved as they're given (OUT/answers.json - a rerun
+// one of its candidate texts (the panel's Harvard sentences and the recipe's listening samples texts) where the two
+// voices' parameter frames differ most, with 3 repeats. The answers are saved as they're given (OUT/answers.json - a rerun
 // resumes); when a round is answered - or finished early from the page (no audible difference) - the report and its
 // recommendation (printed, and OUT/report.json), and the server exits. A rerun after a finished round starts the next
-// round; the report counts every round. Ctrl-C prints the report so far.
+// round (a round not yet started is chosen again); the report counts every round. Ctrl-C prints the report so far.
 //
 //     node tools/trainab.js --lab build/voicelab --out build/train/listen [--summary build/train/distill/summary.json]
 //         [--port 8770] [--open false - the browser not opened]
@@ -74,8 +74,8 @@ async function candidateTrials(texts) {
 }
 
 
-// The trials - the earlier rounds', and a new round when they're all answered: each voice's two candidate texts that
-// differ most between the voices
+// The trials - the earlier rounds', and a new round when they're all answered: each voice's candidate text that differs
+// most between the voices
 mkdirSync(args.out, {'recursive': true});
 const questionsPath = join(args.out, 'questions.json');
 const answersPath = join(args.out, 'answers.json');
@@ -83,6 +83,10 @@ const reportPath = join(args.out, 'report.json');
 const questions = readJSON(questionsPath, []);
 const answers = readJSON(answersPath, {});
 const unanswered = () => questions.filter((question) => !(question.id in answers));
+
+// (a round with no answers yet hasn't started - it's chosen again, with the current trials)
+const started = new Set(questions.filter((question) => question.id in answers).map((question) => question.round));
+questions.splice(0, questions.length, ...questions.filter((question) => started.has(question.round)));
 if (unanswered().length === 0) {
     const panelTexts = readJSON(join(repository, 'tools', 'panel-texts.json'), null).texts;
     const recipe = readJSON(join(repository, 'data', 'nn', 'train.json'), null);

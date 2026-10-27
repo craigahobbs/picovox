@@ -342,7 +342,7 @@ document.getElementById('explore-reset').addEventListener('click', () => setExpl
 
 
 // The A/B's early finish - offered after this many Same answers in a row
-const FINISH_SAME = 8;
+const FINISH_SAME = 6;
 
 
 // The store (the artifact's db - null without one), Claude's questions, and the answers
@@ -360,6 +360,15 @@ function element(tag, className, text = null) {
         created.textContent = text;
     }
     return created;
+}
+
+
+// A question's progress - its place among the questions, or among its round's (the A/B's rounds)
+function progressText(question, pending) {
+    const inRound = (items) => (question.round === undefined ? items : items.filter((item) => item.round === question.round));
+    const total = inRound(questions).length;
+    const round = question.round === undefined ? '' : ` (round ${question.round})`;
+    return `Question ${total - inRound(pending).length + 1} of ${total}${round}`;
 }
 
 
@@ -477,7 +486,7 @@ function renderQuestion() {
         submitRow.append(finish);
     }
     card.append(
-        element('p', 'progress', `Question ${questions.length - pending.length + 1} of ${questions.length}`),
+        element('p', 'progress', progressText(next, pending)),
         element('p', 'prompt', next.prompt), element('p', 'text', `"${next.text}"`), players,
         element('p', 'hint', next.hint ?? (next.type === 'yesno' ? 'Answer yes or no.' : 'Play each as often as you like, then choose.')),
         choiceRow, note, submitRow

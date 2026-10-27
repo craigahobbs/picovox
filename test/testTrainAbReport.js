@@ -84,8 +84,8 @@ test('trainabreport.chooseTrials', () => {
         {'voice': 'female', 'text': 'b', 'difference': 0.4}, {'voice': 'female', 'text': 'c', 'difference': 0.6}
     ];
     const chosen = (perVoice) => chooseTrials(candidates, perVoice).map((trial) => `${trial.voice} ${trial.text}`);
-    assert.deepEqual(chosen(), ['male b', 'male c', 'female c', 'female a']);
-    assert.deepEqual(chosen(1), ['male b', 'female c']);
+    assert.deepEqual(chosen(), ['male b', 'female c']);
+    assert.deepEqual(chosen(2), ['male b', 'male c', 'female c', 'female a']);
 });
 
 

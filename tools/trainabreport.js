@@ -82,7 +82,7 @@ export function alignedDistance(first, second) {
 
 // The trials - each voice's texts most different between the two voices (candidates: [{voice, text, difference}]), the
 // perVoice of each voice's, in the candidates' voice order
-export function chooseTrials(candidates, perVoice = 2) {
+export function chooseTrials(candidates, perVoice = 1) {
     const voices = [...new Set(candidates.map((candidate) => candidate.voice))];
     return voices.flatMap((voice) => candidates.filter((candidate) => candidate.voice === voice)
         .sort((one, two) => two.difference - one.difference).slice(0, perVoice));
@@ -92,7 +92,7 @@ export function chooseTrials(candidates, perVoice = 2) {
 // The trials of a round ([{voice, text, difference}] - chooseTrials's), in a shuffled order (seeded by the round), and
 // repeats of the first trials (repeatOf), each placed at least three trials after its original, for the listener's
 // consistency
-export function makeQuestions({trials, round, repeats = 6}) {
+export function makeQuestions({trials, round, repeats = 3}) {
     const random = seededRandom(round);
     const questions = shuffle([...trials], random).map((trial, index) => ({...trial, 'id': `r${round}-${index + 1}`}));
     for (const original of questions.slice(0, repeats)) {

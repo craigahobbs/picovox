@@ -775,8 +775,8 @@ alone): it reproduces the G2P and gates it against the committed module. `make t
 size, the voice's scores against the shipped model, and whether each module differs from the committed one - and
 installs nothing: `make train-check` runs the package's tests with the trained models, then a blind A/B of the trained
 voice against the shipped one in the voice lab, served locally (both with the shipped G2P; each of the twelve voices
-speaks the two texts, of nine, where the two voices' parameter frames differ most, aligned by dynamic time warping, with
-six repeats - thirty forced choices, finished early after eight Same answers in a row), and reports the listener's win
+speaks the text, of nine, where the two voices' parameter frames differ most, aligned by dynamic time warping, with three
+repeats - fifteen forced choices, finished early after six Same answers in a row), and reports the listener's win
 rate for the trained voice with its interval and sign test and a recommendation (no audible difference when at most a
 fifth of the answers chose a voice); `make train-install` installs the trained modules
 that differ (`make train-install-voice` and `train-install-g2p`, one).
