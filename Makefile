@@ -219,8 +219,9 @@ train-clean:
 downloads/cmudict/cmudict.dict: | build/venv-train.build
 	build/venv-train/bin/python -I train/src/picovox_train/corpora.py cmudict
 
-# The corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D - and the pinned files (downloads, once)
-$(TRAIN_DIR)/corpora.done: | build/venv-train.build
+# The corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D - and the pinned files (downloads, once; after the
+# dictionary's own download, so the two never fetch it at once)
+$(TRAIN_DIR)/corpora.done: | build/venv-train.build downloads/cmudict/cmudict.dict
 	@$(STAGE) start
 	$(STAGE) -- build/venv-train/bin/python -I train/src/picovox_train/corpora.py
 	$(STAGE) -- $(TRAIN_PYTHON) -m picovox_train.cremad fetch
