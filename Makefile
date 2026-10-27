@@ -69,14 +69,16 @@ parity:
 # Python virtual environments for make train - build/venv-<name> from requirements/<name>.txt (for example,
 # build/venv-listeners.build for the listener-model panel, train/src/picovox_train/listeners.py); they run the training
 # package from its source (PYTHONPATH=train/src - TRAIN_SRC). PYTHON_VENV is the Python that creates them (3.12 through
-# 3.14 are known to work).
+# 3.14 are known to work). CMAKE_BUILD_PARALLEL_LEVEL (default, every core) is the source builds' jobs - Praat
+# (parselmouth) on Linux ARM, which has no wheel, otherwise builds serially.
 PYTHON_VENV ?= python3
+CMAKE_BUILD_PARALLEL_LEVEL ?= $(shell getconf _NPROCESSORS_ONLN)
 
 build/venv-%.build: requirements/%.txt
 	rm -rf build/venv-$*
 	$(PYTHON_VENV) -m venv build/venv-$*
 	build/venv-$*/bin/pip -q install --upgrade pip
-	build/venv-$*/bin/pip -q install -r requirements/$*.txt
+	CMAKE_BUILD_PARALLEL_LEVEL=$(CMAKE_BUILD_PARALLEL_LEVEL) build/venv-$*/bin/pip -q install -r requirements/$*.txt
 	touch $@
 
 .PHONY: listeners
