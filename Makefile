@@ -180,6 +180,16 @@ train-check:
 	@echo 'make train-check: the package'"'"'s tests pass with the trained models; the voice lab is staged in build/voicelab/ with them' \
 		'(trained) beside the shipped models - ask Claude for the blind A/B, then make train-install to install them'
 
+# make help - javascript-build's usage, and the train flow
+help:
+	@echo
+	@echo 'The train flow:'
+	@echo '  make -j train        train both models to their gates in build/train/ and report them (lib/models/ unchanged)'
+	@echo '                       - watch it on the dashboard: python3 -m http.server, then http://localhost:8000/tools/dashboard/'
+	@echo '  make train-check     the package'"'"'s tests with the trained models, and the voice lab staged for the blind A/B'
+	@echo '  make train-install   the trained models that differ into lib/models/ - then make commit, and commit them'
+	@echo '  (make -j train-voice or train-g2p - one model; make train-clean - remove build/train for a from-scratch run)'
+
 # make train-install - the trained models that differ from the committed ones into lib/models/
 train-install:
 	$(TRAINED)
