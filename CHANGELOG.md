@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.8 (2026-10-27)
+
+- [bd62a80](https://github.com/craigahobbs/picovox/commit/bd62a80) - pronunciation: the heteronym context network retrained on the context labels 1.6.5's reading fixes changed - "a minute amount of dust" and "he spoke Polish" now right (the context regression set 53 of 54, was 51); 38 of 519,548 words of the pinned books are pronounced differently, all heteronyms. The voice retrained from scratch by the new make train flow - no audible difference in blind A/B listening, its listener-panel scores within noise
+- [961cfbf](https://github.com/craigahobbs/picovox/commit/961cfbf) - the package's internals simplified (the packed weights' decode and unused transform options removed), its audio bit-identical
+
 ## 1.6.7 (2026-10-23)
 
 - [ab9f58b](https://github.com/craigahobbs/picovox/commit/ab9f58b) - no clicks in speak's playback: its audio context runs at the synthesis sample rate, so the blocks join exactly - a context at the device's rate resampled each block apart, and every join (each 85 ms) clicked; the README says to play stream's blocks the same way
