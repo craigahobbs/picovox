@@ -17,6 +17,12 @@ from picovox_train import g2p, g2pmodel
 from . import parity
 
 
+# Uniform values in [low, high) - Generator.uniform's low + scale * value is fused (FMA) on some platforms, and the
+# values are the parity check's inputs
+def uniform(rng, low, high, count):
+    return low + (high - low) * rng.random(count)
+
+
 # Test values for exp and tanh - every range of fdlibm's reductions and special cases
 def sample_values():
     rng = np.random.default_rng(7)
@@ -24,8 +30,8 @@ def sample_values():
                0.35, -0.35, 1.03972077, 1.04, -1.04, 7.09782712893383973096e+02, 709.79, -745.13321910194110842, -745.2,
                -708.4, -720.0, 710.0, 22.0, -22.0, 23.0, 40.0, -40.0, 56.0 * math.log(2), -2.0, 1e-300, -1e-300, 5e-324,
                np.inf, -np.inf, np.nan, 0.6931471805599453, -0.6931471805599453, 1.5, 3.0, 20.0, -0.9, 0.9]
-    ranges = [rng.uniform(-1, 1, 400), rng.uniform(-10, 10, 400), rng.uniform(-40, 40, 400), rng.uniform(-750, 720, 400),
-              rng.uniform(-1e-8, 1e-8, 100), rng.normal(0, 3, 400)]
+    ranges = [uniform(rng, -1, 1, 400), uniform(rng, -10, 10, 400), uniform(rng, -40, 40, 400), uniform(rng, -750, 720, 400),
+              uniform(rng, -1e-8, 1e-8, 100), rng.normal(0, 3, 400)]
     return np.concatenate([np.array(special)] + ranges)
 
 

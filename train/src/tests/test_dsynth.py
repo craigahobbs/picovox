@@ -21,11 +21,12 @@ def frame(**values):
     return [float(values.get(name, params.DEFAULTS[name])) for name in params.NAMES]
 
 
-# Frames [T, COUNT] of a voiced vowel with a breathy onset and a fricative tail, varying F0
+# Frames [T, COUNT] of a voiced vowel with a breathy onset and a fricative tail, varying F0 (rounded - the C library's sin
+# differs in the last bit across platforms, and the frames are the parity check's inputs)
 def speech_frames(count=40, f0=120.0):
     frames = []
     for index in range(count):
-        frames.append(frame(f0=f0 + 20 * math.sin(index / 5), av=-20 if index < count * 0.6 else -90, rd=1.2,
+        frames.append(frame(f0=round(f0 + 20 * math.sin(index / 5), 9), av=-20 if index < count * 0.6 else -90, rd=1.2,
                             ah=-50, af=-40 if index > count / 2 else -90, ap1=-6, jitter=0.01, shimmer=0.05, shelf=3))
     return frames
 
