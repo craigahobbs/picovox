@@ -103,7 +103,9 @@ taken - in a browser, take the blocks in a Web Worker to keep the page responsiv
 <code>finished</code> is a Promise that resolves when the playback ends or is stopped (and rejects if synthesis fails). Playback
 starts with the first blocks while the rest are synthesized, a few seconds ahead. Synthesis runs on the main thread, a
 block at a time between the page's other work; for long texts, use <code>stream</code> in a Web Worker and play its blocks.
-<code>options.context</code> is an <code>AudioContext</code> to play in (by default, a new one, closed when the playback ends). Under Node,
+<code>options.context</code> is an <code>AudioContext</code> to play in (by default, a new one at the sample rate, closed when the playback
+ends). Play blocks in a context at their sample rate (<code>new AudioContext({'sampleRate': 24000})</code>): a context at another
+rate resamples each block apart, and the blocks' joins click. Under Node,
 <code>speak</code> throws an error - there is no Web Audio; use <code>synthesize</code> and <code>toWav</code>.</p>
 <h3><code>voices()</code></h3>
 <p>The built-in voices - <code>[{key, label, sex, description}]</code>, the default first:</p>
@@ -193,7 +195,11 @@ block at a time between the page's other work; for long texts, use <code>stream<
 </table>
 <p>The ten designed voices (<code>data/nn/voices.json</code>) are blends of two to four of the model's audiobook readers, with mild
 pitch, vocal-tract, and effort adjustments and their own speaking rate (the <code>rate</code> option multiplies it); on the
-listener panel's texts they score UTMOS 4.09-4.28 (the package's two voices 4.08 and 4.18).</p>
+listener panel's texts they score UTMOS 4.09-4.28 (the package's two voices 4.08 and 4.18). Every voice's source is 5
+dB darker than the network predicts it (<code>lib/synthesis.js</code> <code>sourceShelf</code>), and the package's two voices have a softer
+glottal pulse (Rd x1.2): in blind A/B listening the network's source sounded tinny - darker, it was less tinny in six of
+the twelve voices and never worse, and never less natural - with UTMOS, Whisper's WER, and speaker similarity on the
+panel texts unchanged.</p>
 <h3><code>styles()</code></h3>
 <p>The speaking styles - <code>[{key, label, kind, description}]</code>, neutral (the default) first. Any style goes with any voice:</p>
 <table>
@@ -387,7 +393,7 @@ that runs its own synthesis loop (PicoShelf's worker does):</p>
 </tr>
 <tr>
 <td><code>lib/transforms.js</code></td>
-<td>Voice and style transforms of parameter frames (pitch, tract length, bandwidths, whisper, effort)</td>
+<td>Voice and style transforms of parameter frames (pitch, tract length, bandwidths, whisper, effort, pulse softness, source shelf)</td>
 </tr>
 <tr>
 <td><code>lib/package.js</code></td>
@@ -429,7 +435,7 @@ that runs its own synthesis loop (PicoShelf's worker does):</p>
 <td>The voice network about 127x real time, the renderer about 97x; synthesis end to end (24 kHz) about 55x</td>
 </tr>
 <tr>
-<td>Speed, iPhone without a JIT (Safari)</td>
+<td>Speed, iPhone without a JIT (Safari over plain http, or in Lockdown Mode)</td>
 <td>About 2.6x real time in one worker; about 3.1-3.4x with the network and the renderer in two workers (<code>sentenceFrames</code> and <code>createSentenceRenderer</code>)</td>
 </tr>
 <tr>
@@ -460,9 +466,10 @@ book (Project Gutenberg and Standard Ebooks), read aloud by PicoVox in the brows
 make test        # the package's unit tests (TEST='name' runs one)
 make -C train commit      # the training's gate alone - its unit tests, pylint, and 100% branch coverage
 make -C train test TEST=tests.test_params    # one test module of the training's
-make -j train             # train both models - the G2P and the voice - each gated, then installed in lib/models/ (see below)
-make -j train-voice       # the voice alone; make -j train-voice-check - trained and gated, not installed
-make -j train-g2p         # the G2P alone, on every core; make -j train-g2p-check - trained and gated, not installed
+make -j train             # train both models - the G2P and the voice - each gated, in build/train/, then a report (see below)
+make train-check          # the package's tests with the trained models, then the blind A/B of the trained voice
+make train-install        # the trained models that differ into lib/models/ (train-install-voice, -g2p: one model)
+make -j train-voice       # the voice alone; make -j train-g2p - the G2P alone, on every core
 </code></pre>
 <p>The training pipeline is a Python package, <code>picovox_train</code> (<code>train/src/picovox_train/</code> - <code>picovox_train/&lt;module&gt;.py</code>
 below), and Node scripts (<code>nn/js/</code>, <code>tools/</code>); they use the package's modules but aren't part of it. <code>train/</code> is a
@@ -470,13 +477,13 @@ python-build package of its own: its unit tests (<code>train/src/tests/</code>) 
 synthetic data and no network, in python-build's environment (<code>train/build/venv/</code>), which installs the package with the
 training's pinned PyTorch and numpy (<code>train/pyproject.toml</code>, the same versions as <code>requirements/nn.txt</code>). <code>make train</code>
 runs the package from its source (<code>PYTHONPATH=train/src</code>) in the training environments, <code>build/venv-&lt;name&gt;</code> from
-<code>requirements/&lt;name&gt;.txt</code> - <code>venv-nn</code> (PyTorch, Praat), <code>venv-listeners</code> (the listener models), and <code>venv-pos</code> (spaCy);
-the corpus download needs only the standard library (<code>python3</code>). A training module runs the same way by hand:</p>
+<code>requirements/&lt;name&gt;.txt</code> - <code>venv-nn</code> (PyTorch, soxr, Praat - and the corpus download, which needs only the standard
+library), <code>venv-listeners</code> (the listener models), and <code>venv-pos</code> (spaCy). A training module runs the same way by hand:</p>
 <pre class="prettyprint source lang-sh"><code>PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke   # every training entry point, a few steps on the CPU
 </code></pre>
 <h2>Command-line tools</h2>
-<pre class="prettyprint source lang-sh"><code>node nn/js/speak.js -m data/nn/slt &quot;Hello, world.&quot; -o out/hello.wav    # an exported model (data/nn/&lt;voice>.json and .bin)
-node nn/js/unpack.js lib/models/voiceModel.js out/voice                 # a packaged model back to its export
+<pre class="prettyprint source lang-sh"><code>node nn/js/unpack.js lib/models/voiceModel.js out/voice                 # a packaged model back to its export
+node nn/js/speak.js -m out/voice &quot;Hello, world.&quot; -o out/hello.wav       # an exported model (&lt;voice>.json and .bin)
 node nn/js/packagecheck.js lib/models/voiceModel.js out/voice           # check a packaged model against its export
 node tools/heteronyms.js                                                # the heteronym and names regression sets
 </code></pre>
@@ -484,12 +491,13 @@ node tools/heteronyms.js                                                # the he
 repository on the local network (open the printed URL on the phone, which then polls for commands), and <code>node tools/perf/send.js COMMAND '{options}'</code> runs one there and prints its result - <code>timing</code> (the network, the renderer, and
 the streaming pipeline, stage by stage, in a worker as an app runs them), <code>parallel</code> and <code>pipeline</code> (several workers, or
 network and render workers in pairs, at once), <code>bench</code> (fixed workloads - whether the JavaScript engine compiles them;
-an iPhone's Safari can run without a JIT), and <code>reload</code>. A variant of <code>lib/</code> to try a change in is
+an iPhone's Safari interprets JavaScript on a page served over plain http, as the lab's is - so the lab measures that
+case; over https it compiles), and <code>reload</code>. A variant of <code>lib/</code> to try a change in is
 <code>tools/perf/variant.sh NAME</code> (<code>build/perf/variants/NAME/lib</code>, which the lab's commands take as <code>lib</code>);
 <code>tools/perf/compare.js NAME</code> compares its output with <code>lib/</code>'s (identical, else the SNR), and <code>tools/perf/speed.js lib NAME</code> times each under Node without a JIT (<code>--jitless</code> - the phone's speed within about 20%). <code>--root DIR</code> serves
 another app (PicoShelf, with its <code>?timing&amp;log=URL</code> timeline posted to <code>build/perf/devlog.jsonl</code>).</p>
 <p><code>nn/js/speak.js</code> speaks with an exported model (<code>picovox_train.export CHECKPOINT --voice NAME</code> writes
-<code>data/nn/NAME.json</code> and <code>.bin</code>; <code>data/nn/multi</code> is an export of the multi-speaker model), every word pronounced by the
+<code>data/nn/NAME.json</code> and <code>.bin</code>; <code>nn/js/unpack.js</code> makes one of the package's multi-speaker model), every word pronounced by the
 G2P network as the package pronounces (<code>-r</code> rate, <code>-s</code> seed, <code>--params</code> the parameter frames, <code>--rate</code> the duration
 multiplier, <code>--batch</code> a list of items); <code>-m</code> also takes a packaged module (<code>lib/models/voiceModel.js</code>). The
 multi-speaker model takes a speaker (<code>--speaker</code>, <code>--blend</code>) and a style (<code>--style</code>, <code>--intensity</code>).</p>
@@ -537,11 +545,6 @@ speaker identity, and speaking style alongside Whisper's intelligibility. They r
 <td><a href="https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb">ECAPA-TDNN</a> (SpeechBrain, VoxCeleb)</td>
 <td>A 192-dimension speaker embedding</td>
 </tr>
-<tr>
-<td>Style</td>
-<td><a href="https://huggingface.co/emotion2vec/emotion2vec_plus_base">emotion2vec+ base</a> (FunASR; <code>listeners.py --emotion</code> - not in the panel's scores)</td>
-<td>Probabilities of angry, disgusted, fearful, happy, neutral, other, sad, surprised, unknown</td>
-</tr>
 </tbody>
 </table>
 <p><code>picovox_train/panel.py</code> is the panel's scoring, shared by every evaluation (<code>picovox_train.distill eval</code>, make train's
@@ -549,21 +552,23 @@ gate): an exported model speaks a fixed evaluation set, <code>tools/panel-texts.
 passages from public-domain books with dialogue (Austen, Melville, Dickens, Doyle, Potter, Grahame), two questions, and
 two exclamations - through <code>nn/js/speak.js</code> (every word pronounced by the G2P network, as the package pronounces), and
 the renderings are scored with UTMOS, Whisper's WER, and the ECAPA speaker similarity.</p>
-<p><code>picovox_train/listeners.py</code> is the scoring tool itself - WAV files of any sample rate in, one JSON line per file out:</p>
+<p><code>picovox_train/listeners.py</code> is the scoring tool itself - WAV files (16-bit PCM) of any sample rate in, one JSON line per
+file out:</p>
 <pre class="prettyprint source lang-sh"><code>make listeners                                              # build/venv-listeners from requirements/listeners.txt
-build/venv-listeners/bin/python -I picovox_train/listeners.py [--no-mos] [--no-embedding] [--emotion] [--device auto|cpu|mps] \
+build/venv-listeners/bin/python -I train/src/picovox_train/listeners.py [--no-mos] [--no-embedding] [--device auto|cpu|mps] \
     [--files-from list.txt|-] file.wav ...
 </code></pre>
-<pre class="prettyprint source lang-json"><code>{&quot;file&quot;: &quot;a.wav&quot;, &quot;seconds&quot;: 2.63, &quot;mos&quot;: 3.33, &quot;embedding&quot;: [31.48, ...], &quot;emotion&quot;: {&quot;angry&quot;: 0.0, ..., &quot;neutral&quot;: 1.0}}
+<pre class="prettyprint source lang-json"><code>{&quot;file&quot;: &quot;a.wav&quot;, &quot;seconds&quot;: 2.63, &quot;mos&quot;: 3.33, &quot;embedding&quot;: [31.48, ...]}
 </code></pre>
 <p>The models load once per run (4-7 s) and then score about 35 seconds of speech a second (6 sentences) on an M3 Max's
 GPU (MPS, the default on Apple silicon - about 3x the CPU, with the same scores). Files longer than 20 s are scored in
 chunks. The models download on first use - about 1.5 GB, into <code>data/listeners/</code> (torch.hub, Hugging Face; like the corpora,
 <code>make clean</code> keeps them) - and later runs need no network.</p>
 <p>The environment is built with <code>python3</code> (3.14 here; 3.12 also works - <code>make listeners PYTHON_VENV=python3.12</code>). Its
-packages are pinned in <code>requirements/listeners.txt</code>: PyTorch 2.14, torchaudio 2.11 (resampling, for UTMOS),
-SpeechBrain 1.1, FunASR 1.4 (emotion2vec), Transformers 5.19 (for CREMA-D's forced alignment), and soundfile and soxr
-for reading and resampling audio.</p>
+packages are pinned in <code>requirements/listeners.txt</code>: PyTorch 2.14, torchaudio 2.11 (UTMOS's), SpeechBrain 1.1,
+transformers 5.20 (the CREMA-D aligner's wav2vec2), and soxr for resampling audio (WAV files are read with the
+standard library - <code>picovox_train/wav.py</code>). (The emotion2vec+ emotion recognizer, FunASR's - about 40 packages more -
+was the style experiments'; it's in git history.)</p>
 <p>Calibration (the evaluation set, or 16 recordings of each human speaker; October 2026):</p>
 <table>
 <thead>
@@ -616,13 +621,39 @@ for reading and resampling audio.</p>
 <p>Speaker similarity: every human pair 0.0-0.48; halves of one human speaker's recordings about 0.9.</p>
 <h2>make train</h2>
 <p><code>make train</code> recreates the generated models - <code>lib/models/g2pModel.js</code> and <code>lib/models/voiceModel.js</code> - from a clean
-checkout, by one recipe, <code>data/nn/train.json</code> (every stage's settings and seeds): <code>make train-g2p</code> and <code>make train-voice</code> at once. Each model's training ends in its gate, then its install - <code>make train-g2p-check</code> and <code>make train-voice-check</code> train and gate a model without installing it. The G2P is deterministic, so its gate is that it
-reproduces the committed module (identical below the comment header, else within the recipe's tolerances), and its
-install replaces <code>lib/models/g2pModel.js</code> only when it differs; the voice's gate is the listener panel against the
-shipped model. The voice data is built with the committed G2P (a G2P installed that differs makes the next <code>make train</code>
-rebuild the voice). Each stage is a stamp in
-<code>build/train/</code> (<code>TRAIN_DIR</code>), so <code>make -j train</code> runs independent stages at once; the GPU stages run one at a time
-(<code>picovox_train/gpulock.py</code> - two at once each run at about half speed) while the CPU stages run beside them:</p>
+checkout, by one recipe, <code>data/nn/train.json</code> (every stage's settings and seeds): <code>make train-g2p</code> and <code>make train-voice</code> at once. Each model's training ends in its gate, with its module in <code>build/train/</code> (<code>g2pModel.js</code>,
+<code>voiceModel.js</code>) - <code>lib/models/</code> unchanged. The G2P is deterministic, so its gate is that it reproduces the committed
+module (identical below the comment header, else within the recipe's tolerances); the voice's gate is the listener
+panel against the shipped model. The voice data is built with the committed G2P (a G2P installed that differs makes the
+next <code>make train</code> rebuild the voice).</p>
+<p>The flow:</p>
+<ol>
+<li><code>make -j train</code> - both models, then a report (<code>picovox_train.trained report</code>): each model's size, the voice's
+listener-panel scores against the shipped model's, and whether each module differs from the committed one.</li>
+<li>The training dashboard (below) - the gates and the listening samples.</li>
+<li><code>make train-check</code> - the package's tests with the trained models in place of <code>lib/models/</code>'s
+(<code>tools/trainmodels.js</code>, a module hook), then the blind A/B of the trained voice against the shipped one, in your
+browser (<code>tools/trainab.js</code> serves the voice lab locally, with the trained voice in <code>build/voicelab/trained/</code>; both
+sides speak with the shipped G2P, so the A/B is the voice's alone): each of the package's voices speaks the one of
+its candidate texts (the panel's Harvard sentences and the recipe's listening samples texts) where the two voices
+differ most - the distance of their parameter frames (pitch, voicing, pulse shape, tilt, the noises, the lower
+formants and bandwidths, each scaled to its range), aligned by dynamic time warping - so an audible difference is
+heard if there is one. The trials are shuffled, with 3 repeats - 15 forced choices (or Same), about 4 minutes; after
+6 Same answers in a row the page offers to finish early (no audible difference). The answers are saved as you go
+(<code>build/train/listen/</code> - a rerun resumes; a rerun after a finished round starts another, and the report counts every
+round). At the end it prints the report (<code>tools/trainabreport.js</code>): the trained voice's win rate over the decided
+trials with its 95% interval and sign test, the repeats' agreement, each voice's counts, the panel's scores, and a
+recommendation - no audible difference when at most a fifth of the answers chose a voice (keep the shipped voice:
+installing changes nothing you can hear), keep the shipped voice when it's significantly preferred, install the
+trained voice when it's preferred at least as often, else too close to call. A retrain of an unchanged recipe is
+usually no audible difference - the A/B is its guardrail against a bad run; a recipe change is where it decides.</li>
+<li><code>make train-install</code> - the trained modules that differ into <code>lib/models/</code> (the G2P when it differs below its
+comment header; <code>picovox_train.trained install</code>) - or one model, <code>make train-install-voice</code> or <code>make train-install-g2p</code>; then <code>make commit</code> and commit them.</li>
+</ol>
+<p>The <code>train-*</code> targets run their commands - none decides on another's results. <code>make train-check</code> and <code>make train-install</code> fail until <code>make train</code> has trained both models (<code>train-install-voice</code> and <code>-g2p</code>, their
+model). Each stage is a
+stamp in <code>build/train/</code> (<code>TRAIN_DIR</code>), so <code>make -j train</code> runs independent stages at once; the GPU stages run one at a
+time (<code>picovox_train/gpulock.py</code> - two at once each run at about half speed) while the CPU stages run beside them:</p>
 <table>
 <thead>
 <tr>
@@ -673,24 +704,19 @@ rebuild the voice). Each stage is a stamp in
 <td>polish, baseline-eval</td>
 </tr>
 <tr>
-<td>package - <code>lib/models/voiceModel.js</code>, with its provenance</td>
+<td>package - the voice's module, <code>build/train/voiceModel.js</code>, with its provenance</td>
 <td>CPU</td>
-<td>student-eval (after samples-reference)</td>
+<td>student-eval</td>
 </tr>
 <tr>
 <td>heteronyms - the relabeled words, checked to reproduce <code>data/nn/g2p-relabel.json</code> (the G2P network's input)</td>
-<td>CPU, ~6 min</td>
+<td>CPU, ~9 min</td>
 <td>corpora (after data-multi)</td>
 </tr>
 <tr>
 <td>g2p-network, context-labels, context-network, g2p - the G2P (the network; the heteronym labels from the pinned books; the context network and its cross-validation; the reading stage, the export, and the gate)</td>
 <td>CPU - the network one core, ~30 min</td>
 <td>corpora (the labels, after data-multi)</td>
-</tr>
-<tr>
-<td>g2p-install - <code>lib/models/g2pModel.js</code>, when the gated module differs from it</td>
-<td>CPU</td>
-<td>g2p, heteronyms</td>
 </tr>
 <tr>
 <td>samples-reference, samples-teacher-a, -teacher-b, -student, -polish - the listening samples</td>
@@ -710,9 +736,9 @@ for listening as the stage finishes, in its own CPU stage beside the next GPU st
 as the package stage exports it, it speaks <code>data/nn/train.json</code>'s <code>samples</code> texts (Moby-Dick's opening, a dialogue,
 and heteronyms) in six of the training speakers' voices (three female, three male) exactly as the package speaks a
 sentence (<code>lib/synthesis.js</code>, every word pronounced by the G2P network), and each sample is scored with UTMOS on the
-CPU. The shipped <code>lib/models/voiceModel.js</code> is rendered the same way, as the reference, before the package stage
-replaces it. The WAV files are <code>TRAIN_DIR/samples/STAGE-SPEAKER-TEXT.wav</code>, listed in <code>TRAIN_DIR/samples/index.json</code>;
-the dashboard's Listen tab plays them, each beside the shipped model's.</p>
+CPU. The shipped <code>lib/models/voiceModel.js</code> is rendered the same way, as the reference. The WAV files are
+<code>TRAIN_DIR/samples/STAGE-SPEAKER-TEXT.wav</code>, listed in <code>TRAIN_DIR/samples/index.json</code>; the dashboard's Listen tab plays
+them, each beside the shipped model's.</p>
 <p><code>make train</code> keeps a record for the training dashboard (<code>tools/dashboard/</code>): each stage's start, end, and failure in
 <code>TRAIN_DIR/stages.jsonl</code> and each command's output also in <code>TRAIN_DIR/logs/STAGE.log</code> (<code>tools/trainstage.sh</code> - the
 teacher's also in its run's <code>train.log</code>), and every 20 seconds, for the life of <code>make train</code>, the CPU busy %, the GPU
@@ -735,11 +761,12 @@ retrain (<code>python -m picovox_train.books pin NAME</code> records the new tex
 or the distillation set change with it, so make train no longer reproduces the committed models byte for byte). The
 fetch alone, for every pinned text: <code>python -m picovox_train.books fetch</code>.</p>
 <p><code>make -j train-g2p</code> runs the G2P alone - its stages, without the voice stages or make train's ordering after the
-readers' data build - for G2P work. The chain's independent parts run in <code>G2P_JOBS</code> worker processes - the context
-labels' aligned readings (by utterance) and part-of-speech tags (by book), and cross-validate's ten folds (each one
-thread) - and the context network and its cross-validation run beside the G2P network; every output is the same for any
-count. Inside make train the chain runs beside the GPU stages, which CPU work slows (the Makefile's <code>BESIDE</code>), so
-<code>G2P_JOBS</code> is 2 there; <code>make train-g2p</code> runs <code>G2P_STANDALONE_JOBS</code> (10) at the default QoS. Measured at the background
+readers' data build - for G2P work. The chain's independent parts run in worker processes - the context labels' aligned
+readings (by utterance) and part-of-speech tags (by book) in <code>G2P_JOBS</code>, and the context network's trainings and
+cross-validate's ten folds (each one thread) in <code>CONTEXT_JOBS</code> - and the context network and its cross-validation run
+beside the G2P network; every output is the same for any count. Inside make train the chain runs beside the GPU stages,
+which CPU work slows (the Makefile's <code>BESIDE</code>), so <code>G2P_JOBS</code> is 2 and <code>CONTEXT_JOBS</code> 6 there; <code>make train-g2p</code> runs
+<code>G2P_STANDALONE_JOBS</code> (10) for both at the default QoS. Measured at the background
 QoS (the efficiency cores only, beside another job's load - October 2026): the context labels took 36 minutes (65
 before: the tags are made by book in worker processes, not by spaCy's worker pool for each book), and the ten folds 54
 minutes at once (one fold alone, two threads, took 134). On a quiet M3 Max the chain was 59 minutes - the G2P network
@@ -958,8 +985,8 @@ network's time, so students that shrink only it - s80's encoder - were trained o
 </tr>
 </tbody>
 </table>
-<p>d64 is about 0.02 UTMOS below s80 on average (the seed spread) with a lower WER, and its network is 1.24x faster on that
-iPhone. The voice's training on the GPU isn't bit-reproducible - the recipe's d64, retrained, matched its losses but not
+<p>d64 is about 0.02 UTMOS below s80 on average (the seed spread) with a lower WER, and its network is 1.24x faster on an
+iPhone without a JIT. The voice's training on the GPU isn't bit-reproducible - the recipe's d64, retrained, matched its losses but not
 its weights bitwise - though its export and packaging from a checkpoint are.</p>
 <h2>Training the G2P model</h2>
 <p>PicoVox pronounces every word with one small network, <code>lib/models/g2pModel.js</code> (<code>lib/g2p.js</code> runs it;
@@ -1043,8 +1070,8 @@ settings.)</p>
 <p>The settings are <code>data/nn/train.json</code>'s <code>context</code> section. <code>make train-g2p</code> runs all of it (the voice stages use the
 committed <code>lib/models/g2pModel.js</code>) and gates its module with <code>picovox_train.context check</code>: identical to the
 committed module below the comment header (the stages are deterministic on the same inputs), else within the recipe's
-tolerances (the regression set, the book error, the top-10K, the monitoring WER) - then <code>picovox_train.context install</code>
-replaces the committed module only when it differs (<code>make train-g2p-check</code> stops at the gate). The books are pinned (<code>data/nn/books.json</code> - see make train), so a clean run reproduces the committed module.</p>
+tolerances (the regression set, the book error, the top-10K, the monitoring WER) - then <code>make train-install</code> replaces
+the committed module only when it differs. The books are pinned (<code>data/nn/books.json</code> - see make train), so a clean run reproduces the committed module.</p>
 <p>The labels (<code>picovox_train/contextlabels.py</code>, with the curated part in <code>data/nn/context-labels.json</code>) come from three
 sources: the LibriTTS-R readers' readings by the forced alignments; part-of-speech tags over the Project Gutenberg books
 (spaCy, training time only - <code>requirements/pos.txt</code>), mapped to readings only for words whose mapping agrees with the
@@ -1057,7 +1084,8 @@ judge word-final voicing, so those keep the front end's reading, and the held-ou
 <p>The training data comes from public corpora, downloaded by <code>picovox_train/corpora.py</code> (make train's first stage) -
 idempotently and sequentially, resuming interrupted downloads; <code>--list</code> shows them; <code>data/corpora/</code> is gitignored and
 its <code>README.md</code> records each corpus's source, license, and size:</p>
-<pre class="prettyprint source lang-sh"><code>python3 -I train/src/picovox_train/corpora.py              # download the corpora into data/corpora/ (the standard library only)
+<pre class="prettyprint source lang-sh"><code>make build/venv-nn.build                                        # build/venv-nn (corpora.py needs only the standard library)
+build/venv-nn/bin/python -I train/src/picovox_train/corpora.py          # download the corpora into data/corpora/
 </code></pre>
 <table>
 <thead>
