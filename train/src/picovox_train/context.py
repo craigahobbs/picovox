@@ -807,11 +807,11 @@ def command_gate(args):
 #
 
 def js_pronouncer(module_path):
-    """A pronouncer of word lists by a module as the app runs it (lib/g2p.js - nn/js/pronounceLines.js)"""
+    """A pronouncer of word lists by a module as the app runs it (lib/g2p.js - tools/pronounceLines.js)"""
     import subprocess  # pylint: disable=import-outside-toplevel
 
     def pronounce(words):
-        process = subprocess.run(['node', os.path.join(ROOT, 'nn', 'js', 'pronounceLines.js'),
+        process = subprocess.run(['node', os.path.join(ROOT, 'tools', 'pronounceLines.js'),
                                   os.path.abspath(module_path)], input=''.join(word + '\n' for word in words),
                                  capture_output=True, text=True, check=True)
         lines = process.stdout.split('\n')

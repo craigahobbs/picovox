@@ -23,10 +23,6 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   --write-js`), `transforms.js`, `lf.js`, `rng.js`, `fft.js`; and `wav.js`. `lib/models/` holds the generated model
   modules (`g2pModel.js`, `voiceModel.js`) that `make train` reproduces (`picovox_train.context export`,
   `picovox_train.package`).
-- `nn/js/` - Node development tools on the package's modules (not part of the package): `speak.js` (text to WAV with an
-  exported or packaged model - the listener panel's renderer), `loadVoice.js` (a model's loader, for `speak.js` and
-  `tools/trainsamples.js`), `unpack.js`, `packagecheck.js`, `pronounceLines.js` (for the Python checks), and
-  `renderLines.js` (`picovox_train.quality`'s renderer).
 - `train/` - the Python training pipeline, the package `picovox_train` (`train/src/picovox_train/`; a python-build
   package - its unit tests in `train/src/tests/`): the front end's port (`frontend.py`, `g2pmodel.py`, `vocab.json`),
   the G2P and heteronym models (`g2p.py`, `g2paudit.py`, `heteronyms.py`, `context.py`, `contextlabels.py`,
@@ -39,7 +35,10 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   train-install - and `quality.py` - the voices' quality measures against their readers' recordings).
   `picovox_train/__init__.py` documents each module. `make train` runs it from its source (`PYTHONPATH=train/src`) in
   the training environments (`build/venv-nn`, `venv-listeners`, `venv-pos` - `requirements/*.txt`).
-- `tools/` - the training dashboard (`dashboard/`), the performance lab (`perf/` - the playback pipeline timed on a
+- `tools/` - Node development tools on the package's modules (not part of the package): `speak.js` (text to WAV with an
+  exported or packaged model - the listener panel's renderer), `loadVoice.js` (a model's loader, for `speak.js` and
+  `trainsamples.js`), `unpack.js`, `packagecheck.js`, `pronounceLines.js` (for the Python checks), and `renderLines.js`
+  (`picovox_train.quality`'s renderer); the training dashboard (`dashboard/`), the performance lab (`perf/` - the playback pipeline timed on a
   phone, and under Node without a JIT), the voice lab (`voicelab/` - the package synthesizing in a page with adjustable
   frame edits, for Claude's blind A/B questions in an artifact; `make voicelab` stages it with `lib/` in
   `build/voicelab/`, and `make train-check` with the trained voice too - a version's `model`, shipped or trained),
@@ -70,7 +69,7 @@ skill before running tests, lint, coverage, or changing the Makefile:
 
 Local Makefile overrides:
 
-- `ESLINT_ARGS` - also `tools/` and `nn/js/` (not the generated `lib/models/`)
+- `ESLINT_ARGS` - also `tools/` (not the generated `lib/models/`)
 
 - `commit` - also runs the training package's gate (`commit-train`: `make -C train commit`, after `make parity`); `make
   clean` cleans it too

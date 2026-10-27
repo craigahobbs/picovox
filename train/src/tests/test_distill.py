@@ -563,9 +563,9 @@ class TestEvaluation(DistillCase):
         with open(module_path, 'w', encoding='utf-8') as file:
             file.write(text)
 
-        # (nn/js/unpack.js - its export)
+        # (tools/unpack.js - its export)
         def unpack(command, check):
-            self.assertEqual((command[:3], check), (['node', os.path.join(ROOT, 'nn', 'js', 'unpack.js'), module_path], True))
+            self.assertEqual((command[:3], check), (['node', os.path.join(ROOT, 'tools', 'unpack.js'), module_path], True))
             manifest, weights = helpers.unpack_module(command[2])
             with open(command[3] + '.json', 'w', encoding='utf-8') as file:
                 json.dump(manifest, file)

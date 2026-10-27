@@ -247,7 +247,7 @@ book (Project Gutenberg and Standard Ebooks), read aloud by PicoVox in the brows
 
 ## Development
 
-This repository is the package (`lib/`, `test/`) and the training pipeline that makes its models (`train/`, `nn/js/`,
+This repository is the package (`lib/`, `test/`) and the training pipeline that makes its models (`train/`,
 `tools/`, `data/`, the paper in `paper/`). The package is developed with
 [javascript-build](https://github.com/craigahobbs/javascript-build#readme), and the training's Python code with
 [python-build](https://github.com/craigahobbs/python-build#readme):
@@ -264,7 +264,7 @@ make -j train-voice       # the voice alone; make -j train-g2p - the G2P alone, 
 ```
 
 The training pipeline is a Python package, `picovox_train` (`train/src/picovox_train/` - `picovox_train/<module>.py`
-below), and Node scripts (`nn/js/`, `tools/`); they use the package's modules but aren't part of it. `train/` is a
+below), and Node scripts (`tools/`); they use the package's modules but aren't part of it. `train/` is a
 python-build package of its own: its unit tests (`train/src/tests/`) run on the CPU in a few minutes, with tiny
 synthetic data and no network, in python-build's environment (`train/build/venv/`), which installs the package with the
 training's pinned PyTorch and numpy (`train/pyproject.toml`, the same versions as `requirements/nn.txt`). `make train`
@@ -280,9 +280,9 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke   # ever
 ## Command-line tools
 
 ```sh
-node nn/js/unpack.js lib/models/voiceModel.js build/voice                 # a packaged model back to its export
-node nn/js/speak.js -m build/voice "Hello, world." -o build/hello.wav     # an exported model (<voice>.json and .bin)
-node nn/js/packagecheck.js lib/models/voiceModel.js build/voice           # check a packaged model against its export
+node tools/unpack.js lib/models/voiceModel.js build/voice                 # a packaged model back to its export
+node tools/speak.js -m build/voice "Hello, world." -o build/hello.wav     # an exported model (<voice>.json and .bin)
+node tools/packagecheck.js lib/models/voiceModel.js build/voice           # check a packaged model against its export
 node tools/heteronyms.js                                                # the heteronym and names regression sets
 ```
 
@@ -298,8 +298,8 @@ case; over https it compiles), and `reload`. A variant of `lib/` to try a change
 NAME` times each under Node without a JIT (`--jitless` - the phone's speed within about 20%). `--root DIR` serves
 another app (PicoShelf, with its `?timing&log=URL` timeline posted to `build/perf/devlog.jsonl`).
 
-`nn/js/speak.js` speaks with an exported model (`picovox_train.export CHECKPOINT --voice NAME` writes
-`data/nn/NAME.json` and `.bin`; `nn/js/unpack.js` makes one of the package's multi-speaker model), every word pronounced by the
+`tools/speak.js` speaks with an exported model (`picovox_train.export CHECKPOINT --voice NAME` writes
+`data/nn/NAME.json` and `.bin`; `tools/unpack.js` makes one of the package's multi-speaker model), every word pronounced by the
 G2P network as the package pronounces (`-r` rate, `-s` seed, `--params` the parameter frames, `--rate` the duration
 multiplier, `--batch` a list of items); `-m` also takes a packaged module (`lib/models/voiceModel.js`). The
 multi-speaker model takes a speaker (`--speaker`, `--blend`) and a style (`--style`, `--intensity`).
@@ -335,7 +335,7 @@ speaker identity, and speaking style alongside Whisper's intelligibility. They r
 `picovox_train/panel.py` is the panel's scoring, shared by every evaluation (`picovox_train.distill eval`, make train's
 gate): an exported model speaks a fixed evaluation set, `tools/panel-texts.json` - six Harvard sentences, six narrative
 passages from public-domain books with dialogue (Austen, Melville, Dickens, Doyle, Potter, Grahame), two questions, and
-two exclamations - through `nn/js/speak.js` (every word pronounced by the G2P network, as the package pronounces), and
+two exclamations - through `tools/speak.js` (every word pronounced by the G2P network, as the package pronounces), and
 the renderings are scored with UTMOS, Whisper's WER, and the ECAPA speaker similarity.
 
 `picovox_train/listeners.py` is the scoring tool itself - WAV files (16-bit PCM) of any sample rate in, one JSON line per
@@ -531,13 +531,13 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.distill pick  
    synthesizer on the recordings, the adversarial critic - started from the teacher's - and feature matching) for a
    short fine-tune.
 4. **Evaluation** - each model is exported (`picovox_train/export.py`), packaged (`picovox_train/package.py`, the
-   generated module's bytes and gzip bytes), and spoken by `nn/js/speak.js` on `tools/panel-texts.json` for six
+   generated module's bytes and gzip bytes), and spoken by `tools/speak.js` on `tools/panel-texts.json` for six
    speakers; the renderings are scored with UTMOS, Whisper's WER, and the ECAPA speaker similarity to the teacher's
-   rendering of the same speaker. `pick` measures `nn/js/speak.js`'s real-time factor, renders listening samples to
+   rendering of the same speaker. `pick` measures `tools/speak.js`'s real-time factor, renders listening samples to
    `build/nn/distill-samples/`, and chooses the smallest student within the tolerance - mean UTMOS within 0.05 of the
    teacher's, WER at most 1 point worse, and speaker similarity at least 0.85 - writing `build/nn/distill/summary.json`.
    With `--against baseline` (make train's gate) the basis is instead the shipped model - `eval
-   baseline=lib/models/voiceModel.js` speaks the packaged module, as the package loads it (`nn/js/unpack.js`) - so a new
+   baseline=lib/models/voiceModel.js` speaks the packaged module, as the package loads it (`tools/unpack.js`) - so a new
    student must be no worse than what ships, and a better teacher never fails it.
 
 Progress lines go to `build/nn/distill/` (`targets.log`, `students.log`, `eval.log`).
@@ -545,7 +545,7 @@ Progress lines go to `build/nn/distill/` (`targets.log`, `students.log`, `eval.l
 The first distillation (October 2026), from stage B's best checkpoint (`multi-b` step 19,000): 294,678 sentence-speaker
 pairs - 40,624 training utterances and 254,054 book sentences - 397 hours of teacher speech, 18.5 GB, made in 9
 minutes on an M3 Max's GPU. Each student trained 20,000 steps (16-35 minutes); polish is 2,000 steps (28-46 minutes,
-the GPU shared). Six speakers by 16 panel texts; the real-time factor is `nn/js/speak.js`'s at 44.1 kHz (the best of
+the GPU shared). Six speakers by 16 panel texts; the real-time factor is `tools/speak.js`'s at 44.1 kHz (the best of
 three, about +/-15%):
 
 | Model | Parameters | Module (gzip) | UTMOS | WER | Similarity | Real time (network / total) |

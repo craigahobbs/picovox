@@ -11,26 +11,26 @@
 //      {name: factor}, "add": {name: value}, "smooth": {name: milliseconds - a moving average}})}
 //  -> {"wav", "seconds", "frames", "frameCount"}
 //
-//     node nn/js/renderLines.js [lib/models/voiceModel.js] < items.jsonl > rendered.jsonl
+//     node tools/renderLines.js [lib/models/voiceModel.js] < items.jsonl > rendered.jsonl
 
 import {
     createSentenceRenderer, defaultSampleRate, modelLoader, paragraphPause, sentenceFrames, sentencePause, textBlocks
-} from '../../lib/synthesis.js';
-import {speechText, splitSentences} from '../../lib/sentences.js';
+} from '../lib/synthesis.js';
+import {speechText, splitSentences} from '../lib/sentences.js';
 import {Buffer} from 'node:buffer';
-import {NAMES} from '../../lib/params.js';
+import {NAMES} from '../lib/params.js';
 import {pathToFileURL} from 'node:url';
 import process from 'node:process';
 import {resolve} from 'node:path';
-import {toWav} from '../../lib/index.js';
+import {toWav} from '../lib/index.js';
 import {writeFileSync} from 'node:fs';
 
 
 // The model - the package's, or another voice model module
 const [, , modulePath] = process.argv;
 const loadModel = modelLoader(
-    () => import('../../lib/models/g2pModel.js'),
-    () => import(modulePath ? pathToFileURL(resolve(modulePath)).href : '../../lib/models/voiceModel.js')
+    () => import('../lib/models/g2pModel.js'),
+    () => import(modulePath ? pathToFileURL(resolve(modulePath)).href : '../lib/models/voiceModel.js')
 );
 const model = await loadModel();
 const speakerIds = new Map(model.manifest.speakers.map((speaker) => [speaker.key, speaker.id]));

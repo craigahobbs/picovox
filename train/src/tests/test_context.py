@@ -468,10 +468,10 @@ class TestContext(unittest.TestCase):
         module_path = g2pmodel.MODULE_PATH
         python = g2pmodel.G2p(g2pmodel.read_module())
 
-        # nn/js/pronounceLines.js (lib/g2p.js - the Python port's pronunciations - the parity check's) and
+        # tools/pronounceLines.js (lib/g2p.js - the Python port's pronunciations - the parity check's) and
         # tools/heteronyms.js (its report)
         def run(command, **kwargs):
-            if command[1] == os.path.join(ROOT, 'nn', 'js', 'pronounceLines.js'):
+            if command[1] == os.path.join(ROOT, 'tools', 'pronounceLines.js'):
                 self.assertEqual(command[2], module_path)
                 self.assertEqual({key: kwargs[key] for key in ('capture_output', 'text', 'check')},
                                  {'capture_output': True, 'text': True, 'check': True})

@@ -102,10 +102,10 @@ class TestPanelScore(unittest.TestCase):
         cls.model_path = os.path.join(cls.root, 'export', 'model')
         cls.enterClassContext(unittest.mock.patch.object(panel.subprocess, 'run', side_effect=cls.speak_js))
 
-    # nn/js/speak.js - a tenth of a second of silence for each batch item, and its report
+    # tools/speak.js - a tenth of a second of silence for each batch item, and its report
     @classmethod
     def speak_js(cls, command, check, capture_output, text, cwd):
-        assert command[:3] == ['node', os.path.join(ROOT, 'nn', 'js', 'speak.js'), '-m'] and command[4] == '--batch'
+        assert command[:3] == ['node', os.path.join(ROOT, 'tools', 'speak.js'), '-m'] and command[4] == '--batch'
         assert (check, capture_output, text, cwd) == (True, True, True, ROOT)
         rate = int(command[command.index('-r') + 1])
         with open(command[5], encoding='utf-8') as file:

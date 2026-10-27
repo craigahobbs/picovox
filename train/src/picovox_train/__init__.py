@@ -54,9 +54,9 @@ The network:
 - quant.py - the export's 8-bit weight quantization (per row), shared by export.py and lib/model.js
 - distill.py - knowledge distillation of the multi-speaker model into small students (data/nn/train.json's distill)
 - export.py - export to <voice>.bin and .json (8-bit weights - quant.py); package.py - an export
-  as a generated JavaScript module (lib/models/voiceModel.js), loaded by lib/package.js (nn/js/packagecheck.js checks
+  as a generated JavaScript module (lib/models/voiceModel.js), loaded by lib/package.js (tools/packagecheck.js checks
   it); lib/model.js - the forward pass in JavaScript; lib/transforms.js - the voice and style transforms;
-  nn/js/speak.js - text to WAV (Node)
+  tools/speak.js - text to WAV (Node)
 
 The pipeline's tools:
 

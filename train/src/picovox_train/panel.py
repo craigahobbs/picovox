@@ -3,7 +3,7 @@
 
 """
 The listener panel's scoring - how every evaluation measures speech (no training framework: an exported voice model is
-spoken by the browser path, nn/js/speak.js):
+spoken by the browser path, tools/speak.js):
 
 - listen - UTMOS and the ECAPA speaker embedding (listeners.py in the listener-model environment, build/venv-listeners)
 - transcribe - whisper.cpp base.en (downloads/whisper/ggml-base.en.bin), cached beside each WAV; words and edit_distance give
@@ -84,11 +84,11 @@ def panel_texts():
         return json.load(file)['texts']
 
 
-# Speak a batch ([{text, wav, seed, speaker}]) with an export (nn/js/speak.js) - its speed report
+# Speak a batch ([{text, wav, seed, speaker}]) with an export (tools/speak.js) - its speed report
 def speak(model_path, batch, batch_path, rate):
     with open(batch_path, 'w', encoding='utf-8') as file:
         json.dump(batch, file)
-    command = ['node', os.path.join(ROOT, 'nn', 'js', 'speak.js'), '-m', model_path, '--batch', batch_path, '-r', str(rate)]
+    command = ['node', os.path.join(ROOT, 'tools', 'speak.js'), '-m', model_path, '--batch', batch_path, '-r', str(rate)]
     process = subprocess.run(command, check=True, capture_output=True, text=True, cwd=ROOT)
     return json.loads(process.stdout.strip().splitlines()[-1])
 

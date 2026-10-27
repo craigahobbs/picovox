@@ -45,10 +45,10 @@ The method:
   loss through the differentiable synthesizer on the recordings, and the adversarial critic and feature matching as
   stage B used them, the critic starting from the teacher's).
 - Evaluation - through the browser path: each model is exported (export.py, 8-bit), packaged (package.py - the
-  generated JavaScript module's bytes and gzip bytes), and spoken by nn/js/speak.js on the listener panel's texts
+  generated JavaScript module's bytes and gzip bytes), and spoken by tools/speak.js on the listener panel's texts
   (tools/panel-texts.json) for six speakers, then scored: UTMOS (listeners.py), Whisper's WER (whisper.cpp
   base.en), and the ECAPA speaker similarity to the teacher's rendering of the same speaker and texts. The speed is
-  nn/js/speak.js's real-time factor at 44.1 kHz. pick chooses the smallest student within the tolerance.
+  tools/speak.js's real-time factor at 44.1 kHz. pick chooses the smallest student within the tolerance.
 """
 
 import argparse
@@ -831,9 +831,9 @@ def evaluate_model(name, checkpoint, config, reference=None, listen_panel=True, 
 
 def evaluate_module(name, module_path, config, reference, listen_panel, whisper_workers, out_dir, start):
     """Speak and score a packaged model module (e.g. the shipped lib/models/voiceModel.js) as packaged - unpacked to
-    its export (nn/js/unpack.js) - its result, as evaluate_model's"""
+    its export (tools/unpack.js) - its result, as evaluate_model's"""
     model_path = os.path.join(out_dir, 'model')
-    subprocess.run(['node', os.path.join(ROOT, 'nn', 'js', 'unpack.js'), root_path(module_path), model_path], check=True)
+    subprocess.run(['node', os.path.join(ROOT, 'tools', 'unpack.js'), root_path(module_path), model_path], check=True)
     with open(model_path + '.json', encoding='utf-8') as file:
         manifest = json.load(file)
     with open(root_path(module_path), 'rb') as file:
@@ -854,7 +854,7 @@ def evaluate_module(name, module_path, config, reference, listen_panel, whisper_
 
 
 def measure_speed(names, config, repeats=3):
-    """The real-time factors of the exported models (nn/js/speak.js at the samples' rate on the panel texts for the
+    """The real-time factors of the exported models (tools/speak.js at the samples' rate on the panel texts for the
     app's male voice) - the best of repeats, interleaved - {name: {realTimeNetwork, realTimeTotal, ...}}"""
     rate = config['samples']['rate']
     texts = panel.panel_texts()

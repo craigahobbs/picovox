@@ -11,7 +11,7 @@ readers' own recordings (the voices' tinniness and warble, 2026-10-23):
 
 measure renders each voice over the panel texts (tools/panel-texts.json) and each of the voices' readers over their
 held-out utterances (data/nn/multi-split.json's test, then val, then training utterances to --per-reader) with the
-package (nn/js/renderLines.js - --edits are frame edits, for an experiment), and measures them and the readers'
+package (tools/renderLines.js - --edits are frame edits, for an experiment), and measures them and the readers'
 recordings (downloads/corpora) in voiced frames (Praat's pitch):
 
 - bands - third-octave levels (dB re the voiced power from 90 Hz to 95% of the source's bandwidth), and their summaries:
@@ -185,7 +185,7 @@ def voice_table():
     return voices
 
 
-# The render jobs (nn/js/renderLines.js's items) and analysis tasks [(kind, who, task)] of a measurement: each voice over
+# The render jobs (tools/renderLines.js's items) and analysis tasks [(kind, who, task)] of a measurement: each voice over
 # the panel texts, each reader synthesized over per_reader of its utterances, and those utterances' recordings
 def plan(out_dir, per_reader, edits, speakers, split, utterances, panel_texts, voices):
     jobs, tasks = [], []
@@ -210,17 +210,17 @@ def plan(out_dir, per_reader, edits, speakers, split, utterances, panel_texts, v
     return jobs, tasks
 
 
-# Render jobs with the package (nn/js/renderLines.js), in processes Node processes at once
+# Render jobs with the package (tools/renderLines.js), in processes Node processes at once
 def render(jobs, processes):
     groups = [jobs[index::processes] for index in range(processes)]
-    children = [subprocess.Popen(['node', os.path.join('nn', 'js', 'renderLines.js')], cwd=ROOT,  # pylint: disable=consider-using-with
+    children = [subprocess.Popen(['node', os.path.join('tools', 'renderLines.js')], cwd=ROOT,  # pylint: disable=consider-using-with
                                  stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True) for group in groups if group]
     for child, group in zip(children, [group for group in groups if group]):
         child.stdin.write(''.join(json.dumps(job) + '\n' for job in group))
         child.stdin.close()
     failed = [child.wait() for child in children]
     if any(failed):
-        raise RuntimeError('nn/js/renderLines.js failed')
+        raise RuntimeError('tools/renderLines.js failed')
 
 
 def measure_command(args):
@@ -298,7 +298,7 @@ def main(argv=None):
     measure_parser = commands.add_parser('measure', help='render and measure the voices and their readers')
     measure_parser.add_argument('--out', default=os.path.join(ROOT, 'build', 'quality'), help='the output directory')
     measure_parser.add_argument('--per-reader', type=int, default=16, help='utterances per reader')
-    measure_parser.add_argument('--edits', help='frame edits for every rendering (nn/js/renderLines.js\'s, JSON)')
+    measure_parser.add_argument('--edits', help='frame edits for every rendering (tools/renderLines.js\'s, JSON)')
     measure_parser.add_argument('-j', '--jobs', type=int, default=8, help='Node renderers and analysis workers')
     report_parser = commands.add_parser('report', help='print a measurement\'s results')
     report_parser.add_argument('results', help='a measurement\'s results.json')

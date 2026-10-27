@@ -144,7 +144,7 @@ def js_literal(text):
     return json.loads(re.sub(r'(?<!\\)"\s*\+\s*"', '', text))
 
 
-# A packaged model module's (package.py's) manifest and weights, as nn/js/unpack.js unpacks it
+# A packaged model module's (package.py's) manifest and weights, as tools/unpack.js unpacks it
 def unpack_module(path):
     with open(path, encoding='utf-8') as file:
         text = file.read()

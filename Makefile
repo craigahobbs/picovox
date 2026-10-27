@@ -38,7 +38,7 @@ _gh-pages: site
 
 
 # The development tools are linted too; the generated model modules (lib/models/) aren't
-ESLINT_ARGS := $(ESLINT_ARGS) tools/ nn/js/ --ignore-pattern 'lib/models/**'
+ESLINT_ARGS := $(ESLINT_ARGS) tools/ --ignore-pattern 'lib/models/**'
 
 
 # The voice lab (tools/voicelab/) staged with the package's lib/ in build/voicelab/ - published as an artifact (Claude's

@@ -4,10 +4,10 @@
 // Pronounce words with a G2P module as the package does (lib/g2p.js) - one word per input line in, one line of its phones
 // (space-separated) out (used by `python -m picovox_train.context check` to measure a module on the book words)
 //
-//     node nn/js/pronounceLines.js lib/models/g2pModel.js < words.txt > phones.txt
+//     node tools/pronounceLines.js lib/models/g2pModel.js < words.txt > phones.txt
 
 import {Buffer} from 'node:buffer';
-import {loadG2p} from '../../lib/g2p.js';
+import {loadG2p} from '../lib/g2p.js';
 import {pathToFileURL} from 'node:url';
 import process from 'node:process';
 import {resolve} from 'node:path';

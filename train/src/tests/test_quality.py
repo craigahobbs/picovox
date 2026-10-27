@@ -135,7 +135,7 @@ class TestPlan(unittest.TestCase):
         with unittest.mock.patch('subprocess.Popen', side_effect=popen):
             quality.render(jobs, 3)
             self.assertEqual(len(children), 2)
-            self.assertEqual(children[0][0], ['node', os.path.join('nn', 'js', 'renderLines.js')])
+            self.assertEqual(children[0][0], ['node', os.path.join('tools', 'renderLines.js')])
             self.assertEqual(children[0][1]['cwd'], quality.ROOT)
             self.assertEqual(children[0][2].stdin.write.call_args.args[0], json.dumps(jobs[0]) + '\n')
             status['code'] = 1

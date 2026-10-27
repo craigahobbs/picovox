@@ -25,7 +25,7 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {g2pModel} from '../lib/models/g2pModel.js';
 import {loadG2p} from '../lib/g2p.js';
-import {loadVoice} from '../nn/js/loadVoice.js';
+import {loadVoice} from './loadVoice.js';
 import process from 'node:process';
 import {setPronouncer} from '../lib/lexicon.js';
 

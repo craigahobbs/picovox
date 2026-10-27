@@ -374,7 +374,7 @@ synthesizer, and the adversarial critic, started from the teacher's, with featur
 
 **The pick.** Each model is exported, packaged, and scored on the panel; the smallest student whose mean UTMOS is
 within 0.05 of the teacher's, whose WER is at most 1 point worse, and whose speaker similarity is at least 0.85 is
-chosen. The first distillation (each student 20,000 steps; real-time factors are `nn/js/speak.js`'s at 44.1 kHz in
+chosen. The first distillation (each student 20,000 steps; real-time factors are `tools/speak.js`'s at 44.1 kHz in
 Node, the best of three, about +/-15%):
 
 | Model | Parameters | Module (gzip) | UTMOS | WER | Similarity | Real time (network / total) |
@@ -1208,7 +1208,7 @@ make -j train-g2p                                               # reproduce the 
 make train-check                                                # the package's tests with the trained models, and the voice lab staged to listen
 make train-install                                              # the trained models that differ into lib/models/
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke    # every training entry point, a few steps on the CPU
-node nn/js/unpack.js lib/models/voiceModel.js out/voice && node nn/js/speak.js -m out/voice "Call me Ishmael." -o ishmael.wav
+node tools/unpack.js lib/models/voiceModel.js build/voice && node tools/speak.js -m build/voice "Call me Ishmael." -o ishmael.wav
 ```
 
 The dictionary audit is `picovox_train.g2paudit` (folds, suspects, audio, adjudicate). The rule-based synthesizer's

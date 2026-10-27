@@ -4,11 +4,11 @@
 // Load a voice model under Node - a packaged module (PATH.js, e.g. lib/models/voiceModel.js - lib/package.js) or an
 // export (picovox_train.export's PATH.json and PATH.bin - lib/model.js):
 //
-//     import {loadVoice} from './nn/js/loadVoice.js';
+//     import {loadVoice} from './tools/loadVoice.js';
 //     const model = await loadVoice('lib/models/voiceModel.js');
 
-import {loadModel} from '../../lib/model.js';
-import {loadPackagedModel} from '../../lib/package.js';
+import {loadModel} from '../lib/model.js';
+import {loadPackagedModel} from '../lib/package.js';
 import {pathToFileURL} from 'node:url';
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';

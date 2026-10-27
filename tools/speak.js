@@ -7,9 +7,9 @@
 // The model is an export (picovox_train.export's MODEL.json and MODEL.bin) or a packaged module (lib/models/voiceModel.js).
 // The multi-speaker, multi-style model takes a speaker and a style (--rate is the duration multiplier - 0.9 is 10% faster):
 //
-//     node nn/js/speak.js -m build/voice "Hello, world." -o hello.wav [-r 44100] [-s seed] [--params out.json] [--rate 1]
-//     node nn/js/speak.js -m build/voice --batch list.json    # [{text, wav, params, seed, speaker, style, rate}, ...]
-//     node nn/js/speak.js -m build/voice "Hello." -o hello.wav --speaker 5            # a speaker id (data/nn/speakers.json)
+//     node tools/speak.js -m build/voice "Hello, world." -o hello.wav [-r 44100] [-s seed] [--params out.json] [--rate 1]
+//     node tools/speak.js -m build/voice --batch list.json    # [{text, wav, params, seed, speaker, style, rate}, ...]
+//     node tools/speak.js -m build/voice "Hello." -o hello.wav --speaker 5            # a speaker id (data/nn/speakers.json)
 //         [--blend '{"5": 0.6, "12": 0.4}']                                        # or a blend
 //         [--style happy --intensity 0.7] [--style '{"happy": 0.5, "sad": 0.2}']   # an emotion, or a blend
 //
@@ -18,15 +18,15 @@
 /* eslint-disable no-console */
 
 import {readFileSync, writeFileSync} from 'node:fs';
-import {NAMES} from '../../lib/params.js';
-import {encodeWav} from '../../lib/wav.js';
-import {g2pModel} from '../../lib/models/g2pModel.js';
-import {loadG2p} from '../../lib/g2p.js';
+import {NAMES} from '../lib/params.js';
+import {encodeWav} from '../lib/wav.js';
+import {g2pModel} from '../lib/models/g2pModel.js';
+import {loadG2p} from '../lib/g2p.js';
 import {loadVoice} from './loadVoice.js';
 import process from 'node:process';
-import {render} from '../../lib/render.js';
-import {setPronouncer} from '../../lib/lexicon.js';
-import {speakFrames} from '../../lib/model.js';
+import {render} from '../lib/render.js';
+import {setPronouncer} from '../lib/lexicon.js';
+import {speakFrames} from '../lib/model.js';
 
 
 // The rendered audio's peak
@@ -88,7 +88,7 @@ function normalize(samples, peak) {
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     if (args.model === null) {
-        throw new Error('usage: node nn/js/speak.js -m MODEL (an export without its .json and .bin, or a packaged module) TEXT -o WAV');
+        throw new Error('usage: node tools/speak.js -m MODEL (an export without its .json and .bin, or a packaged module) TEXT -o WAV');
     }
     const defaultStyle = typeof args.style === 'string' ? {'emotion': args.style, 'intensity': args.intensity} : args.style;
     const startLoad = performance.now();
