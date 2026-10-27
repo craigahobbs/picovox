@@ -6,9 +6,9 @@ Packaging - an exported acoustic model (export.py's <voice>.json manifest and <v
 JavaScript module, which lib/package.js loads the same way in Node, the browser, and a Web Worker (a plain import -
 no fetch, no file system):
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.package build/train/export/multi -o out/multi.js
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.package build/train/export/multi -o build/multi.js
 
-    import * as voice from './out/multi.js';
+    import * as voice from './build/multi.js';
     import {loadPackagedModel} from './lib/package.js';
     const model = await loadPackagedModel(voice);     // lib/model.js's model, as loadModel(manifest, buffer) gives
 

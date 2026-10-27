@@ -51,8 +51,8 @@ from . import readings as readings_module
 
 SPEC_PATH = os.path.join(ROOT, 'data', 'nn', 'context-labels.json')
 TEST_PATH = os.path.join(ROOT, 'data', 'nn', 'heteronyms-test.json')
-LIBRITTS_DIR = os.path.join(ROOT, 'data', 'corpora', 'libritts_r', 'LibriTTS_R')
-LABEL_DIR = os.path.join(ROOT, 'data', 'corpora', 'libritts_label', 'lab', 'phone')
+LIBRITTS_DIR = os.path.join(ROOT, 'downloads', 'corpora', 'libritts_r', 'LibriTTS_R')
+LABEL_DIR = os.path.join(ROOT, 'downloads', 'corpora', 'libritts_label', 'lab', 'phone')
 
 
 # The recipe's label settings - data/nn/train.json's context.labels (and the context network's window)

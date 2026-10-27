@@ -280,9 +280,9 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke   # ever
 ## Command-line tools
 
 ```sh
-node nn/js/unpack.js lib/models/voiceModel.js out/voice                 # a packaged model back to its export
-node nn/js/speak.js -m out/voice "Hello, world." -o out/hello.wav       # an exported model (<voice>.json and .bin)
-node nn/js/packagecheck.js lib/models/voiceModel.js out/voice           # check a packaged model against its export
+node nn/js/unpack.js lib/models/voiceModel.js build/voice                 # a packaged model back to its export
+node nn/js/speak.js -m build/voice "Hello, world." -o build/hello.wav     # an exported model (<voice>.json and .bin)
+node nn/js/packagecheck.js lib/models/voiceModel.js build/voice           # check a packaged model against its export
 node tools/heteronyms.js                                                # the heteronym and names regression sets
 ```
 
@@ -328,7 +328,7 @@ speaker identity, and speaking style alongside Whisper's intelligibility. They r
 
 | Listener | Model | Measures |
 | --- | --- | --- |
-| Intelligibility | Whisper `base.en` (whisper.cpp, `whisper-cli`, the model in `data/whisper/`) | Word error rate against the text |
+| Intelligibility | Whisper `base.en` (whisper.cpp's `whisper-cli` - installed separately, e.g. `brew install whisper-cpp`; the model downloaded with the corpora into `downloads/whisper/`) | Word error rate against the text |
 | Naturalness | [UTMOS22 strong](https://github.com/sarulab-speech/UTMOS22) (through torch.hub [tarepan/SpeechMOS](https://github.com/tarepan/SpeechMOS)) | Predicted mean opinion score, 1-5 |
 | Speaker identity | [ECAPA-TDNN](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb) (SpeechBrain, VoxCeleb) | A 192-dimension speaker embedding |
 
@@ -353,8 +353,8 @@ build/venv-listeners/bin/python -I train/src/picovox_train/listeners.py [--no-mo
 
 The models load once per run (4-7 s) and then score about 35 seconds of speech a second (6 sentences) on an M3 Max's
 GPU (MPS, the default on Apple silicon - about 3x the CPU, with the same scores). Files longer than 20 s are scored in
-chunks. The models download on first use - about 1.5 GB, into `data/listeners/` (torch.hub, Hugging Face; like the corpora,
-`make clean` keeps them) - and later runs need no network.
+chunks. The models download on first use - about 1.5 GB, into `downloads/listeners/` (torch.hub, Hugging Face; like the corpora,
+`make clean` keeps them - `make superclean` removes them) - and later runs need no network.
 
 The environment is built with `python3` (3.14 here; 3.12 also works - `make listeners PYTHON_VENV=python3.12`). Its
 packages are pinned in `requirements/listeners.txt`: PyTorch 2.14, torchaudio 2.11 (UTMOS's), SpeechBrain 1.1,
@@ -697,12 +697,13 @@ gate`, `folds`) leaves them to the regression set.
 ## The corpora
 
 The training data comes from public corpora, downloaded by `picovox_train/corpora.py` (make train's first stage) -
-idempotently and sequentially, resuming interrupted downloads; `--list` shows them; `data/corpora/` is gitignored and
-its `README.md` records each corpus's source, license, and size:
+idempotently and sequentially, resuming interrupted downloads, with the listener panel's Whisper model; `--list` shows
+them. Everything downloaded is under `downloads/` (gitignored - `make clean` keeps it, `make superclean` removes it), and
+`downloads/corpora/README.md` records each corpus's source, license, and size:
 
 ```sh
 make build/venv-nn.build                                        # build/venv-nn (corpora.py needs only the standard library)
-build/venv-nn/bin/python -I train/src/picovox_train/corpora.py          # download the corpora into data/corpora/
+build/venv-nn/bin/python -I train/src/picovox_train/corpora.py          # download the corpora and the Whisper model into downloads/
 ```
 
 | Corpus | Speakers | Download | License |

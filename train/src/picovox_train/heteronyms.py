@@ -10,7 +10,7 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B):
     python -m picovox_train.heteronyms --out DIR --check data/nn/g2p-relabel.json           # and the same words?
 
 1. readers - for every word with 2+ pronunciations, which variant the readers used, by the MFA word and phone alignments
-   (data/corpora/libritts_label/lab/{word,phone}/{train-clean-100,dev-clean}): each aligned token's phones are matched
+   (downloads/corpora/libritts_label/lab/{word,phone}/{train-clean-100,dev-clean}): each aligned token's phones are matched
    to the variants exactly (with stress), else ignoring stress when that leaves one variant (readers.json, tokens.jsonl)
 2. candidates - words whose readers' majority variant isn't the first, significant (the Wilson 95% lower bound of
    majority / (majority + first) above one half, used by 3+ speakers), with the kind of difference (candidates.json)
@@ -40,8 +40,8 @@ import numpy
 from . import ROOT
 
 
-LABELS = os.path.join(ROOT, 'data', 'corpora', 'libritts_label', 'lab')
-AUDIO = os.path.join(ROOT, 'data', 'corpora', 'libritts_r', 'LibriTTS_R')
+LABELS = os.path.join(ROOT, 'downloads', 'corpora', 'libritts_label', 'lab')
+AUDIO = os.path.join(ROOT, 'downloads', 'corpora', 'libritts_r', 'LibriTTS_R')
 SUBSETS = ('train-clean-100', 'dev-clean')
 VOWELS = {'AA', 'AE', 'AH', 'AO', 'AW', 'AY', 'EH', 'ER', 'EY', 'IH', 'IY', 'OW', 'OY', 'UH', 'UW'}
 REDUCED = {'AH', 'IH', 'ER', 'IY', 'UW'}

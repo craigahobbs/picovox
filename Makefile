@@ -424,3 +424,10 @@ $(TRAIN_DIR)/samples-polish.done: $(TRAIN_DIR)/polish.done | build/venv-listener
 clean:
 	rm -rf Makefile.base jsdoc.json eslint.config.js
 	$(MAKE) -C train clean
+
+
+# superclean also removes the downloads (downloads/ - the corpora, the listener models, and Whisper; about 14 GB)
+.PHONY: superclean-local
+superclean: superclean-local
+superclean-local:
+	rm -rf downloads

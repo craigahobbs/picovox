@@ -2,14 +2,16 @@
 # https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
-Download and unpack the human speech corpora used as calibration targets, idempotently, into data/corpora/.
+Download and unpack the human speech corpora used as calibration targets, idempotently, into downloads/corpora/ - and
+the listener panel's Whisper model (picovox_train/panel.py), into downloads/whisper/.
 
     build/venv-nn/bin/python -I train/src/picovox_train/corpora.py [--list] [--keep-archives] [name ...]
 
 The corpora (names): the labeled CMU ARCTIC US English speakers (arctic-<speaker>), the LibriTTS-R dev-clean audiobook
 and train-clean-100 subsets (libritts-r-dev-clean, libritts-r-train-clean-100), and the LibriTTSLabel forced alignments
 of LibriTTS (libritts-label-dev-clean, libritts-label-train-clean-100).
-With no names, all of them are fetched. A corpus already unpacked is skipped; an interrupted download resumes.
+With no names, all of them are fetched, and the Whisper model. A corpus already unpacked (or the model present) is
+skipped; an interrupted download resumes.
 Downloads are sequential (one connection at a time) with a descriptive User-Agent.
 """
 
@@ -25,8 +27,8 @@ import urllib.request
 
 # (the repository root - train/src/picovox_train/ is three levels below it)
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-CORPORA_DIR = os.path.join(ROOT, 'data', 'corpora')
-DOWNLOADS_DIR = os.path.join(CORPORA_DIR, 'downloads')
+CORPORA_DIR = os.path.join(ROOT, 'downloads', 'corpora')
+ARCHIVES_DIR = os.path.join(CORPORA_DIR, 'archives')
 USER_AGENT = 'picovox-corpora/1.0 (+https://github.com/craigahobbs/picovox; research calibration)'
 
 ARCTIC_RELEASE_URL = 'http://festvox.org/cmu_arctic/cmu_arctic/packed/cmu_us_{speaker}_arctic-0.95-release.tar.bz2'
@@ -36,6 +38,10 @@ ARCTIC_LICENSE = (
     'license without fee, provided the copyright notice is retained, modifications are marked, and the original '
     'authors\' names are kept (the full text is in each 0.95 release\'s COPYING file)'
 )
+
+# The listener panel's Whisper model - whisper.cpp's base.en (picovox_train/panel.py)
+WHISPER_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin'
+WHISPER_MODEL = os.path.join(ROOT, 'downloads', 'whisper', 'ggml-base.en.bin')
 
 # The US English ARCTIC speakers with a 0.95 release's phone labels (per festvox.org/cmu_arctic): sex and notes
 ARCTIC_SPEAKERS = {
@@ -191,16 +197,16 @@ def fetch(name, keep_archives):
     if os.path.exists(corpus['check']):
         log(f'{name}: present')
         return 0
-    os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+    os.makedirs(ARCHIVES_DIR, exist_ok=True)
     paths = []
     for url in corpus['urls']:
-        path = os.path.join(DOWNLOADS_DIR, os.path.basename(url))
+        path = os.path.join(ARCHIVES_DIR, os.path.basename(url))
         log(f'{name}: downloading {url}')
         download(url, path)
         paths.append(path)
     archive = paths[0]
     if len(paths) > 1:
-        archive = os.path.join(DOWNLOADS_DIR, name + '.tar.gz')
+        archive = os.path.join(ARCHIVES_DIR, name + '.tar.gz')
         concatenate(paths, archive)
     size = sum(os.path.getsize(path) for path in paths)
     log(f'{name}: unpacking {size / 1e6:.0f} MB')
@@ -213,7 +219,18 @@ def fetch(name, keep_archives):
     return size
 
 
-# Write data/corpora/README.md - each corpus's source, description, license, and unpacked size
+# Fetch the Whisper model, unless it's present - returns its download size in bytes
+def fetch_whisper():
+    if os.path.exists(WHISPER_MODEL):
+        log('whisper: present')
+        return 0
+    os.makedirs(os.path.dirname(WHISPER_MODEL), exist_ok=True)
+    log(f'whisper: downloading {WHISPER_URL}')
+    download(WHISPER_URL, WHISPER_MODEL)
+    return os.path.getsize(WHISPER_MODEL)
+
+
+# Write downloads/corpora/README.md - each corpus's source, description, license, and unpacked size
 def write_readme():
     lines = [
         '# Speech corpora',
@@ -255,8 +272,8 @@ def write_readme():
 
 # Command-line entry point
 def main():
-    parser = argparse.ArgumentParser(description='Download the speech calibration corpora into data/corpora/')
-    parser.add_argument('names', nargs='*', help='corpora to fetch (default: all)')
+    parser = argparse.ArgumentParser(description='Download the speech calibration corpora into downloads/corpora/')
+    parser.add_argument('names', nargs='*', help='corpora to fetch (default: all, and the Whisper model)')
     parser.add_argument('--list', action='store_true', help='list the corpora and exit')
     parser.add_argument('--keep-archives', action='store_true', help='keep the downloaded archives')
     args = parser.parse_args()
@@ -274,6 +291,8 @@ def main():
     total = 0
     for name in names:
         total += fetch(name, args.keep_archives)
+    if not args.names:
+        total += fetch_whisper()
     write_readme()
     log(f'Downloaded {total / 1e6:.0f} MB in {time.time() - start:.0f} s')
 

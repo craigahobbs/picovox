@@ -12,7 +12,7 @@ readers' own recordings (the voices' tinniness and warble, 2026-10-23):
 measure renders each voice over the panel texts (tools/panel-texts.json) and each of the voices' readers over their
 held-out utterances (data/nn/multi-split.json's test, then val, then training utterances to --per-reader) with the
 package (nn/js/renderLines.js - --edits are frame edits, for an experiment), and measures them and the readers'
-recordings (data/corpora) in voiced frames (Praat's pitch):
+recordings (downloads/corpora) in voiced frames (Praat's pitch):
 
 - bands - third-octave levels (dB re the voiced power from 90 Hz to 95% of the source's bandwidth), and their summaries:
   tilt (dB/octave, 300 Hz to 5 kHz), alpha (50 Hz-1 kHz less 1-5 kHz), hammarberg (the 0-2 kHz peak less the 2-5 kHz),

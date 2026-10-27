@@ -18,9 +18,9 @@ Each line is {"file", "seconds", "mos", "embedding"}:
 
 Audio (16-bit PCM WAV, of any sample rate - picovox_train/wav.py) is mixed to mono and resampled to 16 kHz. Files
 longer than --chunk-seconds are scored in chunks (MOS averaged by duration, embeddings averaged). All models are loaded
-once per run. Model files are cached under data/listeners/ (like the corpora, kept by make clean); after the first run, no network access is
-needed. On Apple silicon the models run on the GPU (MPS) by default - about 3x faster than the CPU, with the same scores
-to four decimals.
+once per run. Model files are cached under downloads/listeners/ (like the corpora, kept by make clean); after the first
+run, no network access is needed. On Apple silicon the models run on the GPU (MPS) by default - about 3x faster than the
+CPU, with the same scores to four decimals.
 """
 
 import argparse
@@ -36,7 +36,7 @@ import warnings
 
 # (the repository root - train/src/picovox_train/ is three levels below it)
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-CACHE_DIR = os.path.join(ROOT, 'data', 'listeners')
+CACHE_DIR = os.path.join(ROOT, 'downloads', 'listeners')
 SAMPLE_RATE = 16000
 
 UTMOS_REPO = 'tarepan/SpeechMOS:v1.2.0'

@@ -7,7 +7,7 @@ each reading 12 fixed sentences as angry, disgusted, fearful, happy, neutral, an
 medium, and high intensity), 7,442 clips, 16 kHz WAV, with crowd-sourced ratings of every clip's emotion and intensity
 (audio alone, video alone, and both - about 10 ratings each).
 
-    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.cremad fetch          # data/corpora/crema_d/ (650 MB, 7 min)
+    PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.cremad fetch          # downloads/corpora/crema_d/ (650 MB, 7 min)
     PYTHONPATH=train/src build/venv-listeners/bin/python -B -m picovox_train.cremad align   # build/nn/cremad/alignments.jsonl (GPU)
     PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.cremad build          # build/nn/data/cremad/, data/nn/cremad.json
     PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.cremad build --out DIR   # elsewhere, its cremad.json beside it
@@ -49,7 +49,7 @@ import urllib.request
 from . import ROOT, SOURCE_DIR
 
 
-CORPORA_DIR = os.path.join(ROOT, 'data', 'corpora')
+CORPORA_DIR = os.path.join(ROOT, 'downloads', 'corpora')
 CREMAD_DIR = os.path.join(CORPORA_DIR, 'crema_d')
 WAV_DIR = os.path.join(CREMAD_DIR, 'AudioWAV')
 USER_AGENT = 'picovox-corpora/1.0 (+https://github.com/craigahobbs/picovox; research)'
@@ -120,7 +120,7 @@ def download(url, path, attempts=5):
     return 0
 
 
-# Fetch the CREMA-D audio (WAV) and metadata into data/corpora/crema_d/
+# Fetch the CREMA-D audio (WAV) and metadata into downloads/corpora/crema_d/
 def fetch(args):
     os.makedirs(CREMAD_DIR, exist_ok=True)
     tree_path = os.path.join(CREMAD_DIR, 'tree.json')
@@ -153,7 +153,7 @@ README_START = '<!-- crema-d: written by nn/cremad.py readme -->'
 README_END = '<!-- crema-d end -->'
 
 
-# Write (or replace) CREMA-D's section of data/corpora/README.md (corpora.py rewrites the file without it - fetch
+# Write (or replace) CREMA-D's section of downloads/corpora/README.md (corpora.py rewrites the file without it - fetch
 # writes it again after it; the marker keeps its first writer's name, so an existing section is found)
 def write_readme():
     path = os.path.join(CORPORA_DIR, 'README.md')
@@ -197,8 +197,8 @@ def write_readme():
 
 BUILD_DIR = os.path.join(ROOT, 'build', 'nn', 'cremad')
 ALIGNMENTS_PATH = os.path.join(BUILD_DIR, 'alignments.jsonl')
-# (the recognizer's download, with the listener models' - data/listeners/, kept by make clean)
-HF_HOME = os.path.join(ROOT, 'data', 'listeners', 'hf')
+# (the recognizer's download, with the listener models' - downloads/listeners/, kept by make clean)
+HF_HOME = os.path.join(ROOT, 'downloads', 'listeners', 'hf')
 
 
 # The CREMA-D clips - [{id, actor, sentence, emotion, intensity, text, wav}], sorted by id
@@ -893,7 +893,7 @@ def realign_command(args):
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='picovox_train.cremad', description='CREMA-D emotional speech for the style modifiers')
     commands = parser.add_subparsers(dest='command', required=True)
-    fetch_parser = commands.add_parser('fetch', help='download CREMA-D into data/corpora/crema_d/')
+    fetch_parser = commands.add_parser('fetch', help='download CREMA-D into downloads/corpora/crema_d/')
     fetch_parser.add_argument('-j', '--jobs', type=int, default=8, help='parallel connections')
     align_parser = commands.add_parser('align', help='CTC forced alignment of the clips (build/venv-listeners)')
     align_parser.add_argument('--limit', type=int, help='a sample of this many clips (alignments.jsonl.sample)')

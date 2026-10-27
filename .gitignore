@@ -1,13 +1,10 @@
-out/
-data/whisper/
 /build/
+/downloads/
 /node_modules/
 /Makefile.base
 /eslint.config.js
 /jsdoc.json
 /package-lock.json
 .DS_Store
-data/corpora/
-data/listeners/
 __pycache__/
 *.pyc

@@ -57,6 +57,8 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
 - `data/` - the CMU Pronouncing Dictionary (G2P training only), `data/nn/` (the recipe `train.json`, the pinned book
   texts `books.json`, the speaker pool, the G2P and heteronym data, and the designed voices - `voices.json`, the design
   record of `lib/synthesis.js`'s voice and style tables).
+- `downloads/` - gitignored: make train's downloads - the corpora (`picovox_train/corpora.py`, `cremad fetch`), the
+  listener models (on first use), and the Whisper model (with the corpora); `make clean` keeps it
 - `paper/` - the paper (`paper.md`; `index.html` renders it with MarkdownUp).
 
 ## javascript-build
@@ -72,6 +74,7 @@ Local Makefile overrides:
 
 - `commit` - also runs the training package's gate (`commit-train`: `make -C train commit`, after `make parity`); `make
   clean` cleans it too
+- `superclean` - also the downloads (`downloads/` - the corpora, the listener models, and Whisper; about 14 GB)
 
 `make commit` (test, lint, doc, cover, and the training's gate) is the gate before committing. `npm pack --dry-run`
 lists the package's files (`package.json` `files`: `lib/`). `make -j train` trains both generated models from the recipe

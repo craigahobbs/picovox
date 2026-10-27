@@ -7,9 +7,9 @@
 // The model is an export (picovox_train.export's MODEL.json and MODEL.bin) or a packaged module (lib/models/voiceModel.js).
 // The multi-speaker, multi-style model takes a speaker and a style (--rate is the duration multiplier - 0.9 is 10% faster):
 //
-//     node nn/js/speak.js -m out/voice "Hello, world." -o hello.wav [-r 44100] [-s seed] [--params out.json] [--rate 1]
-//     node nn/js/speak.js -m out/voice --batch list.json    # [{text, wav, params, seed, speaker, style, rate}, ...]
-//     node nn/js/speak.js -m out/voice "Hello." -o hello.wav --speaker 5            # a speaker id (data/nn/speakers.json)
+//     node nn/js/speak.js -m build/voice "Hello, world." -o hello.wav [-r 44100] [-s seed] [--params out.json] [--rate 1]
+//     node nn/js/speak.js -m build/voice --batch list.json    # [{text, wav, params, seed, speaker, style, rate}, ...]
+//     node nn/js/speak.js -m build/voice "Hello." -o hello.wav --speaker 5            # a speaker id (data/nn/speakers.json)
 //         [--blend '{"5": 0.6, "12": 0.4}']                                        # or a blend
 //         [--style happy --intensity 0.7] [--style '{"happy": 0.5, "sad": 0.2}']   # an emotion, or a blend
 //

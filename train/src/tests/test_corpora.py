@@ -153,7 +153,7 @@ class TestFetch(unittest.TestCase):
         }
         return [unittest.mock.patch.dict(corpora.CORPORA, test_corpora, clear=True),
                 unittest.mock.patch.object(corpora, 'CORPORA_DIR', directory),
-                unittest.mock.patch.object(corpora, 'DOWNLOADS_DIR', os.path.join(directory, 'downloads')),
+                unittest.mock.patch.object(corpora, 'ARCHIVES_DIR', os.path.join(directory, 'archives')),
                 unittest.mock.patch('urllib.request.urlopen', side_effect=urlopen)]
 
     def test_fetch(self):
@@ -176,7 +176,7 @@ class TestFetch(unittest.TestCase):
                     self.assertEqual(corpora.fetch('one', False), len(one_bytes))
                     self.assertEqual(corpora.fetch('one', False), 0)
                     self.assertEqual(corpora.fetch('split', True), len(split_bytes))
-                downloads = sorted(os.listdir(os.path.join(directory, 'downloads')))
+                archives_kept = sorted(os.listdir(os.path.join(directory, 'archives')))
                 self.assertTrue(os.path.exists(os.path.join(directory, 'one', 'data', 'a.wav')))
                 self.assertTrue(os.path.exists(os.path.join(directory, 'split', 'lab', 'phone', 'a.lab')))
                 self.assertFalse(os.path.exists(os.path.join(directory, 'split', 'lab', 'word')))
@@ -187,9 +187,27 @@ class TestFetch(unittest.TestCase):
             finally:
                 for patch in reversed(patches):
                     patch.stop()
-        self.assertEqual(downloads, ['split.tar.gz', 'split.tar.gz-0', 'split.tar.gz-1'])
+        self.assertEqual(archives_kept, ['split.tar.gz', 'split.tar.gz-0', 'split.tar.gz-1'])
         self.assertIn('one: downloading https://x/one.tar.gz\n', stderr.getvalue())
         self.assertIn('one: unpacking 0 MB\none: present\nsplit: downloading https://x/split.tar.gz-0\n', stderr.getvalue())
+
+    def test_fetch_whisper(self):
+        with tempfile.TemporaryDirectory() as directory:
+            model = os.path.join(directory, 'whisper', 'ggml-base.en.bin')
+            urls = []
+
+            def urlopen(request, timeout):
+                urls.append((request.full_url, timeout))
+                return FakeResponse(b'model')
+            with unittest.mock.patch.object(corpora, 'WHISPER_MODEL', model), \
+                    unittest.mock.patch('urllib.request.urlopen', side_effect=urlopen), helpers.captured() as (_, stderr):
+                self.assertEqual(corpora.fetch_whisper(), 5)
+                self.assertEqual(corpora.fetch_whisper(), 0)
+            with open(model, 'rb') as file:
+                self.assertEqual(file.read(), b'model')
+        self.assertEqual(urls, [(corpora.WHISPER_URL, 60)])
+        self.assertTrue(stderr.getvalue().startswith(f'whisper: downloading {corpora.WHISPER_URL}\n'))
+        self.assertTrue(stderr.getvalue().endswith('whisper: present\n'))
 
     def test_write_readme(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -252,12 +270,15 @@ class TestMain(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
                 unittest.mock.patch.object(corpora, 'CORPORA_DIR', os.path.join(directory, 'corpora')), \
                 unittest.mock.patch.object(corpora, 'fetch', return_value=2000000) as fetch, \
+                unittest.mock.patch.object(corpora, 'fetch_whisper', return_value=1000000) as fetch_whisper, \
                 unittest.mock.patch.object(corpora, 'write_readme') as write_readme, helpers.captured() as (_, stderr):
             with unittest.mock.patch.object(sys, 'argv', ['corpora.py', 'arctic-slt', '--keep-archives']):
                 corpora.main()
             self.assertEqual(fetch.call_args_list, [unittest.mock.call('arctic-slt', True)])
+            self.assertEqual(fetch_whisper.call_count, 0)
             with unittest.mock.patch.object(sys, 'argv', ['corpora.py']):
                 corpora.main()
+            self.assertEqual(fetch_whisper.call_count, 1)
             self.assertEqual([call.args[0] for call in fetch.call_args_list[1:]], list(corpora.CORPORA))
             self.assertTrue(os.path.isdir(os.path.join(directory, 'corpora')))
             with unittest.mock.patch.object(sys, 'argv', ['corpora.py', 'nope']), self.assertRaises(SystemExit):

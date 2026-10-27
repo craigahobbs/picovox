@@ -6,7 +6,7 @@ The listener panel's scoring - how every evaluation measures speech (no training
 spoken by the browser path, nn/js/speak.js):
 
 - listen - UTMOS and the ECAPA speaker embedding (listeners.py in the listener-model environment, build/venv-listeners)
-- transcribe - whisper.cpp base.en (data/whisper/ggml-base.en.bin), cached beside each WAV; words and edit_distance give
+- transcribe - whisper.cpp base.en (downloads/whisper/ggml-base.en.bin), cached beside each WAV; words and edit_distance give
   the word error rate as the former tools/eval.js counted it
 - cosine - the speaker similarity of two embeddings
 - speak - a batch of texts with an exported model (its speed report)
@@ -23,12 +23,12 @@ import subprocess
 
 import numpy
 
-from . import ROOT
+from . import ROOT, corpora
 
 
 LISTENERS_PYTHON = os.path.join(ROOT, 'build', 'venv-listeners', 'bin', 'python')
 LISTENERS_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'listeners.py')
-WHISPER_MODEL = os.path.join(ROOT, 'data', 'whisper', 'ggml-base.en.bin')
+WHISPER_MODEL = corpora.WHISPER_MODEL
 TEXTS_PATH = os.path.join(ROOT, 'tools', 'panel-texts.json')
 
 

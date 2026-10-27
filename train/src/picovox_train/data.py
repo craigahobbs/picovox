@@ -38,7 +38,7 @@ from .frontend import tokenize
 from .wav import read_wav
 
 
-CORPORA_DIR = os.path.join(ROOT, 'data', 'corpora')
+CORPORA_DIR = os.path.join(ROOT, 'downloads', 'corpora')
 ARCTIC_DIR = os.path.join(CORPORA_DIR, 'arctic')
 
 # The LibriTTS-R alignments (LibriTTSLabel's MFA phone labels) and the LibriTTS-R subsets in the pool (multi.py,
