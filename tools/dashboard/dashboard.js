@@ -818,7 +818,7 @@ const listenTitles = {'teacher-a': 'Teacher A', 'teacher-b': 'Teacher B', 'stude
 const listenNotes = {'teacher-a': 'its final checkpoint, which teacher B starts from', 'teacher-b': 'the distillation\'s teacher',
     'student': 'distilled from teacher B, before its polish',
     'polish': 'the model make train packages, if it passes the gate',
-    'reference': 'lib/models/voiceModel.js, before make train replaces it'};
+    'reference': 'lib/models/voiceModel.js'};
 const trainSamplesHelp = 'make train renders listening samples of each training stage\'s final model as the stage finishes ' +
     '(its own CPU stage, beside the next GPU stage): teacher A (its last checkpoint, which teacher B starts from), teacher B ' +
     '(its best - the distillation\'s teacher), the student (its best, before the polish), and the polished student (its ' +
@@ -826,10 +826,10 @@ const trainSamplesHelp = 'make train renders listening samples of each training 
     '(data/nn/train.json samples) in six of the training speakers\' voices, three female and three male, exactly as the ' +
     'package speaks (exported and quantized as the package stage exports it, its G2P network, 24 kHz, its gain). Beside each ' +
     'is the shipped model, ' +
-    'lib/models/voiceModel.js, rendered the same way before make train replaces it - so the new model can be judged by ' +
-    'ear. The numbers are UTMOS (1-5, a neural predictor of naturalness; real recordings score about 4.1-4.3), scored on ' +
-    'the CPU - green when above the shipped model\'s, red when below by 0.1 or more. A model not rendered yet is listed as ' +
-    'waiting. The files are TRAIN_DIR/samples/ (index.json lists them).';
+    'lib/models/voiceModel.js, rendered the same way - so the new model can be judged by ear (make train installs ' +
+    'nothing: make train-check, then make train-install). The numbers are UTMOS (1-5, a neural predictor of naturalness; ' +
+    'real recordings score about 4.1-4.3), scored on the CPU - green when above the shipped model\'s, red when below by 0.1 ' +
+    'or more. A model not rendered yet is listed as waiting. The files are TRAIN_DIR/samples/ (index.json lists them).';
 document.getElementById('trainSamplesTitle').append(' ', helpTip('trainSamples', trainSamplesHelp));
 let trainSamplesKey = null;
 const trainSampleTiles = new Map();

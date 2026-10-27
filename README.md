@@ -257,9 +257,10 @@ make commit      # the package's unit tests (100% coverage), lint, and API docum
 make test        # the package's unit tests (TEST='name' runs one)
 make -C train commit      # the training's gate alone - its unit tests, pylint, and 100% branch coverage
 make -C train test TEST=tests.test_params    # one test module of the training's
-make -j train             # train both models - the G2P and the voice - each gated, then installed in lib/models/ (see below)
-make -j train-voice       # the voice alone; make -j train-voice-check - trained and gated, not installed
-make -j train-g2p         # the G2P alone, on every core; make -j train-g2p-check - trained and gated, not installed
+make -j train             # train both models - the G2P and the voice - each gated, in build/train/, then a report (see below)
+make train-check          # the package's tests with the trained models, and the voice lab staged with them to listen
+make train-install        # the trained models that differ into lib/models/
+make -j train-voice       # the voice alone; make -j train-g2p - the G2P alone, on every core
 ```
 
 The training pipeline is a Python package, `picovox_train` (`train/src/picovox_train/` - `picovox_train/<module>.py`
@@ -382,14 +383,26 @@ Speaker similarity: every human pair 0.0-0.48; halves of one human speaker's rec
 
 `make train` recreates the generated models - `lib/models/g2pModel.js` and `lib/models/voiceModel.js` - from a clean
 checkout, by one recipe, `data/nn/train.json` (every stage's settings and seeds): `make train-g2p` and `make
-train-voice` at once. Each model's training ends in its gate, then its install - `make train-g2p-check` and `make
-train-voice-check` train and gate a model without installing it. The G2P is deterministic, so its gate is that it
-reproduces the committed module (identical below the comment header, else within the recipe's tolerances), and its
-install replaces `lib/models/g2pModel.js` only when it differs; the voice's gate is the listener panel against the
-shipped model. The voice data is built with the committed G2P (a G2P installed that differs makes the next `make train`
-rebuild the voice). Each stage is a stamp in
-`build/train/` (`TRAIN_DIR`), so `make -j train` runs independent stages at once; the GPU stages run one at a time
-(`picovox_train/gpulock.py` - two at once each run at about half speed) while the CPU stages run beside them:
+train-voice` at once. Each model's training ends in its gate, with its module in `build/train/` (`g2pModel.js`,
+`voiceModel.js`) - `lib/models/` unchanged. The G2P is deterministic, so its gate is that it reproduces the committed
+module (identical below the comment header, else within the recipe's tolerances); the voice's gate is the listener
+panel against the shipped model. The voice data is built with the committed G2P (a G2P installed that differs makes the
+next `make train` rebuild the voice).
+
+The flow:
+
+1. `make -j train` - both models, then a report (`picovox_train.trained report`): each model's size, the voice's
+   listener-panel scores against the shipped model's, and whether each module differs from the committed one.
+2. The training dashboard (below) - the gates and the listening samples.
+3. `make train-check` - the package's tests with the trained models in place of `lib/models/`'s
+   (`tools/trainmodels.js`, a module hook), and the voice lab staged with them (`build/voicelab/trained/`) for the
+   blind A/B against the shipped models.
+4. `make train-install` - the trained modules that differ into `lib/models/` (the G2P when it differs below its
+   comment header; `picovox_train.trained install`); then `make commit` and commit them.
+
+`make train-check` and `make train-install` fail until `make train` has trained both models. Each stage is a
+stamp in `build/train/` (`TRAIN_DIR`), so `make -j train` runs independent stages at once; the GPU stages run one at a
+time (`picovox_train/gpulock.py` - two at once each run at about half speed) while the CPU stages run beside them:
 
 | Stage | Runs on | Needs |
 | --- | --- | --- |
@@ -401,10 +414,9 @@ rebuild the voice). Each stage is a stamp in
 | targets, student, polish - the distilled student (`picovox_train.distill`) | GPU | teacher-b |
 | baseline-eval - the shipped model through the panel, beside the student's GPU stages | CPU | teacher-eval |
 | student-eval - the panel and the gate (`picovox_train.distill pick --against baseline`: no worse than the shipped model) | CPU | polish, baseline-eval |
-| package - `lib/models/voiceModel.js`, with its provenance | CPU | student-eval (after samples-reference) |
+| package - the voice's module, `build/train/voiceModel.js`, with its provenance | CPU | student-eval |
 | heteronyms - the relabeled words, checked to reproduce `data/nn/g2p-relabel.json` (the G2P network's input) | CPU, ~9 min | corpora (after data-multi) |
 | g2p-network, context-labels, context-network, g2p - the G2P (the network; the heteronym labels from the pinned books; the context network and its cross-validation; the reading stage, the export, and the gate) | CPU - the network one core, ~30 min | corpora (the labels, after data-multi) |
-| g2p-install - `lib/models/g2pModel.js`, when the gated module differs from it | CPU | g2p, heteronyms |
 | samples-reference, samples-teacher-a, -teacher-b, -student, -polish - the listening samples | CPU, under a minute each | the shipped model (after data-multi); each stage's model |
 
 The critical path - the readers' data (7.3 minutes), teacher A (28.6) and B (20.4), the targets (3.6), the student
@@ -419,9 +431,9 @@ for listening as the stage finishes, in its own CPU stage beside the next GPU st
 as the package stage exports it, it speaks `data/nn/train.json`'s `samples` texts (Moby-Dick's opening, a dialogue,
 and heteronyms) in six of the training speakers' voices (three female, three male) exactly as the package speaks a
 sentence (`lib/synthesis.js`, every word pronounced by the G2P network), and each sample is scored with UTMOS on the
-CPU. The shipped `lib/models/voiceModel.js` is rendered the same way, as the reference, before the package stage
-replaces it. The WAV files are `TRAIN_DIR/samples/STAGE-SPEAKER-TEXT.wav`, listed in `TRAIN_DIR/samples/index.json`;
-the dashboard's Listen tab plays them, each beside the shipped model's.
+CPU. The shipped `lib/models/voiceModel.js` is rendered the same way, as the reference. The WAV files are
+`TRAIN_DIR/samples/STAGE-SPEAKER-TEXT.wav`, listed in `TRAIN_DIR/samples/index.json`; the dashboard's Listen tab plays
+them, each beside the shipped model's.
 
 `make train` keeps a record for the training dashboard (`tools/dashboard/`): each stage's start, end, and failure in
 `TRAIN_DIR/stages.jsonl` and each command's output also in `TRAIN_DIR/logs/STAGE.log` (`tools/trainstage.sh` - the
@@ -656,8 +668,8 @@ settings.)
 The settings are `data/nn/train.json`'s `context` section. `make train-g2p` runs all of it (the voice stages use the
 committed `lib/models/g2pModel.js`) and gates its module with `picovox_train.context check`: identical to the
 committed module below the comment header (the stages are deterministic on the same inputs), else within the recipe's
-tolerances (the regression set, the book error, the top-10K, the monitoring WER) - then `picovox_train.context install`
-replaces the committed module only when it differs (`make train-g2p-check` stops at the gate). The books are pinned (`data/nn/books.json` - see make train), so a clean run reproduces the committed module.
+tolerances (the regression set, the book error, the top-10K, the monitoring WER) - then `make train-install` replaces
+the committed module only when it differs. The books are pinned (`data/nn/books.json` - see make train), so a clean run reproduces the committed module.
 
 The labels (`picovox_train/contextlabels.py`, with the curated part in `data/nn/context-labels.json`) come from three
 sources: the LibriTTS-R readers' readings by the forced alignments; part-of-speech tags over the Project Gutenberg books

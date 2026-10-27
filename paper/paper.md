@@ -753,10 +753,10 @@ text too - is left open.
 
 ### 10.1 One recipe, one command
 
-`make train` recreates both generated models - `lib/models/g2pModel.js` and `lib/models/voiceModel.js` - from a clean
-checkout, by one recipe, `data/nn/train.json`, which holds every stage's settings and seeds. Each stage is a Makefile
-target with a stamp, so `make -j train` runs independent stages at once; the GPU stages run one at a time under a
-lock (two at once each run at about half speed), and the CPU stages run beside them:
+`make train` recreates both generated models - `lib/models/g2pModel.js` and `lib/models/voiceModel.js`'s modules, in
+`build/train/` - from a clean checkout, by one recipe, `data/nn/train.json`, which holds every stage's settings and
+seeds. Each stage is a Makefile target with a stamp, so `make -j train` runs independent stages at once; the GPU stages
+run one at a time under a lock (two at once each run at about half speed), and the CPU stages run beside them:
 
 | Stage | Runs on |
 | --- | --- |
@@ -766,13 +766,15 @@ lock (two at once each run at about half speed), and the CPU stages run beside t
 | teacher evaluation | CPU |
 | distillation targets, student, polish | GPU |
 | student evaluation and the gate | CPU |
-| package - `lib/models/voiceModel.js`, with its provenance | CPU |
+| package - the voice's module, with its provenance | CPU |
 | listening samples of each stage's final model and of the shipped model | CPU, under a minute each |
 
 The voice data is built with the committed G2P module. The G2P chain - the network, the heteronym labels, the context
 network, its cross-validation, and the relabeling of Section 9.4 - runs beside the voice stages (`make train-g2p`
-alone): it reproduces the G2P, gates it against the committed module, and installs it only when it differs; `make
-train-g2p-check` and `make train-voice-check` stop each model at its gate.
+alone): it reproduces the G2P and gates it against the committed module. `make train` ends in a report - each model's
+size, the voice's scores against the shipped model, and whether each module differs from the committed one - and
+installs nothing: `make train-check` runs the package's tests with the trained models and stages them in the voice lab
+for blind listening against the shipped models, and `make train-install` installs the trained modules that differ.
 
 ### 10.2 Gates and provenance
 
@@ -785,6 +787,8 @@ A retrain never silently replaces what ships:
   regression set's minimums, no kind more than 2 cases below the committed module, and the book measures within the
   recipe's tolerances - and it keeps the committed module either way.
 - **The held-out gate** of Section 9.5, and the relabeling's reproduction.
+- **The install** is its own step, after the gates, the listening, and the package's tests with the trained models
+  (`make train-check`): `make train-install`.
 - **Provenance.** The packaged voice module records the commit it was trained from (and whether the tree was clean),
   the SHA-256 of the recipe and of the training data, and the gate's scores; picovox 1.0.1's names commit dddc189,
   clean, with UTMOS 4.1667, WER 1.1078%, and similarity 0.9784.
@@ -1184,7 +1188,9 @@ npm install picovox                                             # the package
 make commit                                                     # tests, lint, docs, 100% coverage of lib/ and train/
 make listeners                                                  # the listener panel's environment
 make -j train                                                   # both models from scratch: the G2P, and the voice - the corpora, the teacher, the student, the gate
-make -j train-g2p-check                                         # reproduce the G2P chain and check it against the committed module
+make -j train-g2p                                               # reproduce the G2P chain and check it against the committed module
+make train-check                                                # the package's tests with the trained models, and the voice lab staged to listen
+make train-install                                              # the trained models that differ into lib/models/
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke    # every training entry point, a few steps on the CPU
 node nn/js/unpack.js lib/models/voiceModel.js out/voice && node nn/js/speak.js -m out/voice "Call me Ishmael." -o ishmael.wav
 ```

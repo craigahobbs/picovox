@@ -14,10 +14,8 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B):
     python -m picovox_train.context gate --labels DIR/labels.json [MODULE]                           # held-out accuracy (one split)
     python -m picovox_train.context cross-validate --labels DIR/labels.json --out DIR/folds [-j N]   # the gate, 10 folds
     python -m picovox_train.context folds DIR/folds/fold-*.json --labels DIR/labels.json             # the gate of the folds' results
-    python -m picovox_train.context check NEW.js     # make train-g2p-check: identical to lib/models/g2pModel.js, else
-                                                     # the quality gate
-    python -m picovox_train.context install NEW.js   # make train-g2p: the checked module as lib/models/g2pModel.js
-                                                     # (kept when identical below its header)
+    python -m picovox_train.context check NEW.js     # make train's G2P gate: identical to lib/models/g2pModel.js,
+                                                     # else the quality gate (make train-install installs it - trained.py)
 
 The settings are data/nn/train.json's "context" section (g2p, network, export, gate).
 
@@ -58,13 +56,13 @@ import hashlib
 import json
 import multiprocessing
 import os
-import shutil
 import sys
 import time
 
 import numpy
 
 from . import RECIPE_PATH, ROOT, g2pmodel
+from .trained import module_body
 from .g2p import (EOS, LETTERS, MAX_WORD, MODULE_LINE_LENGTH, PHONES, UPSAMPLE, build_model, learning_rate, log_line, make_batch,
                   model_config, quantize_array, quantize_state, weight_bytes)
 
@@ -848,16 +846,8 @@ def heteronym_scores(module_path):
     return kinds, process.returncode
 
 
-# A generated module's lines below its comment header - its leading comment lines (its provenance - the checkpoints'
-# digests - differs run to run; a line of base64 weights below it may start with // too)
-def module_body(path):
-    with open(path, encoding='utf-8') as file:
-        lines = file.read().split('\n')
-    return lines[next((index for index, line in enumerate(lines) if not line.startswith('//')), len(lines)):]
-
-
 def command_check(args):
-    """make train-g2p-check's gate - the retrained module against the committed one: identical (below the comment
+    """make train's G2P gate - the retrained module against the committed one: identical (below the comment
     header), else the quality gate (the regression set - tools/heteronyms.js's minimums, and no kind more than
     heteronymKindDrop below the committed module's - and g2p.py's book measures within the recipe's tolerances)"""
     from . import g2p  # pylint: disable=import-outside-toplevel
@@ -887,18 +877,6 @@ def command_check(args):
           f'(committed: {g2p.describe(old_measures)}) - ' +
           (f'FAILED: {"; ".join(failures)}' if failures else 'within the tolerances'))
     return 1 if failures else 0
-
-
-def command_install(args):
-    """make train-g2p's install - the checked module (command_check) as the committed one, unless it's identical below
-    the comment header (the committed module is kept, its provenance unchanged)"""
-    if module_body(args.model) == module_body(args.committed):
-        print(f'install: {args.model} is identical to {args.committed} (below the comment header) - {args.committed} kept')
-        return 0
-    shutil.copyfile(args.model, args.committed)
-    print(f'install: {args.committed} is now {args.model} - the voice\'s data, built with the earlier G2P, is rebuilt by the next '
-          'make train (or make train-voice)')
-    return 0
 
 
 #
@@ -1050,10 +1028,6 @@ def main(argv=None):
     check_parser.add_argument('model')
     check_parser.add_argument('--committed', default=g2pmodel.MODULE_PATH)
     check_parser.set_defaults(func=command_check)
-    install_parser = commands.add_parser('install', help='make train-g2p\'s install - a checked module as the committed one')
-    install_parser.add_argument('model')
-    install_parser.add_argument('--committed', default=g2pmodel.MODULE_PATH)
-    install_parser.set_defaults(func=command_install)
     gate_parser = commands.add_parser('gate', help='the held-out accuracy of a module\'s context network (exit 1 below the gate)')
     gate_parser.add_argument('model', nargs='?', default=g2pmodel.MODULE_PATH)
     gate_parser.add_argument('--labels', required=True)

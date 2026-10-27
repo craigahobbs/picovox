@@ -42,13 +42,21 @@ ESLINT_ARGS := $(ESLINT_ARGS) tools/ nn/js/ --ignore-pattern 'lib/models/**'
 
 
 # The voice lab (tools/voicelab/) staged with the package's lib/ in build/voicelab/ - published as an artifact (Claude's
-# questions and the answers in its db store; index.html the page, the rest its files) or served locally (Explore only)
+# questions and the answers in its db store; index.html the page, the rest its files) or served locally (Explore only).
+# VOICELAB_TRAINED - a directory of trained models (make train-check's TRAIN_DIR), staged beside the shipped ones as
+# build/voicelab/trained/ (its g2pModel.js and voiceModel.js)
+VOICELAB_TRAINED ?=
+
 .PHONY: voicelab
 voicelab:
 	rm -rf build/voicelab
 	mkdir -p build/voicelab/picovox
 	rsync -a tools/voicelab/ build/voicelab/
 	rsync -a lib build/voicelab/picovox/
+ifneq '$(VOICELAB_TRAINED)' ''
+	mkdir -p build/voicelab/trained
+	cp $(VOICELAB_TRAINED)/g2pModel.js $(VOICELAB_TRAINED)/voiceModel.js build/voicelab/trained/
+endif
 
 
 # The training package (train/ - a python-build package, picovox_train): make commit runs its gate too (its unit tests,
@@ -85,17 +93,21 @@ build/venv-%.build: requirements/%.txt
 listeners: build/venv-listeners.build
 
 
-# make train - both generated models (lib/models/g2pModel.js and voiceModel.js) from a clean checkout, by the recipe
-# data/nn/train.json: make train-g2p (the G2P and the heteronym relabeling, CPU) and make train-voice (the voice - its
-# data, teacher, and student, GPU) at once. Each model's training ends in its gate, then its install: make
-# train-g2p-check and make train-voice-check train and gate a model without installing it (the G2P - identical to the
-# committed module below its header, else within the recipe's tolerances; the voice - no worse than the shipped model on
-# the listener panel), and make train-g2p and make train-voice install it too (the G2P only when it differs). Each stage
-# is a stamp in TRAIN_DIR; make -j train runs the independent stages at once - the GPU stages one at a time
-# (picovox_train/gpulock.py: two at once each run at about half speed), the CPU stages beside them (the G2P, the data
-# builds, the evaluations, and the listening samples). The voice data is built with the committed G2P (the G2P is
-# deterministic, so its training reproduces it; a G2P installed that differs makes the next make train rebuild the
-# voice).
+# make train - both generated models from a clean checkout, by the recipe data/nn/train.json, trained to their gates in
+# TRAIN_DIR (TRAIN_DIR/g2pModel.js and voiceModel.js - lib/models/ unchanged): make train-g2p (the G2P and the heteronym
+# relabeling, CPU) and make train-voice (the voice - its data, teacher, and student, GPU) at once, then the report (each
+# model's size and scores, and whether it differs from the committed module - picovox_train.trained report). The gates:
+# the G2P - identical to the committed module below its header, else within the recipe's tolerances; the voice - no
+# worse than the shipped model on the listener panel. Each stage is a stamp in TRAIN_DIR; make -j train runs the
+# independent stages at once - the GPU stages one at a time (picovox_train/gpulock.py: two at once each run at about
+# half speed), the CPU stages beside them (the G2P, the data builds, the evaluations, and the listening samples). The
+# voice data is built with the committed G2P (the G2P is deterministic, so its training reproduces it; a G2P installed
+# that differs makes the next make train rebuild the voice).
+#
+# The flow: make train; the training dashboard (its gates and listening samples); make train-check (the package's tests
+# with the trained models, and the voice lab staged with them for the blind A/B against the shipped models); then make
+# train-install (the trained models that differ into lib/models/). make train-check and train-install fail until make
+# train has trained both models.
 TRAIN_DIR ?= build/train
 TRAIN_SRC := $(CURDIR)/train/src
 NN_PYTHON := env PYTHONPATH=$(TRAIN_SRC) build/venv-nn/bin/python -B
@@ -125,40 +137,53 @@ STAGE = tools/trainstage.sh $(TRAIN_DIR) $(basename $(@F))
 TRAIN_TARGET = @mkdir -p $(TRAIN_DIR) && printf '{"event": "target", "target": "%s", "time": %s}\n' $(1) "$$(date +%s)" >> $(TRAIN_DIR)/stages.jsonl; \
 	if command -v caffeinate >/dev/null; then nohup caffeinate -i -s -w $$PPID >/dev/null 2>&1 & fi
 
-# The targets' final stages - the voice's (its gate and listening samples, then its package) and the G2P's (its gate and
-# the heteronym relabeling's, then its install)
-TRAIN_VOICE_CHECK := $(TRAIN_DIR)/student-eval.done $(TRAIN_DIR)/samples-reference.done $(TRAIN_DIR)/samples-teacher-a.done \
-	$(TRAIN_DIR)/samples-teacher-b.done $(TRAIN_DIR)/samples-student.done $(TRAIN_DIR)/samples-polish.done
-TRAIN_VOICE := $(TRAIN_DIR)/package.done $(TRAIN_VOICE_CHECK)
-TRAIN_G2P_CHECK := $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.done
-TRAIN_G2P := $(TRAIN_DIR)/g2p-install.done
+# The targets' final stages - the voice's (its package, gate, and listening samples) and the G2P's (its gate and the
+# heteronym relabeling's)
+TRAIN_VOICE := $(TRAIN_DIR)/package.done $(TRAIN_DIR)/student-eval.done $(TRAIN_DIR)/samples-reference.done \
+	$(TRAIN_DIR)/samples-teacher-a.done $(TRAIN_DIR)/samples-teacher-b.done $(TRAIN_DIR)/samples-student.done \
+	$(TRAIN_DIR)/samples-polish.done
+TRAIN_G2P := $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.done
+TRAIN_REPORT := $(NN_PYTHON) -m picovox_train.trained report $(TRAIN_DIR)
 
-# (the power check first, alone - its prompt has the terminal - then the stages, in parallel with make -j)
-.PHONY: train train-voice train-voice-check train-g2p train-g2p-check train-util train-clean
+# Fail unless make train has trained both models (make train-check and train-install)
+TRAINED = @test -f $(TRAIN_DIR)/package.done -a -f $(TRAIN_DIR)/g2p.done || \
+	{ echo 'make $@: no trained models in $(TRAIN_DIR) - make train first'; exit 1; }
+
+# (the power check first, alone - its prompt has the terminal - then the stages, in parallel with make -j, then the report)
+.PHONY: train train-voice train-g2p train-check train-install train-util train-clean
 train:
 	$(call TRAIN_TARGET,train)
 	@tools/trainpower.sh
 	@$(MAKE) --no-print-directory train-util $(TRAIN_VOICE) $(TRAIN_G2P)
+	@$(TRAIN_REPORT)
 
 train-voice:
 	$(call TRAIN_TARGET,train-voice)
 	@tools/trainpower.sh
 	@$(MAKE) --no-print-directory train-util $(TRAIN_VOICE)
+	@$(TRAIN_REPORT)
 
-train-voice-check:
-	$(call TRAIN_TARGET,train-voice-check)
-	@tools/trainpower.sh
-	@$(MAKE) --no-print-directory train-util $(TRAIN_VOICE_CHECK)
-
-# make train-g2p and train-g2p-check - the G2P alone, on every core (G2P_STANDALONE_JOBS workers at the default QoS, not
-# after the readers' data build)
+# make train-g2p - the G2P alone, on every core (G2P_STANDALONE_JOBS workers at the default QoS, not after the readers'
+# data build)
 train-g2p:
 	$(call TRAIN_TARGET,train-g2p)
 	@$(MAKE) --no-print-directory train-util G2P_STANDALONE=1 G2P_JOBS=$(G2P_STANDALONE_JOBS) CONTEXT_JOBS=$(G2P_STANDALONE_JOBS) BESIDE= $(TRAIN_G2P)
+	@$(TRAIN_REPORT)
 
-train-g2p-check:
-	$(call TRAIN_TARGET,train-g2p-check)
-	@$(MAKE) --no-print-directory train-util G2P_STANDALONE=1 G2P_JOBS=$(G2P_STANDALONE_JOBS) CONTEXT_JOBS=$(G2P_STANDALONE_JOBS) BESIDE= $(TRAIN_G2P_CHECK)
+# make train-check - the trained models checked before they're installed: the package's tests with them in place of
+# lib/models/'s (tools/trainmodels.js - lib/models/ unchanged), and the voice lab staged with them (build/voicelab/trained/)
+# for the blind A/B against the shipped models
+train-check:
+	$(TRAINED)
+	NODE_OPTIONS='--import=$(CURDIR)/tools/trainmodels.js' TRAIN_MODELS=$(TRAIN_DIR) node --test $(NODE_TEST_ARGS)
+	@$(MAKE) --no-print-directory voicelab VOICELAB_TRAINED=$(TRAIN_DIR)
+	@echo 'make train-check: the package'"'"'s tests pass with the trained models; the voice lab is staged in build/voicelab/ with them' \
+		'(trained) beside the shipped models - ask Claude for the blind A/B, then make train-install to install them'
+
+# make train-install - the trained models that differ from the committed ones into lib/models/
+train-install:
+	$(TRAINED)
+	$(NN_PYTHON) -m picovox_train.trained install $(TRAIN_DIR)
 
 # The utilization sampler - it exits when make does (finished, failed, or interrupted)
 train-util:
@@ -181,9 +206,8 @@ $(TRAIN_DIR)/corpora.done: | build/venv-nn.build
 # The G2P (CPU): the network's four stages (one core, deterministic), the heteronym context labels (the books - pinned
 # texts, data/nn/books.json - and part-of-speech tags in build/venv-pos), the context network and its held-out accuracy
 # gate (cross-validated over the aligned speakers) beside the G2P network, then the reading stage (two threads), the
-# export to $(TRAIN_DIR), and picovox_train.context check against the committed module; the heteronym relabeling,
-# which must reproduce data/nn/g2p-relabel.json (the G2P network's input); and the install (picovox_train.context
-# install - lib/models/g2pModel.js replaced only when the new module differs below its header).
+# export to $(TRAIN_DIR)/g2pModel.js, and picovox_train.context check against the committed module; and the heteronym
+# relabeling, which must reproduce data/nn/g2p-relabel.json (the G2P network's input).
 #
 # In make train, the G2P's memory-bound stages (the context labels, the relabeling) are scheduled after the readers'
 # data build (order-only prerequisites) - into the teacher's GPU-bound hours, when the cores are idle - not competing
@@ -234,12 +258,6 @@ $(TRAIN_DIR)/g2p.done: $(TRAIN_DIR)/g2p-network.done $(TRAIN_DIR)/context-labels
 	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context export --g2p $(TRAIN_DIR)/context/g2p.pt --context $(TRAIN_DIR)/context/context.pt \
 		--out $(TRAIN_DIR)/g2pModel.js
 	$(STAGE) -- $(BESIDE) $(NN_PYTHON) -m picovox_train.context check $(TRAIN_DIR)/g2pModel.js
-	@$(STAGE) end
-	touch $@
-
-$(TRAIN_DIR)/g2p-install.done: $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.done
-	@$(STAGE) start
-	$(STAGE) -- $(NN_PYTHON) -m picovox_train.context install $(TRAIN_DIR)/g2pModel.js
 	@$(STAGE) end
 	touch $@
 
@@ -330,12 +348,12 @@ $(TRAIN_DIR)/student-eval.done: $(TRAIN_DIR)/polish.done $(TRAIN_DIR)/baseline-e
 	@$(STAGE) end
 	touch $@
 
-# The voice model module, with its provenance (the commit, the recipe's and the data's hashes, the gate's scores) - after
-# the reference samples, which hear the module it replaces
-$(TRAIN_DIR)/package.done: $(TRAIN_DIR)/student-eval.done | $(TRAIN_DIR)/samples-reference.done
+# The voice model module, TRAIN_DIR/voiceModel.js, with its provenance (the commit, the recipe's and the data's hashes,
+# the gate's scores)
+$(TRAIN_DIR)/package.done: $(TRAIN_DIR)/student-eval.done
 	@$(STAGE) start
 	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m picovox_train.export $(TRAIN_RUNS)/distill-student-polish/best.pt --voice multi --out $(TRAIN_DIR)/export
-	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m picovox_train.package $(TRAIN_DIR)/export/multi -o lib/models/voiceModel.js --provenance --recipe data/nn/train.json \
+	$(STAGE) -- $(TRAIN_ENV) $(NN_PYTHON) -m picovox_train.package $(TRAIN_DIR)/export/multi -o $(TRAIN_DIR)/voiceModel.js --provenance --recipe data/nn/train.json \
 		--data $(TRAIN_DIR)/data/multi $(TRAIN_DIR)/data/cremad --scores $(TRAIN_DIR)/distill/eval/student/result.json
 	@$(STAGE) end
 	touch $@
@@ -344,8 +362,8 @@ $(TRAIN_DIR)/package.done: $(TRAIN_DIR)/student-eval.done | $(TRAIN_DIR)/samples
 # The listening samples (CPU, each beside the next GPU stage - tools/trainsamples.js): each training stage's final model
 # (the checkpoint the next stage starts from, exported as the package stage exports it) speaking data/nn/train.json's
 # samples texts in its speakers' voices as the package speaks them, scored with UTMOS, in $(TRAIN_DIR)/samples/ (index.json)
-# for the training dashboard's Listen tab - and the reference, the shipped lib/models/voiceModel.js before the package
-# stage replaces it (in the teacher's GPU-bound hours, after the readers' data build; again when the shipped model changes)
+# for the training dashboard's Listen tab - and the reference, the shipped lib/models/voiceModel.js (in the teacher's
+# GPU-bound hours, after the readers' data build; again when the shipped model changes)
 SAMPLES := OMP_NUM_THREADS=2 $(BESIDE) node tools/trainsamples.js --out $(TRAIN_DIR)/samples
 
 $(TRAIN_DIR)/samples-reference.done: lib/models/voiceModel.js | build/venv-listeners.build $(TRAIN_DIR)/data-multi.done

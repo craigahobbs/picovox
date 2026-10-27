@@ -2,11 +2,9 @@
     "description": "make train's stages (the Makefile's $(TRAIN_DIR)/<stage>.done targets) for the training dashboard: each stage's group, what it runs on (cpu, gpu - one at a time under the GPU lock - or network), the stages it needs (data dependencies), the stages it runs after (ordering only - Make's order-only prerequisites: the CPU checks scheduled into the teacher's GPU-bound hours), its expected minutes (an M3 Max on its 140 W adapter, measured 2026-10-21 - the corpora downloaded once), a stage without a training run whose log counts its progress (progress: {log - in $(TRAIN_DIR), pattern - a finished part's line, total - its parts}), the training run it writes ($(TRAIN_DIR)/runs/<run>/ - its data/nn/train.json section, whose stop ends it early), and for a listening samples stage, the stage whose model it renders (samples - $(TRAIN_DIR)/samples/index.json's stage; reference: the shipped model); test/testTrainStages.js keeps it in sync with the Makefile",
     "target": "train",
     "targets": {
-        "train": ["package", "student-eval", "samples-reference", "samples-teacher-a", "samples-teacher-b", "samples-student", "samples-polish", "g2p-install"],
+        "train": ["package", "student-eval", "samples-reference", "samples-teacher-a", "samples-teacher-b", "samples-student", "samples-polish", "g2p", "heteronyms"],
         "train-voice": ["package", "student-eval", "samples-reference", "samples-teacher-a", "samples-teacher-b", "samples-student", "samples-polish"],
-        "train-voice-check": ["student-eval", "samples-reference", "samples-teacher-a", "samples-teacher-b", "samples-student", "samples-polish"],
-        "train-g2p": ["g2p-install"],
-        "train-g2p-check": ["g2p", "heteronyms"]
+        "train-g2p": ["g2p", "heteronyms"]
     },
     "stages": [
         {"stage": "corpora", "group": "Data", "title": "The corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D (downloads, once)", "on": "network", "minutes": 1, "needs": []},
@@ -18,7 +16,6 @@
         {"stage": "context-labels", "group": "G2P", "title": "The heteronym context labels (the pinned books, aligned readings, part-of-speech tags)", "on": "cpu", "minutes": 13, "needs": ["corpora"], "after": ["data-multi"]},
         {"stage": "context-network", "group": "G2P", "title": "The context network and its cross-validated held-out gate (picovox_train.context train-context, cross-validate)", "on": "cpu", "minutes": 35, "needs": ["context-labels"], "progress": {"log": "context/train.log", "pattern": "train-context: step (\\d+)/\\1 \\(quantized\\)", "total": 55}},
         {"stage": "g2p", "group": "G2P", "title": "The context G2P - the reading stage, the export, and its gate (picovox_train.context check: identical to the committed module below its header, else within the recipe's tolerances)", "on": "cpu", "minutes": 4, "needs": ["g2p-network", "context-labels", "context-network"]},
-        {"stage": "g2p-install", "group": "G2P", "title": "lib/models/g2pModel.js - the checked module, when it differs from the committed one below its header (picovox_train.context install)", "on": "cpu", "minutes": 1, "needs": ["g2p", "heteronyms"]},
         {"stage": "teacher-a", "group": "Teacher", "title": "Teacher stage A (picovox_train.trainmulti --recipe teacher.a - 15,000 steps)", "on": "gpu", "minutes": 26, "needs": ["data-multi", "data-cremad"], "run": "teacher-a", "recipe": "teacher.a"},
         {"stage": "teacher-b", "group": "Teacher", "title": "Teacher stage B with the critic (picovox_train.trainmulti --recipe teacher.b - 10,000 steps)", "on": "gpu", "minutes": 23, "needs": ["teacher-a"], "run": "teacher-b", "recipe": "teacher.b"},
         {"stage": "teacher-eval", "group": "Teacher", "title": "The teacher through the listener panel (picovox_train.distill eval)", "on": "cpu", "minutes": 2, "needs": ["teacher-b"]},
@@ -27,11 +24,11 @@
         {"stage": "polish", "group": "Student", "title": "The student's polish on real audio (picovox_train.distill polish)", "on": "gpu", "minutes": 5, "needs": ["student"], "run": "distill-student-polish"},
         {"stage": "baseline-eval", "group": "Student", "title": "The shipped model (lib/models/voiceModel.js) through the panel - the gate's baseline (picovox_train.distill eval)", "on": "cpu", "minutes": 1.5, "needs": ["teacher-eval"]},
         {"stage": "student-eval", "group": "Student", "title": "The student through the panel, and the gate (picovox_train.distill pick: within the tolerance of the shipped model)", "on": "cpu", "minutes": 1.5, "needs": ["polish", "baseline-eval"]},
-        {"stage": "package", "group": "Package", "title": "lib/models/voiceModel.js with its provenance (picovox_train.export, picovox_train.package)", "on": "cpu", "minutes": 1, "needs": ["student-eval"], "after": ["samples-reference"]},
-        {"stage": "samples-reference", "group": "Listening samples", "title": "The shipped model's samples - lib/models/voiceModel.js before the package stage replaces it (tools/trainsamples.js)", "on": "cpu", "minutes": 1, "needs": [], "after": ["data-multi"], "samples": "reference"},
+        {"stage": "package", "group": "Package", "title": "The voice's module, TRAIN_DIR/voiceModel.js, with its provenance (picovox_train.export, picovox_train.package)", "on": "cpu", "minutes": 1, "needs": ["student-eval"]},
+        {"stage": "samples-reference", "group": "Listening samples", "title": "The shipped model's samples - lib/models/voiceModel.js (tools/trainsamples.js)", "on": "cpu", "minutes": 1, "needs": [], "after": ["data-multi"], "samples": "reference"},
         {"stage": "samples-teacher-a", "group": "Listening samples", "title": "Teacher A's samples - its final checkpoint (tools/trainsamples.js)", "on": "cpu", "minutes": 1, "needs": ["teacher-a"], "samples": "teacher-a"},
         {"stage": "samples-teacher-b", "group": "Listening samples", "title": "Teacher B's samples - its best checkpoint (tools/trainsamples.js)", "on": "cpu", "minutes": 1, "needs": ["teacher-b"], "samples": "teacher-b"},
         {"stage": "samples-student", "group": "Listening samples", "title": "The student's samples - its best checkpoint, before the polish (tools/trainsamples.js)", "on": "cpu", "minutes": 1, "needs": ["student"], "samples": "student"},
-        {"stage": "samples-polish", "group": "Listening samples", "title": "The polished student's samples - the model the package stage ships (tools/trainsamples.js)", "on": "cpu", "minutes": 1, "needs": ["polish"], "samples": "polish"}
+        {"stage": "samples-polish", "group": "Listening samples", "title": "The polished student's samples - the model the package stage packages (tools/trainsamples.js)", "on": "cpu", "minutes": 1, "needs": ["polish"], "samples": "polish"}
     ]
 }

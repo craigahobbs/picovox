@@ -70,6 +70,8 @@ The pipeline's tools:
   (tools/voicelab/)
 - stepcheck.py - the trainer's step-0 losses on fixed batches, exactly, to check a change leaves training unchanged
 - gpulock.py - a command run holding the GPU lock (make train's GPU stages one at a time)
+- trained.py - make train's trained models: its report (each model's size and scores, and whether it differs from the
+  committed module) and make train-install (the trained modules that differ into lib/models/)
 
 (The rule-based synthesizer's bridge and comparisons, the single-speaker model and trainer, the spectral correction
 head, the all-convolution encoder, the size search, and the finished experiments' evaluations are in git history.)

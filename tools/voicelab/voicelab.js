@@ -4,18 +4,23 @@
 // The voice lab - PicoVox synthesized in the page (the package's lib/, staged beside this script as picovox/lib/ by make
 // voicelab) with adjustable settings: edits of the network's parameter frames (each sentence's), the rendering's sample
 // rate, and a stereo room at playback. Two views: Claude's blind questions (an artifact's db store - "questions" Claude
-// writes, "answers" the page writes), and free exploration with saved settings ("presets").
+// writes, "answers" the page writes), and free exploration with saved settings ("presets"). The models are the package's
+// (shipped), or make train's (trained - staged as trained/ by make train-check, when it's there).
 //
 // A question: {order, type ('ab' - choose a version, or 'Same'; 'yesno'; 'choice' - one of options), prompt, text, voice,
-// versions: [{name, settings}] (played in a shuffled order), allowSame, options, hint, retired, repeatOf}. An answer:
+// model, versions: [{name, voice, model, settings}] (played in a shuffled order - a version's voice and model, else the
+// question's, else shipped), allowSame, options, hint, retired, repeatOf}. An answer:
 // {question, choice, versionIndex, version (the chosen version's name), order (the versions as played), plays, note,
 // answeredAt}.
 
 import {
-    createSentenceRenderer, defaultSampleRate, modelLoader, paragraphPause, sentenceFrames, sentencePause, voiceTable
+    createSentenceRenderer, defaultSampleRate, paragraphPause, sentenceFrames, sentencePause, voiceTable
 } from './picovox/lib/synthesis.js';
 import {speechText, splitSentences} from './picovox/lib/sentences.js';
 import {NAMES} from './picovox/lib/params.js';
+import {loadG2p} from './picovox/lib/g2p.js';
+import {loadPackagedModel} from './picovox/lib/package.js';
+import {setPronouncer} from './picovox/lib/lexicon.js';
 
 
 // The settings - frame edits (scale, add, or smooth - a centered moving average, ms - named parameters), the
@@ -59,8 +64,28 @@ function setStatus(text, kind = '') {
 }
 
 
-// PicoVox - the package's models, loaded once
-const loadModel = modelLoader(() => import('./picovox/lib/models/g2pModel.js'), () => import('./picovox/lib/models/voiceModel.js'));
+// The models - the package's (shipped) and make train's (trained), each its G2P and voice, loaded once when first used
+const MODELS = {
+    'shipped': {
+        'label': 'Shipped models', 'g2p': () => import('./picovox/lib/models/g2pModel.js'),
+        'voice': () => import('./picovox/lib/models/voiceModel.js')
+    },
+    'trained': {
+        'label': 'Trained models (make train)', 'g2p': () => import('./trained/g2pModel.js'),
+        'voice': () => import('./trained/voiceModel.js')
+    }
+};
+const loadedModels = new Map();
+function loadModel(name = 'shipped') {
+    if (!loadedModels.has(name)) {
+        const {g2p, voice} = MODELS[name];
+        const loading = Promise.all([g2p().then((module) => loadG2p(module.g2pModel)), voice().then((module) => loadPackagedModel(module))])
+            .then(([pronounce, model]) => ({pronounce, model}));
+        loading.catch(() => loadedModels.delete(name));
+        loadedModels.set(name, loading);
+    }
+    return loadedModels.get(name);
+}
 let modelReady = false;
 
 
@@ -96,19 +121,21 @@ function editFrames(frames, settings) {
 }
 
 
-// Render text in a voice with settings - {samples (Float32Array), sampleRate}, cached (the playback settings aside)
+// Render text in a voice with a model and settings - {samples (Float32Array), sampleRate}, cached (the playback settings
+// aside). The G2P is the lexicon's pronouncer, so it's the model's for the rendering (synchronous, after the load).
 const renders = new Map();
-async function render(voice, text, settings, seed = 1000) {
+async function render(voice, modelName, text, settings, seed = 1000) {
     const sampleRate = settings.sampleRate ?? defaultSampleRate;
     const rendered = Object.fromEntries(Object.entries(settings).filter(
         ([name]) => SETTINGS.find((setting) => setting.key === name)?.kind !== 'playback'
     ));
-    const key = JSON.stringify([voice, text, rendered, seed]);
+    const key = JSON.stringify([voice, modelName, text, rendered, seed]);
     if (!renders.has(key)) {
-        const model = await loadModel();
+        const {pronounce, model} = await loadModel(modelName);
         await new Promise((resolve) => {
             setTimeout(resolve, 0);
         });
+        setPronouncer(pronounce);
         const blocks = [];
         for (const sentence of splitSentences(text)) {
             const {chunks, eq} = sentenceFrames(model, speechText(sentence.text), {voice});
@@ -175,11 +202,11 @@ function markRendering(button, label = null) {
 }
 
 
-// Play text in a voice with settings (stopping whatever plays), marking the button while it plays - the dry voice
-// centered, and a stereo room at its mix (the dry level lowered so the loudness stays the same)
+// Play text in a voice with a model and settings (stopping whatever plays), marking the button while it plays - the dry
+// voice centered, and a stereo room at its mix (the dry level lowered so the loudness stays the same)
 let audio = null;
 let current = null;
-async function play(button, voice, text, settings) {
+async function play(button, voice, modelName, text, settings) {
     audio ??= new AudioContext();
     if (audio.state === 'suspended') {
         await audio.resume();
@@ -189,7 +216,7 @@ async function play(button, voice, text, settings) {
     markRendering(button);
     let rendered;
     try {
-        rendered = await render(voice, text, settings);
+        rendered = await render(voice, modelName, text, settings);
     } catch (error) {
         setStatus(`Couldn't synthesize: ${error.message}`, 'warn');
         return;
@@ -253,8 +280,16 @@ function describe(settings) {
 }
 
 
-// Explore - the voice, the sentence, and a slider per setting
+// Explore - the voice, the models (the trained ones when they're staged), the sentence, and a slider per setting
 const voiceSelect = document.getElementById('explore-voice');
+const modelSelect = document.getElementById('explore-model');
+modelSelect.append(new Option(MODELS.shipped.label, 'shipped'));
+fetch('./trained/voiceModel.js').then((response) => {
+    if (response.ok) {
+        modelSelect.append(new Option(MODELS.trained.label, 'trained'));
+        modelSelect.hidden = false;
+    }
+}, () => null);
 for (const voice of voiceTable) {
     voiceSelect.append(new Option(`${voice.label} (${voice.sex})`, voice.key));
 }
@@ -295,10 +330,10 @@ function setExplore(settings) {
 }
 const exploreText = () => TEXTS[Number(textSelect.value)];
 document.getElementById('explore-play').addEventListener(
-    'click', (event) => play(event.currentTarget, voiceSelect.value, exploreText(), {...explore})
+    'click', (event) => play(event.currentTarget, voiceSelect.value, modelSelect.value, exploreText(), {...explore})
 );
 document.getElementById('explore-baseline').addEventListener(
-    'click', (event) => play(event.currentTarget, voiceSelect.value, exploreText(), {...NEUTRAL})
+    'click', (event) => play(event.currentTarget, voiceSelect.value, modelSelect.value, exploreText(), {...NEUTRAL})
 );
 document.getElementById('explore-reset').addEventListener('click', () => setExplore(NEUTRAL));
 
@@ -353,7 +388,8 @@ function renderQuestion() {
         button.id = `play-${next.id}-${position}`;
         button.addEventListener('click', () => {
             plays.set(position, (plays.get(position) ?? 0) + 1);
-            play(button, item.version.voice ?? next.voice, next.text, item.version.settings ?? {});
+            const modelName = item.version.model ?? next.model ?? 'shipped';
+            play(button, item.version.voice ?? next.voice, modelName, next.text, item.version.settings ?? {});
         });
         players.append(button);
     });
@@ -439,11 +475,13 @@ function renderPresets(snapshot) {
         loadButton.type = 'button';
         loadButton.addEventListener('click', () => {
             voiceSelect.value = preset.voice;
+            modelSelect.value = [...modelSelect.options].some((option) => option.value === preset.model) ? preset.model : 'shipped';
             textSelect.value = String(preset.textIndex ?? 0);
             setExplore(preset.settings ?? {});
         });
         row.append(loadButton, element('span', 'name', preset.name || '(unnamed)'),
-            element('span', 'detail', `${preset.voice}: ${describe(preset.settings ?? {})}${preset.note ? ` - ${preset.note}` : ''}`));
+            element('span', 'detail', `${preset.voice}${preset.model === 'trained' ? ' (trained)' : ''}: ` +
+                `${describe(preset.settings ?? {})}${preset.note ? ` - ${preset.note}` : ''}`));
         list.append(row);
     }
 }
@@ -458,7 +496,8 @@ document.getElementById('preset-save').addEventListener('click', async () => {
     const noteInput = document.getElementById('preset-note');
     try {
         await store.collection('presets').add({
-            'name': nameInput.value.trim(), 'voice': voiceSelect.value, 'textIndex': Number(textSelect.value), 'settings': {...explore},
+            'name': nameInput.value.trim(), 'voice': voiceSelect.value, 'model': modelSelect.value, 'textIndex': Number(textSelect.value),
+            'settings': {...explore},
             'note': noteInput.value, 'savedAt': new Date().toISOString()
         });
         setStatus('Settings saved.', 'ok');

@@ -55,30 +55,23 @@ test('trainStages', () => {
         ['teacher-a', 'teacher-b', 'distill-student', 'distill-student-polish']);
 
     // The listening samples stages each render their stage's model (tools/trainsamples.js --stage), the reference the
-    // shipped model before the package stage replaces it
+    // shipped model
     const samplesStages = manifest.stages.filter((stage) => stage.samples);
     assert.deepEqual(samplesStages.map((stage) => stage.samples), ['reference', 'teacher-a', 'teacher-b', 'student', 'polish']);
     for (const stage of samplesStages) {
         assert(stages[stage.stage].recipe.some((line) => line.includes(`--stage ${stage.samples} `)), stage.stage);
         assert(stage.samples === 'reference' || stage.needs.includes(stage.samples), stage.stage);
     }
-    assert(stages.package.after.includes('samples-reference'));
 
-    // The manifest's targets are the Makefile's - make train (both models), make train-voice and train-g2p (each model,
-    // installed), and make train-voice-check and train-g2p-check (each model to its gate) - each recording its run and
-    // making its stages
+    // The manifest's targets are the Makefile's - make train (both models), make train-voice and train-g2p (each model) -
+    // each recording its run, making its stages, then reporting
     const joinedMakefile = makefile.replace(/\\\n/g, ' ');
     const stampsOf = (text) => [...text.matchAll(/\$\(TRAIN_DIR\)\/([\w-]+)\.done/g)].map((match) => match[1]);
-    const variable = (name) => {
-        const [, value] = joinedMakefile.match(new RegExp(`^${name} := ([^\\n]*)$`, 'm'));
-        return value.replace(/\$\((TRAIN_[A-Z0-9_]+)\)/g, (match, inner) => (inner === 'TRAIN_DIR' ? match : variable(inner)));
-    };
+    const variable = (name) => joinedMakefile.match(new RegExp(`^${name} := ([^\\n]*)$`, 'm'))[1];
     const targetStamps = {
         'train': '$(TRAIN_VOICE) $(TRAIN_G2P)',
         'train-voice': '$(TRAIN_VOICE)',
-        'train-voice-check': '$(TRAIN_VOICE_CHECK)',
-        'train-g2p': '$(TRAIN_G2P)',
-        'train-g2p-check': '$(TRAIN_G2P_CHECK)'
+        'train-g2p': '$(TRAIN_G2P)'
     };
     const expand = (stamps) => stamps.replace(/\$\((TRAIN_[A-Z0-9_]+)\)/g, (match, name) => variable(name));
     const expected = Object.entries(targetStamps).map(([target, stamps]) => [target, stampsOf(expand(stamps))]);
@@ -86,7 +79,9 @@ test('trainStages', () => {
     for (const [target, stamps] of Object.entries(targetStamps)) {
         const [, body] = joinedMakefile.match(new RegExp(`^${target}:\\n((?:\\t[^\\n]*\\n)*)`, 'm'));
         assert(body.startsWith(`\t$(call TRAIN_TARGET,${target})\n`), target);
-        assert(body.trimEnd().endsWith(` train-util ${stamps}`) || body.trimEnd().endsWith(` BESIDE= ${stamps}`), target);
+        const [make, report] = body.trimEnd().split('\n').slice(-2);
+        assert(make.endsWith(` train-util ${stamps}`) || make.endsWith(` BESIDE= ${stamps}`), target);
+        assert.equal(report, '\t@$(TRAIN_REPORT)', target);
     }
 
     // make train reaches every stage

@@ -504,15 +504,6 @@ class TestContext(unittest.TestCase):
             self.assertEqual(context.main(['check', copy]), 0)
         self.assertIn('is identical to', stdout.getvalue())
 
-        # A line of weights below the header starting with // isn't the header
-        self.assertEqual(context.module_body(copy), context.module_body(g2pmodel.MODULE_PATH))
-        with open(copy, 'w', encoding='utf-8') as file:
-            file.write('// Header\n\nexport const g2pModel = `\n//AAAA\n`;\n')
-        self.assertEqual(context.module_body(copy), ['', 'export const g2pModel = `', '//AAAA', '`;', ''])
-        with open(copy, 'w', encoding='utf-8') as file:
-            file.write('// Only a header')
-        self.assertEqual(context.module_body(copy), [])
-
         # A differing module - the regression set and the book measures within the tolerances, or not
         with open(copy, 'w', encoding='utf-8') as file:
             file.write(text.replace("'version': 1", "'version': 1 "))
@@ -543,29 +534,6 @@ class TestContext(unittest.TestCase):
         with unittest.mock.patch.object(g2p, 'load_config', lambda: config):
             status, _ = run({'default': (48, 52)}, 0, dict(measures))
         self.assertEqual(status, 0)
-
-    def test_install(self):
-        # Identical below the comment header - the committed module kept
-        committed = self.path('committed.js')
-        model = self.path('g2pModel.js')
-        with open(committed, 'w', encoding='utf-8') as file:
-            file.write('// The committed provenance\nexport const g2pModel = 1;\n')
-        with open(model, 'w', encoding='utf-8') as file:
-            file.write('// Another provenance\nexport const g2pModel = 1;\n')
-        with captured() as (stdout, _):
-            self.assertEqual(context.main(['install', model, '--committed', committed]), 0)
-        self.assertIn('is identical to', stdout.getvalue())
-        with open(committed, encoding='utf-8') as file:
-            self.assertEqual(file.read(), '// The committed provenance\nexport const g2pModel = 1;\n')
-
-        # A differing module - installed
-        with open(model, 'w', encoding='utf-8') as file:
-            file.write('// Another provenance\nexport const g2pModel = 2;\n')
-        with captured() as (stdout, _):
-            self.assertEqual(context.main(['install', model, '--committed', committed]), 0)
-        self.assertIn('is now', stdout.getvalue())
-        with open(committed, encoding='utf-8') as file:
-            self.assertEqual(file.read(), '// Another provenance\nexport const g2pModel = 2;\n')
 
     def test_train_g2p_command(self):
         items, _ = self.tiny_items()

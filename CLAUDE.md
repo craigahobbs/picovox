@@ -35,16 +35,18 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   `rng.py`, `spectral.py`), the model and its training (`model.py`, `trainmulti.py`, `losses.py`, `discriminator.py`,
   `quant.py`, `optim.py` - the training step's options), distillation (`distill.py`), export (`export.py`, `package.py`,
   `synthesize.py`), the listener panel (`panel.py`, and the listener models, `listeners.py` - `build/venv-listeners`),
-  and the pipeline's tools (`gpulock.py`, `smoke.py`, `stepcheck.py`, and `quality.py` - the voices' quality measures
-  against their readers' recordings).
+  and the pipeline's tools (`gpulock.py`, `smoke.py`, `stepcheck.py`, `trained.py` - make train's report and make
+  train-install - and `quality.py` - the voices' quality measures against their readers' recordings).
   `picovox_train/__init__.py` documents each module. `make train` runs it from its source (`PYTHONPATH=train/src`) in
   the training environments (`build/venv-nn`, `venv-listeners`, `venv-pos` - `requirements/*.txt`).
 - `tools/` - the training dashboard (`dashboard/`), the performance lab (`perf/` - the playback pipeline timed on a
   phone, and under Node without a JIT), the voice lab (`voicelab/` - the package synthesizing in a page with adjustable
-  frame edits, for Claude's blind A/B questions in an artifact; `make voicelab` stages it with `lib/` in `build/voicelab/`), `heteronyms.js` (the heteronym and names regression sets), make train's
-  bookkeeping (`trainstage.sh`, `trainutil.sh` - the stage events and logs, the utilization samples, `trainpower.sh`)
-  and listening samples (`trainsamples.js`, `trainsamplesindex.js`), the panel's texts (`panel-texts.json`), and the
-  parity checks' outputs (`parity.js` - make parity).
+  frame edits, for Claude's blind A/B questions in an artifact; `make voicelab` stages it with `lib/` in
+  `build/voicelab/`, and `make train-check` with the trained models too - a version's `model`, shipped or trained),
+  `heteronyms.js` (the heteronym and names regression sets), `trainmodels.js` (make train-check's module hook), make
+  train's bookkeeping (`trainstage.sh`, `trainutil.sh` - the stage events and logs, the utilization samples,
+  `trainpower.sh`) and listening samples (`trainsamples.js`, `trainsamplesindex.js`), the panel's texts
+  (`panel-texts.json`), and the parity checks' outputs (`parity.js` - make parity).
 - `test/` - unit tests (`node:test`), one `test<Module>.js` per `lib/` module (`testIndex.js` for the API - including
   `speak` with a fake AudioContext, and the package's browser safety and exports), and the dashboard's and make train's
   (`testTrainDashboard.js`, `testTrainSamplesIndex.js`, `testTrainStages.js`); `parity-inputs.json` - the parity checks'
@@ -73,9 +75,12 @@ Local Makefile overrides:
 lists the package's files (`package.json` `files`: `lib/`). `make -j train` trains both generated models from the recipe
 (`data/nn/train.json`, with its book texts pinned in `data/nn/books.json` - a revised text fails the fetch, never trains):
 `make -j train-g2p` (the G2P and the heteronym relabeling, CPU - `G2P_STANDALONE_JOBS` workers alone) and `make -j
-train-voice` at once, each model gated, then installed in `lib/models/` (the G2P only when it differs from the committed
-module); `make -j train-g2p-check` and `train-voice-check` stop at the gate; `PYTHONPATH=train/src
-build/venv-nn/bin/python -B -m picovox_train.smoke` runs every training entry point for a few steps on the CPU.
+train-voice` at once, each model gated, its module in `build/train/` (`lib/models/` unchanged), then a report
+(`picovox_train.trained`: sizes, the voice's scores against the shipped model's, which modules differ). The flow: `make
+-j train`, the training dashboard, `make train-check` (the package's tests with the trained models, by
+`tools/trainmodels.js`, and the voice lab staged with them for the blind A/B), then `make train-install` (the trained
+modules that differ into `lib/models/`). `PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke`
+runs every training entry point for a few steps on the CPU.
 
 ## python-build (train/)
 
