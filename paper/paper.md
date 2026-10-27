@@ -773,8 +773,16 @@ The voice data is built with the committed G2P module. The G2P chain - the netwo
 network, its cross-validation, and the relabeling of Section 9.4 - runs beside the voice stages (`make train-g2p`
 alone): it reproduces the G2P and gates it against the committed module. `make train` ends in a report - each model's
 size, the voice's scores against the shipped model, and whether each module differs from the committed one - and
-installs nothing: `make train-check` runs the package's tests with the trained models and stages them in the voice lab
-for blind listening against the shipped models, and `make train-install` installs the trained modules that differ.
+installs nothing: `make train-check` runs the package's tests with the trained models, then a blind A/B of the trained
+voice against the shipped one in the voice lab, served locally (both with the shipped G2P; each of the twelve voices
+speaks a sentence and a passage, with six repeats - thirty forced choices), and reports the listener's win rate for the
+trained voice with its interval and sign test and a recommendation; `make train-install` installs the trained modules
+that differ (`make train-install-voice` and `train-install-g2p`, one).
+
+The first run of this flow showed both checks earning their place: the trained voice ran 2% longer on one test sentence,
+past a duration bound the shipped voice had met by 0.02 seconds (the bound was widened), and the G2P's context network
+did not reproduce the committed module - the G2P network itself did, checkpoint for checkpoint - though it passed its
+gate.
 
 ### 10.2 Gates and provenance
 

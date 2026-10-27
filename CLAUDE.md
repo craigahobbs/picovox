@@ -42,15 +42,17 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
 - `tools/` - the training dashboard (`dashboard/`), the performance lab (`perf/` - the playback pipeline timed on a
   phone, and under Node without a JIT), the voice lab (`voicelab/` - the package synthesizing in a page with adjustable
   frame edits, for Claude's blind A/B questions in an artifact; `make voicelab` stages it with `lib/` in
-  `build/voicelab/`, and `make train-check` with the trained models too - a version's `model`, shipped or trained),
-  `heteronyms.js` (the heteronym and names regression sets), `trainmodels.js` (make train-check's module hook), make
-  train's bookkeeping (`trainstage.sh`, `trainutil.sh` - the stage events and logs, the utilization samples,
-  `trainpower.sh`) and listening samples (`trainsamples.js`, `trainsamplesindex.js`), the panel's texts
-  (`panel-texts.json`), and the parity checks' outputs (`parity.js` - make parity).
+  `build/voicelab/`, and `make train-check` with the trained voice too - a version's `model`, shipped or trained),
+  make train-check's blind A/B (`trainab.js` - the voice lab served locally with its trials, the answers in
+  `build/train/listen/`; `trainabreport.js` - the trials, and the report with its recommendation), `heteronyms.js`
+  (the heteronym and names regression sets), `trainmodels.js` (make train-check's module hook), make train's
+  bookkeeping (`trainstage.sh`, `trainutil.sh` - the stage events and logs, the utilization samples, `trainpower.sh`)
+  and listening samples (`trainsamples.js`, `trainsamplesindex.js`), the panel's texts (`panel-texts.json`), and the
+  parity checks' outputs (`parity.js` - make parity).
 - `test/` - unit tests (`node:test`), one `test<Module>.js` per `lib/` module (`testIndex.js` for the API - including
   `speak` with a fake AudioContext, and the package's browser safety and exports), and the dashboard's and make train's
-  (`testTrainDashboard.js`, `testTrainSamplesIndex.js`, `testTrainStages.js`); `parity-inputs.json` - the parity checks'
-  inputs (below).
+  (`testTrainDashboard.js`, `testTrainSamplesIndex.js`, `testTrainStages.js`, `testTrainAbReport.js`);
+  `parity-inputs.json` - the parity checks' inputs (below).
 - `data/` - the CMU Pronouncing Dictionary (G2P training only), `data/nn/` (the recipe `train.json`, the pinned book
   texts `books.json`, the speaker pool, the G2P and heteronym data, and the designed voices - `voices.json`, the design
   record of `lib/synthesis.js`'s voice and style tables), and `data/targets/` (the four labeled ARCTIC speakers'
@@ -78,9 +80,11 @@ lists the package's files (`package.json` `files`: `lib/`). `make -j train` trai
 train-voice` at once, each model gated, its module in `build/train/` (`lib/models/` unchanged), then a report
 (`picovox_train.trained`: sizes, the voice's scores against the shipped model's, which modules differ). The flow: `make
 -j train`, the training dashboard, `make train-check` (the package's tests with the trained models, by
-`tools/trainmodels.js`, and the voice lab staged with them for the blind A/B), then `make train-install` (the trained
-modules that differ into `lib/models/`). `PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke`
-runs every training entry point for a few steps on the CPU.
+`tools/trainmodels.js`, then the blind A/B of the trained voice in the browser - `tools/trainab.js` - and its report
+and recommendation), then `make train-install` (the trained modules that differ into `lib/models/`; `make
+train-install-voice` and `train-install-g2p`, one). The `train-*` targets just run their commands - none acts on
+another's results. `PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke` runs every training
+entry point for a few steps on the CPU.
 
 ## python-build (train/)
 

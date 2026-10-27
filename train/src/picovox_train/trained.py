@@ -6,10 +6,10 @@ make train's trained models - the report that ends make train, and make train-in
 their gates in TRAIN_DIR (TRAIN_DIR/g2pModel.js and voiceModel.js) and leaves lib/models/ unchanged; the report says
 what each model is, how the voice scored against the shipped one, and whether each differs from the committed module.
 make train-install replaces the committed modules with the trained ones that differ - the G2P below its comment header
-(its provenance differs run to run), the voice byte for byte.
+(its provenance differs run to run), the voice byte for byte; make train-install-voice and train-install-g2p, one model.
 
-    PYTHONPATH=train/src python3 -B -m picovox_train.trained report build/train    # make train's report
-    PYTHONPATH=train/src python3 -B -m picovox_train.trained install build/train   # make train-install
+    PYTHONPATH=train/src python3 -B -m picovox_train.trained report build/train                  # make train's report
+    PYTHONPATH=train/src python3 -B -m picovox_train.trained install build/train [--model voice]  # make train-install
 """
 
 import argparse
@@ -121,7 +121,7 @@ def command_report(args):
 
 
 def command_install(args):
-    models = trained_models(args.train_dir)
+    models = [model for model in trained_models(args.train_dir) if args.model in (None, model[0].lower())]
     installed = []
     for name, path, committed in models:
         if differs(name, path, committed):
@@ -146,6 +146,7 @@ def main(argv=None):
     report_parser.set_defaults(func=command_report)
     install_parser = commands.add_parser('install', help='make train-install - the trained models that differ into lib/models/')
     install_parser.add_argument('train_dir', help='make train\'s TRAIN_DIR')
+    install_parser.add_argument('--model', choices=('voice', 'g2p'), help='one model (default: both)')
     install_parser.set_defaults(func=command_install)
     args = parser.parse_args(argv)
     return args.func(args)

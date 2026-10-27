@@ -167,6 +167,22 @@ class TestTrained(unittest.TestCase):
         self.assertIn('is rebuilt by the next make train', output)
         self.assertEqual(self.read(os.path.join(self.models_dir, 'g2pModel.js')), g2p_trained)
 
+        # One model - the voice alone, then the G2P alone
+        g2p_trained = G2P_MODULE.replace("'version': 1", "'version': 3")
+        voice_trained = VOICE_MODULE.replace('"commit":"a"', '"commit":"c"')
+        self.models(g2p=g2p_trained, voice=voice_trained)
+        with captured() as (stdout, _):
+            self.assertEqual(trained.main(['install', self.train_dir, '--model', 'voice']), 0)
+        self.assertIn('voiceModel.js is now ', stdout.getvalue())
+        self.assertNotIn('g2pModel.js', stdout.getvalue())
+        self.assertEqual(self.read(os.path.join(self.models_dir, 'voiceModel.js')), voice_trained)
+        self.assertEqual(self.read(os.path.join(self.models_dir, 'g2pModel.js')), G2P_MODULE)
+        with captured() as (stdout, _):
+            self.assertEqual(trained.main(['install', self.train_dir, '--model', 'g2p']), 0)
+        self.assertIn('g2pModel.js is now ', stdout.getvalue())
+        self.assertNotIn('voiceModel.js', stdout.getvalue())
+        self.assertEqual(self.read(os.path.join(self.models_dir, 'g2pModel.js')), g2p_trained)
+
         # Both identical - nothing installed
         self.models(g2p=G2P_MODULE)
         with captured() as (stdout, _):

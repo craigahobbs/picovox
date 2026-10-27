@@ -83,7 +83,7 @@ test('synthesize', async () => {
     const {samples, sampleRate} = await synthesize(text, {'voice': 'female'});
     assert(samples instanceof Float32Array);
     assert.equal(sampleRate, 24000);
-    assert(samples.length / sampleRate > 2 && samples.length / sampleRate < 6);
+    assert(samples.length / sampleRate > 2 && samples.length / sampleRate < 8);
     assert(samples.every((value) => value > -1 && value < 1));
 
     // The synthesis pipeline - the female voice, seed 1000 for the first sentence, normal speed

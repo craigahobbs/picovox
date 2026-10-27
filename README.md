@@ -258,8 +258,8 @@ make test        # the package's unit tests (TEST='name' runs one)
 make -C train commit      # the training's gate alone - its unit tests, pylint, and 100% branch coverage
 make -C train test TEST=tests.test_params    # one test module of the training's
 make -j train             # train both models - the G2P and the voice - each gated, in build/train/, then a report (see below)
-make train-check          # the package's tests with the trained models, and the voice lab staged with them to listen
-make train-install        # the trained models that differ into lib/models/
+make train-check          # the package's tests with the trained models, then the blind A/B of the trained voice
+make train-install        # the trained models that differ into lib/models/ (train-install-voice, -g2p: one model)
 make -j train-voice       # the voice alone; make -j train-g2p - the G2P alone, on every core
 ```
 
@@ -395,12 +395,22 @@ The flow:
    listener-panel scores against the shipped model's, and whether each module differs from the committed one.
 2. The training dashboard (below) - the gates and the listening samples.
 3. `make train-check` - the package's tests with the trained models in place of `lib/models/`'s
-   (`tools/trainmodels.js`, a module hook), and the voice lab staged with them (`build/voicelab/trained/`) for the
-   blind A/B against the shipped models.
+   (`tools/trainmodels.js`, a module hook), then the blind A/B of the trained voice against the shipped one, in your
+   browser (`tools/trainab.js` serves the voice lab locally, with the trained voice in `build/voicelab/trained/`; both
+   sides speak with the shipped G2P, so the A/B is the voice's alone): each of the package's voices speaks a Harvard
+   sentence and a passage, in a shuffled order, with 6 repeats - 30 forced choices (or Same), about 8 minutes. The
+   answers are saved as you go (`build/train/listen/` - a rerun resumes; a rerun after a finished round starts another,
+   and the report counts every round). At the end it prints the report (`tools/trainabreport.js`): the trained
+   voice's win rate over the decided trials with its 95% interval and sign test, the repeats' agreement, each voice's
+   counts, the panel's scores, and a recommendation - keep the shipped voice when it's significantly preferred, install
+   the trained voice when it's preferred at least as often, else too close to call.
 4. `make train-install` - the trained modules that differ into `lib/models/` (the G2P when it differs below its
-   comment header; `picovox_train.trained install`); then `make commit` and commit them.
+   comment header; `picovox_train.trained install`) - or one model, `make train-install-voice` or `make
+   train-install-g2p`; then `make commit` and commit them.
 
-`make train-check` and `make train-install` fail until `make train` has trained both models. Each stage is a
+The `train-*` targets run their commands - none decides on another's results. `make train-check` and `make
+train-install` fail until `make train` has trained both models (`train-install-voice` and `-g2p`, their
+model). Each stage is a
 stamp in `build/train/` (`TRAIN_DIR`), so `make -j train` runs independent stages at once; the GPU stages run one at a
 time (`picovox_train/gpulock.py` - two at once each run at about half speed) while the CPU stages run beside them:
 

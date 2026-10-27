@@ -43,8 +43,8 @@ ESLINT_ARGS := $(ESLINT_ARGS) tools/ nn/js/ --ignore-pattern 'lib/models/**'
 
 # The voice lab (tools/voicelab/) staged with the package's lib/ in build/voicelab/ - published as an artifact (Claude's
 # questions and the answers in its db store; index.html the page, the rest its files) or served locally (Explore only).
-# VOICELAB_TRAINED - a directory of trained models (make train-check's TRAIN_DIR), staged beside the shipped ones as
-# build/voicelab/trained/ (its g2pModel.js and voiceModel.js)
+# VOICELAB_TRAINED - a directory with a trained voice (make train-check's TRAIN_DIR), staged beside the shipped models
+# as build/voicelab/trained/voiceModel.js
 VOICELAB_TRAINED ?=
 
 .PHONY: voicelab
@@ -55,7 +55,7 @@ voicelab:
 	rsync -a lib build/voicelab/picovox/
 ifneq '$(VOICELAB_TRAINED)' ''
 	mkdir -p build/voicelab/trained
-	cp $(VOICELAB_TRAINED)/g2pModel.js $(VOICELAB_TRAINED)/voiceModel.js build/voicelab/trained/
+	cp $(VOICELAB_TRAINED)/voiceModel.js build/voicelab/trained/
 endif
 
 
@@ -145,9 +145,10 @@ TRAIN_VOICE := $(TRAIN_DIR)/package.done $(TRAIN_DIR)/student-eval.done $(TRAIN_
 TRAIN_G2P := $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.done
 TRAIN_REPORT := $(NN_PYTHON) -m picovox_train.trained report $(TRAIN_DIR)
 
-# Fail unless make train has trained both models (make train-check and train-install)
-TRAINED = @test -f $(TRAIN_DIR)/package.done -a -f $(TRAIN_DIR)/g2p.done || \
-	{ echo 'make $@: no trained models in $(TRAIN_DIR) - make train first'; exit 1; }
+# Fail unless make train has trained the models - their stamps: the voice's package.done, the G2P's g2p.done (make
+# train-check and the train-installs)
+TRAINED = @for stamp in $(1); do test -f $(TRAIN_DIR)/$$stamp || \
+	{ echo "make $@: no trained model ($(TRAIN_DIR)/$$stamp) - make train first"; exit 1; }; done
 
 # (the power check first, alone - its prompt has the terminal - then the stages, in parallel with make -j, then the report)
 .PHONY: train train-voice train-g2p train-check train-install train-util train-clean
@@ -171,14 +172,14 @@ train-g2p:
 	@$(TRAIN_REPORT)
 
 # make train-check - the trained models checked before they're installed: the package's tests with them in place of
-# lib/models/'s (tools/trainmodels.js - lib/models/ unchanged), and the voice lab staged with them (build/voicelab/trained/)
-# for the blind A/B against the shipped models
+# lib/models/'s (tools/trainmodels.js - lib/models/ unchanged), then the blind A/B of the trained voice against the shipped
+# one (tools/trainab.js - the voice lab served locally, build/voicelab with the trained voice; the answers and the report
+# in TRAIN_DIR/listen - a rerun resumes, or after a finished round starts the next; the report counts every round)
 train-check:
-	$(TRAINED)
+	$(call TRAINED,package.done g2p.done)
 	NODE_OPTIONS='--import=$(CURDIR)/tools/trainmodels.js' TRAIN_MODELS=$(TRAIN_DIR) node --test $(NODE_TEST_ARGS)
 	@$(MAKE) --no-print-directory voicelab VOICELAB_TRAINED=$(TRAIN_DIR)
-	@echo 'make train-check: the package'"'"'s tests pass with the trained models; the voice lab is staged in build/voicelab/ with them' \
-		'(trained) beside the shipped models - ask Claude for the blind A/B, then make train-install to install them'
+	node tools/trainab.js --lab build/voicelab --out $(TRAIN_DIR)/listen --summary $(TRAIN_DIR)/distill/summary.json
 
 # make help - javascript-build's usage, and the train flow
 help:
@@ -186,14 +187,26 @@ help:
 	@echo 'The train flow:'
 	@echo '  make -j train        train both models to their gates in build/train/ and report them (lib/models/ unchanged)'
 	@echo '                       - watch it on the dashboard: python3 -m http.server, then http://localhost:8000/tools/dashboard/'
-	@echo '  make train-check     the package'"'"'s tests with the trained models, and the voice lab staged for the blind A/B'
+	@echo '  make train-check     the package'"'"'s tests with the trained models, then the blind A/B of the trained voice'
+	@echo '                       against the shipped one in your browser - its report and recommendation print at the end'
 	@echo '  make train-install   the trained models that differ into lib/models/ - then make commit, and commit them'
-	@echo '  (make -j train-voice or train-g2p - one model; make train-clean - remove build/train for a from-scratch run)'
+	@echo '  (make -j train-voice or train-g2p, make train-install-voice or train-install-g2p - one model;'
+	@echo '   make train-clean - remove build/train for a from-scratch run)'
 
-# make train-install - the trained models that differ from the committed ones into lib/models/
+# make train-install - the trained models that differ from the committed ones into lib/models/; make
+# train-install-voice and train-install-g2p - one model
+.PHONY: train-install-voice train-install-g2p
 train-install:
-	$(TRAINED)
+	$(call TRAINED,package.done g2p.done)
 	$(NN_PYTHON) -m picovox_train.trained install $(TRAIN_DIR)
+
+train-install-voice:
+	$(call TRAINED,package.done)
+	$(NN_PYTHON) -m picovox_train.trained install $(TRAIN_DIR) --model voice
+
+train-install-g2p:
+	$(call TRAINED,g2p.done)
+	$(NN_PYTHON) -m picovox_train.trained install $(TRAIN_DIR) --model g2p
 
 # The utilization sampler - it exits when make does (finished, failed, or interrupted)
 train-util:

@@ -5,7 +5,9 @@
 // voicelab) with adjustable settings: edits of the network's parameter frames (each sentence's), the rendering's sample
 // rate, and a stereo room at playback. Two views: Claude's blind questions (an artifact's db store - "questions" Claude
 // writes, "answers" the page writes), and free exploration with saved settings ("presets"). The models are the package's
-// (shipped), or make train's (trained - staged as trained/ by make train-check, when it's there).
+// (shipped), or make train's voice with the package's G2P (trained - the voice staged as trained/ by make train-check,
+// when it's there). Served by make train-check's blind A/B (tools/trainab.js), the questions are its trials and the
+// answers are posted to it (its api/), not Claude's.
 //
 // A question: {order, type ('ab' - choose a version, or 'Same'; 'yesno'; 'choice' - one of options), prompt, text, voice,
 // model, versions: [{name, voice, model, settings}] (played in a shuffled order - a version's voice and model, else the
@@ -64,14 +66,15 @@ function setStatus(text, kind = '') {
 }
 
 
-// The models - the package's (shipped) and make train's (trained), each its G2P and voice, loaded once when first used
+// The models - the package's (shipped), and make train's voice with the package's G2P (trained - so a comparison is the
+// voice's alone), each loaded once when first used
 const MODELS = {
     'shipped': {
         'label': 'Shipped models', 'g2p': () => import('./picovox/lib/models/g2pModel.js'),
         'voice': () => import('./picovox/lib/models/voiceModel.js')
     },
     'trained': {
-        'label': 'Trained models (make train)', 'g2p': () => import('./trained/g2pModel.js'),
+        'label': 'Trained voice (make train)', 'g2p': () => import('./picovox/lib/models/g2pModel.js'),
         'voice': () => import('./trained/voiceModel.js')
     }
 };
@@ -367,9 +370,9 @@ function renderQuestion() {
     card.replaceChildren();
     showing = next;
     if (next === null) {
+        const done = local ? 'The report is in your terminal.' : 'Tell Claude, and new ones will appear here.';
         card.append(element('p', 'empty', questions.length ?
-            `All ${questions.length} questions answered - thank you. Tell Claude, and new ones will appear here.` :
-            'Waiting for Claude\'s questions…'));
+            `All ${questions.length} questions answered - thank you. ${done}` : 'Waiting for Claude\'s questions…'));
         return;
     }
     const order = next.versions.map((version, index) => ({version, index}));
@@ -525,12 +528,50 @@ function showReady() {
 }
 
 
-// Start - PicoVox, then the store (live questions, answers, and presets)
+// The local store - make train-check's blind A/B (tools/trainab.js), its api/ beside the page: its questions and the
+// answers so far (once), an answer posted to it, and no presets - the db store's calls the page makes, or null without it
+let local = false;
+async function localStore() {
+    const response = await fetch('./api/questions').catch(() => null);
+    if (!response?.ok) {
+        return null;
+    }
+    local = true;
+    const localQuestions = await response.json();
+    const localAnswers = await (await fetch('./api/answers')).json();
+    const snapshot = (items) => ({'empty': items.length === 0, 'docs': items.map(([id, value]) => ({id, 'data': () => value}))});
+    const collections = {
+        'questions': snapshot(localQuestions.map((question) => [question.id, question])),
+        'answers': snapshot(Object.entries(localAnswers)),
+        'presets': snapshot([])
+    };
+    const collection = (name) => ({
+        'orderBy': () => collection(name),
+        'onSnapshot': (callback) => callback(collections[name]),
+        'add': () => Promise.reject(new Error('No presets in the A/B'))
+    });
+    return {
+        collection,
+        'doc': (path) => ({
+            'set': async (body) => {
+                const posted = await fetch(`./api/${path.split('/').map(encodeURIComponent).join('/')}`, {
+                    'method': 'POST', 'headers': {'Content-Type': 'application/json'}, 'body': JSON.stringify(body)
+                });
+                if (!posted.ok) {
+                    throw new Error(`Not saved (${posted.status})`);
+                }
+            }
+        })
+    };
+}
+
+
+// Start - PicoVox, then the store (live questions, answers, and presets - the A/B's, else the artifact's db)
 loadModel().then(() => {
     modelReady = true;
     showReady();
 }, (error) => setStatus(`PicoVox failed to load: ${error.message}`, 'warn'));
-const db = await globalThis.claude?.use?.('db');
+const db = await localStore() ?? await globalThis.claude?.use?.('db');
 storeConnected = Boolean(db);
 showReady();
 if (db) {
