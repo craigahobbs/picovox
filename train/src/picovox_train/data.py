@@ -34,8 +34,8 @@ import subprocess
 
 import numpy as np
 
-from . import align
-from .frontend import ROOT, tokenize
+from . import ROOT, align
+from .frontend import tokenize
 
 
 CORPORA_DIR = os.path.join(ROOT, 'data', 'corpora')

@@ -17,7 +17,7 @@ import warnings
 import numpy
 import torch
 
-from picovox_train import ROOT, distill, export, package, params
+from picovox_train import ROOT, distill, export, frontend, package, params
 from picovox_train.books import PinError
 from tests import data_fixtures, helpers, model_fixtures
 
@@ -166,6 +166,19 @@ class TestBooks(DistillCase):
         self.assertEqual(paragraphs[2], 'Is it cold? Wait here! The cat sat on the mat.')
         self.assertEqual(distill.book_paragraphs(os.path.join(self.root, 'books', 'plain.txt')),
                          ['We went home. A dark night fell on the town. Oh. Call me Ishmael.'])
+
+    def test_sentences(self):
+        vocab = frontend.vocabulary()
+        ids = frontend.tokenize('Hello there. Who are you? Fine')['ids']
+        parts = distill.sentences(ids, vocab)
+        self.assertEqual(len(parts), 3)
+        self.assertEqual(distill.sentences([2, 20, 21], vocab), [[2, 20, 21]])
+        self.assertTrue(all(part[0] == 2 for part in parts))
+        self.assertEqual([vocab[part[-1]] for part in parts[:2]], ['<period>', '<wh>'])
+        self.assertEqual(sum(len(part) - 1 for part in parts), len(ids) - 1)
+        # (without a leading <bos>; nothing after the last sentence's end)
+        self.assertEqual(distill.sentences(ids[1:5] + [vocab.index('<period>')], vocab), [[2] + ids[1:5] + [vocab.index('<period>')]])
+        self.assertEqual(distill.sentences([2], vocab), [])
 
     def test_book_sentences(self):
         path, sentences = distill.book_sentences(os.path.join(self.root, 'books', 'plain.txt'))

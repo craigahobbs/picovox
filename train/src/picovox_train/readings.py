@@ -29,100 +29,25 @@ import os
 import re
 import sys
 
-from . import data
-from .frontend import FUNCTION_WORDS, ROOT, text_to_phrases
+from . import ROOT, data, heteronyms
+from .frontend import BOUNDARIES, FUNCTION_WORDS, text_to_phrases
+from .heteronyms import VOWELS, base, edit_ops, read_lab
 
 
 DICTIONARY_PATH = os.path.join(ROOT, 'data', 'cmudict.dict')
 
-# The share of a build's heteronym tokens that may still disagree with the aligner (the make train gate)
+# The share of a build's heteronym tokens that may still disagree with the aligner (readings check fails above it;
+# multi build reports it)
 MAX_DISAGREE = 0.01
 
-VOWELS = {'AA', 'AE', 'AH', 'AO', 'AW', 'AY', 'EH', 'ER', 'EY', 'IH', 'IY', 'OW', 'OY', 'UH', 'UW'}
-REDUCED = {'AH', 'IH', 'ER', 'IY', 'UW'}
-
-# Closed-class words - articles, pronouns and possessives, prepositions, conjunctions, auxiliaries and modals, and their
-# contractions: their reduced forms are contextual (stress, phrase position), so they keep the G2P's form
-CLOSED_CLASS = set("""
-a an the this that these those some any each every no
-i me my mine myself you your yours yourself yourselves he him his himself she her hers herself it its itself we us our ours
-ourselves they them their theirs themselves one who whom whose which what that's
-of to in on at by for from with within without into onto upon over under about above below across after against along
-among amongst around before behind beneath beside besides between beyond but despite down during except inside like
-near off out outside past per since than through throughout till toward towards underneath unless until up via whereas
-re and or nor so yet if because although though while whether as either neither both then there here
-am is are was were be been being have has had having do does did done shall should will would can could may might must
-ought let's i'll you'll he'll she'll we'll they'll it'll i'd you'd he'd she'd we'd they'd i've you've we've they've
-i'm you're we're they're he's she's it's isn't aren't wasn't weren't don't doesn't didn't hasn't haven't hadn't won't
-wouldn't can't cannot couldn't shouldn't mustn't there's here's what's who's
-""".split()) | FUNCTION_WORDS
-
-
-# A phone without its stress digit
-def base(phone):
-    return re.sub(r'\d', '', phone)
+# Closed-class words (heteronyms.py's) and the function words - their reduced forms are contextual (stress, phrase
+# position), so they keep the G2P's form
+CLOSED_CLASS = heteronyms.FUNCTION_WORDS | FUNCTION_WORDS
 
 
 # Phones (a string) without stress digits
 def unstressed(phones):
     return ' '.join(base(phone) for phone in phones.split())
-
-
-# The Levenshtein alignment of two phone lists (a substitution of the same phone with another stress costs one half) -
-# the (first's phone or None, second's phone or None) pairs that differ
-def edit_ops(first, second):
-    def substitution(left, right):
-        return 0 if left == right else (0.5 if base(left) == base(right) else 1)
-    rows, columns = len(first) + 1, len(second) + 1
-    cost = [[0] * columns for _ in range(rows)]
-    for row in range(rows):
-        cost[row][0] = row
-    for column in range(columns):
-        cost[0][column] = column
-    for row in range(1, rows):
-        for column in range(1, columns):
-            cost[row][column] = min(cost[row - 1][column] + 1, cost[row][column - 1] + 1,
-                                    cost[row - 1][column - 1] + substitution(first[row - 1], second[column - 1]))
-    ops, row, column = [], len(first), len(second)
-    while row > 0 or column > 0:
-        if row > 0 and column > 0:
-            cost_sub = substitution(first[row - 1], second[column - 1])
-            if cost[row][column] == cost[row - 1][column - 1] + cost_sub:
-                if cost_sub:
-                    ops.append((first[row - 1], second[column - 1]))
-                row, column = row - 1, column - 1
-                continue
-        if row > 0 and cost[row][column] == cost[row - 1][column] + 1:
-            ops.append((first[row - 1], None))
-            row -= 1
-        else:
-            ops.append((None, second[column - 1]))
-            column -= 1
-    return ops[::-1]
-
-
-# Whether a difference (edit_ops) is a consonant substitution - not stress alone, not reduced vowels swapped, not consonants
-# only inserted or deleted, no syllable gained or lost, and no vowel's quality changed
-def consonant_change(first, second):
-    ops = edit_ops(first, second)
-
-    def vowel(phone):
-        return phone is not None and base(phone) in VOWELS
-
-    def reduced(phone):
-        return phone is not None and base(phone) in REDUCED and phone[-1] == '0'
-    if all(left is not None and right is not None and base(left) == base(right) for left, right in ops):
-        return False
-    if all(reduced(left) and reduced(right) for left, right in ops):
-        return False
-    if all(not vowel(left) and not vowel(right) and (left is None or right is None) for left, right in ops):
-        return False
-    syllable = any((left is None and vowel(right)) or (right is None and vowel(left)) or
-                   (left and right and vowel(left) != vowel(right)) for left, right in ops)
-    if syllable and all(not (vowel(left) and vowel(right)) or base(left) == base(right) for left, right in ops):
-        return False
-    return not (any(vowel(left) and vowel(right) and base(left) != base(right) for left, right in ops) or
-                any(vowel(left) != vowel(right) for left, right in ops if left and right))
 
 
 # The vowel pairs that differ between two variants - by syllable, or by the edit alignment when the counts differ
@@ -142,7 +67,7 @@ def distinct(first, second):
         return True
     primary_moves = any(left[-1] == '1' and right[-1] != '1' for left, right in pairs) and \
         any(left[-1] != '1' and right[-1] == '1' for left, right in pairs)
-    if primary_moves or consonant_change(first.split(), second.split()):
+    if primary_moves or heteronyms.kind(first.split(), second.split()) == 'consonant':
         return True
     return any({left[-1], right[-1]} == {'2', '0'} and base(left) != base(right) for left, right in pairs)
 
@@ -216,17 +141,6 @@ def reading_of(phones, readings):
 #
 # The aligned readings of an utterance
 #
-
-# An MFA label file's labeled intervals - [(start, end, label)] (unlabeled silences dropped)
-def read_lab(path):
-    rows = []
-    with open(path, encoding='utf-8') as file:
-        for line in file:
-            fields = line.rstrip('\n').split('\t')
-            if len(fields) >= 3 and fields[2]:
-                rows.append((float(fields[0]), float(fields[1]), fields[2]))
-    return rows
-
 
 # The word label path of a phone label path (lab/phone/... -> lab/word/...)
 def word_lab_path(phone_lab_path):
@@ -331,7 +245,6 @@ def attach_readings(tasks):
 # Count a built utterance's heteronym tokens against the aligner (its utterance's alignedReadings) - totals {tokens,
 # disagree}
 def check_built(utterance, tokens, totals):
-    from .frontend import BOUNDARIES  # pylint: disable=import-outside-toplevel
     aligned = utterance.get('alignedReadings')
     if aligned:
         # (built once - setdefault would evaluate inventory(), about 1.7 s, on every call)
@@ -346,7 +259,6 @@ _INVENTORY_CACHE = {}
 # The check command - a build's included LibriTTS-R heteronym tokens against the aligner (alignment.jsonl's tokens and
 # readings, re-aligned); exits 1 above MAX_DISAGREE
 def check_command(args):
-    from .frontend import BOUNDARIES  # pylint: disable=import-outside-toplevel
     with open(os.path.join(args.out, 'index.json'), encoding='utf-8') as file:
         index = json.load(file)
     included = {entry['id']: entry for entry in index['utterances'] if entry['include'] and entry['speaker'].startswith('libritts')}

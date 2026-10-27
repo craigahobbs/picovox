@@ -22,25 +22,6 @@ from . import data_fixtures
 from .helpers import captured
 
 
-class FakePool:
-    """multiprocessing.Pool in the test's process (so the workers' code is measured)"""
-
-    def __init__(self, processes=None):
-        self.processes = processes
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
-
-    def map(self, function, items, chunksize=1):  # pylint: disable=unused-argument
-        return [function(item) for item in items]
-
-    def imap_unordered(self, function, items, chunksize=1):  # pylint: disable=unused-argument
-        return map(function, items)
-
-
 # The tiny dictionary - word to its pronunciations
 DICTIONARY = {
     'lead': [['L', 'IY1', 'D'], ['L', 'EH1', 'D']],
@@ -175,7 +156,7 @@ class TestHeteronyms(unittest.TestCase):
         self.write_readers_corpus()
         with unittest.mock.patch.object(heteronyms, 'LABELS', self.labels), \
                 unittest.mock.patch.object(heteronyms, 'read_dictionary', lambda: DICTIONARY), \
-                unittest.mock.patch.object(heteronyms.multiprocessing, 'Pool', FakePool):
+                unittest.mock.patch.object(heteronyms.multiprocessing, 'Pool', data_fixtures.FakePool):
             return heteronyms.readers(self.out, 1)
 
     def test_readers_and_candidates(self):
@@ -204,7 +185,7 @@ class TestHeteronyms(unittest.TestCase):
         self.write_utterance('100', 0, [('use', [('Y', 0.0, 0.1), ('UW2', 0.1, 0.2), ('Z', 0.2, 0.3)])])
         with unittest.mock.patch.object(heteronyms, 'LABELS', self.labels), \
                 unittest.mock.patch.object(heteronyms, 'read_dictionary', lambda: DICTIONARY), \
-                unittest.mock.patch.object(heteronyms.multiprocessing, 'Pool', FakePool):
+                unittest.mock.patch.object(heteronyms.multiprocessing, 'Pool', data_fixtures.FakePool):
             heteronyms.readers(self.out, 1)
         with open(os.path.join(self.out, 'readers.json'), encoding='utf-8') as file:
             self.assertEqual(json.load(file)['use']['stressOnly'], [0, 1])
@@ -293,7 +274,7 @@ class TestHeteronyms(unittest.TestCase):
     def run_acoustic(self, per_word=240):
         with unittest.mock.patch.object(heteronyms, 'LABELS', self.labels), unittest.mock.patch.object(heteronyms, 'AUDIO', self.audio), \
                 unittest.mock.patch.object(heteronyms, 'measure', self.fake_measure), \
-                unittest.mock.patch.object(heteronyms.multiprocessing, 'Pool', FakePool):
+                unittest.mock.patch.object(heteronyms.multiprocessing, 'Pool', data_fixtures.FakePool):
             return heteronyms.acoustic(self.out, 1, per_word)
 
     def test_acoustic(self):
@@ -336,7 +317,7 @@ class TestHeteronyms(unittest.TestCase):
             return {'rel': task[0], 'speaker': '100', 'vowels': vowels, 'targets': targets}
         with unittest.mock.patch.object(heteronyms, 'LABELS', self.labels), unittest.mock.patch.object(heteronyms, 'AUDIO', self.audio), \
                 unittest.mock.patch.object(heteronyms, 'measure', measure), \
-                unittest.mock.patch.object(heteronyms.multiprocessing, 'Pool', FakePool):
+                unittest.mock.patch.object(heteronyms.multiprocessing, 'Pool', data_fixtures.FakePool):
             heteronyms.acoustic(self.out, 1, 10)
         with open(os.path.join(self.out, 'acoustic.json'), encoding='utf-8') as file:
             self.assertEqual(json.load(file)['words']['a']['acoustic'], {'majority': 1})
@@ -394,7 +375,7 @@ class TestHeteronyms(unittest.TestCase):
         with unittest.mock.patch.object(heteronyms, 'LABELS', self.labels), unittest.mock.patch.object(heteronyms, 'AUDIO', self.audio), \
                 unittest.mock.patch.object(heteronyms, 'read_dictionary', lambda: DICTIONARY), \
                 unittest.mock.patch.object(heteronyms, 'measure', measure), \
-                unittest.mock.patch.object(heteronyms.multiprocessing, 'Pool', FakePool):
+                unittest.mock.patch.object(heteronyms.multiprocessing, 'Pool', data_fixtures.FakePool):
             with captured() as (_, stderr):
                 self.assertEqual(heteronyms.main(['--out', self.out, '-j', '1', '--check', expected]), 1)
             self.assertIn('readers: 9 utterances', stderr.getvalue())

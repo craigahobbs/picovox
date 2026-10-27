@@ -1,8 +1,7 @@
-// The training dashboard - reads make train's bookkeeping (the TRAIN_DIR of pipeline.json's train: stages.jsonl, the
-// stamps, util.log, logs/, runs/, samples/; tools/dashboard/train.js models it), the neural training runs' logs
-// (build/nn/runs/<run>/log.jsonl and train.log), the data pipelines' logs (build/nn/**/*.log), and samples
-// (build/nn/**/*.wav) through python3 -m http.server's directory listings, and refreshes every second. Read-only: it
-// never touches the training.
+// The training dashboard - reads make train's bookkeeping (TRAIN_DIR - build/train, or the page's ?train=DIR:
+// stages.jsonl, util.log, logs/, runs/, samples/; tools/dashboard/train.js models it), the other logs (build/nn/**/*.log)
+// and samples (build/nn/**/*.wav), and the archived pipelines (tools/dashboard/pipelines/) through python3 -m
+// http.server's directory listings, and refreshes every second. Read-only: it never touches the training.
 
 
 // Where the repository and the build live relative to this page, and timing (ms)
@@ -26,25 +25,17 @@ const samplesElement = document.getElementById('samples');
 const pipelineSection = document.getElementById('pipelineSection');
 const pipelineTitle = document.getElementById('pipelineTitle');
 const pipelineFacts = document.getElementById('pipelineFacts');
-const pipelineBar = document.getElementById('pipelineBar');
 const phasesElement = document.getElementById('phases');
 const updatedElement = document.getElementById('updated');
-const checkpointSection = document.getElementById('checkpointSection');
-const checkpointsElement = document.getElementById('checkpoints');
 
 
-// State - runs by name ({name, entries, info, modified}), the selected run, and fetched files by URL
-const runs = new Map();
+// State - the Runs tab's selected run, and fetched files by URL
 let selectedRun = null;
 const fileCache = new Map();
 
 
 // The latest logs (for re-rendering between refreshes)
 let lastLogs = [];
-
-
-// Each active log's progress readings by path - [{time, fraction}], for the time-left estimates
-const progressHistory = new Map();
 
 
 // Create an element with a class and text
@@ -152,12 +143,6 @@ function parseTextLog(text) {
     if (data) {
         info.data = data[1].replace(/\s*\(.*\)$/, '');
     }
-    const continued = text.match(/stopped at step (\d+) \(continued as ([^)\s]+)\)/);
-    if (continued) {
-        const [, stoppedStep, continuedAs] = continued;
-        info.stoppedStep = Number(stoppedStep);
-        info.continuedAs = continuedAs;
-    }
     // An error counts only in the latest launch (after the last header) - a resumed run's log keeps earlier failures
     const launches = text.split(/^.*steps from \d+.*$/m);
     const latest = launches[launches.length - 1];
@@ -230,90 +215,10 @@ function runStatus(run) {
 }
 
 
-// Refresh the runs - their logs, for runs whose logs changed
-async function refreshRuns() {
-    const entries = await listDirectory(new URL('runs/', buildUrl));
-    for (const entry of entries.filter((item) => item.isDirectory)) {
-        const base = new URL(`runs/${encodeURIComponent(entry.name)}/`, buildUrl);
-        const [jsonLog, textLog] = await Promise.all([fetchText(new URL('log.jsonl', base)), fetchText(new URL('train.log', base))]);
-        if (jsonLog === null && textLog === null) {
-            continue;
-        }
-        // A run stopped early by plan (pipeline.json stopAt - for example, a stage launched with a longer schedule, for its
-        // learning rate, and stopped part way) counts its progress to the planned stop
-        const info = textLog === null ? {} : parseTextLog(textLog.text);
-        const stopAt = pipeline?.stopAt?.[entry.name];
-        if (stopAt) {
-            info.targetSteps = stopAt;
-        }
-        runs.set(entry.name, {
-            'name': entry.name,
-            'entries': jsonLog === null ? {'train': [], 'val': []} : parseJsonLog(jsonLog.text),
-            info,
-            'modified': Math.max(jsonLog?.modified || 0, textLog?.modified || 0)
-        });
-    }
-    // make train's runs (TRAIN_DIR/runs/, loaded by the Train tab - each stopped at its recipe's stop) as "make train/<run>"
-    for (const run of trainRuns.values()) {
-        if (!run.waiting) {
-            runs.set(`make train/${run.name}`, {...run, 'name': `make train/${run.name}`});
-        }
-    }
-    // First-seen order - each run's place is fixed when the page first sees it (remembered per browser)
-    let changed = false;
-    for (const run of runs.values()) {
-        if (!(run.name in runOrder)) {
-            runOrder[run.name] = runOrderLoaded ? Date.now() : run.modified;
-            changed = true;
-        }
-    }
-    if (changed) {
-        storageSet(runOrderKey, JSON.stringify(runOrder));
-    }
-    runOrderLoaded = true;
-    if (selectedRun === null || !runs.has(selectedRun)) {
-        // The remembered run, else the newest live run of the first group, else the newest run there, else any
-        const remembered = storageGet(selectedKey);
-        const [firstGroup] = groupRuns();
-        const live = firstGroup.runs.find((run) => runStatus(run) === 'live');
-        selectedRun = runs.has(remembered) ? remembered : (live || firstGroup.runs[0] || [...runs.values()][0])?.name ?? null;
-    }
-}
-
-
-// The run groups, each run in the first group whose prefixes match its name - the running runs (live or stalled), then
-// the done ones (finished, stopped, or failed), each newest first by first-seen order (so a run that finishes moves to
-// the done runs, and the others keep their places)
-const runGroupSpecs = [
-    {'title': 'make train', 'prefixes': ['make train/'], 'open': true},
-    {'title': 'Multi-speaker voice', 'prefixes': ['multi-'], 'open': true},
-    {'title': 'G2P', 'prefixes': ['g2p-'], 'open': false},
-    {'title': 'Voice students (distilled and from scratch)', 'prefixes': ['distill-', 'scratch-'], 'open': true},
-    {'title': 'Earlier single-speaker voices', 'prefixes': ['slt-', 'bdl-', 'joint-'], 'open': false},
-    {'title': 'Other', 'prefixes': [''], 'open': false}
-];
-const runOrderKey = 'training-dashboard-run-order-v1';
+// The Runs tab's runs - make train's training runs (TRAIN_DIR/runs/, loaded with the Train tab), in the stages' order
 const selectedKey = 'training-dashboard-run-v1';
-const groupsOpenKey = 'training-dashboard-run-groups-v1';
-let runOrder = {};
-try {
-    runOrder = JSON.parse(storageGet(runOrderKey)) || {};
-} catch {
-    runOrder = {};
-}
-let runOrderLoaded = false;
-function groupRuns() {
-    const groups = runGroupSpecs.map((spec) => ({...spec, 'runs': []}));
-    for (const run of runs.values()) {
-        groups.find((group) => group.prefixes.some((prefix) => run.name.startsWith(prefix))).runs.push(run);
-    }
-    for (const group of groups) {
-        const seen = (run) => runOrder[run.name] ?? 0;
-        const done = (run) => (['live', 'stalled'].includes(runStatus(run)) ? 0 : 1);
-        group.runs.sort((first, second) => done(first) - done(second) || seen(second) - seen(first) ||
-            first.name.localeCompare(second.name));
-    }
-    return groups;
+function runList() {
+    return trainData ? trainData.manifest.stages.filter((stage) => stage.run).map((stage) => trainRuns.get(stage.run)) : [];
 }
 
 
@@ -326,94 +231,31 @@ function selectRun(name) {
 }
 
 
-// Render the run cards
+// Render the run cards - the selected run, else the remembered one, else the live run, else the latest started, else the
+// first
 function renderRuns() {
-    // The Training tab's fact - the first group's live run (the voice training), by first-seen order
-    const [live] = groupRuns()[0].runs.filter((run) => runStatus(run) === 'live');
+    const list = runList();
+    const [live] = list.filter((run) => runStatus(run) === 'live');
+    if (!trainRuns.has(selectedRun)) {
+        const remembered = storageGet(selectedKey);
+        selectedRun = trainRuns.has(remembered) ? remembered : (live ?? list.filter((run) => !run.waiting).pop() ?? list[0])?.name ?? null;
+    }
+    // The Runs tab's fact - the live run's progress
     const liveLast = live ? (live.entries.train || []).slice(-1)[0] : null;
     let trainingFact = '';
     if (live) {
         trainingFact = live.info.targetSteps && liveLast ? `${Math.round(100 * liveLast.step / live.info.targetSteps)}%` : 'live';
     }
     setTabFact('tabFactTraining', trainingFact);
-    if (runs.size === 0) {
-        runsElement.replaceChildren(make('p', 'empty',
-            'No runs yet - make train writes to build/train/runs/<run>/, experiments to build/nn/runs/<run>/.'));
+    if (list.length === 0) {
+        runsElement.replaceChildren(make('p', 'empty', 'No runs yet - make train writes them to TRAIN_DIR/runs/<run>/.'));
         return;
     }
-    let groupsOpen = {};
-    try {
-        groupsOpen = JSON.parse(storageGet(groupsOpenKey)) || {};
-    } catch {
-        groupsOpen = {};
-    }
-    const groups = groupRuns().filter((group) => group.runs.length !== 0);
-    // The groups' elements persist (so their open state does), and their cards are rebuilt each refresh
-    for (const group of groups) {
-        if (!runGroupElements.has(group.title)) {
-            const element = make('details', 'run-group');
-            element.open = groupsOpen[group.title] ?? group.open;
-            element.addEventListener('toggle', () => {
-                groupsOpen[group.title] = element.open;
-                storageSet(groupsOpenKey, JSON.stringify(groupsOpen));
-            });
-            const summary = make('summary');
-            const title = make('h3', '', group.title);
-            const facts = make('span', 'facts');
-            const bar = make('div', 'bar');
-            const fill = make('div');
-            bar.append(fill);
-            summary.append(title, facts, bar);
-            const grid = make('div', 'runs');
-            element.append(summary, grid);
-            runGroupElements.set(group.title, {element, facts, fill, grid});
-        }
-        const {facts, fill, grid} = runGroupElements.get(group.title);
-        const progress = groupProgress(group.runs);
-        const counts = `${group.runs.length} run${group.runs.length === 1 ? '' : 's'}${progress.live ? ` · ${progress.live} live` : ''}`;
-        const percent = Number.isFinite(progress.fraction) ? ` · ${Math.round(100 * progress.fraction)}% of steps` : '';
-        const left = Number.isFinite(progress.secondsLeft) ? ` · ${formatDuration(progress.secondsLeft)} left` : '';
-        facts.textContent = `${counts}${percent}${left}`;
-        fill.style.width = `${(100 * (progress.fraction || 0)).toFixed(1)}%`;
-        grid.replaceChildren(...group.runs.map((run) => safeRunCard(run)));
-    }
-    const elements = groups.map((group) => runGroupElements.get(group.title).element);
-    if (elements.some((element, index) => runsElement.children[index] !== element) || runsElement.children.length !== elements.length) {
-        runsElement.replaceChildren(...elements);
-    }
-}
-
-
-// A group's overall progress - {fraction (steps done of the runs' targets), live (count), secondsLeft (the longest live
-// run's)}; a run stopped and continued as another counts as complete at its stopping step
-function groupProgress(members) {
-    let done = 0;
-    let total = 0;
-    let live = 0;
-    let secondsLeft = NaN;
-    for (const run of members) {
-        const train = run.entries.train || [];
-        const step = train.length === 0 ? 0 : train[train.length - 1].step;
-        const target = run.info.continuedAs ? run.info.stoppedStep : run.info.targetSteps;
-        if (target) {
-            done += Math.min(step, target);
-            total += target;
-        }
-        if (runStatus(run) === 'live') {
-            live += 1;
-            const secondsPerStep = median(train.slice(-20).map((entry) => entry.secondsPerStep).filter(Number.isFinite));
-            const remaining = target ? (target - step) * secondsPerStep : NaN;
-            if (Number.isFinite(remaining)) {
-                secondsLeft = Number.isFinite(secondsLeft) ? Math.max(secondsLeft, remaining) : remaining;
-            }
-        }
-    }
-    return {'fraction': total === 0 ? NaN : done / total, live, secondsLeft};
+    runsElement.replaceChildren(...list.map((run) => safeRunCard(run)));
 }
 
 
 // A run's card
-const runGroupElements = new Map();
 function runCard(run, onSelect, selected) {
     const train = run.entries.train || [];
     const last = train[train.length - 1];
@@ -445,13 +287,6 @@ function runCard(run, onSelect, selected) {
         `train total ${fixed3(last?.total)}${lastVal ? ` · val ${fixed3(lastVal.spectral ?? lastVal.total)}` : ''}`,
         `updated ${formatDuration((Date.now() - run.modified) / 1000)} ago`
     ];
-    if (run.info.continuedAs) {
-        facts.push(`continued as ${run.info.continuedAs} at step ${run.info.stoppedStep.toLocaleString()}`);
-    }
-    const parent = parentRun(run);
-    if (parent) {
-        facts.push(`continues ${parent.run.name} from step ${parent.offset.toLocaleString()}`);
-    }
     if (run.info.parameters) {
         facts.push(`${run.info.parameters.toLocaleString()} parameters`);
     }
@@ -464,21 +299,6 @@ function runCard(run, onSelect, selected) {
     }
     card.append(head, bar, factsElement);
     return card;
-}
-
-
-// The run a run continues - {run, offset} (the parent's step it started from), or null
-function parentRun(run) {
-    const parent = [...runs.values()].find((other) => other.info.continuedAs === run.name);
-    return parent ? {'run': parent, 'offset': parent.info.stoppedStep} : null;
-}
-
-
-// A run's reference run, drawn faded on its charts for comparison - pipeline.json's compare, {run name prefix: the
-// reference run's name} (for example, a quality run against its same-seed control), or null
-function referenceRun(run) {
-    const entry = Object.entries(pipeline?.compare || {}).find(([prefix]) => run.name.startsWith(prefix));
-    return entry && entry[1] !== run.name ? runs.get(entry[1]) ?? null : null;
 }
 
 
@@ -592,12 +412,12 @@ function helpTip(key, text) {
 
 
 // The Runs heading's explanation - the run cards' facts
-document.getElementById('runsTitle').append(' ', helpTip('runs', 'Each card is a training run: its status (live - updating; ' +
-    'stalled - quiet for minutes; stopped - quiet for long; finished - reached its target), steps done of its target, ' +
-    'seconds per step and the time left at that pace, the latest training total loss and validation loss (lower is ' +
-    'better - the spectral loss for training on recordings; for distillation runs (distill-sNN), the loss against the ' +
-    'teacher, on its own small scale), and when its log last changed. Select a card for its curves; each chart\'s (?) ' +
-    'explains its measurement.'));
+document.getElementById('runsTitle').append(' ', helpTip('runs', 'Each card is one of make train\'s training runs: its status ' +
+    '(live - updating; stalled - quiet for minutes; stopped - quiet for long; finished - reached its target; waiting - its ' +
+    'stage not started), steps done of its target, seconds per step and the time left at that pace, the latest training ' +
+    'total loss and validation loss (lower is better - the spectral loss for training on recordings; for the student\'s ' +
+    'runs, distill-student and distill-student-polish, the loss against the teacher, on its own small scale), and when its ' +
+    'log last changed. Select a card for its curves; each chart\'s (?) explains its measurement.'));
 
 
 // An exponential moving average of a series' values
@@ -691,18 +511,17 @@ function renderCharts(force = false) {
     if (currentTab !== 'runs') {
         return;
     }
-    const run = runs.get(selectedRun);
-    drawRunCharts(chartsElement, chartsTitle, run ?? null, run ? referenceRun(run) : null, run ? parentRun(run) : null, force);
+    const run = trainRuns.get(selectedRun);
+    drawRunCharts(chartsElement, chartsTitle, run && !run.waiting ? run : null, force);
 }
 
 
-// Draw a run's charts into an element (its title into titleElement) - with its reference run and the run it continues
-// (parent, {run, offset}) faded behind it - only when its data changed, unless forced; with extras (a list), only those
-// of the other measurements' charts
+// Draw a run's charts into an element (its title into titleElement) - only when its data changed, unless forced; with
+// extras (a list), only those of the other measurements' charts
 const chartKeys = new Map();
-function drawRunCharts(element, titleElement, run, reference, parent, force = false, extras = null) {
+function drawRunCharts(element, titleElement, run, force = false, extras = null) {
     const dataKey = run ? [run.name, run.modified, (run.entries.train || []).length, (run.entries.val || []).length,
-        reference?.name, reference?.modified, element.clientWidth].join(' ') : '';
+        element.clientWidth].join(' ') : '';
     if (!force && dataKey === chartKeys.get(element)) {
         return;
     }
@@ -712,25 +531,12 @@ function drawRunCharts(element, titleElement, run, reference, parent, force = fa
         element.replaceChildren(make('p', 'empty', 'Select a run.'));
         return;
     }
-    titleElement.textContent = parent ? `Curves - ${run.name} (continuing ${parent.run.name}, faded)` : `Curves - ${run.name}`;
-    if (reference) {
-        titleElement.textContent += ` - compared with ${reference.name} (faded)`;
-    }
+    titleElement.textContent = `Curves - ${run.name}`;
     const styles = getComputedStyle(document.documentElement);
     const colors = ['--accent', '--series-2', '--series-3', '--series-4'].map((name) => styles.getPropertyValue(name));
     const train = run.entries.train || [];
     const val = run.entries.val || [];
-    const offset = parent ? parent.offset : 0;
-    const series = (entries, key) => entries.filter((entry) => Number.isFinite(entry[key])).
-        map((entry) => [entry.step + offset, entry[key]]);
-    const parentSeries = (kind, key) => {
-        if (!parent) {
-            return [];
-        }
-        const entries = (parent.run.entries[kind] || []).filter((entry) => Number.isFinite(entry[key]) && entry.step <= offset);
-        return entries.map((entry) => [entry.step, entry[key]]);
-    };
-    const faded = (color) => `${color.trim()}55`;
+    const series = (entries, key) => entries.filter((entry) => Number.isFinite(entry[key])).map((entry) => [entry.step, entry[key]]);
     // Each series: [label, kind (train or val), key, smoothed, color]
     const charts = [
         {'title': 'Loss (total)', 'help': 'total', 'logScale': true, 'series': [
@@ -760,26 +566,12 @@ function drawRunCharts(element, titleElement, run, reference, parent, force = fa
         ]});
     }
 
-    // The series' points - a continued run's parent drawn behind it, faded, up to the step the run started from
+    // The series' points
     const entriesOf = {train, val};
     for (const chart of charts) {
-        chart.series = chart.series.flatMap(([label, kind, key, smoothed, color]) => {
-            const own = series(entriesOf[kind], key);
-            const ownSeries = {label, 'points': smoothed ? smoothSeries(own, 0.8) : own, color};
-            const drawn = [ownSeries];
-            const before = parentSeries(kind, key);
-            if (before.length !== 0) {
-                const parentPoints = smoothed ? smoothSeries(before, 0.8) : before;
-                drawn.unshift({'label': `${parent.run.name} ${label}`, 'points': parentPoints, 'color': faded(color)});
-            }
-            if (reference) {
-                const theirs = series(reference.entries[kind] || [], key).map(([step, value]) => [step - offset, value]);
-                if (theirs.length !== 0) {
-                    drawn.unshift({'label': `${reference.name} ${label}`, 'points': smoothed ? smoothSeries(theirs, 0.8) : theirs,
-                        'color': faded(color)});
-                }
-            }
-            return drawn;
+        chart.series = chart.series.map(([label, kind, key, smoothed, color]) => {
+            const points = series(entriesOf[kind], key);
+            return {label, 'points': smoothed ? smoothSeries(points, 0.8) : points, color};
         });
     }
     element.replaceChildren(...charts.map((chart) => {
@@ -829,56 +621,6 @@ async function findFiles() {
 }
 
 
-// A log's latest progress - the last of its final lines reporting a percentage or an n/m count - {fraction, line} or null
-function parseProgress(lines) {
-    for (const line of lines.slice(-5).reverse()) {
-        const percents = [...line.matchAll(/(\d+(?:\.\d+)?)\s*%/g)];
-        if (percents.length !== 0) {
-            return {'fraction': Number(percents[percents.length - 1][1]) / 100, 'line': line.trim()};
-        }
-        const counts = [...line.matchAll(/(\d[\d,]*)\s*\/\s*(\d[\d,]*)/g)].map((match) => [
-            Number(match[1].replace(/,/g, '')), Number(match[2].replace(/,/g, ''))
-        ]).filter(([done, total]) => total > 0 && done <= total);
-        if (counts.length !== 0) {
-            const [done, total] = counts[counts.length - 1];
-            return {'fraction': done / total, 'line': line.trim()};
-        }
-    }
-    return null;
-}
-
-
-// The time left (s) for a log's progress, from its readings over the last few minutes
-function progressTimeLeft(path, fraction) {
-    const now = Date.now();
-    const recent = (reading) => now - reading.time < 5 * 60 * 1000 && reading.fraction <= fraction;
-    const readings = (progressHistory.get(path) || []).filter(recent);
-    readings.push({'time': now, fraction});
-    progressHistory.set(path, readings);
-    const [first] = readings;
-    const rate = (fraction - first.fraction) / ((now - first.time) / 1000);
-    return rate > 0 ? (1 - fraction) / rate : NaN;
-}
-
-
-// The dashboard's settings (pipeline.json) - the make train run to show (train), the runs' planned stops (stopAt) and
-// comparisons (compare), and the checkpoint samples (samples, also the monitor's)
-let pipeline = null;
-let pipelineLoaded = 0;
-async function loadPipeline() {
-    if (Date.now() - pipelineLoaded < 30000) {
-        return;
-    }
-    pipelineLoaded = Date.now();
-    const result = await fetchText(new URL('pipeline.json', import.meta.url));
-    try {
-        pipeline = result === null ? null : JSON.parse(result.text);
-    } catch {
-        pipeline = null;
-    }
-}
-
-
 // The archived pipelines (tools/dashboard/pipelines/*.json - earlier experiment pipelines: phases of steps, each tracked
 // by a log, a training run, an output file (or a file containing a text), or a process) and the selected one, newest
 // first - the archive selector's choice, remembered per browser
@@ -890,7 +632,7 @@ let archiveListed = 0;
 archiveSelect.addEventListener('change', () => {
     storageSet(archiveKey, archiveSelect.value);
     archived = null;
-    renderPipeline(lastLogs);
+    renderArchive();
 });
 async function loadArchive() {
     if (Date.now() - archiveListed > 30000) {
@@ -921,377 +663,76 @@ async function loadArchive() {
 }
 
 
-// Whether a file exists - checked every 10 seconds
-const existsCache = new Map();
-async function fileExists(path) {
-    const cached = existsCache.get(path);
-    if (cached && Date.now() - cached.time < 10000) {
-        return cached.exists;
-    }
-    let exists = false;
-    try {
-        exists = (await fetch(new URL(path, rootUrl), {'method': 'HEAD', 'cache': 'no-store'})).ok;
-    } catch {
-        // Unreachable - not there
-    }
-    existsCache.set(path, {'time': Date.now(), exists});
-    return exists;
-}
-
-
-// The phase each unplanned log in an unknown folder was assigned to - the phase running when it first appeared,
-// remembered per browser
-const assignedKey = 'training-dashboard-assigned-v2';
-let assigned = {};
-try {
-    assigned = JSON.parse(localStorage.getItem(assignedKey)) || {};
-} catch {
-    assigned = {};
-}
-function saveAssigned() {
-    try {
-        localStorage.setItem(assignedKey, JSON.stringify(assigned));
-    } catch {
-        // Unavailable storage - assignments last this page load
-    }
-}
-
-
-// A log step's state from its fetched log - {status: waiting|running|done|failed, fraction, line, timeLeft}. A step with
-// doneWhen (and failWhen) text is running until a log line contains it, however long the log is quiet (a long stage)
-function logState(path, log, {doneWhen = null, failWhen = null} = {}) {
-    if (!log) {
-        return {'status': 'waiting', 'fraction': 0, 'line': 'not started'};
-    }
-    const {result, lines} = log;
-    const lastLine = (lines[lines.length - 1] || '').trim();
-    if (lines.some((line) => line.startsWith('Traceback') || (failWhen !== null && line.includes(failWhen)))) {
-        return {'status': 'failed', 'fraction': 0, 'line': lastLine};
-    }
-    if (doneWhen !== null) {
-        const done = lines.some((line) => line.includes(doneWhen));
-        return {'status': done ? 'done' : 'running', 'fraction': done ? 1 : null, 'line': lastLine};
-    }
-    // Done: quiet for a few minutes, or briefly quiet after a complete count or a summary line following the progress lines
-    const quiet = Date.now() - result.modified;
-    const lastProgress = parseProgress(lines.slice(-1));
-    const finished = (lastProgress !== null && lastProgress.fraction >= 1) || (lastProgress === null && parseProgress(lines) !== null);
-    if (quiet < stalledMs && !(finished && quiet >= 20000)) {
-        const progress = parseProgress(lines);
-        if (progress === null) {
-            return {'status': 'running', 'fraction': null, 'line': lastLine};
-        }
-        const fraction = Math.min(progress.fraction, 0.99);
-        return {'status': 'running', fraction, 'line': progress.line, 'timeLeft': progressTimeLeft(path, progress.fraction)};
-    }
-    return {'status': 'done', 'fraction': 1, 'line': lastLine};
-}
-
-
-// A training run's state
-function runState(run) {
-    const train = run.entries.train || [];
-    const last = train[train.length - 1];
-    const fraction = run.info.targetSteps ? Math.min(1, (last?.step ?? 0) / run.info.targetSteps) : null;
-    const status = runStatus(run);
-    const target = run.info.targetSteps ? ` of ${run.info.targetSteps.toLocaleString()}` : '';
-    const line = `step ${last ? last.step.toLocaleString() : 0}${target}`;
-    if (status === 'failed') {
-        return {status, fraction, line};
-    }
-    if (status === 'finished' || status === 'stopped') {
-        return {'status': 'done', 'fraction': 1, line};
-    }
-    const recent = train.slice(-20).map((entry) => entry.secondsPerStep).filter(Number.isFinite);
-    const timeLeft = last && run.info.targetSteps ? (run.info.targetSteps - last.step) * median(recent) : NaN;
-    return {'status': 'running', fraction, 'line': status === 'stalled' ? `${line} - no update for a few minutes` : line, timeLeft};
-}
-
-
-// The monitor's activity (tools/dashboard/monitor.js writes build/nn/activity.json) - {updated, steps, agents} or null
-async function loadActivity() {
-    const result = await fetchText(new URL('activity.json', buildUrl));
-    try {
-        return result === null ? null : JSON.parse(result.text);
-    } catch {
-        return null;
-    }
-}
-
-
-// A process's state - running (with its workers, CPU, and time), or ended
-function processState(entry) {
-    const workers = entry.workers ? `${entry.workers} workers · ` : '';
-    if (entry.running) {
-        const line = `${workers}${entry.cpu}% CPU · running ${formatDuration((Date.now() - entry.started) / 1000)}`;
-        return {'status': 'running', 'fraction': null, line};
-    }
-    const ran = formatDuration((entry.lastSeen - entry.started) / 1000);
-    const line = `ran ${ran}, ended ${formatDuration((Date.now() - entry.lastSeen) / 1000)} ago`;
-    return {'status': 'done', 'fraction': 1, line};
-}
-
-
-// An agent's state - its latest action and when
-function agentState(agent) {
-    const ago = formatDuration((Date.now() - (agent.actionTime || agent.updated)) / 1000);
-    const line = agent.action ? `${agent.action} · ${ago} ago` : 'starting';
-    return agent.status === 'done' ? {'status': 'done', 'fraction': 1, line} : {'status': 'running', 'fraction': null, line};
-}
-
-
-// The pipeline's rows - each phase's agents, its planned steps, then the unplanned work that appeared during it (logs,
-// runs, and processes since the pipeline started), each with its state. Rows are never removed.
-async function pipelineRows(logs, activity) {
-    const since = Date.parse(archived.since);
-    const plannedSteps = archived.phases.flatMap((phase) => phase.steps);
-    const logsByPath = new Map(logs.map((log) => [`build/nn/${log.file.path}`, log]));
-    const newRuns = [...runs.values()].filter((run) => run.modified >= since).sort((first, second) => first.modified - second.modified);
-    // The run step tracks the newest run whose name starts with its prefix (true = any run)
-    const runStep = plannedSteps.find((step) => step.run);
-    const runPrefix = typeof runStep?.run === 'string' ? runStep.run : '';
-    const newestRun = newRuns.filter((run) => run.name.startsWith(runPrefix)).pop();
-    const planned = new Set(plannedSteps.filter((step) => step.log).map((step) => step.log));
-    const processes = (activity?.steps || []).filter((entry) => entry.started >= since);
-    const latestProcess = (prefix) => processes.filter((entry) => entry.label.startsWith(prefix)).pop();
-    const notStarted = {'status': 'waiting', 'fraction': 0, 'line': 'not started'};
-    const phases = await Promise.all(archived.phases.map(async (phase) => ({
-        phase, 'rows': await Promise.all(phase.steps.map(async (step) => {
-            let state;
-            if (step.log) {
-                state = logState(step.log, logsByPath.get(step.log), step);
-            } else if (step.run) {
-                state = newestRun ? runState(newestRun) : notStarted;
-                if (newestRun) {
-                    state.line = `${newestRun.name} - ${state.line}`;
-                }
-            } else if (step.contains) {
-                // Done when the file contains the text
-                const result = await fetchText(new URL(step.file, rootUrl));
-                const contains = result !== null && result.text.includes(step.contains);
-                state = contains ? {'status': 'done', 'fraction': 1, 'line': step.file} : notStarted;
-            } else {
-                state = await fileExists(step.file) ? {'status': 'done', 'fraction': 1, 'line': step.file} : notStarted;
-            }
-
-            // The step's process - running shows (if the log or run doesn't), and ended without output counts as done
-            const entry = step.process ? latestProcess(step.process) : undefined;
-            if (entry && entry.running && state.status !== 'running') {
-                state = processState(entry);
-            } else if (entry && !entry.running && state.status === 'waiting') {
-                state = processState(entry);
-            }
-            return {'id': step.title, 'title': step.title, 'kind': 'step', 'weight': step.weight, state};
-        }))
-    })));
-
-    // The phase running now - the first not done (for assigning unplanned work)
-    const currentPhase = Math.max(0, phases.findIndex(({rows}) => !rows.every((row) => row.state.status === 'done')));
-    const assign = (id, phaseIndex) => {
-        if (phaseIndex !== -1) {
-            return phaseIndex;
-        }
-        if (!(id in assigned)) {
-            assigned[id] = currentPhase;
-            saveAssigned();
-        }
-        return assigned[id];
-    };
-    // A phase's rows by index - clamped to the pipeline's phases (an assignment can outlive a pipeline change)
-    const phaseRows = (phaseIndex) => phases[Math.max(0, Math.min(phaseIndex, phases.length - 1))].rows;
-    const addRow = (phaseIndex, row) => {
-        phaseRows(phaseIndex).push({...row, 'weight': 0, 'unplanned': true});
-    };
-
-    // Agents lead their phase
-    for (const agent of activity?.agents || []) {
-        const phaseIndex = assign(`agent:${agent.id}`, archived.phases.findIndex((phase) => phase.title === agent.phase));
-        phaseRows(phaseIndex).unshift({
-            'id': `agent:${agent.id}`, 'title': `agent: ${agent.label}`, 'kind': 'agent', 'weight': 0, 'unplanned': true,
-            'state': agentState(agent)
-        });
-    }
-
-    // Unplanned logs join the phase whose planned logs share their folder
-    const folder = (path) => path.slice(0, path.lastIndexOf('/') + 1);
-    const phaseOfFolder = (path) => archived.phases.findIndex((phase) => phase.steps.some((step) => (
-        step.log && folder(step.log) === folder(path)
-    )));
-    const ownLogs = logs.filter((item) => !item.file.path.startsWith('make train: '));
-    for (const log of ownLogs.filter((item) => item.result.modified >= since && !planned.has(`build/nn/${item.file.path}`)).
-        sort((first, second) => first.result.modified - second.result.modified)) {
-        const id = `log:${log.file.path}`;
-        const row = {id, 'title': log.file.path, 'kind': 'log', 'state': logState(log.file.path, log)};
-        addRow(assign(id, phaseOfFolder(`build/nn/${log.file.path}`)), row);
-    }
-
-    // Other runs join the phase whose run prefixes match (else the training phase, else the phase running when they appeared)
-    const trainPhase = archived.phases.findIndex((phase) => phase.steps.some((step) => step.run));
-    for (const run of newRuns.filter((item) => item !== newestRun)) {
-        const phaseIndex = archived.phases.findIndex((phase) => (phase.runs || []).some((prefix) => run.name.startsWith(prefix)));
-        const id = `run:${run.name}`;
-        const row = {id, 'title': `run ${run.name}`, 'kind': 'run', 'state': runState(run)};
-        addRow(phaseIndex === -1 ? assign(id, trainPhase) : phaseIndex, row);
-    }
-
-    // Unplanned processes join the phase whose process prefixes match
-    const plannedProcess = (entry) => plannedSteps.some((step) => step.process && entry.label.startsWith(step.process));
-    for (const entry of processes.filter((item) => !plannedProcess(item))) {
-        const id = `process:${entry.label} ${Math.round(entry.started / 10000)}`;
-        const phaseIndex = archived.phases.findIndex((phase) => (phase.processes || []).some((prefix) => entry.label.startsWith(prefix)));
-        addRow(assign(id, phaseIndex), {id, 'title': entry.label, 'kind': 'process', 'state': processState(entry)});
-    }
-    return phases;
-}
-
-
-// The phases open in the pipeline (by title), remembered per browser
+// The phases open in the archived pipeline (by title), remembered per browser
 const openKey = 'training-dashboard-open-v1';
 let openPhases = new Set();
 try {
-    openPhases = new Set(JSON.parse(localStorage.getItem(openKey)) || []);
+    openPhases = new Set(JSON.parse(storageGet(openKey)) || []);
 } catch {
     openPhases = new Set();
 }
-function saveOpen() {
-    try {
-        localStorage.setItem(openKey, JSON.stringify([...openPhases]));
-    } catch {
-        // Unavailable storage - remembered this page load
+
+
+// What an archived step tracked - its log, its training run (the newest whose name starts with its prefix), or its output
+// file (or the text the file came to contain), and its process
+function archivedTracker(step) {
+    let tracked = step.file;
+    if (step.log) {
+        tracked = step.log;
+    } else if (step.run) {
+        tracked = typeof step.run === 'string' ? `the newest training run ${step.run}*` : 'the newest training run';
+    } else if (step.contains) {
+        tracked = `${step.file} containing ${step.contains}`;
     }
+    return step.process ? `${tracked} · process ${step.process}` : tracked;
 }
 
 
-// A row's status label - its percent and time left when running
-function statusLabel({status, fraction, timeLeft}) {
-    if (status !== 'running') {
-        return status;
-    }
-    let label = fraction === null ? 'running' : `${Math.round(100 * fraction)}%`;
-    if (Number.isFinite(timeLeft)) {
-        label += ` · ${formatDuration(timeLeft)} left`;
-    }
-    return label;
-}
-
-
-// Render the pipeline - each phase a group (its progress, what's happening now, and how many steps are done) that opens
-// to its rows - agents, steps, and other work - updated in place; and the overall progress (by the phases' and steps'
-// weights, roughly their expected time)
-const stepIcons = {'waiting': '○', 'running': '●', 'done': '✓', 'failed': '✕'};
-let pipelineKey = null;
-let rowElements = new Map();
-let phaseElements = [];
-async function renderPipeline(logs) {
+// Render the archived pipeline - its plan, as it was archived: each phase a group (its detail and its share of the
+// expected time) that opens to its planned steps and what tracked each. The experiments are finished and their runs and
+// logs moved (build/archive/), so nothing is tracked live. Rebuilt when the archive changes.
+let archiveShown = null;
+async function renderArchive() {
     if (currentTab !== 'archive') {
         return;
     }
     await loadArchive();
     pipelineSection.hidden = archived === null;
-    if (archived === null) {
+    const key = archived === null ? null : JSON.stringify(archived);
+    if (archived === null || key === archiveShown) {
         return;
     }
-    const activity = await loadActivity();
-    const phases = await pipelineRows(logs, activity);
-
-    // Build the groups when the set of rows changes (a step appeared), otherwise update them in place
-    const key = phases.map(({rows}) => rows.map((row) => row.id).join('|')).join('||');
-    if (key !== pipelineKey) {
-        pipelineKey = key;
-        rowElements = new Map();
-        phaseElements = phases.map(({phase, rows}) => {
-            const element = make('details', 'phase');
-            element.open = openPhases.has(phase.title);
-            element.addEventListener('toggle', () => {
-                if (element.open) {
-                    openPhases.add(phase.title);
-                } else {
-                    openPhases.delete(phase.title);
-                }
-                saveOpen();
-            });
-            const summary = make('summary');
-            const head = make('div', 'pipeline-head');
-            const facts = make('span', 'facts');
-            head.append(make('h3', '', phase.title), facts);
-            const bar = make('div', 'bar');
-            const fill = make('div');
-            bar.append(fill);
-            const now = make('div', 'phase-now');
-            const count = make('div', 'phase-count');
-            summary.append(head, bar, now, count);
-            const list = make('ul', 'steps');
-            for (const row of rows) {
-                const item = make('li', 'step');
-                const icon = make('span', 'icon');
-                const percent = make('span', 'facts');
-                const rowBar = make('div', 'bar');
-                const rowFill = make('div');
-                rowBar.append(rowFill);
-                const line = make('div', 'progress-line');
-                item.append(icon, make('span', row.unplanned ? `unplanned kind-${row.kind}` : '', row.title), percent, rowBar, line);
-                list.append(item);
-                rowElements.set(row.id, {item, icon, percent, 'fill': rowFill, line});
+    archiveShown = key;
+    const totalWeight = archived.phases.reduce((sum, phase) => sum + phase.weight, 0);
+    phasesElement.replaceChildren(...archived.phases.map((phase) => {
+        const element = make('details', 'phase');
+        element.open = openPhases.has(phase.title);
+        element.addEventListener('toggle', () => {
+            if (element.open) {
+                openPhases.add(phase.title);
+            } else {
+                openPhases.delete(phase.title);
             }
-            element.append(summary, make('div', 'phase-detail', phase.detail), list);
-            return {element, facts, fill, now, count};
+            storageSet(openKey, JSON.stringify([...openPhases]));
         });
-        phasesElement.replaceChildren(...phaseElements.map(({element}) => element));
-    }
-
-    // Update the rows and the groups
-    let overall = 0;
-    const totalWeight = phases.reduce((sum, {phase}) => sum + phase.weight, 0);
-    phases.forEach(({phase, rows}, index) => {
-        for (const row of rows) {
-            const {item, icon, percent, fill, line} = rowElements.get(row.id);
-            const {status, fraction} = row.state;
-            item.className = `step ${status}`;
-            icon.textContent = stepIcons[status];
-            percent.textContent = statusLabel(row.state);
-            fill.style.width = `${(100 * (fraction ?? 0)).toFixed(1)}%`;
-            fill.classList.toggle('indeterminate', status === 'running' && fraction === null);
-            line.textContent = row.state.line || '';
-            line.title = row.state.line || '';
-        }
-        const plannedRows = rows.filter((row) => !row.unplanned);
-        const stepWeight = plannedRows.reduce((sum, row) => sum + row.weight, 0);
-        const done = plannedRows.reduce((sum, row) => sum + row.weight * (row.state.fraction ?? 0.5), 0) / stepWeight;
-        overall += phase.weight * done / totalWeight;
-        const work = rows.filter((row) => row.kind !== 'agent');
-        let status = 'waiting';
-        if (rows.every((row) => row.state.status === 'done')) {
-            status = 'done';
-        } else if (rows.some((row) => row.state.status !== 'waiting')) {
-            status = 'running';
-        }
-
-        // What's happening now - the running work, else the running agent's latest action
-        const running = work.filter((row) => row.state.status === 'running' || row.state.status === 'failed');
-        const agent = rows.find((row) => row.kind === 'agent' && row.state.status === 'running');
-        let now = '';
-        if (running.length !== 0) {
-            now = running.map((row) => `${stepIcons[row.state.status]} ${row.title} · ${statusLabel(row.state)}`).join('   ');
-        } else if (agent) {
-            now = `${agent.title} - ${agent.state.line}`;
-        } else if (status === 'done') {
-            now = 'complete';
-        }
-        const group = phaseElements[index];
-        group.element.className = `phase ${status}`;
-        group.facts.textContent = status === 'waiting' ? 'waiting' : `${Math.round(100 * done)}%`;
-        group.fill.style.width = `${(100 * done).toFixed(1)}%`;
-        group.now.textContent = now;
-        group.now.title = now;
-        const doneCount = work.filter((row) => row.state.status === 'done').length;
-        group.count.textContent = `${doneCount} of ${work.length} steps done`;
-    });
+        const summary = make('summary');
+        const head = make('div', 'pipeline-head');
+        const share = `${Math.round(100 * phase.weight / totalWeight)}% of the expected time`;
+        head.append(make('h3', '', phase.title), make('span', 'facts', share));
+        summary.append(head, make('div', 'phase-count', `${phase.steps.length} step${phase.steps.length === 1 ? '' : 's'}`));
+        const list = make('ul', 'steps');
+        list.append(...phase.steps.map((step) => {
+            const item = make('li', 'step');
+            const line = make('div', 'progress-line', archivedTracker(step));
+            item.append(make('span', 'icon', '·'), make('span', '', step.title), make('span', 'facts', ''), line);
+            return item;
+        }));
+        element.append(summary, make('div', 'phase-detail', phase.detail), list);
+        return element;
+    }));
     pipelineTitle.textContent = archived.title;
-    pipelineBar.style.width = `${(100 * overall).toFixed(1)}%`;
-    const elapsed = formatDuration((Date.now() - Date.parse(archived.since)) / 1000);
-    const monitor = activity && Date.now() - activity.updated < 10000 ? '' :
-        ' · the monitor isn\'t running (node tools/dashboard/monitor.js) - steps without logs aren\'t shown';
-    pipelineFacts.textContent = `about ${Math.round(100 * overall)}% (weighted by expected time) · started ${elapsed} ago${monitor}`;
+    const steps = archived.phases.reduce((sum, phase) => sum + phase.steps.length, 0);
+    pipelineFacts.textContent = `${archived.phases.length} phases · ${steps} steps · started ${new Date(archived.since).toLocaleString()}`;
 }
 
 
@@ -1368,75 +809,6 @@ function meanScore(samples, sex) {
 }
 
 
-// Render the checkpoint samples (build/nn/samples-progress/index.json, written by the monitor) - each checkpoint's
-// voices, newest first, then the package's voices (the reference) - rebuilt when the index changes, reusing each sample's player so
-// playback continues
-let checkpointsKey = null;
-const voiceTiles = new Map();
-async function renderCheckpointSamples() {
-    const result = await fetchText(new URL('samples-progress/index.json', buildUrl));
-    if (result === null || result.text === checkpointsKey) {
-        checkpointSection.hidden = result === null && checkpointsKey === null;
-        return;
-    }
-    checkpointsKey = result.text;
-    let index;
-    try {
-        index = JSON.parse(result.text);
-    } catch {
-        return;
-    }
-    const tile = (sample) => {
-        if (!voiceTiles.has(sample.file)) {
-            const element = make('div', 'voice');
-            const head = make('div', 'voice-head');
-            head.append(make('span', '', sample.label), make('span', 'mos', Number.isFinite(sample.mos) ? sample.mos.toFixed(2) : '-'));
-            const audio = make('audio');
-            audio.controls = true;
-            audio.preload = 'none';
-            audio.src = new URL(`samples-progress/${encodeURIComponent(sample.file)}`, buildUrl);
-            element.append(head, audio);
-            voiceTiles.set(sample.file, element);
-        }
-        return voiceTiles.get(sample.file);
-    };
-    const block = (title, facts, samples) => {
-        const element = make('div', 'checkpoint');
-        const head = make('div', 'checkpoint-head');
-        head.append(make('h3', '', title), make('span', 'facts', facts));
-        const voices = make('div', 'voices');
-        voices.append(...samples.map(tile));
-        element.append(head, voices);
-        return element;
-    };
-    const checkpoints = [...index.checkpoints].sort((first, second) => second.rendered - first.rendered);
-    checkpointSteps = new Map();
-    for (const checkpoint of checkpoints) {
-        checkpointSteps.set(checkpoint.run, [...checkpointSteps.get(checkpoint.run) || [], checkpoint.step]);
-    }
-    if (checkpoints.length !== 0) {
-        const [newest] = checkpoints;
-        newestCheckpoint = `${newest.run} ${newest.step}`;
-        updateListenDot();
-    }
-    const blocks = checkpoints.map((checkpoint) => block(
-        `${checkpoint.run} · step ${checkpoint.step.toLocaleString()}`,
-        `female ${meanScore(checkpoint.samples, 'female')} · male ${meanScore(checkpoint.samples, 'male')} · ` +
-            `rendered ${new Date(checkpoint.rendered).toLocaleTimeString()}`,
-        checkpoint.samples
-    ));
-    if (index.reference.length !== 0) {
-        const facts = `female ${meanScore(index.reference, 'female')} · male ${meanScore(index.reference, 'male')}`;
-        blocks.push(block('The package\'s voices (reference)', facts, index.reference));
-    }
-    if (checkpoints.length === 0) {
-        blocks.unshift(make('p', 'empty', 'No checkpoints yet - samples appear as each one is saved.'));
-    }
-    checkpointsElement.replaceChildren(...blocks);
-    checkpointSection.hidden = false;
-}
-
-
 // make train's listening samples (TRAIN_DIR/samples/index.json, tools/trainsamples.js) - each model's samples, newest
 // model first, every speaker's sample beside the shipped model's (the reference); a model not rendered yet is listed as
 // waiting, so nothing moves when it arrives. Rebuilt when the index or the models' states change, reusing each sample's
@@ -1466,9 +838,10 @@ async function renderTrainSamples() {
     const section = document.getElementById('trainSamplesSection');
     if (!trainData) {
         section.hidden = true;
+        setTabFact('tabFactListen', '');
         return;
     }
-    const samplesUrl = new URL(`${trainData.config.dir.replace(/\/$/, '')}/samples/`, rootUrl);
+    const samplesUrl = new URL(`${trainData.dir}/samples/`, rootUrl);
     const [result, recipeResult] = await Promise.all([fetchText(new URL('index.json', samplesUrl)),
         fetchText(new URL('data/nn/train.json', rootUrl))]);
     let index;
@@ -1572,61 +945,21 @@ async function renderTrainSamples() {
     document.getElementById('trainSamples').replaceChildren(...blocks);
     const rendered = models.filter((model) => model.samples.length !== 0);
     document.getElementById('trainSamplesFacts').textContent =
-        `${rendered.length} of ${models.length} rendered · ${trainData.config.dir.replace(/\/$/, '')}/samples/`;
+        `${rendered.length} of ${models.length} rendered · ${trainData.dir}/samples/`;
     section.hidden = false;
 
     // The newest model rendered (the Listen tab's dot and fact)
     const newest = trained.find((model) => model.samples.length !== 0) ?? null;
     newestTrainSamples = newest === null ? null :
         {'key': `${samplesUrl.href} ${newest.key}`, 'title': listenTitles[newest.key] ?? newest.key};
+    setTabFact('tabFactListen', newestTrainSamples?.title.toLowerCase() ?? '');
     updateListenDot();
 }
 
 
-// Render the time until the next checkpoint's samples - the live run's next checkpoint (every pipeline.json
-// samples.checkpointEvery steps, or the interval between its rendered checkpoints), estimated from its recent seconds
-// per step, plus about 1.5 minutes for the monitor to notice, render, and score it
-let checkpointSteps = new Map();
-const renderSeconds = 90;
-function renderNextCheckpoint() {
-    const section = document.getElementById('nextSection');
-    // Only the runs whose checkpoints get samples (pipeline.json samples.runs), newest first by first-seen order
-    const prefix = pipeline?.samples?.runs ?? '';
-    const [live] = [...runs.values()].filter((run) => run.name.startsWith(prefix) && runStatus(run) === 'live').
-        sort((first, second) => (runOrder[second.name] ?? 0) - (runOrder[first.name] ?? 0));
-    const train = live ? live.entries.train || [] : [];
-    const last = train[train.length - 1];
-    if (!live || !last || !pipeline?.samples) {
-        section.hidden = true;
-        const checkpointFact = newestCheckpoint === null ? '' : `step ${Number(newestCheckpoint.split(' ')[1]).toLocaleString()}`;
-        setTabFact('tabFactListen', newestTrainSamples?.title.toLowerCase() ?? checkpointFact);
-        return;
-    }
-    const rendered = (checkpointSteps.get(live.name) || []).sort((first, second) => first - second);
-    const gaps = rendered.slice(1).map((step, index) => step - rendered[index]).filter((gap) => gap > 0);
-    const every = gaps.length !== 0 ? Math.min(...gaps) : pipeline.samples.checkpointEvery || 5000;
-    let next = (Math.floor(last.step / every) + 1) * every;
-    if (live.info.targetSteps) {
-        next = Math.min(next, live.info.targetSteps);
-    }
-    const previous = next - every;
-    const secondsPerStep = median(train.slice(-20).map((entry) => entry.secondsPerStep).filter(Number.isFinite));
-    const seconds = (next - last.step) * secondsPerStep + renderSeconds;
-    const when = new Date(Date.now() + seconds * 1000).toLocaleTimeString([], {'hour': 'numeric', 'minute': '2-digit'});
-    section.hidden = false;
-    const whenText = Number.isFinite(seconds) ? `in about ${formatDuration(seconds)} · around ${when}` : '';
-    document.getElementById('nextWhen').textContent = whenText;
-    const fraction = Math.max(0, Math.min(1, (last.step - previous) / every));
-    document.getElementById('nextBar').style.width = `${(100 * fraction).toFixed(1)}%`;
-    document.getElementById('nextLine').textContent = `${live.name} step ${next.toLocaleString()} - now at step ` +
-        `${last.step.toLocaleString()}, ${secondsPerStep.toFixed(2)} s/step; the samples appear a minute or two after it's saved`;
-    setTabFact('tabFactListen', Number.isFinite(seconds) ? `next ${formatDuration(seconds)}` : '');
-}
-
-
-// Render the samples - WAV files under build/nn/ (but the checkpoint samples, shown above)
+// Render the samples - WAV files under build/nn/
 function renderSamples(allFiles) {
-    const files = allFiles.filter((file) => file.path.endsWith('.wav') && !file.path.startsWith('samples-progress/'));
+    const files = allFiles.filter((file) => file.path.endsWith('.wav'));
     if (files.length === 0) {
         samplesElement.replaceChildren(make('p', 'empty', 'No samples yet.'));
         return;
@@ -1648,15 +981,10 @@ function renderSamples(allFiles) {
 }
 
 
-// make train (the Train tab) - pipeline.json's train: {dir (TRAIN_DIR, default build/train - the page's ?train=DIR
-// overrides it, for another checkout's or worktree's run, so pipeline.json never names one run), log (make's output - for a
-// run without stage events, its stages are inferred from it and the stamps), logs (other make logs, searched for
-// failures and checks), util (default TRAIN_DIR/util.log), target (the make target, else the log's), manifest (default
-// data/nn/train-stages.json), compare ({run: the reference run in build/nn/runs/ drawn faded behind it})}
+// make train (the Train tab) - TRAIN_DIR (build/train, or the page's ?train=DIR - another checkout's or worktree's run),
+// its stages from data/nn/train-stages.json
 let trainManifestText = null;
 let trainManifest = null;
-let trainStamps = new Map();
-let trainStampsChecked = 0;
 const trainRuns = new Map();
 const trainRunKey = 'training-dashboard-train-run-v1';
 let trainSelectedRun = storageGet(trainRunKey);
@@ -1682,42 +1010,12 @@ function lastMatch(texts, pattern) {
 }
 
 
-// The last-modified time of each of a directory's stamps (*.done) - Map stage -> ms, listed every 5 seconds
-async function loadStamps(dirUrl) {
-    if (Date.now() - trainStampsChecked < 5000) {
-        return trainStamps;
-    }
-    trainStampsChecked = Date.now();
-    const entries = (await listDirectory(dirUrl)).filter((entry) => !entry.isDirectory && entry.name.endsWith('.done'));
-    const stamps = new Map();
-    await Promise.all(entries.map(async (entry) => {
-        const name = entry.name.slice(0, -'.done'.length);
-        let modified = trainStamps.get(name);
-        if (!Number.isFinite(modified)) {
-            try {
-                const response = await fetch(new URL(encodeURIComponent(entry.name), dirUrl), {'method': 'HEAD', 'cache': 'no-store'});
-                modified = Date.parse(response.headers.get('Last-Modified') || '');
-            } catch {
-                modified = NaN;
-            }
-        }
-        stamps.set(name, modified);
-    }));
-    trainStamps = stamps;
-    return stamps;
-}
-
-
-// Load make train's state - {config, manifest, states, forecast, samples, alive, start, end, status, gates, logFiles} or
-// null (no stage manifest)
+// Load make train's state - {dir, manifest, states, plan, samples, alive, start, end, status, gates, logFiles, now,
+// progress} or null (no stage manifest)
 async function loadTrain() {
-    const config = {'dir': 'build/train', ...pipeline?.train};
-    const dirParameter = new URLSearchParams(window.location.search).get('train');
-    if (dirParameter) {
-        config.dir = dirParameter;
-    }
-    const dirUrl = new URL(`${config.dir.replace(/\/$/, '')}/`, rootUrl);
-    const manifestResult = await fetchText(new URL(config.manifest ?? 'data/nn/train-stages.json', rootUrl));
+    const dir = (new URLSearchParams(window.location.search).get('train') || 'build/train').replace(/\/$/, '');
+    const dirUrl = new URL(`${dir}/`, rootUrl);
+    const manifestResult = await fetchText(new URL('data/nn/train-stages.json', rootUrl));
     if (manifestResult === null) {
         return null;
     }
@@ -1737,16 +1035,12 @@ async function loadTrain() {
         recipe = null;
     }
 
-    // The bookkeeping - the stage events, the stamps, make's logs, and the utilization samples
-    const [eventsResult, makeResult, utilResult, stamps, ...extra] = await Promise.all([
+    // The bookkeeping - the stage events and the utilization samples
+    const [eventsResult, utilResult] = await Promise.all([
         fetchText(new URL('stages.jsonl', dirUrl)),
-        config.log ? fetchText(new URL(config.log, rootUrl)) : null,
-        fetchText(config.util ? new URL(config.util, rootUrl) : new URL('util.log', dirUrl)),
-        loadStamps(dirUrl),
-        ...(config.logs || []).map((path) => fetchText(new URL(path, rootUrl)))
+        fetchText(new URL('util.log', dirUrl))
     ]);
     const events = eventsResult === null ? new Map() : trainModel.parseStageEvents(eventsResult.text);
-    const segments = makeResult === null ? [] : trainModel.parseMakeLog(makeResult.text);
     const stageLogs = new Map();
     await Promise.all(manifest.stages.filter((stage) => events.has(stage.stage)).map(async (stage) => {
         const result = await fetchText(new URL(`logs/${encodeURIComponent(stage.stage)}.log`, dirUrl));
@@ -1766,14 +1060,12 @@ async function loadTrain() {
     const queued = new Set([...stageLogs].filter(([, result]) => (
         /^gpulock: waiting/.test(lastMatch([result.text], /^gpulock: /) || '')
     )).map(([name]) => name));
-    const utilFresh = utilResult !== null && Date.now() - utilResult.modified < 90000;
-    const alive = utilFresh || (makeResult !== null && Date.now() - makeResult.modified < 10 * 60000);
-    const extraTexts = extra.filter((result) => result !== null).map((result) => result.text);
+    // (make runs while its utilization sampler writes)
+    const alive = utilResult !== null && Date.now() - utilResult.modified < 90000;
     // (the run's target and start - make train and its targets record them in stages.jsonl)
     const runTarget = eventsResult === null ? null : trainModel.parseRunTarget(eventsResult.text);
-    const states = trainModel.stageStates(manifest, {events, stamps, segments, 'errorTexts': extraTexts, alive, queued,
-        'target': config.target ?? runTarget?.target, 'started': runTarget?.time});
-    document.getElementById('trainTitle').firstChild.nodeValue = `make ${config.target ?? runTarget?.target ?? manifest.target}`;
+    const states = trainModel.stageStates(manifest, {events, alive, queued, 'target': runTarget?.target, 'started': runTarget?.time});
+    document.getElementById('trainTitle').firstChild.nodeValue = `make ${runTarget?.target ?? manifest.target}`;
 
     // The training runs (TRAIN_DIR/runs/<run>/), each stopped at its recipe's stop
     for (const stage of manifest.stages.filter((item) => item.run)) {
@@ -1815,13 +1107,12 @@ async function loadTrain() {
     const plan = trainModel.forecast(manifest, states, remaining, now);
     const starts = [...states.values()].map((state) => state.start).filter((time) => time !== null);
     const firstEvent = Math.min(...[...events.values()].map((event) => event.start ?? Infinity));
-    const start = Math.min(segments[0]?.start ?? Infinity, firstEvent, ...starts);
+    const start = Math.min(firstEvent, ...starts);
     const counted = [...states.values()].filter((state) => state.status !== 'skipped');
     let status = 'waiting';
     // (no record at all in TRAIN_DIR - not a run waiting to start, but the wrong directory or no make train yet)
-    const recorded = eventsResult !== null || utilResult !== null || makeResult !== null || stamps.size !== 0;
-    if (!recorded) {
-        status = `no make train record in ${config.dir}/ - start make train, or open the dashboard with ?train=DIR`;
+    if (eventsResult === null && utilResult === null) {
+        status = `no make train record in ${dir}/ - start make train, or open the dashboard with ?train=DIR`;
     } else if (counted.length !== 0 && counted.every((state) => state.status === 'done')) {
         status = 'finished';
     } else if (counted.some((state) => state.status === 'failed')) {
@@ -1845,7 +1136,7 @@ async function loadTrain() {
             return null;
         }
     };
-    const texts = (stage) => [stageLogs.get(stage)?.text, ...extraTexts, makeResult?.text];
+    const texts = (stage) => [stageLogs.get(stage)?.text];
     const gates = {
         'heteronyms': lastMatch(texts('heteronyms'), /^check: (?:the \d+ relabeled|the relabeled)/),
         'g2pCheck': lastMatch(texts('g2p'), /^check: .*g2pModel/),
@@ -1859,17 +1150,11 @@ async function loadTrain() {
     // make train's logs (for the Logs tab)
     const logFiles = [];
     const addLog = (label, url) => logFiles.push({'path': `make train: ${label}`, url});
-    if (config.log) {
-        addLog(config.log, new URL(config.log, rootUrl));
-    }
-    for (const path of config.logs || []) {
-        addLog(path, new URL(path, rootUrl));
-    }
     for (const name of stageLogs.keys()) {
         addLog(`logs/${name}.log`, new URL(`logs/${encodeURIComponent(name)}.log`, dirUrl));
     }
-    addLog(config.util ?? 'util.log', config.util ? new URL(config.util, rootUrl) : new URL('util.log', dirUrl));
-    return {config, manifest, states, plan, samples, alive, start, end, status, gates, logFiles, now, progress};
+    addLog('util.log', new URL('util.log', dirUrl));
+    return {dir, manifest, states, plan, samples, alive, start, end, status, gates, logFiles, now, progress};
 }
 
 
@@ -1889,11 +1174,9 @@ const trainHelp = {
     'stages': 'Every stage of make train, grouped, in the order they can run: waiting (its inputs aren\'t done), queued ' +
         '(waiting for the GPU lock), running, done, failed, stopped (started, but make isn\'t running - resumable), or ' +
         'skipped (not in this run\'s make target). Each shows its start and end, its time against the expected time, and ' +
-        'the mean CPU and GPU use while it ran. Stage events come from TRAIN_DIR/stages.jsonl; without them (a run before ' +
-        'the bookkeeping) the states are inferred from the stamps (*.done) and make\'s log.',
+        'the mean CPU and GPU use while it ran. Stage events come from TRAIN_DIR/stages.jsonl.',
     'runs': 'The make train stages that train a network, each a run in TRAIN_DIR/runs/ - the teacher\'s stages A and B, ' +
-        'the distilled student, and its polish. Select one for its curves; the teacher\'s are drawn over the earlier ' +
-        'teacher runs (multi-a, multi-b - faded) to show whether this run is on the same track.',
+        'the distilled student, and its polish. Select one for its curves (the Runs tab has every measurement\'s).',
     'gates': 'The checks make train must pass: the heteronym relabeling reproduces data/nn/g2p-relabel.json; the ' +
         'retrained G2P is identical to the committed lib/models/g2pModel.js (else within the recipe\'s tolerances) with ' +
         'its held-out context accuracy; the teacher and the student through the listener panel (UTMOS - naturalness, ' +
@@ -2132,7 +1415,7 @@ function renderTrain(force = false) {
     } else {
         facts.push(`ETA ${clockTime(plan.eta)} (${formatDuration(left / 1000)} left)`);
     }
-    facts.push(data.config.dir);
+    facts.push(data.dir);
     document.getElementById('trainFacts').textContent = facts.join(' · ');
     const fraction = Number.isFinite(elapsed) && elapsed + left > 0 ? elapsed / (elapsed + left) : 0;
     document.getElementById('trainBar').style.width = `${(100 * fraction).toFixed(1)}%`;
@@ -2204,8 +1487,8 @@ function renderTrain(force = false) {
         }
     }
 
-    // The training runs' cards (all listed from the start), the selected one's curves - compared with its reference
-    const trainRunList = manifest.stages.filter((stage) => stage.run).map((stage) => trainRuns.get(stage.run));
+    // The training runs' cards (all listed from the start), the selected one's curves
+    const trainRunList = runList();
     if (!trainRuns.has(trainSelectedRun)) {
         const [live] = trainRunList.filter((run) => runStatus(run) === 'live');
         trainSelectedRun = (live ?? trainRunList.filter((run) => !run.waiting).pop() ?? trainRunList[0])?.name ?? null;
@@ -2213,10 +1496,8 @@ function renderTrain(force = false) {
     document.getElementById('trainRuns').replaceChildren(...trainRunList.map((run) => safeRunCard(run, selectTrainRun, trainSelectedRun)));
     if (currentTab === 'train') {
         const run = trainRuns.get(trainSelectedRun) ?? null;
-        const referenceName = data.config.compare?.[run?.name];
-        const reference = referenceName ? runs.get(referenceName) ?? null : null;
         drawRunCharts(document.getElementById('trainCharts'), document.getElementById('trainChartsTitle'),
-            run && !run.waiting ? run : null, reference, null, force, trainChartExtras);
+            run && !run.waiting ? run : null, force, trainChartExtras);
         renderUtilization(data, force);
     }
 }
@@ -2388,8 +1669,8 @@ document.getElementById('utilLegend').append(...[
 }));
 
 
-// Tabs - the selected tab is in the URL's hash (and remembered per browser); the Listen tab marks new checkpoints until
-// it's viewed
+// Tabs - the selected tab is in the URL's hash (and remembered per browser); the Listen tab marks new samples until it's
+// viewed
 const tabNames = ['train', 'listen', 'runs', 'logs', 'archive'];
 const tabAliases = {'progress': 'archive', 'training': 'runs'};
 const tabKey = 'training-dashboard-tab-v1';
@@ -2430,7 +1711,7 @@ function selectTab(name, {updateHash = true} = {}) {
         renderTrain(true);
     }
     if (currentTab === 'archive') {
-        renderPipeline(lastLogs);
+        renderArchive();
     }
     if (currentTab === 'listen') {
         markHeard();
@@ -2452,13 +1733,9 @@ for (const tab of tabNames) {
 window.addEventListener('hashchange', () => selectTab(window.location.hash.slice(1), {'updateHash': false}));
 
 
-// The newest checkpoint's key, and marking it and the newest make train samples heard (the Listen tab's dot)
-let newestCheckpoint = null;
+// Marking the newest make train samples heard (the Listen tab's dot)
 function listenKey() {
-    if (newestTrainSamples === null && newestCheckpoint === null) {
-        return null;
-    }
-    return `${newestTrainSamples?.key ?? ''} | ${newestCheckpoint ?? ''}`;
+    return newestTrainSamples?.key ?? null;
 }
 function markHeard() {
     if (listenKey() !== null) {
@@ -2475,7 +1752,7 @@ function updateListenDot() {
 }
 
 
-// Update the tabs' facts - the overall progress, the newest checkpoint, the live run, and the active logs
+// Update a tab's fact - make train's state, the newest samples, the live run, and the active logs
 function setTabFact(id, text) {
     const element = document.getElementById(id);
     if (element.textContent !== text) {
@@ -2513,25 +1790,21 @@ let firstRefresh = true;
 // Refresh - then again a second later, so refreshes never overlap
 async function refresh() {
     try {
-        await loadPipeline();
-        await refreshRuns();
-        renderRuns();
-        renderCharts();
         trainData = await loadTrain();
         if (firstRefresh && hashTab === '' && trainData?.status === 'running') {
             selectTab('train');
         }
         firstRefresh = false;
         renderTrain();
+        renderRuns();
+        renderCharts();
         const files = await findFiles();
         const logs = await loadLogs([...trainData?.logFiles ?? [], ...files]);
         lastLogs = logs;
-        await renderPipeline(logs);
+        await renderArchive();
         renderLogs(logs);
         renderSamples(files);
-        await renderCheckpointSamples();
         await renderTrainSamples();
-        renderNextCheckpoint();
         updatedElement.textContent = `Updated ${new Date().toLocaleTimeString()} · every second`;
     } finally {
         setTimeout(refresh, refreshMs);

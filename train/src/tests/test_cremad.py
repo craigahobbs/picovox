@@ -5,7 +5,6 @@
 
 import argparse
 import contextlib
-import io
 import json
 import os
 import runpy
@@ -23,6 +22,7 @@ import torch
 
 from picovox_train import cremad, data, frontend
 from tests import data_fixtures, helpers
+from tests.data_fixtures import FakeResponse
 
 
 # A recognizer vocabulary - the blank and specials, then every IPA token
@@ -167,16 +167,6 @@ def fake_realign(command, **_kwargs):
 
 def build_args(out, limit=None, realign=False):
     return argparse.Namespace(out=out, limit=limit, realign=realign, jobs=1)
-
-
-# A response of the fake urlopen
-class FakeResponse(io.BytesIO):
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc_info):
-        self.close()
 
 
 class TestDownload(unittest.TestCase):

@@ -20,9 +20,6 @@ A token sequence is:
   silence
 
     python -m picovox_train.frontend vocab                 # write vocab.json
-
-The CMU Pronouncing Dictionary (data/cmudict.dict, get_dictionary) is the G2P network's training labels - a training
-tool, not the front end's.
 """
 
 import json
@@ -32,10 +29,9 @@ import re
 import sys
 import unicodedata
 
-from . import ROOT, g2pmodel
+from . import g2pmodel
 
 
-DICTIONARY_PATH = os.path.join(ROOT, 'data', 'cmudict.dict')
 VOCAB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vocab.json')
 
 # The ARPAbet phones (lib/phonemes.js) - the vowels carry stress 0, 1, or 2
@@ -85,7 +81,6 @@ TOKEN_IDS = {token: index for index, token in enumerate(vocabulary())}
 # The port of lib/lexicon.js
 #
 
-_DICTIONARY = None
 _G2P = None
 
 
@@ -168,24 +163,6 @@ def pronounce_texts(texts, jobs=None):
             g2p.pronounce_many(sorted(words), reading)
     pronunciations.state = g2p.state()
     return pronunciations
-
-
-# Load the CMU Pronouncing Dictionary - word to its first pronunciation; comments stripped (the G2P network's training
-# labels)
-def get_dictionary(path=DICTIONARY_PATH):
-    global _DICTIONARY  # pylint: disable=global-statement
-    if _DICTIONARY is None:
-        dictionary = {}
-        with open(path, encoding='utf-8') as file:
-            for line in file.read().split('\n'):
-                hash_index = line.find('#')
-                content = (line[:hash_index] if hash_index >= 0 else line).strip()
-                if content != '':
-                    word, *phones = content.split()
-                    if '(' not in word:
-                        dictionary[word] = phones
-        _DICTIONARY = dictionary
-    return _DICTIONARY
 
 
 # Function words - unaccented, with reduced stress

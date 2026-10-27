@@ -37,7 +37,7 @@ import sys
 
 import numpy
 
-from .frontend import ROOT
+from . import ROOT
 
 
 LABELS = os.path.join(ROOT, 'data', 'corpora', 'libritts_label', 'lab')

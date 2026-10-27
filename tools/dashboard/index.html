@@ -141,35 +141,6 @@
         padding: 16px;
         min-width: 0;
     }
-    #runs {
-        display: grid;
-        gap: 10px;
-    }
-    .run-group summary {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: space-between;
-        align-items: baseline;
-        gap: 6px 8px;
-        padding: 6px 0;
-        cursor: pointer;
-    }
-    .run-group summary h3::before {
-        content: "▸ ";
-        color: var(--accent);
-    }
-    .run-group[open] summary h3::before {
-        content: "▾ ";
-    }
-    .run-group summary .bar {
-        flex-basis: 100%;
-    }
-    .run-group summary::-webkit-details-marker {
-        display: none;
-    }
-    .run-group .runs {
-        margin-top: 6px;
-    }
     .runs {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
@@ -347,15 +318,6 @@
         overflow: hidden;
         text-overflow: ellipsis;
     }
-    .step .unplanned {
-        font-family: var(--mono);
-        font-size: 0.8rem;
-    }
-    .step .unplanned.kind-agent {
-        font-family: inherit;
-        font-size: inherit;
-        font-style: italic;
-    }
     .step.done .bar > div {
         background: var(--good);
     }
@@ -381,24 +343,6 @@
             width: 100% !important;
             opacity: 0.35;
         }
-    }
-    .progress-list {
-        display: grid;
-        gap: 12px;
-    }
-    .progress-item {
-        display: grid;
-        gap: 5px;
-        min-width: 0;
-    }
-    .progress-head {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: space-between;
-        gap: 2px 12px;
-    }
-    .progress-item .bar {
-        height: 8px;
     }
     .progress-line {
         font: 0.75rem/1.4 var(--mono);
@@ -470,19 +414,6 @@
         margin-right: 5px;
         vertical-align: middle;
         background: var(--swatch);
-    }
-    .next-checkpoint {
-        display: grid;
-        gap: 8px;
-    }
-    .next-checkpoint[hidden] {
-        display: none;
-    }
-    .next-checkpoint h2 {
-        margin: 0;
-    }
-    .next-checkpoint .bar {
-        height: 8px;
     }
     .checkpoint-note {
         margin: -4px 0 12px;
@@ -708,15 +639,15 @@
             <label class="archive-select">Archived pipeline
                 <select id="archiveSelect"></select>
             </label>
-            <p class="muted checkpoint-note">The earlier experiment pipelines (tools/dashboard/pipelines/), each as its steps
-                and the work that appeared during it. Their runs moved to build/archive/runs/ (build/archive/MOVED.md).</p>
+            <p class="muted checkpoint-note">The earlier experiment pipelines (tools/dashboard/pipelines/), each as it was
+                planned - its phases and steps, and what tracked each. Their runs moved to build/archive/runs/
+                (build/archive/MOVED.md).</p>
         </section>
         <section id="pipelineSection" hidden>
             <div class="pipeline-head">
                 <h2 id="pipelineTitle">Pipeline</h2>
                 <span id="pipelineFacts" class="facts"></span>
             </div>
-            <div class="bar overall"><div id="pipelineBar"></div></div>
             <div id="phases" class="phases"></div>
         </section>
     </div>
@@ -730,21 +661,6 @@
                 model - the newest first; UTMOS, 1-5 (real recordings score about 4.1-4.3).</p>
             <div id="trainSamples" class="checkpoints"></div>
         </section>
-        <section id="nextSection" class="next-checkpoint" hidden>
-            <div class="pipeline-head">
-                <h2>Next checkpoint</h2>
-                <span id="nextWhen" class="facts"></span>
-            </div>
-            <div class="bar"><div id="nextBar"></div></div>
-            <div id="nextLine" class="progress-line"></div>
-        </section>
-        <section id="checkpointSection" hidden>
-            <h2>Checkpoint samples (the monitor)</h2>
-            <p class="muted checkpoint-note">The experiment runs' checkpoints (tools/dashboard/monitor.js, build/nn/runs/ -
-                build/nn/samples-progress/), each rendered and scored (UTMOS, 1-5; real recordings score about 4.1-4.3) as
-                it's saved. Newest first.</p>
-            <div id="checkpoints" class="checkpoints"></div>
-        </section>
         <section>
             <h2>Other samples</h2>
             <div id="samples" class="samples"><p class="empty">No samples yet.</p></div>
@@ -753,7 +669,7 @@
     <div class="tab-panel" id="panel-runs" role="tabpanel" aria-labelledby="tab-runs" hidden>
         <section>
             <h2 id="runsTitle">Runs</h2>
-            <div id="runs"><p class="empty">Looking for runs in build/nn/runs/...</p></div>
+            <div id="runs" class="runs"><p class="empty">Looking for make train's runs...</p></div>
         </section>
         <section>
             <h2 id="chartsTitle">Curves</h2>

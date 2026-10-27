@@ -21,15 +21,11 @@ tensor's name, shape, encoding, and byte offsets, with the model config, the voc
 and the inference defaults (the pause threshold, and the formant bandwidth scale - a sharpening of the network's
 over-smoothed bandwidths, chosen on the validation sentences).
 
-The quantization is the only lossy step - quantized_model() gives the PyTorch model with the exported weights
-(dequantized), which lib/model.js must match.
+The quantization (quant.py) is the only lossy step - quantized_model() gives the PyTorch model with the exported
+weights (dequantized), which lib/model.js must match.
 
 The manifest's training record (the checkpoint's step, validation, and arguments) has its paths relative to the
 repository root.
-
-Lower precision (--bits 6, 5, 4, and --group for per-group scales) uses quant.py's 'packed' encoding: the values
-packed at the bit width, float16 scales per row or per group (the manifest entry's bits and group). The default (8 bits
-per row) is the 'int8' format above, unchanged.
 """
 
 import argparse
@@ -44,26 +40,22 @@ import torch
 
 from . import ROOT, params, quant
 from .data import DATA_DIR, ArcticData
-from .model import STYLE_NAMES, build_model, parameter_count
+from .model import STYLE_NAMES, MultiModel, core_parameter_count, parameter_count
 
 
 OUT_DIR = os.path.join(ROOT, 'data', 'nn')
 FORMAT_VERSION = 1
 
-# Tensors smaller than this stay float32
-MIN_QUANTIZED = 1024
 
-
-# Load a checkpoint's model (on the CPU, in eval mode) - (model, checkpoint)
+# Load a checkpoint's model (on the CPU, in eval mode) - (model, checkpoint); the multi-speaker model only (config
+# 'kind': 'multi' - the single-speaker model and its trainer, nn/train.py, are in git history)
 def load_model(path, device='cpu'):
     state = torch.load(path, map_location=device, weights_only=False)
-    model = build_model(state['config'], priors=state.get('priors'))
+    if state['config'].get('kind') != 'multi':
+        raise ValueError('only the multi-speaker model (config kind "multi") is supported')
+    model = MultiModel(state['config'], priors=state.get('priors'))
     model.load_state_dict(state['model'])
     return model.to(device).eval(), state
-
-
-# The tensors that stay float32 whatever their size
-FLOAT_TENSORS = ('eq_table',)
 
 
 # The exported tensors of a model's state - {name: tensor} - the whole speaker table, and the channel equalizers as a
@@ -78,33 +70,13 @@ def exported_tensors(model):
     return tensors
 
 
-# Quantize a tensor per output channel (dim 0) - (int8 values, float32 scales)
-def quantize(tensor):
-    rows = tensor.reshape(tensor.shape[0], -1).numpy().astype(numpy.float64)
-    scales = numpy.abs(rows).max(axis=1) / 127
-    scales[scales == 0] = 1.0
-    values = numpy.clip(numpy.round(rows / scales[:, None]), -127, 127).astype(numpy.int8)
-    return values, scales.astype(numpy.float32)
-
-
-# Whether a tensor is quantized
-def is_quantized(tensor, name=None):
-    return tensor.dim() >= 2 and tensor.numel() >= MIN_QUANTIZED and name not in FLOAT_TENSORS
-
-
-# A copy of a model with its weights quantized and dequantized - the exported model, in PyTorch (bits and group - the
-# export's precision, quant.py)
-def quantized_model(model, bits=8, group=0):
+# A copy of a model with its weights quantized and dequantized - the exported model, in PyTorch
+def quantized_model(model):
     model = copy.deepcopy(model)
     state = model.state_dict()
     for name, tensor in exported_tensors(model).items():
-        if is_quantized(tensor, name):
-            if quant.is_int8(bits, group):
-                values, scales = quantize(tensor)
-                state[name] = torch.tensor(values.astype(numpy.float32) * scales[:, None]).reshape(tensor.shape)
-            else:
-                values, scales = quant.quantize_array(tensor.numpy(), bits, group)
-                state[name] = torch.tensor(quant.dequantize_array(values, scales, tuple(tensor.shape), group))
+        if quant.is_quantized(tensor, name):
+            state[name] = torch.tensor(quant.dequantize(*quant.quantize(tensor), tensor.shape))
     model.load_state_dict(state)
     return model
 
@@ -171,28 +143,16 @@ def relative_paths(value):
     return value
 
 
-# Export a model - writes <out>/<voice>.bin and <voice>.json, returns the manifest (bits and group - the weights'
-# precision, quant.py; the default is the 8-bit per-row 'int8' format)
-def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0, bandwidth_scale=1.0, bits=8, group=0):
+# Export a model - writes <out>/<voice>.bin and <voice>.json, returns the manifest
+def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0, bandwidth_scale=1.0):
     os.makedirs(out_dir, exist_ok=True)
-    if not quant.is_int8(bits, group):
-        extra = {**(extra or {}), 'quantization': {'bits': bits, 'group': group}}
     chunks = []
     offset = 0
     tensors = []
     for name, tensor in exported_tensors(model).items():
         entry = {'name': name, 'shape': list(tensor.shape)}
-        if is_quantized(tensor, name) and not quant.is_int8(bits, group):
-            values, scales = quant.quantize_array(tensor.numpy(), bits, group)
-            data = quant.pack(values, bits)
-            scale_data = scales.astype('<f2').tobytes()
-            entry.update({'encoding': 'packed', 'bits': bits, 'group': quant.group_size(values.shape[1], group),
-                          'offset': offset, 'scaleOffset': offset + _aligned(len(data))})
-            chunks.append(data + b'\0' * (_aligned(len(data)) - len(data)))
-            chunks.append(scale_data + b'\0' * (_aligned(len(scale_data)) - len(scale_data)))
-            offset += _aligned(len(data)) + _aligned(len(scale_data))
-        elif is_quantized(tensor, name):
-            values, scales = quantize(tensor)
+        if quant.is_quantized(tensor, name):
+            values, scales = quant.quantize(tensor)
             data = values.tobytes()
             entry.update({'encoding': 'int8', 'offset': offset, 'scaleOffset': offset + _aligned(len(data))})
             chunks.append(data + b'\0' * (_aligned(len(data)) - len(data)))
@@ -218,7 +178,7 @@ def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0, bandwidt
         'eq': eq, 'remap': token_remap(vocab, counts), 'vocab': vocab,
         'inference': {'pauseThreshold': 0.5, 'bandwidthScale': bandwidth_scale},
         'parameterCount': parameter_count(model),
-        'parameterCountCore': parameter_count(model) - model.speaker.weight.numel() - model.eq_free.numel(),
+        'parameterCountCore': core_parameter_count(model),
         'bytes': len(binary), 'tensors': tensors,
         'training': {'step': state.get('step'), 'val': state.get('val'), 'args': relative_paths(state.get('args'))},
         'license': 'Trained on LibriTTS-R (CC BY 4.0), CMU ARCTIC (free use with attribution), and CREMA-D (a Produced '
@@ -245,16 +205,13 @@ def main(argv=None):
     parser.add_argument('--speaker', default=None, help='the default speaker and its channel equalizer (default: arctic-bdl)')
     parser.add_argument('--bandwidth-scale', type=float, default=1.0,
                         help='the default formant bandwidth scale at inference (lib/model.js speakFrames)')
-    parser.add_argument('--bits', type=int, default=8, help='the weights\' bit width (quant.py; default 8)')
-    parser.add_argument('--group', type=int, default=0, help='per-group scales of this many weights (default 0: per row)')
     args = parser.parse_args(argv)
     model, state = load_model(args.checkpoint)
     speaker = state['speakers'].index(args.speaker if args.speaker else 'arctic-bdl')
-    manifest = export(model, state, args.voice, args.out, speaker=speaker, bandwidth_scale=args.bandwidth_scale, bits=args.bits,
-                      group=args.group)
+    manifest = export(model, state, args.voice, args.out, speaker=speaker, bandwidth_scale=args.bandwidth_scale)
     sizes = {suffix: os.path.getsize(os.path.join(args.out, f'{args.voice}.{suffix}')) for suffix in ('bin', 'json')}
     print(json.dumps({'voice': args.voice, 'parameters': manifest['parameterCount'], 'bytes': sizes,
-                      'quantized': sum(1 for tensor in manifest['tensors'] if tensor['encoding'] in ('int8', 'packed')),
+                      'quantized': sum(1 for tensor in manifest['tensors'] if tensor['encoding'] == 'int8'),
                       'float32': sum(1 for tensor in manifest['tensors'] if tensor['encoding'] == 'float32'),
                       'remap': manifest['remap']}))
     return 0

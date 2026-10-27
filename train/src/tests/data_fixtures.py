@@ -7,6 +7,7 @@ synthetic recordings and phone labels that match the front end's tokens
 """
 
 import contextlib
+import io
 import os
 import sys
 import types
@@ -15,6 +16,21 @@ import numpy
 import soundfile
 
 from picovox_train import frontend
+
+
+class FakeResponse(io.BytesIO):
+    """A urlopen response - its body, status, and Content-Length header (if length)"""
+
+    def __init__(self, body, status=200, length=True):
+        super().__init__(body)
+        self.status = status
+        self.headers = {'Content-Length': str(len(body))} if length else {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.close()
 
 
 class FakePool:
@@ -40,6 +56,9 @@ class FakePool:
 
     def map(self, function, iterable, chunksize=1):
         return list(self.imap(function, iterable, chunksize))
+
+    def imap_unordered(self, function, iterable, chunksize=1):
+        return self.imap(function, iterable, chunksize)
 
 
 # Fake modules in sys.modules (by name) for the context - only those names restored after (unittest.mock.patch.dict would

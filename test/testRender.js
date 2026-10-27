@@ -2,7 +2,7 @@
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 import {DEFAULTS, FLOOR_DB, NAMES, PARAMETERS} from '../lib/params.js';
-import {createRenderer, frameValues, noiseFftSize, render, sampleCount} from '../lib/render.js';
+import {concatBlocks, createRenderer, frameValues, noiseFftSize, render, sampleCount} from '../lib/render.js';
 import {strict as assert} from 'node:assert';
 import test from 'node:test';
 
@@ -119,11 +119,7 @@ test('render, onBlock', () => {
     const samples = render(frames, {'sampleRate': 16000, 'blockSize': 1000, 'onBlock': (block) => blocks.push(block.slice())});
     assert(blocks.slice(0, -1).every((block) => block.length === 1000));
     assert(blocks[blocks.length - 1].length <= 1000);
-    const joined = new Float32Array(samples.length);
-    blocks.reduce((offset, block) => {
-        joined.set(block, offset);
-        return offset + block.length;
-    }, 0);
+    const joined = concatBlocks(blocks);
     assert.deepEqual(joined, samples);
 });
 
@@ -140,11 +136,7 @@ test('render, voicing onsets and offsets', () => {
             renderer.push(frame);
         }
         renderer.end();
-        const streamed = new Float32Array(whole.length);
-        blocks.reduce((offset, block) => {
-            streamed.set(block, offset);
-            return offset + block.length;
-        }, 0);
+        const streamed = concatBlocks(blocks);
         assert.deepEqual(streamed, whole);
         const energy = (start, end) => whole.slice(start, end).reduce((sum, value) => sum + value * value, 0);
         assert(energy(120 * (onset + 2), 120 * (onset + 28)) > 1e-2);
@@ -189,11 +181,7 @@ test('createRenderer', () => {
     const total = renderer.end();
     assert.equal(total, whole.length);
     assert(blocks.length > beforeEnd);
-    const joined = new Float32Array(total);
-    blocks.reduce((offset, block) => {
-        joined.set(block, offset);
-        return offset + block.length;
-    }, 0);
+    const joined = concatBlocks(blocks);
     assert.deepEqual(joined, whole);
 
     // Frames pushed after the end render nothing

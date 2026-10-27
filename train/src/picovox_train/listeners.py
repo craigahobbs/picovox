@@ -4,17 +4,17 @@
 """
 The listener-model panel - neural listeners that score WAV files, one JSON object per file (JSON lines) on stdout.
 
-    build/venv-listeners/bin/python -I train/src/picovox_train/listeners.py [--no-mos] [--no-embedding] [--no-emotion]
+    build/venv-listeners/bin/python -I train/src/picovox_train/listeners.py [--no-mos] [--no-embedding] [--emotion]
         [--device auto|cpu|mps] [--files-from list.txt|-] file.wav ...
 
-Each line is {"file", "seconds", "mos", "embedding", "emotion"}:
+Each line is {"file", "seconds", "mos", "embedding"}, and "emotion" with --emotion:
 
 - mos - UTMOS22 strong (the UTokyo-SaruLab VoiceMOS Challenge 2022 system, through torch.hub tarepan/SpeechMOS), a
   predicted mean opinion score of naturalness from 1 (bad) to 5 (excellent).
 - embedding - the 192-dimension ECAPA-TDNN speaker embedding (speechbrain/spkrec-ecapa-voxceleb); compare two with
   cosine similarity (same speaker is typically above 0.5-0.6).
-- emotion - emotion2vec+ base (emotion2vec/emotion2vec_plus_base) class probabilities: angry, disgusted, fearful,
-  happy, neutral, other, sad, surprised, unknown.
+- emotion (--emotion; the panel doesn't score it) - emotion2vec+ base (emotion2vec/emotion2vec_plus_base) class
+  probabilities: angry, disgusted, fearful, happy, neutral, other, sad, surprised, unknown.
 
 Audio of any sample rate is mixed to mono and resampled to 16 kHz. Files longer than --chunk-seconds are scored in
 chunks (MOS and emotion averaged by duration, embeddings averaged). All models are loaded once per run. Model files
@@ -59,7 +59,7 @@ def parse_args(argv):
                         help='read more WAV paths, one per line, from a file (- for stdin)')
     parser.add_argument('--no-mos', action='store_true', help='skip the UTMOS naturalness score')
     parser.add_argument('--no-embedding', action='store_true', help='skip the ECAPA speaker embedding')
-    parser.add_argument('--no-emotion', action='store_true', help='skip the emotion2vec+ emotion probabilities')
+    parser.add_argument('--emotion', action='store_true', help='score the emotion2vec+ emotion probabilities too')
     parser.add_argument('--device', default='auto', choices=['auto', 'cpu', 'mps'],
                         help='the torch device (default auto - mps on Apple silicon, else cpu)')
     parser.add_argument('--chunk-seconds', type=float, default=20, help='score longer files in chunks of this length')
@@ -191,7 +191,7 @@ def main(argv=None):
         models['mos'] = load_utmos(args.device)
     if not args.no_embedding:
         models['embedding'] = load_ecapa(args.device)
-    if not args.no_emotion:
+    if args.emotion:
         models['emotion'] = load_emotion(args.emotion_model, args.device)
     output = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
     for path in args.files:

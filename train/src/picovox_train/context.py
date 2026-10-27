@@ -53,7 +53,6 @@ words' other windows in the books, contextlabels.py), "transferShare" of a batch
 
 import argparse
 import collections
-import datetime
 import gzip
 import hashlib
 import json
@@ -65,16 +64,13 @@ import time
 
 import numpy
 
-from . import ROOT, g2pmodel
-from .g2p import (EOS, LETTERS, MAX_WORD, MODULE_LINE_LENGTH, PHONES, UPSAMPLE, build_model, learning_rate, make_batch,
+from . import RECIPE_PATH, ROOT, g2pmodel
+from .g2p import (EOS, LETTERS, MAX_WORD, MODULE_LINE_LENGTH, PHONES, UPSAMPLE, build_model, learning_rate, log_line, make_batch,
                   model_config, quantize_array, quantize_state, weight_bytes)
 
 
-CONFIG_PATH = os.path.join(ROOT, 'data', 'nn', 'train.json')
-
-
 # The recipe's settings - data/nn/train.json's "context" (labels, g2p, network, export, gate)
-def load_settings(path=CONFIG_PATH):
+def load_settings(path=RECIPE_PATH):
     with open(path, encoding='utf-8') as file:
         return json.load(file)['context']
 
@@ -100,15 +96,6 @@ G2P_SETTINGS = {key: value for key, value in RECIPE['g2p'].items() if key not in
 
 # The reading stage's new tensors (their learning rate is the stage's times headRate)
 HEADS = ('reading', 'ambiguity_layer', 'ambiguity')
-
-
-# A progress line - stderr, and the log file if given
-def log_line(path, text):
-    line = f'{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} {text}'
-    print(line, file=sys.stderr, flush=True)
-    if path:
-        with open(path, 'a', encoding='utf-8') as file:
-            file.write(line + '\n')
 
 
 # The labels (contextlabels.py labels)
@@ -598,11 +585,11 @@ def train_student(labels_path, fold, settings, log, states):
     return train_context(labels_of(labels_path, fold), settings, lambda text: log_line(log, f'{prefix}{text}'), teachers)
 
 
-def train_distilled(labels_path, fold, settings, log, jobs=1):
+def train_distilled(labels_path, settings, log, jobs=1):
     """The recipe's context network - its teachers ("teachers" of them, each its own seed; in jobs worker processes),
     then the network distilled from them (train_student) - the model"""
-    tasks = [(labels_path, fold, seed, {**CONTEXT_SETTINGS, **settings}, log) for seed in teacher_seeds(settings)]
-    return train_student(labels_path, fold, settings, log, run_tasks(teacher_task, tasks, jobs))
+    tasks = [(labels_path, None, seed, {**CONTEXT_SETTINGS, **settings}, log) for seed in teacher_seeds(settings)]
+    return train_student(labels_path, None, settings, log, run_tasks(teacher_task, tasks, jobs))
 
 
 def evaluate_context(slot_of, labels, split='heldout'):
@@ -940,15 +927,15 @@ def command_train_g2p(args):
 def command_train_context(args):
     """Train the context network (its teachers first - in -j worker processes) - <out> (a checkpoint)"""
     import torch  # pylint: disable=import-outside-toplevel
-    labels = labels_of(args.labels, args.fold)
+    labels = load_labels(args.labels)
     overrides = json.loads(args.settings) if args.settings else {}
-    model = train_distilled(args.labels, args.fold, overrides, args.log, args.jobs)
+    model = train_distilled(args.labels, overrides, args.log, args.jobs)
     torch.save({'config': model.config, 'state': model.state_dict(), 'settings': {**CONTEXT_SETTINGS, **overrides}}, args.out)
     quantizer = WeightQuantizer(model, EXPORT)
     quantizer.quantize()
     result = evaluate_context(lambda windows: context_predict(model, windows), labels)
     _, line = gate_result(result, labels)
-    log_line(args.log, f'train-context{"" if args.fold is None else f" fold {args.fold}"}: {line}; {describe_heldout(result)}')
+    log_line(args.log, f'train-context: {line}; {describe_heldout(result)}')
     with open(os.path.splitext(args.out)[0] + '.json', 'w', encoding='utf-8') as file:
         json.dump(result, file, indent=1)
     return 0
@@ -1005,8 +992,8 @@ def command_cross_validate(args):
 
 
 def command_folds(args):
-    """The cross-validated gate - the held-out results of every fold's context network (train-context --fold, the
-    .json beside each checkpoint) pooled"""
+    """The cross-validated gate - the held-out results of every fold's context network (cross-validate's
+    <out>/fold-<k>.json) pooled"""
     pooled = {'words': collections.defaultdict(lambda: {'right': 0, 'total': 0, 'majority': 0}), 'sources': {}}
     for path in args.results:
         with open(path, encoding='utf-8') as file:
@@ -1029,7 +1016,7 @@ def main(argv=None):
     g2p_parser.add_argument('--labels', required=True)
     g2p_parser.add_argument('--init', required=True, help='the trained G2P checkpoint')
     g2p_parser.add_argument('--out', required=True)
-    g2p_parser.add_argument('--config', default=None, help='g2p.py\'s settings (default data/nn/train.json)')
+    g2p_parser.add_argument('--config', default=RECIPE_PATH, help='g2p.py\'s settings')
     g2p_parser.add_argument('--settings', help='JSON settings over G2P_SETTINGS')
     g2p_parser.add_argument('--log')
     g2p_parser.set_defaults(func=command_train_g2p)
@@ -1037,7 +1024,6 @@ def main(argv=None):
     context_parser.add_argument('--labels', required=True)
     context_parser.add_argument('--out', required=True)
     context_parser.add_argument('--settings', help='JSON settings over CONTEXT_SETTINGS')
-    context_parser.add_argument('--fold', type=int, help='hold out this fold of the aligned speakers (0 to FOLDS - 1)')
     context_parser.add_argument('-j', '--jobs', type=int, default=1, help='teachers at once (worker processes)')
     context_parser.add_argument('--log')
     context_parser.set_defaults(func=command_train_context)
@@ -1072,9 +1058,6 @@ def main(argv=None):
     gate_parser.add_argument('--out')
     gate_parser.set_defaults(func=command_gate)
     args = parser.parse_args(argv)
-    if getattr(args, 'config', 'unset') is None:
-        from . import g2p  # pylint: disable=import-outside-toplevel
-        args.config = g2p.CONFIG_PATH
     return args.func(args)
 
 

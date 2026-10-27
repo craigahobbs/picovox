@@ -34,55 +34,18 @@ function plain(frames) {
 }
 
 
-// A float16's bits of a normal number (exact for the test's values)
-function floatToHalf(value) {
-    const sign = value < 0 ? 0x8000 : 0;
-    const exponent = Math.floor(Math.log2(Math.abs(value)));
-    return sign | ((exponent + 15) << 10) | Math.round((Math.abs(value) / 2 ** exponent - 1) * 1024);
-}
-
-
 test('loadModel, encodings', () => {
-    // A float32 tensor, an int8 tensor with per-row scales, and packed tensors (4 and 3 bits, float16 scales per row or
-    // per group) - in one buffer
-    const buffer = new ArrayBuffer(128);
+    // A float32 tensor and an int8 tensor with per-row scales - in one buffer
+    const buffer = new ArrayBuffer(32);
     new Float32Array(buffer, 0, 3).set([0.5, -1.25, 3]);
     new Int8Array(buffer, 16, 6).set([1, -2, 3, 127, -128, 0]);
     new Float32Array(buffer, 24, 2).set([0.5, 2]);
-
-    // Packed 4-bit, 2 rows of 3, a scale per row: unsigned values offset by 8, LSB first
-    const packed4 = [[-8, 0, 7], [1, -1, 2]];
-    const bytes4 = new Uint8Array(buffer, 32, 3);
-    packed4.flat().forEach((value, index) => {
-        bytes4[index >> 1] |= (value + 8) << (4 * (index & 1));
-    });
-    new Uint16Array(buffer, 36, 2).set([floatToHalf(0.25), floatToHalf(-3)]);
-
-    // Packed 3-bit, 1 row of 5 in groups of 2 (3 groups): fields cross byte boundaries; the scales are a normal, a
-    // subnormal, and an infinity
-    const packed3 = [3, -4, 1, 0, -1];
-    const bytes3 = new Uint8Array(buffer, 40, 2);
-    let bit = 0;
-    for (const value of packed3) {
-        for (let ix = 0; ix < 3; ix++) {
-            bytes3[(bit + ix) >> 3] |= (((value + 4) >> ix) & 1) << ((bit + ix) & 7);
-        }
-        bit += 3;
-    }
-    new Uint16Array(buffer, 44, 3).set([floatToHalf(1.5), 0x8001, 0x7c00]);
-
-    // A NaN scale
-    new Uint8Array(buffer, 50, 1).set([0x9]);
-    new Uint16Array(buffer, 52, 1).set([0x7e00]);
 
     const manifest = {
         'vocab': ['<pad>', '<unk>', '<bos>', '_'],
         'tensors': [
             {'name': 'float', 'shape': [3], 'offset': 0},
-            {'name': 'int8', 'shape': [2, 3], 'offset': 16, 'encoding': 'int8', 'scaleOffset': 24},
-            {'name': 'packed4', 'shape': [2, 3], 'offset': 32, 'encoding': 'packed', 'bits': 4, 'group': 3, 'scaleOffset': 36},
-            {'name': 'packed3', 'shape': [1, 5], 'offset': 40, 'encoding': 'packed', 'bits': 3, 'group': 2, 'scaleOffset': 44},
-            {'name': 'nan', 'shape': [1, 1], 'offset': 50, 'encoding': 'packed', 'bits': 4, 'group': 1, 'scaleOffset': 52}
+            {'name': 'int8', 'shape': [2, 3], 'offset': 16, 'encoding': 'int8', 'scaleOffset': 24}
         ],
         'config': {'kind': 'single'}
     };
@@ -93,10 +56,6 @@ test('loadModel, encodings', () => {
     assert.deepEqual(Array.from(model.tensors.float.data), [0.5, -1.25, 3]);
     assert.deepEqual(model.tensors.float.shape, [3]);
     assert.deepEqual(Array.from(model.tensors.int8.data), [0.5, -1, 1.5, 254, -256, 0]);
-    assert.deepEqual(Array.from(model.tensors.packed4.data), [-2, 0, 1.75, -3, 3, -6]);
-    const subnormal = -(2 ** -24);
-    assert.deepEqual(Array.from(model.tensors.packed3.data), [4.5, -6, Math.fround(subnormal), -0, -Infinity]);
-    assert(Number.isNaN(model.tensors.nan.data[0]));
 });
 
 

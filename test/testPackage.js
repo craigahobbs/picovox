@@ -2,7 +2,7 @@
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 import * as voiceModule from '../lib/models/voiceModel.js';
-import {decodeBase64, loadPackagedModel, packagedWeights} from '../lib/package.js';
+import {loadPackagedModel, packagedWeights} from '../lib/package.js';
 import {Buffer} from 'node:buffer';
 import {strict as assert} from 'node:assert';
 import test from 'node:test';
@@ -24,12 +24,6 @@ function base64Lines(bytes) {
 const weights = new Uint8Array(new Float32Array([1.5, -2, 0.25, 8]).buffer);
 const manifest = {'vocab': [], 'tensors': [{'name': 'weight', 'shape': [2, 2], 'offset': 0}], 'config': {'kind': 'single'}};
 
-
-test('package.decodeBase64', () => {
-    assert.deepEqual(decodeBase64('AAEC/w=='), Uint8Array.from([0, 1, 2, 255]));
-    assert.deepEqual(decodeBase64(' AA\nEC\r\n/w==\t'), Uint8Array.from([0, 1, 2, 255]));
-    assert.deepEqual(decodeBase64(''), new Uint8Array(0));
-});
 
 
 test('package.packagedWeights', async () => {

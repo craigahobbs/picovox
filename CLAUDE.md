@@ -24,19 +24,20 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   modules (`g2pModel.js`, `voiceModel.js`) that `make train` reproduces (`picovox_train.context export`,
   `picovox_train.package`).
 - `nn/js/` - Node development tools on the package's modules (not part of the package): `speak.js` (text to WAV with an
-  exported model - the listener panel's renderer), `voices.js` (the designed voices, `data/nn/voices.json`) and
-  `voicescheck.js`, `unpack.js`, `packagecheck.js`, `pronounceLines.js` and `tokenizeLines.js` (for the Python checks).
+  exported or packaged model - the listener panel's renderer), `loadVoice.js` (a model's loader, for `speak.js` and
+  `tools/trainsamples.js`), `unpack.js`, `packagecheck.js`, `pronounceLines.js` and `tokenizeLines.js` (for the Python
+  checks).
 - `train/` - the Python training pipeline, the package `picovox_train` (`train/src/picovox_train/`; a python-build
   package - its unit tests in `train/src/tests/`): the front end's port (`frontend.py`, `g2pmodel.py`, `vocab.json`),
-  the G2P and heteronym models (`g2p.py`, `heteronyms.py`, `context.py`, `contextlabels.py`, `readings.py`), the data
-  (`corpora.py` - the corpus download, `books.py` - the pinned book texts, `data.py`, `align.py`, `multi.py`,
-  `cremad.py`), the differentiable synthesizer (`params.py`, `dsynth.py`, `lf.py`, `rng.py`, `spectral.py`), the model
-  and its training (`model.py`, `trainmulti.py`, `losses.py`, `discriminator.py`, `quant.py`, `optim.py` - the training
-  step's options), distillation (`distill.py`), export (`export.py`, `package.py`, `synthesize.py`), the listener panel
-  (`panel.py`, and the listener models, `listeners.py` - `build/venv-listeners`), and the pipeline's tools (`gpulock.py`,
-  `smoke.py`, `stepcheck.py`).
+  the G2P and heteronym models (`g2p.py`, `g2paudit.py`, `heteronyms.py`, `context.py`, `contextlabels.py`,
+  `readings.py`), the data (`corpora.py` - the corpus download, `books.py` - the pinned book texts, `data.py`,
+  `align.py`, `multi.py`, `cremad.py`), the differentiable synthesizer (`params.py`, `dsynth.py`, `lf.py`, `rng.py`,
+  `spectral.py`), the model and its training (`model.py`, `trainmulti.py`, `losses.py`, `discriminator.py`, `quant.py`,
+  `optim.py` - the training step's options), distillation (`distill.py`), export (`export.py`, `package.py`,
+  `synthesize.py`), the listener panel (`panel.py`, and the listener models, `listeners.py` - `build/venv-listeners`),
+  and the pipeline's tools (`gpulock.py`, `smoke.py`, `stepcheck.py`).
   `picovox_train/__init__.py` documents each module. `make train` runs it from its source (`PYTHONPATH=train/src`) in
-  the training environments (`build/venv-nn`, `venv-listeners`, `venv-pos`, `venv-analysis` - `requirements/*.txt`).
+  the training environments (`build/venv-nn`, `venv-listeners`, `venv-pos` - `requirements/*.txt`).
 - `tools/` - the training dashboard (`dashboard/`), the performance lab (`perf/` - the playback pipeline timed on a
   phone, and under Node without a JIT), `heteronyms.js` (the heteronym and names regression sets), make train's
   bookkeeping (`trainstage.sh`, `trainutil.sh` - the stage events and logs, the utilization samples, `trainpower.sh`)
@@ -47,8 +48,9 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   (`testTrainDashboard.js`, `testTrainSamplesIndex.js`, `testTrainStages.js`); `parity-inputs.json` - the parity checks'
   inputs (below).
 - `data/` - the CMU Pronouncing Dictionary (G2P training only), `data/nn/` (the recipe `train.json`, the pinned book
-  texts `books.json`, the speaker pool, the G2P and heteronym data, the designed voices, the single-speaker exports
-  `slt`/`bdl`), and `data/targets/` (the four labeled ARCTIC speakers' analysis settings).
+  texts `books.json`, the speaker pool, the G2P and heteronym data, the designed voices (`voices.json` - the design
+  record of `lib/synthesis.js`'s voice and style tables), the single-speaker exports `slt`/`bdl`), and `data/targets/`
+  (the four labeled ARCTIC speakers' analysis settings).
 - `paper/` - the paper (`paper.md`; `index.html` renders it with MarkdownUp).
 
 ## javascript-build

@@ -40,8 +40,8 @@ import random
 import re
 import sys
 
-from . import g2p
-from .frontend import ROOT
+from . import ROOT, g2p
+from .g2p import log_line
 
 
 # The audit's partitions - REPEATS partitions of FOLDS folds (every word held out REPEATS times)
@@ -59,15 +59,6 @@ MARGIN = 3.0
 # The controls - words every fold model agrees with, in the books at least CONTROL_COUNT times, with one pronunciation
 CONTROL_COUNT = 20
 CONTROL_CANDIDATES = 400
-
-
-# A progress line
-def log_line(path, text):
-    line = f'{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} {text}'
-    print(line, file=sys.stderr, flush=True)
-    if path:
-        with open(path, 'a', encoding='utf-8') as file:
-            file.write(line + '\n')
 
 
 # A phone string without stress

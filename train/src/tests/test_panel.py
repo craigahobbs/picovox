@@ -36,8 +36,7 @@ class TestPanel(unittest.TestCase):
         self.assertEqual(scores, {'a.wav': {'file': 'a.wav', 'mos': 3.0, 'embedding': [1.0, 0.0]},
                                   'b.wav': {'file': 'b.wav', 'mos': 4.0, 'embedding': [1.0, 0.0]}})
         command, kwargs = calls[0]
-        self.assertEqual(command, [panel.LISTENERS_PYTHON, '-I', panel.LISTENERS_SCRIPT, '--device', 'cpu', '--no-emotion',
-                                   '--files-from', '-'])
+        self.assertEqual(command, [panel.LISTENERS_PYTHON, '-I', panel.LISTENERS_SCRIPT, '--device', 'cpu', '--files-from', '-'])
         self.assertTrue(os.path.isfile(panel.LISTENERS_SCRIPT))
         self.assertEqual(kwargs['input'], 'a.wav\nb.wav')
 

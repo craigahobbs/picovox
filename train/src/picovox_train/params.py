@@ -191,39 +191,6 @@ def _stack(columns, like):
 
 
 #
-# The bandwidth transform of parameter values ([..., COUNT] torch tensors or numpy arrays, returned as copies) - the
-# inference default (the export's bandwidthScale); the voice and style transforms are lib/transforms.js's
-#
-
-def _copy(values):
-    return values.clone() if hasattr(values, 'clone') else values.copy()
-
-
-# Scale the formant bandwidths (b1-b5) - below 1 sharpens the resonances (a network trained by spectral regression
-# over-smooths them), above 1 dulls them
-def bandwidth_scale(values, scale, names=('b1', 'b2', 'b3', 'b4', 'b5')):
-    out = _copy(values)
-    for name in names:
-        out[..., INDEX[name]] = out[..., INDEX[name]] * scale
-    return out
-
-
-#
-# Parameter files - JSON {"frameRate": 200, "names": [...], "frames": [[value, ...], ...], "eq": [dB, ...] (optional)},
-# shared with nn/js
-#
-
-# Write parameter frames (a [T, COUNT] array-like) to a JSON parameter file, with an optional channel equalizer (dB)
-def write_params(path, frames, eq=None):
-    rows = [[round(float(value), 4) for value in row[:COUNT]] for row in frames]
-    data = {'frameRate': FRAME_RATE, 'names': NAMES, 'frames': rows}
-    if eq is not None:
-        data['eq'] = [round(float(value), 3) for value in eq]
-    with open(path, 'w', encoding='utf-8') as file:
-        json.dump(data, file, separators=(',', ':'))
-
-
-#
 # The JavaScript copy - lib/params.js
 #
 

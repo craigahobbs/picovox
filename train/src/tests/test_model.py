@@ -50,6 +50,9 @@ class TestModel(unittest.TestCase):
 
     def test_parameter_count(self):
         self.assertEqual(model.parameter_count(torch.nn.Linear(3, 2)), 8)
+        network = model.MultiModel(tiny_config(speakers=4))
+        self.assertEqual(model.core_parameter_count(network),
+                         model.parameter_count(network) - 4 * network.config['speakerDim'] - 4 * params.EQ_BAND_COUNT)
 
     def test_multi_model(self):
         network = model.MultiModel(tiny_config(), priors={'f0': 150})
@@ -151,10 +154,3 @@ class TestModel(unittest.TestCase):
         vector = network.infer(tokens, speaker_vector=network.speaker_vector(torch.tensor([1, 1])), emotion=torch.tensor([3, 3]),
                                intensity=torch.tensor([1.0, 1.0]))
         self.assertTrue(torch.allclose(vector['values'], styled['values']))
-
-    def test_build_model(self):
-        self.assertIsInstance(model.build_model(tiny_config(), dropout=0.0), model.MultiModel)
-        with self.assertRaises(ValueError):
-            model.build_model({'kind': 'single'})
-        with self.assertRaises(ValueError):
-            model.build_model(None)

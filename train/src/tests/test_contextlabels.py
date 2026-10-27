@@ -18,24 +18,8 @@ import unittest.mock
 from picovox_train import contextlabels, g2p
 from picovox_train.books import load_pins
 
+from . import data_fixtures
 from .helpers import captured
-
-
-class FakePool:
-    """multiprocessing.Pool in the test's process (so the workers' code is measured)"""
-
-    def __init__(self, processes, initializer, initargs):
-        self.processes = processes
-        initializer(*initargs)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
-
-    def imap(self, function, items, chunksize=1):  # pylint: disable=unused-argument
-        return map(function, items)
 
 
 # A fake spaCy (build/venv-pos only): the tagger tags "read" VBD after "had" or "I", else VB, "lives" NNS, other words NN
@@ -228,7 +212,7 @@ class TestContextLabels(unittest.TestCase):
         with unittest.mock.patch.object(contextlabels, 'LABEL_DIR', labels), \
                 unittest.mock.patch.object(contextlabels, 'LIBRITTS_DIR', audio), \
                 unittest.mock.patch.object(contextlabels, 'candidate_words', lambda spec: tiny_words()), \
-                unittest.mock.patch.object(contextlabels.multiprocessing, 'Pool', FakePool), captured() as (stdout, _):
+                unittest.mock.patch.object(contextlabels.multiprocessing, 'Pool', data_fixtures.FakePool), captured() as (stdout, _):
             self.assertEqual(len(contextlabels.libritts_utterances()), 3)
             self.assertEqual(contextlabels.main(['aligned', '--out', out, '-j', '1']), 0)
         self.assertEqual(stdout.getvalue(), f'aligned: 3 utterances, 2 candidate tokens with an aligned reading ({len(tiny_words())} '
@@ -295,7 +279,7 @@ class TestContextLabels(unittest.TestCase):
         spacy = types.ModuleType('spacy')
         spacy.load = lambda name, disable: nlp
         with unittest.mock.patch.dict(sys.modules, {'spacy': spacy}), self.patched_books(), \
-                unittest.mock.patch.object(contextlabels.multiprocessing, 'Pool', FakePool), \
+                unittest.mock.patch.object(contextlabels.multiprocessing, 'Pool', data_fixtures.FakePool), \
                 unittest.mock.patch.object(contextlabels, 'TAG_CHUNK', 1), \
                 unittest.mock.patch.object(contextlabels, 'candidate_words', lambda spec: tiny_words()), captured() as (stdout, _):
             self.assertEqual(contextlabels.main(['tag', '--out', out, '--books', books_dir, '-j', '2']), 0)

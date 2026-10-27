@@ -221,17 +221,6 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(index.tolist(), [[0, 0, 2, 2, 2, 2]])
         self.assertTrue(numpy.allclose(position.numpy(), [[0.25, 0.75, 0.5 / 3, 1.5 / 3, 2.5 / 3, 3.5 / 3]]))
 
-    def test_qat_context(self):
-        model = MultiModel(helpers.tiny_config())
-        # (the head's weights - 64 x 16, quantized)
-        weight = model.head.weight
-        with trainmulti.qat_context(model, argparse.Namespace(qat_bits=4, qat_group=0)):
-            self.assertIsNot(model.head.weight, weight)
-            self.assertLessEqual(len(torch.unique(model.head.weight[0])), 15)
-        self.assertIs(model.head.weight, weight)
-        with trainmulti.qat_context(model, argparse.Namespace()):
-            self.assertIs(model.head.weight, weight)
-
     def test_recipe_defaults(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, 'recipe.json')
@@ -407,10 +396,6 @@ class TestMain(unittest.TestCase):
         self.assertEqual(DATA.train('resume-critic', '--stop', '1'), 0)
         self.assertEqual(DATA.train('resume-critic', '--adversarial', '0.1', '--resume', '--steps', '2'), 0)
         self.assertIn('critic', torch.load(DATA.run_path('resume-critic', 'last.pt'), weights_only=False))
-
-    def test_qat(self):
-        self.assertEqual(DATA.train('qat', '--qat-bits', '4', '--qat-group', '8', '--steps', '2'), 0)
-        self.assertEqual(torch.load(DATA.run_path('qat', 'last.pt'), weights_only=False)['args']['qat_bits'], 4)
 
     def test_validation_schedule(self):
         # Validated only from --val-from (and at the end); the best is kept only when the score improves

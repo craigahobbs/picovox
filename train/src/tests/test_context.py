@@ -19,6 +19,7 @@ import torch
 
 from picovox_train import ROOT, context, g2p, g2pmodel
 
+from . import data_fixtures
 from .helpers import captured
 
 
@@ -71,24 +72,19 @@ def same_weights(model, other):
                zip(model.state_dict().values(), other.state_dict().values()))
 
 
-# A fake multiprocessing.Pool (run in this process) - each pool made is appended to pools
+# A fake multiprocessing.Pool (data_fixtures.FakePool, run in this process) - each pool made is appended to pools, with
+# the tasks it mapped
 def fake_pool(pools):
-    class FakePool:
+    class RecordingPool(data_fixtures.FakePool):
         def __init__(self, processes):
-            self.processes = processes
+            super().__init__(processes)
             self.tasks = None
             pools.append(self)
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-        def map(self, function, tasks):
-            self.tasks = list(tasks)
-            return list(map(function, self.tasks))
-    return FakePool
+        def map(self, function, iterable, chunksize=1):
+            self.tasks = list(iterable)
+            return super().map(function, self.tasks, chunksize)
+    return RecordingPool
 
 
 class TestContext(unittest.TestCase):
@@ -116,15 +112,6 @@ class TestContext(unittest.TestCase):
         self.assertNotIn('window', context.CONTEXT_SETTINGS)
         self.assertNotIn('readings', context.G2P_SETTINGS)
         self.assertEqual(context.CONTEXT_CHAR_IDS['\''], 1)
-
-    def test_log_line(self):
-        log_path = self.path('train.log')
-        with captured() as (_, stderr):
-            context.log_line(None, 'first')
-            context.log_line(log_path, 'second')
-        self.assertIn('first', stderr.getvalue())
-        with open(log_path, encoding='utf-8') as file:
-            self.assertTrue(file.read().endswith(' second\n'))
 
     def test_add_reading_heads_and_load(self):
         model = context.add_reading_heads(tiny_g2p())
@@ -349,14 +336,14 @@ class TestContext(unittest.TestCase):
             self.assertIn(' fold 1: train-context: ', file.read())
 
         # The recipe's network - its teachers (in worker processes or not - the same), then the student
-        distilled = context.train_distilled(path, None, dict(CONTEXT_TINY, teachers=2), log_path)
+        distilled = context.train_distilled(path, dict(CONTEXT_TINY, teachers=2), log_path)
         with captured():
             teachers = [context.teacher_task((path, None, seed, settings, None)) for seed in (101, 102)]
             student = context.train_student(path, None, dict(CONTEXT_TINY, teachers=2), None, teachers)
         self.assertTrue(same_weights(distilled, student))
         pools = []
         with unittest.mock.patch.object(context.multiprocessing, 'Pool', fake_pool(pools)):
-            pooled = context.train_distilled(path, None, dict(CONTEXT_TINY, teachers=2), log_path, jobs=4)
+            pooled = context.train_distilled(path, dict(CONTEXT_TINY, teachers=2), log_path, jobs=4)
         self.assertEqual([pool.processes for pool in pools], [2])
         self.assertTrue(same_weights(distilled, pooled))
 
@@ -618,12 +605,6 @@ class TestContext(unittest.TestCase):
             self.assertIn('sources', json.load(file))
         with open(log_path, encoding='utf-8') as file:
             self.assertIn('train-context: held-out aligned', file.read())
-
-        # A fold held out, the recipe's settings
-        with unittest.mock.patch.dict(context.CONTEXT_SETTINGS, CONTEXT_TINY), captured() as (_, stderr):
-            self.assertEqual(context.main(['train-context', '--labels', path, '--out', self.path('fold.pt'), '--fold', '1']), 0)
-        self.assertIn('fold 1: teacher 101: train-context:', stderr.getvalue())
-        self.assertIn('train-context fold 1:', stderr.getvalue())
 
         # The teachers in worker processes (-j) - the same network
         pools = []

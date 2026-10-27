@@ -262,8 +262,8 @@ python-build package of its own: its unit tests (`train/src/tests/`) run on the 
 synthetic data and no network, in python-build's environment (`train/build/venv/`), which installs the package with the
 training's pinned PyTorch and numpy (`train/pyproject.toml`, the same versions as `requirements/nn.txt`). `make train`
 runs the package from its source (`PYTHONPATH=train/src`) in the training environments, `build/venv-<name>` from
-`requirements/<name>.txt` - `venv-nn` (PyTorch, Praat), `venv-listeners` (the listener models), `venv-pos` (spaCy), and
-`venv-analysis` (the corpus download). A training module runs the same way by hand:
+`requirements/<name>.txt` - `venv-nn` (PyTorch, Praat), `venv-listeners` (the listener models), and `venv-pos` (spaCy);
+the corpus download needs only the standard library (`python3`). A training module runs the same way by hand:
 
 ```sh
 PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke   # every training entry point, a few steps on the CPU
@@ -274,10 +274,8 @@ PYTHONPATH=train/src build/venv-nn/bin/python -B -m picovox_train.smoke   # ever
 
 ```sh
 node nn/js/speak.js -m data/nn/slt "Hello, world." -o out/hello.wav    # an exported model (data/nn/<voice>.json and .bin)
-node nn/js/speak.js -m data/nn/multi "Hello." -o out/hello.wav --voice narrator-f   # a designed voice (data/nn/voices.json)
 node nn/js/unpack.js lib/models/voiceModel.js out/voice                 # a packaged model back to its export
 node nn/js/packagecheck.js lib/models/voiceModel.js out/voice           # check a packaged model against its export
-node nn/js/voicescheck.js [lib/models/voiceModel.js]                    # check the designed voices
 node tools/heteronyms.js                                                # the heteronym and names regression sets
 ```
 
@@ -294,41 +292,27 @@ another app (PicoShelf, with its `?timing&log=URL` timeline posted to `build/per
 
 `nn/js/speak.js` speaks with an exported model (`picovox_train.export CHECKPOINT --voice NAME` writes
 `data/nn/NAME.json` and `.bin`; `data/nn/multi` is an export of the multi-speaker model), every word pronounced by the
-G2P network as the package pronounces (`-r` rate, `-s` seed, `--params` the parameter frames, `--batch` a list of
-items); the multi-speaker model takes a speaker (`--speaker`, `--blend`), a style (`--style`, `--intensity`), or a
-designed voice and style (`--voice`, `--voice-style` - `nn/js/voices.js`, the designed voices of `data/nn/voices.json`,
-each a blend of the model's speakers with a style and transforms).
+G2P network as the package pronounces (`-r` rate, `-s` seed, `--params` the parameter frames, `--rate` the duration
+multiplier, `--batch` a list of items); `-m` also takes a packaged module (`lib/models/voiceModel.js`). The
+multi-speaker model takes a speaker (`--speaker`, `--blend`) and a style (`--style`, `--intensity`).
 
-The training dashboard, `tools/dashboard/`, follows `make train` and the neural voices' training as they run: serve the
-repository (`python3 -m http.server`), start its monitor (`node tools/dashboard/monitor.js`), and open
-http://localhost:8000/tools/dashboard/. It has five tabs (each linkable, e.g. `#listen`): Train, Listen, Runs, Logs,
-and Archive. Train is a `make train` run (`tools/dashboard/pipeline.json`'s `train`: its `TRAIN_DIR`, default
-`build/train`; the default tab while it runs): the run's state, its ETA and critical path; the CPU and GPU utilization
-over the run with each stage as a band (the GPU's idle time shaded, the forecast faded); every stage of
-`data/nn/train-stages.json` in collapsible groups - its state (waiting, queued for the GPU, running, done, failed,
-stopped, or not in the run's make target), its start, end, and time against the expected time, and its mean CPU and
-GPU use; the training runs' curves (the teacher's compared with the earlier teacher runs); and the gates (the
-heteronym and G2P checks, the listener panel's scores, and the pick). A run without the stage events (from before the
-bookkeeping) is inferred from its stamps and make's log (`pipeline.json`'s `train.log`). Listen plays the `make train` run's
-listening samples (each training stage's final model beside the shipped model - see make train, below; the stages not
-rendered yet listed as waiting), the monitor's checkpoint samples (below), and other samples in `build/nn/`, and marks
-new samples until they're heard. Runs has the runs in
-`build/nn/runs/` (their `log.jsonl` and `train.log`) with charts of their losses, validation, pitch error, and step
-times. Logs has the tails
-of `make train`'s logs and the logs in `build/nn/` updated in the last hour (all of them with "Show older logs").
-Archive shows the earlier experiment pipelines (`tools/dashboard/pipelines/`): each phase is a group with its progress,
-what's happening now, and how many of its steps are done, and it opens to its rows - the workflow's agents, the planned
-steps (each tracked by a log, the newest training run, an output file, and its process), and the work that appeared
-during it. It refreshes every second, read-only, re-fetching only what changed, and reloads itself when its own code
-changes.
-
-The monitor writes `build/nn/activity.json` every second: the Python and Node processes working in the repository for
-10 seconds or more (with their multiprocessing workers folded in), running now or before, and the workflow's agents
-(`pipeline.json`'s workflow, else the newest workflow in `~/.claude/projects/`) - so the dashboard shows the steps that
-write no log. It also renders each new checkpoint of the pipeline's runs (`build/nn/runs/<run>/step-*.pt`) with
-`pipeline.json`'s sample speakers and text, scores the samples with UTMOS on the CPU (leaving the GPU to training), and
-lists them in `build/nn/samples-progress/index.json` with the package's voices as a reference; the dashboard's Checkpoint
-samples section plays them, newest first.
+The training dashboard, `tools/dashboard/`, follows `make train` as it runs: serve the repository (`python3 -m
+http.server`) and open http://localhost:8000/tools/dashboard/ (with `?train=DIR` for a run in another `TRAIN_DIR` -
+another checkout's or worktree's; default `build/train`). It has five tabs (each linkable, e.g. `#listen`): Train,
+Listen, Runs, Logs, and Archive. Train is the `make train` run (the default tab while it runs): the run's state, its
+ETA and critical path; the CPU and GPU utilization over the run with each stage as a band (the GPU's idle time shaded,
+the forecast faded); every stage of `data/nn/train-stages.json` in collapsible groups - its state (waiting, queued for
+the GPU, running, done, failed, stopped, or not in the run's make target, from `TRAIN_DIR/stages.jsonl`), its start,
+end, and time against the expected time, and its mean CPU and GPU use; the training runs' curves; and the gates (the
+heteronym and G2P checks, the listener panel's scores, and the pick). Listen plays the `make train` run's listening
+samples (each training stage's final model beside the shipped model - see make train, below; the stages not rendered
+yet listed as waiting) and other samples in `build/nn/`, and marks new samples until they're heard. Runs has the
+`make train` run's training runs (`TRAIN_DIR/runs/`, their `log.jsonl` and `train.log`) with charts of all their
+measurements - losses, validation, pitch error, and step times. Logs has the tails of `make train`'s logs and the logs
+in `build/nn/` updated in the last hour (all of them with "Show older logs"). Archive shows the earlier experiment
+pipelines (`tools/dashboard/pipelines/`) as they were planned: each phase a group with its share of the expected time,
+opening to its steps and what tracked each (a log, a training run, an output file, a process). It refreshes every
+second, read-only, re-fetching only what changed, and reloads itself when its own code changes.
 
 
 ## The listener panel
@@ -342,7 +326,7 @@ speaker identity, and speaking style alongside Whisper's intelligibility. They r
 | Intelligibility | Whisper `base.en` (whisper.cpp, `whisper-cli`, the model in `data/whisper/`) | Word error rate against the text |
 | Naturalness | [UTMOS22 strong](https://github.com/sarulab-speech/UTMOS22) (through torch.hub [tarepan/SpeechMOS](https://github.com/tarepan/SpeechMOS)) | Predicted mean opinion score, 1-5 |
 | Speaker identity | [ECAPA-TDNN](https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb) (SpeechBrain, VoxCeleb) | A 192-dimension speaker embedding |
-| Style | [emotion2vec+ base](https://huggingface.co/emotion2vec/emotion2vec_plus_base) (FunASR) | Probabilities of angry, disgusted, fearful, happy, neutral, other, sad, surprised, unknown |
+| Style | [emotion2vec+ base](https://huggingface.co/emotion2vec/emotion2vec_plus_base) (FunASR; `listeners.py --emotion` - not in the panel's scores) | Probabilities of angry, disgusted, fearful, happy, neutral, other, sad, surprised, unknown |
 
 `picovox_train/panel.py` is the panel's scoring, shared by every evaluation (`picovox_train.distill eval`, make train's
 gate): an exported model speaks a fixed evaluation set, `tools/panel-texts.json` - six Harvard sentences, six narrative
@@ -354,7 +338,7 @@ the renderings are scored with UTMOS, Whisper's WER, and the ECAPA speaker simil
 
 ```sh
 make listeners                                              # build/venv-listeners from requirements/listeners.txt
-build/venv-listeners/bin/python -I picovox_train/listeners.py [--no-mos] [--no-embedding] [--no-emotion] [--device auto|cpu|mps] \
+build/venv-listeners/bin/python -I picovox_train/listeners.py [--no-mos] [--no-embedding] [--emotion] [--device auto|cpu|mps] \
     [--files-from list.txt|-] file.wav ...
 ```
 
@@ -369,7 +353,8 @@ chunks. The models download on first use - about 1.5 GB, into `data/listeners/` 
 
 The environment is built with `python3` (3.14 here; 3.12 also works - `make listeners PYTHON_VENV=python3.12`). Its
 packages are pinned in `requirements/listeners.txt`: PyTorch 2.14, torchaudio 2.11 (resampling, for UTMOS),
-SpeechBrain 1.1, FunASR 1.4 (emotion2vec), and soundfile and soxr for reading and resampling audio.
+SpeechBrain 1.1, FunASR 1.4 (emotion2vec), Transformers 5.19 (for CREMA-D's forced alignment), and soundfile and soxr
+for reading and resampling audio.
 
 Calibration (the evaluation set, or 16 recordings of each human speaker; October 2026):
 
@@ -684,8 +669,7 @@ idempotently and sequentially, resuming interrupted downloads; `--list` shows th
 its `README.md` records each corpus's source, license, and size:
 
 ```sh
-make build/venv-analysis.build                                  # build/venv-analysis (picovox_train/corpora.py's environment)
-build/venv-analysis/bin/python -I picovox_train/corpora.py              # download the corpora into data/corpora/
+python3 -I train/src/picovox_train/corpora.py              # download the corpora into data/corpora/ (the standard library only)
 ```
 
 | Corpus | Speakers | Download | License |

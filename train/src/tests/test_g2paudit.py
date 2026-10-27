@@ -20,6 +20,7 @@ import torch
 
 from picovox_train import cremad, g2p, g2paudit, heteronyms
 
+from . import data_fixtures
 from .helpers import captured
 
 
@@ -64,22 +65,6 @@ WORDS = {
 # The settings - a tiny model
 CONFIG = {'model': {'embed': 4, 'hidden': 4}, 'batch': 8, 'alpha': 0.5, 'uniform': 0.5, 'unknown': 0.3, 'threads': 1,
           'stages': [{'name': 'base', 'steps': 2, 'lr': 0.003, 'warmup': 1, 'seed': 1}], 'export': {'bits': 6}}
-
-
-class FakePool:
-    """multiprocessing.Pool in the test's process (so the workers' code is measured)"""
-
-    def __init__(self, processes=None):
-        self.processes = processes
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
-
-    def imap_unordered(self, function, items):
-        return [function(item) for item in items]
 
 
 # A tiny screening model (untrained, seeded)
@@ -130,15 +115,6 @@ class TestG2pAudit(unittest.TestCase):
             patch.stop()
         self.directory.cleanup()
 
-    def test_log_line(self):
-        path = os.path.join(self.directory.name, 'log.txt')
-        with captured() as (_, stderr):
-            g2paudit.log_line(path, 'one')
-            g2paudit.log_line(None, 'two')
-        self.assertTrue(stderr.getvalue().endswith(' two\n'))
-        with open(path, encoding='utf-8') as file:
-            self.assertTrue(file.read().endswith(' one\n'))
-
     def test_unstressed_group_partition(self):
         self.assertEqual(g2paudit.unstressed('HH AA1 B Z'), 'HH AA B Z')
         self.assertEqual(g2paudit.group_key('hobbes\'s'), 'hobbes')
@@ -157,7 +133,7 @@ class TestG2pAudit(unittest.TestCase):
 
     def train_folds(self, jobs=1):
         args = argparse.Namespace(out=self.out, repeats=2, repeat=None, steps=2, jobs=jobs)
-        with captured(), unittest.mock.patch.object(g2paudit.multiprocessing, 'Pool', FakePool):
+        with captured(), unittest.mock.patch.object(g2paudit.multiprocessing, 'Pool', data_fixtures.FakePool):
             self.assertEqual(g2paudit.command_folds(args), 0)
 
     def test_folds(self):

@@ -5,20 +5,9 @@ import {modelLoader, textBlocks, voiceSpeaker} from '../lib/synthesis.js';
 import {readFileSync, readdirSync} from 'node:fs';
 import {speak, stream, styles, synthesize, toWav, voices} from '../lib/index.js';
 import {strict as assert} from 'node:assert';
+import {concatBlocks} from '../lib/render.js';
 import {encodeWav} from '../lib/wav.js';
 import test from 'node:test';
-
-
-// Blocks concatenated
-function concat(blocks) {
-    const samples = new Float32Array(blocks.reduce((sum, block) => sum + block.length, 0));
-    let offset = 0;
-    for (const block of blocks) {
-        samples.set(block, offset);
-        offset += block.length;
-    }
-    return samples;
-}
 
 
 // A stream's blocks
@@ -90,7 +79,7 @@ test('synthesize', async () => {
 
     // The synthesis pipeline - the female voice, seed 1000 for the first sentence, normal speed
     const model = await modelLoader(() => import('../lib/models/g2pModel.js'), () => import('../lib/models/voiceModel.js'))();
-    const expected = concat([...textBlocks(model, text, {'speaker': voiceSpeaker(model, 'female'), 'seed': 1000})]);
+    const expected = concatBlocks([...textBlocks(model, text, {'speaker': voiceSpeaker(model, 'female'), 'seed': 1000})]);
     assert.deepEqual(samples, expected);
 });
 
@@ -138,14 +127,14 @@ test('stream', async () => {
     const blocks = await streamBlocks(text, {'voice': 'female', 'rate': 1.2});
     assert(blocks.length > 10);
     assert(blocks.every((block) => block instanceof Float32Array));
-    assert.deepEqual(concat(blocks), (await synthesize(text, {'voice': 'female', 'rate': 1.2})).samples);
+    assert.deepEqual(concatBlocks(blocks), (await synthesize(text, {'voice': 'female', 'rate': 1.2})).samples);
 
     // The first block is the first sentence's pause (a paragraph's - 0.4 s at 1.2x)
     assert.equal(blocks[0].length, Math.round(24000 * 0.4 / 1.2));
     assert(blocks[0].every((value) => value === 0));
 
     // Defaults
-    assert.deepEqual(concat(await streamBlocks('Hello.')), (await synthesize('Hello.')).samples);
+    assert.deepEqual(concatBlocks(await streamBlocks('Hello.')), (await synthesize('Hello.')).samples);
 });
 
 
@@ -327,7 +316,7 @@ class FakeAudioContext {
 
     // The scheduled samples, in order
     samples() {
-        return concat(this.sources.map((source) => source.buffer.data));
+        return concatBlocks(this.sources.map((source) => source.buffer.data));
     }
 
     // How far ahead of the time the blocks are scheduled (s)

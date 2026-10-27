@@ -83,9 +83,9 @@ test('transforms.whisper', () => {
     assert.equal(full[IX.shimmer], 0);
 
     // Half intensity - the voicing 6 dB down, the aspiration also 6 dB lower
-    const [half] = whisper([input], {'intensity': 0.5, 'breathDb': -20});
+    const [half] = whisper([input], {'intensity': 0.5});
     assert.equal(half[IX.av], -6 + 20 * Math.log10(0.5));
-    assert.equal(half[IX.ah], 10 * Math.log10(10 ** (-40 / 10) + 10 ** ((-6 - 20 + 20 * Math.log10(0.5)) / 10)));
+    assert.equal(half[IX.ah], 10 * Math.log10(10 ** (-40 / 10) + 10 ** ((-6 - 28 + 20 * Math.log10(0.5)) / 10)));
     assert.equal(half[IX.jitter], 0.005);
 
     // An unvoiced frame gains no aspiration
@@ -105,8 +105,6 @@ test('transforms.effort', () => {
     // Rd stays in 0.3 - 2.7
     assert.equal(effort([frame({'rd': 0.31})], 30)[0][IX.rd], 0.3);
     assert.equal(effort([frame({'rd': 2.6})], -30)[0][IX.rd], 2.7);
-    const [custom] = effort([frame()], 2, {'shelfPerDb': 1, 'rdPerDb': 0});
-    assert.deepEqual([custom[IX.av], custom[IX.shelf], custom[IX.rd]], [-4, 2, 1]);
 });
 
 
@@ -118,8 +116,6 @@ test('transforms.press', () => {
     // Rd stays in 0.3 - 2.7
     assert.equal(press([frame({'rd': 0.31})], 30)[0][IX.rd], 0.3);
     assert.equal(press([frame({'rd': 2.6})], -30)[0][IX.rd], 2.7);
-    const [custom] = press([frame()], 2, {'shelfPerDb': 1, 'rdPerDb': 0});
-    assert.deepEqual([custom[IX.shelf], custom[IX.rd]], [2, 1]);
 });
 
 

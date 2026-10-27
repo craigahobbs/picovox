@@ -1,5 +1,5 @@
 // The training dashboard's make train model (no DOM) - the stage graph (data/nn/train-stages.json) and a run's
-// bookkeeping ($(TRAIN_DIR)/stages.jsonl, the stamps, make's log, util.log) to each stage's state, the forecast (the
+// bookkeeping ($(TRAIN_DIR)/stages.jsonl, util.log) to each stage's state, the forecast (the
 // critical path and the ETA), the utilization samples, and the listening samples by model
 
 
@@ -94,37 +94,6 @@ export function parseStageEvents(text) {
 }
 
 
-// Parse make's log (a make train run's output, with the "YYYY-MM-DD HH:MM:SS start:" / "restart:" lines of whoever
-// started it) - its segments [{start, target, directory, ended, text}], each a make invocation: its target (from "make
-// [-jN] TARGET" in the line), its output's lines up to the next start line, and whether it ended (make left its
-// directory). Makes may overlap - another make's start line, its output elsewhere - so make's "Leaving directory" line ends
-// the latest segment that entered that directory.
-export function parseMakeLog(text) {
-    const segments = [];
-    for (const line of text.split('\n')) {
-        const match = line.match(/^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) (?:re)?start: (.*)$/);
-        const directory = line.match(/^make(?:\[\d+\])?: (Entering|Leaving) directory [`'"](.*)['"]$/);
-        if (match !== null) {
-            const make = match[2].match(/make(?: -j ?\d+)? (\S+)/);
-            const target = make === null ? 'train' : make[1].replace(/[),;]+$/, '').replace(/^.*\//, '').replace(/\.done$/, '');
-            segments.push({'start': parseLocalTime(match[1]), target, 'directory': null, 'ended': false, 'lines': []});
-        } else if (segments.length !== 0) {
-            const segment = segments[segments.length - 1];
-            segment.lines.push(line);
-            if (directory !== null && directory[1] === 'Entering' && segment.directory === null) {
-                [, , segment.directory] = directory;
-            } else if (directory !== null && directory[1] === 'Leaving') {
-                const entered = segments.filter((other) => other.directory === directory[2] && !other.ended).pop();
-                if (entered) {
-                    entered.ended = true;
-                }
-            }
-        }
-    }
-    return segments.map(({lines, ...segment}) => ({...segment, 'text': lines.join('\n')}));
-}
-
-
 // Parse util.log (tools/trainutil.sh, or an earlier sampler's "HH:MM:SS cpu gpu stages" lines dated from baseTime) -
 // [{time, cpu, gpu, mem, system, powerIn, thermal}] (system and powerIn - the system's power and the power it takes in,
 // watts; thermal - macOS's thermal pressure level, 0 nominal to 4; NaN when not sampled) - each header line names the
@@ -204,40 +173,17 @@ export function meanUtilization(samples, start, end) {
 }
 
 
-// Each stage's state - Map stage -> {status, start, end, failure}: status is done, failed, running, queued (waiting for
-// the GPU lock), stopped (started, but make isn't running), skipped (not in a run's target), or waiting. From the stage
-// events when there are any, else inferred from the stamps (done at their times) and make's log: a make run (segment)
-// is open until it leaves its directory or its target stage is done; a stage in an open run's target runs once the
-// stages it needs (and runs after) are done; a stage a make reported failed (make's log, or another log in errorTexts)
-// failed.
+// Each stage's state - Map stage -> {status, start, end, failure} from the stage events: status is done, failed, running,
+// queued (waiting for the GPU lock), stopped (started, but make isn't running), skipped (not in the run's make target), or
+// waiting.
 //
-// run: {events (parseStageEvents), stamps (Map stage -> ms), segments (parseMakeLog), errorTexts ([text]), alive (make
-//       runs - with stage events), target (else the segments'), started (the run's start, ms - earlier unfinished attempts
-//       are stale), queued (Set of stages waiting for the GPU lock)}
+// run: {events (parseStageEvents), alive (make runs), target (the run's make target, else the manifest's), started (the
+//       run's start, ms - earlier unfinished attempts are stale), queued (Set of stages waiting for the GPU lock)}
 export function stageStates(manifest, run) {
     const states = new Map();
-    const segments = run.segments.map((segment) => (
-        {...segment, 'stages': targetStages(manifest, segment.target), 'open': !segment.ended && !run.stamps.has(segment.target)}
-    ));
-    const open = segments.filter((segment) => segment.open);
-    let targets = open.length !== 0 ? open : segments.slice(-1);
-    if (run.target) {
-        targets = [{'stages': targetStages(manifest, run.target), 'start': null}];
-    }
-    const included = new Set(targets.flatMap((segment) => [...segment.stages]));
-    if (targets.length === 0) {
-        targetStages(manifest, manifest.target).forEach((name) => included.add(name));
-    }
-    const errorTexts = [...segments.slice(-1).map((segment) => segment.text), ...run.errorTexts || []];
+    const included = targetStages(manifest, run.target ?? manifest.target);
     for (const stage of stageOrder(manifest)) {
         const name = stage.stage;
-        const deps = [...stage.needs, ...stage.after || []].map((dep) => states.get(dep));
-        const depsDone = deps.every((dep) => dep.status === 'done');
-        // The latest end of the stage's dependencies (before a time)
-        const depsEnd = (before) => Math.max(-Infinity, ...deps.map((dep) => dep.end ?? -Infinity).filter((end) => end <= before));
-        // The latest start of a make run building the stage (before a time)
-        const runStart = (runs, before) => Math.max(-Infinity, ...runs.
-            filter((segment) => segment.stages.has(name) && segment.start <= before).map((segment) => segment.start));
         // (an unfinished attempt from before the run's start is stale - a stage that failed or stopped in an earlier run)
         const recorded = run.events.get(name);
         const event = recorded && run.started && recorded.start < run.started && (recorded.end === null || recorded.end < recorded.start) ?
@@ -250,15 +196,6 @@ export function stageStates(manifest, run) {
         } else if (event) {
             const status = run.queued?.has(name) ? 'queued' : 'running';
             state = {'status': run.alive ? status : 'stopped', 'start': event.start, 'end': null};
-        } else if (run.stamps.has(name)) {
-            const end = run.stamps.get(name);
-            const start = Math.max(depsEnd(end), runStart(segments, end));
-            state = {'status': 'done', 'start': Number.isFinite(start) ? start : null, end};
-        } else if (errorTexts.some((text) => text.includes(`/${name}.done] Error`))) {
-            state = {'status': 'failed', 'start': null, 'end': null, 'failure': 'make reported an error'};
-        } else if (run.events.size === 0 && open.some((segment) => segment.stages.has(name)) && depsDone) {
-            const start = Math.max(depsEnd(Infinity), runStart(open, Infinity));
-            state = {'status': 'running', 'start': Number.isFinite(start) ? start : null, 'end': null};
         } else {
             state = {'status': included.has(name) ? 'waiting' : 'skipped', 'start': null, 'end': null};
         }

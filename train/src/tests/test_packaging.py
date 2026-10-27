@@ -61,11 +61,9 @@ class TestPackageText(unittest.TestCase):
         self.assertEqual(lines[2], '// lib/package.js loadPackagedModel - the export\'s manifest, and its weights (2 bytes) as base64.')
         self.assertIn("export const encoding = 'raw';", lines)
         self.assertEqual(lines[-4:], ['export const weights = `', 'AQI=', '`;', ''])
-        text = package.module_text({'quantization': {'bits': 5, 'group': 32}}, b'', 'deflate-raw', 7)
-        self.assertIn('// The model acoustic model (None parameters, 5-bit weights, groups of 32) for', text)
+        text = package.module_text({}, b'', 'deflate-raw', 7)
+        self.assertIn('// The model acoustic model (None parameters, 8-bit weights) for', text)
         self.assertIn('(7 bytes, deflated) as base64.', text)
-        text = package.module_text({'quantization': {'bits': 6, 'group': 0}}, b'', 'raw', 0)
-        self.assertIn('6-bit weights) for', text)
 
     def test_file_sha256(self):
         with tempfile.TemporaryDirectory() as directory:

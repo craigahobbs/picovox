@@ -94,7 +94,7 @@ class TestArguments(unittest.TestCase):
                 file.write('b.wav\n\n  c.wav \n')
             args = listeners.parse_args(['a.wav', '--files-from', list_path, '--no-mos', '--device', 'cpu'])
         self.assertEqual(args.files, ['a.wav', 'b.wav', 'c.wav'])
-        self.assertEqual((args.no_mos, args.no_embedding, args.no_emotion, args.device, args.chunk_seconds, args.emotion_model),
+        self.assertEqual((args.no_mos, args.no_embedding, args.emotion, args.device, args.chunk_seconds, args.emotion_model),
                          (True, False, False, 'cpu', 20, listeners.EMOTION_REPO))
         with unittest.mock.patch.object(sys, 'stdin', io.StringIO('d.wav\n')):
             self.assertEqual(listeners.parse_args(['--files-from', '-']).files, ['d.wav'])
@@ -212,10 +212,10 @@ class TestMain(unittest.TestCase):
             paths = [write_wav(directory, 'a.wav', 0.5, 16000), write_wav(directory, 'b.wav', 0.25, 22050)]
             stdout = FakeStdout()
             with unittest.mock.patch.object(sys, 'stdout', stdout):
-                listeners.main(paths)
+                listeners.main([*paths, '--emotion'])
             lines = [json.loads(line) for line in stdout.buffer.getvalue().decode('utf-8').splitlines()]
             stdout = FakeStdout()
-            argv = ['listeners.py', paths[0], '--no-mos', '--no-embedding', '--no-emotion', '--device', 'cpu']
+            argv = ['listeners.py', paths[0], '--no-mos', '--no-embedding', '--device', 'cpu']
             with unittest.mock.patch.object(sys, 'stdout', stdout), unittest.mock.patch.object(sys, 'argv', argv):
                 listeners.main()
             bare = [json.loads(line) for line in stdout.buffer.getvalue().decode('utf-8').splitlines()]

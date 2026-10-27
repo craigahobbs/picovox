@@ -27,13 +27,13 @@ The data:
 - books.py - the pinned book texts (data/nn/books.json): the Project Gutenberg books the heteronym labels and the
   distillation read, each fetched once and verified by its SHA-256 - a revised text is never used
 - cremad.py - emotional speech for the style modifiers: CREMA-D fetched, force-aligned (a wav2vec2 phoneme CTC
-  recognizer), and built under build/nn/data/cremad/ in data.py's format with emotion and intensity labels; the
-  listener panel's emotion recognition of it (data/nn/cremad.json)
+  recognizer), and built under build/nn/data/cremad/ in data.py's format with emotion and intensity labels (its
+  summary, data/nn/cremad.json)
 
 The synthesizer:
 
 - params.py - the parameter set (32 interpretable source-filter parameters per 5 ms frame, their units, ranges, and
-  network normalization), the channel equalizer, and the parameter file format; lib/params.js is generated from it
+  network normalization), and the channel equalizer; lib/params.js is generated from it
   (python -m picovox_train.params --write-js)
 - dsynth.py - the differentiable synthesizer (PyTorch, batched, any sample rate) - harmonic voicing through the
   tract's analytic response, and STFT-filtered noise; lf.py (the LF pulse's harmonic table) and rng.py (the
@@ -51,15 +51,13 @@ The network:
 - optim.py - the training step's options for trainmulti.py and distill.py (all off by default): the lean gradient
   clip and AdamW step, Muon for the hidden matrices (batched Newton-Schulz), the flat EMA of the weights, the
   warmup-stable-decay schedule, and zero-initialized residual projections
-- quant.py - weight quantization at 8-4 bits, per row or per group, shared by export.py (--bits, --group),
-  quantization-aware training (trainmulti.py --qat-bits), and lib/model.js
+- quant.py - the export's 8-bit weight quantization (per row), shared by export.py and lib/model.js
 - distill.py - knowledge distillation of the multi-speaker model into small students (data/nn/train.json's distill)
-- export.py - export to <voice>.bin and .json (8-bit, or quant.py's packed formats); package.py - an export
+- export.py - export to <voice>.bin and .json (8-bit weights - quant.py); package.py - an export
   as a generated JavaScript module (lib/models/voiceModel.js), loaded by lib/package.js (nn/js/packagecheck.js checks
   it); lib/model.js - the forward pass in JavaScript; lib/transforms.js - the voice and style transforms;
-  nn/js/voices.js - the designed voices (data/nn/voices.json; nn/js/voicescheck.js checks them); nn/js/speak.js - text
-  to WAV (Node)
-- synthesize.py - inference in PyTorch
+  nn/js/speak.js - text to WAV (Node)
+- synthesize.py - inference in PyTorch with the exported weights (the export's parity check)
 
 The pipeline's tools:
 
@@ -79,6 +77,9 @@ import os
 # The repository root (train/src/picovox_train/ is three levels below it) - the data, the corpora, the build outputs,
 # and the package's modules (lib/) the pipeline reads
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+# make train's recipe - the training settings of every stage
+RECIPE_PATH = os.path.join(ROOT, 'data', 'nn', 'train.json')
 
 # The package's source directory (train/src) - the PYTHONPATH of the pipeline's Python subprocesses
 SOURCE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

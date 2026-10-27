@@ -65,10 +65,9 @@ class TestLosses(unittest.TestCase):
         self.assertAlmostEqual(float(pause), math.log(2), places=5)
         self.assertAlmostEqual(float(paused), float((target[0, [0, 4]] ** 2).mean()), places=5)
 
-    def test_silent_values(self):
-        values = losses.silent_values('cpu')
-        self.assertEqual(float(values[params.INDEX['av']]), params.FLOOR_DB)
+    def test_silence(self):
         silence, mask = losses._silence('cpu')  # pylint: disable=protected-access
+        self.assertEqual(float(silence[params.INDEX['av']]), params.FLOOR_DB)
         self.assertIs(losses._silence('cpu')[0], silence)  # pylint: disable=protected-access
         self.assertEqual(float(mask.sum()), 3)
 

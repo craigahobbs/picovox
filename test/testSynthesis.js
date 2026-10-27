@@ -7,11 +7,11 @@ import {
     sentenceFrames, sentencePause, softLimit, spanFrames, styleSettings, styleTable, textBlocks, voiceSettings, voiceSpeaker,
     voiceTable
 } from '../lib/synthesis.js';
+import {concatBlocks, render} from '../lib/render.js';
 import {speechText, splitSentences} from '../lib/sentences.js';
 import {applyTransforms} from '../lib/transforms.js';
 import {strict as assert} from 'node:assert';
 import {readFileSync} from 'node:fs';
-import {render} from '../lib/render.js';
 import {speakFrames} from '../lib/model.js';
 import test from 'node:test';
 
@@ -20,18 +20,6 @@ import test from 'node:test';
 const importG2p = () => import('../lib/models/g2pModel.js');
 const importVoice = () => import('../lib/models/voiceModel.js');
 const model = await modelLoader(importG2p, importVoice)();
-
-
-// Blocks concatenated
-function concat(blocks) {
-    const samples = new Float32Array(blocks.reduce((sum, block) => sum + block.length, 0));
-    let offset = 0;
-    for (const block of blocks) {
-        samples.set(block, offset);
-        offset += block.length;
-    }
-    return samples;
-}
 
 
 // A sentence spoken by the pipeline directly - the pause, then the frames rendered whole, with the gain and the limiter
@@ -179,7 +167,7 @@ test('styles', () => {
 
 test('sentenceFrames, styles', () => {
     // A styled voice's frames are its emotion's, at the voice's and the style's rates, with the voice's transforms and
-    // then the style's (as nn/js/voices.js's designed voices speak)
+    // then the style's
     const text = 'Get out of my house!';
     for (const [voice, style] of [['helen', 'fearful'], ['male', 'whisper'], ['david', 'angry']]) {
         const {chunks, eq} = sentenceFrames(model, text, {voice, style, 'rate': 1.2});
@@ -202,10 +190,10 @@ test('sentenceFrames, styles', () => {
     assert.deepEqual([...neutral.chunks].flat(), [...sentenceFrames(model, text, {speaker}).chunks].flat());
 
     // sentenceBlocks and textBlocks take the style too
-    assert.deepEqual(concat([...sentenceBlocks(model, text, {'voice': 'amy', 'style': 'sad', 'seed': 2})]),
-        concat([...sentenceBlocks(model, text, {'voice': 'amy', 'style': 'sad', 'seed': 2})]));
-    assert.notDeepEqual(concat([...textBlocks(model, 'Hello there.', {'voice': 'amy', 'style': 'happy'})]),
-        concat([...textBlocks(model, 'Hello there.', {'voice': 'amy'})]));
+    assert.deepEqual(concatBlocks([...sentenceBlocks(model, text, {'voice': 'amy', 'style': 'sad', 'seed': 2})]),
+        concatBlocks([...sentenceBlocks(model, text, {'voice': 'amy', 'style': 'sad', 'seed': 2})]));
+    assert.notDeepEqual(concatBlocks([...textBlocks(model, 'Hello there.', {'voice': 'amy', 'style': 'happy'})]),
+        concatBlocks([...textBlocks(model, 'Hello there.', {'voice': 'amy'})]));
 });
 
 
@@ -242,10 +230,10 @@ test('sentenceFrames, beat', () => {
     const spanned = spanFrames(model, spans, {'voice': 'helen', beat});
     const first = sentenceFrames(model, 'She said,', {'voice': 'helen', beat});
     assert.deepEqual([...spanned.chunks][0], [...first.chunks][0]);
-    assert.deepEqual(concat([...sentenceBlocks(model, text, {'voice': 'helen', beat})]),
-        concat([...sentenceBlocks(model, text, {'voice': 'helen', beat})]));
-    assert.notDeepEqual(concat([...sentenceBlocks(model, text, {'voice': 'helen', beat})]),
-        concat([...sentenceBlocks(model, text, {'voice': 'helen'})]));
+    assert.deepEqual(concatBlocks([...sentenceBlocks(model, text, {'voice': 'helen', beat})]),
+        concatBlocks([...sentenceBlocks(model, text, {'voice': 'helen', beat})]));
+    assert.notDeepEqual(concatBlocks([...sentenceBlocks(model, text, {'voice': 'helen', beat})]),
+        concatBlocks([...sentenceBlocks(model, text, {'voice': 'helen'})]));
 });
 
 
@@ -259,18 +247,17 @@ test('textBlocks, auto', () => {
     assert.deepEqual([auto.spans(0), auto.spans(1).map((span) => span.style)], [null, ['dialogue']]);
     const expected = sentences.map((sentence) => {
         const spans = auto.spans(sentence.index)?.map((span) => ({'text': speechText(span.text), 'style': span.style}));
-        return concat([...sentenceBlocks(model, speechText(sentence.text), {
+        return concatBlocks([...sentenceBlocks(model, speechText(sentence.text), {
             'voice': 'kate', spans, 'beat': beats[sentence.index], 'seed': 3 + sentence.index,
             'pause': sentence.paragraphStart ? paragraphPause : sentencePause
         })]);
     });
-    assert.deepEqual(concat([...textBlocks(model, text, {'voice': 'kate', 'style': 'auto', 'seed': 3})]), concat(expected));
+    assert.deepEqual(concatBlocks([...textBlocks(model, text, {'voice': 'kate', 'style': 'auto', 'seed': 3})]), concatBlocks(expected));
 });
 
 
 test('sentenceFrames, voices', () => {
-    // A voice's frames are its blend spoken at its rate times the listener's, with its adjustments (as nn/js/voices.js's
-    // designed voices speak)
+    // A voice's frames are its blend spoken at its rate times the listener's, with its adjustments
     const text = 'The birch canoe slid on the smooth planks.';
     for (const key of ['helen', 'david']) {
         const {chunks, eq} = sentenceFrames(model, text, {'voice': key, 'rate': 1.1});
@@ -287,9 +274,9 @@ test('sentenceFrames, voices', () => {
     assert.deepEqual([...voiced.chunks].flat(), [...spoken.chunks].flat());
 
     // sentenceBlocks and textBlocks take the voice too
-    assert.deepEqual(concat([...sentenceBlocks(model, text, {'voice': 'female', 'seed': 2})]),
-        concat([...sentenceBlocks(model, text, {'speaker': voiceSpeaker(model, 'female'), 'seed': 2})]));
-    assert(concat([...textBlocks(model, 'Hello there.', {'voice': 'amy'})]).some((value) => value !== 0));
+    assert.deepEqual(concatBlocks([...sentenceBlocks(model, text, {'voice': 'female', 'seed': 2})]),
+        concatBlocks([...sentenceBlocks(model, text, {'speaker': voiceSpeaker(model, 'female'), 'seed': 2})]));
+    assert(concatBlocks([...textBlocks(model, 'Hello there.', {'voice': 'amy'})]).some((value) => value !== 0));
 });
 
 
@@ -302,18 +289,18 @@ test('sentenceBlocks', () => {
     assert(blocks[0].every((value) => value === 0));
     assert(blocks.slice(1, -1).every((block) => block.length === blockSize));
     assert(blocks[blocks.length - 1].length <= blockSize);
-    assert.deepEqual(concat(blocks), directSentence(text, options));
+    assert.deepEqual(concatBlocks(blocks), directSentence(text, options));
 
     // Another sample rate
     const fast = {'speaker': voiceSpeaker(model, 'male'), 'seed': 5, 'sampleRate': 16000};
-    assert.deepEqual(concat([...sentenceBlocks(model, 'Call me Ishmael.', fast)]), directSentence('Call me Ishmael.', fast));
+    assert.deepEqual(concatBlocks([...sentenceBlocks(model, 'Call me Ishmael.', fast)]), directSentence('Call me Ishmael.', fast));
 });
 
 
 test('sentenceBlocks, defaults', () => {
     // No pause, the model's default speaker, seed 1, normal speed
     const blocks = [...sentenceBlocks(model, 'Hello.')];
-    assert.deepEqual(concat(blocks), directSentence('Hello.', {'speaker': model.manifest.defaultSpeaker}));
+    assert.deepEqual(concatBlocks(blocks), directSentence('Hello.', {'speaker': model.manifest.defaultSpeaker}));
     assert.notEqual(blocks[0][0], 0);
 });
 
@@ -333,7 +320,7 @@ test('sentenceBlocks, streaming', () => {
     const startWhole = performance.now();
     const whole = directSentence(text, options);
     const wholeMs = performance.now() - startWhole;
-    assert.deepEqual(concat([first.value, second.value, ...rest]), whole);
+    assert.deepEqual(concatBlocks([first.value, second.value, ...rest]), whole);
     assert(firstMs < wholeMs, `first block ${firstMs} ms, whole sentence ${wholeMs} ms`);
 
     // An empty sentence is only its pause
@@ -355,7 +342,7 @@ test('sentenceFrames and createSentenceRenderer', () => {
         renderer.push(chunk);
     }
     renderer.end();
-    assert.deepEqual(concat(blocks), concat([...sentenceBlocks(model, text, options)]));
+    assert.deepEqual(concatBlocks(blocks), concatBlocks([...sentenceBlocks(model, text, options)]));
 
     // The defaults - no pause, seed 1, normal speed, no equalizer
     const plain = [];
@@ -376,12 +363,12 @@ test('textBlocks', () => {
         speaker, 'rate': 0.8, 'seed': 1000 + sentence.index, 'pause': sentence.paragraphStart ? paragraphPause : sentencePause
     }));
     assert.equal(expected.length, 5);
-    assert.deepEqual(concat([...textBlocks(model, text, {speaker, 'rate': 0.8, 'seed': 1000})]), concat(expected));
+    assert.deepEqual(concatBlocks([...textBlocks(model, text, {speaker, 'rate': 0.8, 'seed': 1000})]), concatBlocks(expected));
 
     // Defaults - seed 1, normal speed, 24 kHz
-    const defaults = concat([...textBlocks(model, 'One. Two.')]);
+    const defaults = concatBlocks([...textBlocks(model, 'One. Two.')]);
     const speakerDefault = model.manifest.defaultSpeaker;
-    assert.deepEqual(defaults, concat([
+    assert.deepEqual(defaults, concatBlocks([
         directSentence('One.', {'speaker': speakerDefault, 'seed': 1, 'pause': paragraphPause}),
         directSentence('Two.', {'speaker': speakerDefault, 'seed': 2, 'pause': sentencePause})
     ]));

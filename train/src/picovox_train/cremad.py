@@ -171,7 +171,7 @@ def write_readme():
         '## crema-d',
         '',
         f'- Source: https://github.com/{REPO} (git LFS; the WAV files from {MEDIA_URL.format(path="AudioWAV/<name>.wav")}, '
-        'fetched by `python -m nn.cremad fetch`)',
+        'fetched by `python -m picovox_train.cremad fetch`)',
         '- Contents: CREMA-D, the Crowd-sourced Emotional Multimodal Actors Dataset - 91 actors (48 male, 43 female, '
         'ages 20-74, several races and ethnicities) reading 12 sentences as angry, disgusted, fearful, happy, neutral, '
         'and sad (the sentence "It\'s eleven o\'clock" also at low, medium, and high intensity); 7,442 clips, 16 kHz '

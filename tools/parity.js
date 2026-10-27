@@ -75,8 +75,8 @@ const outputs = {
         'samplesEq': Array.from(render(renderInputs.frames,
             {'sampleRate': renderInputs.sampleRate, 'seed': renderInputs.seed, 'eq': renderInputs.eq}))
     },
-    'export-8-0': exportOutputs(inputs['export-8-0']),
-    'export-6-32': exportOutputs(inputs['export-6-32'])
+    'export': exportOutputs(inputs.export),
+    'export-style': exportOutputs(inputs['export-style'])
 };
 mkdirSync(dirname(outPath), {'recursive': true});
 writeFileSync(outPath, JSON.stringify(outputs));

@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(os.getcwd(), 'train', 'src'))
 import numpy  # noqa: E402
 import torch  # noqa: E402
 
-from picovox_train import dsynth  # noqa: E402
+from picovox_train import dsynth, trainmulti  # noqa: E402
 from picovox_train.trainmulti import MULTI_PRIORS, Corpus, batch_losses, collate, default_settings, sonorant_mask  # noqa: E402
 from picovox_train.model import MultiModel  # noqa: E402
 
@@ -44,8 +44,8 @@ def main(argv=None):
     state = torch.load(args.init, map_location='cpu', weights_only=False)
     config = {**state['config'], **json.loads(args.config)}
     corpora = [Corpus('multi', 'val', max_items=64)]
-    if os.path.exists(os.path.join('build', 'nn', 'data', 'cremad', 'index.json')):
-        corpora.append(Corpus('cremad', 'val', speaker_offset=state.get('readerCount', 237), max_items=32))
+    if os.path.exists(os.path.join(trainmulti.DATA_DIR, 'cremad', 'index.json')):
+        corpora.append(Corpus('cremad', 'val', speaker_offset=state['readerCount'], max_items=32))
     sonorants = torch.tensor(sonorant_mask(corpora[0].data.index['vocab']), device=device)
     synth = dsynth.DSynth(settings.rate).to(device)
     out = {'init': args.init, 'device': args.device, 'config': json.loads(args.config), 'batches': []}
