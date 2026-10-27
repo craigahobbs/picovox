@@ -783,10 +783,14 @@ that differ (`make train-install-voice` and `train-install-g2p`, one).
 
 The first run of this flow showed both checks earning their place: the trained voice ran 2% longer on one test sentence,
 past a duration bound the shipped voice had met by 0.02 seconds (the bound was widened), and the G2P's context network
-did not reproduce the committed module - the G2P network itself did, checkpoint for checkpoint - though it passed its
-gate. And its A/B was thirty Same answers: a retrain of an unchanged recipe is, by ear, the shipped voice (its panel
-scores within noise - UTMOS 4.131 against 4.146), so the A/B is a retrain's guardrail against a bad run, and the judge
-of a recipe change.
+did not reproduce the committed module - the G2P network itself did, checkpoint for checkpoint. The committed module
+predated version 1.6.5's reading fixes ("No." ends a sentence only before a number, an en dash between numbers is "to",
+titles spelled out), which changed the context labels the books give through the front end; that release's check had
+retrained and gated the new network but kept the module. The run reproduced that check's network exactly - the regression
+set's context sentences 53 of 54 (51 before: "a minute amount", "spoke Polish"), 38 of 519,548 book words pronounced
+differently, all heteronyms - and version 1.6.8 installs it, so `make train` reproduces both modules again. And its A/B
+was thirty Same answers: a retrain of an unchanged recipe is, by ear, the shipped voice (its panel scores within noise -
+UTMOS 4.131 against 4.146), so the A/B is a retrain's guardrail against a bad run, and the judge of a recipe change.
 
 ### 10.2 Gates and provenance
 
