@@ -4,6 +4,8 @@
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
 import argparse
+import collections
+import hashlib
 import json
 import os
 import runpy
@@ -41,7 +43,7 @@ def window(*items):
     return padded
 
 
-# Tiny labels (contextlabels.py's format) - read, lives, and the S/Z-only use; aligned examples over many speakers (both
+# Tiny labels (contextlabels.py's format) - read, lives, and the S/Z-only use; aligned examples over many books (both
 # folds' sides), silver and seed examples, train and held out
 def tiny_labels():
     words = {
@@ -55,7 +57,7 @@ def tiny_labels():
         slot = (number // 3) % 2
         before = 'will' if slot == 0 else 'had'
         examples.append({'window': window('', 'i', before, word, 'it', '.', ''), 'word': word, 'slot': slot,
-                         'source': 'aligned', 'split': 'heldout' if number % 4 == 0 else 'train', 'group': f'speaker-{number}'})
+                         'source': 'aligned', 'split': 'heldout' if number % 4 == 0 else 'train', 'group': f'pg{number}'})
     examples.append({'window': window('', '', 'the', 'read', '.', '', ''), 'word': 'read', 'slot': 1, 'source': 'silver',
                      'split': 'train', 'group': 'pg1'})
     examples.append({'window': window('', '', 'a', 'read', '.', '', ''), 'word': 'read', 'slot': 1, 'source': 'silver',
@@ -244,12 +246,32 @@ class TestContext(unittest.TestCase):
 
     def test_fold_labels(self):
         labels = tiny_labels()
-        folded = context.fold_labels(labels, 0)
-        aligned = [example for example in folded['examples'] if example['source'] == 'aligned']
-        self.assertEqual({example['split'] for example in aligned}, {'train', 'heldout'})
-        others = [example for example in folded['examples'] if example['source'] != 'aligned']
-        self.assertEqual([example['split'] for example in others], [example['split'] for example in labels['examples']
-                                                                     if example['source'] != 'aligned'])
+
+        # Fold 0 - the labels' own split (their held-out books)
+        self.assertEqual(context.fold_labels(labels, 0), labels)
+
+        # The other folds - a fold's books' examples (every source's) held out by the book's hash; the labels' held-out
+        # books' and the seeds' examples train
+        def bucket(book):
+            return 1 + int(hashlib.sha1(book.encode('utf-8')).hexdigest(), 16) % (context.FOLDS - 1)
+        held = collections.Counter()
+        for fold in range(1, context.FOLDS):
+            folded = context.fold_labels(labels, fold)
+            self.assertEqual(folded['words'], labels['words'])
+            self.assertEqual(folded['transfer'], labels['transfer'])
+            for example, original in zip(folded['examples'], labels['examples']):
+                self.assertEqual({**example, 'split': original['split']}, original)
+                if original['split'] == 'heldout' or original['source'] == 'seed':
+                    self.assertEqual(example['split'], 'train')
+                else:
+                    self.assertEqual(example['split'], 'heldout' if bucket(original['group']) == fold else 'train')
+                if example['split'] == 'heldout':
+                    held[json.dumps(original)] += 1
+        # (each of the other examples is held out in exactly one fold, and the aligned books are spread over several folds)
+        others = [example for example in labels['examples'] if example['split'] == 'train' and example['source'] != 'seed']
+        self.assertEqual(held, collections.Counter(json.dumps(example) for example in others))
+        aligned = [example for example in others if example['source'] == 'aligned']
+        self.assertGreater(len({bucket(example['group']) for example in aligned}), 1)
 
     def test_train_context(self):
         lines = []

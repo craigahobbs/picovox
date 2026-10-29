@@ -29,7 +29,7 @@ test('trainsamplesindex.parseArgs', () => {
 
 
 test('trainsamplesindex.sampleFile', () => {
-    assert.equal(sampleFile('teacher-a', 'arctic-slt', 'ishmael'), 'teacher-a-arctic-slt-ishmael.wav');
+    assert.equal(sampleFile('teacher-a', 'female', 'ishmael'), 'teacher-a-female-ishmael.wav');
 });
 
 

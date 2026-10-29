@@ -24,19 +24,26 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   modules (`g2pModel.js`, `voiceModel.js`) that `make train` reproduces (`picovox_train.context export`,
   `picovox_train.package`).
 - `train/` - the Python training pipeline, the package `picovox_train` (`train/src/picovox_train/`; a python-build
-  package - its unit tests in `train/src/tests/`): the front end's port (`frontend.py`, `g2pmodel.py`, `vocab.json`),
-  the G2P and heteronym models (`g2p.py`, `g2paudit.py`, `heteronyms.py`, `context.py`, `contextlabels.py`,
-  `readings.py`), the data (`corpora.py` - the corpus download, `books.py` - the pinned book texts, `data.py`,
-  `align.py`, `multi.py`, `cremad.py`, `wav.py`), the differentiable synthesizer (`params.py`, `dsynth.py`, `lf.py`,
+  package - its unit tests in `train/src/tests/`), trained on speech it generates (no human recordings): the front
+  end's port (`frontend.py`, `g2pmodel.py`, `vocab.json`), the G2P and heteronym models (`g2p.py`, `g2paudit.py`,
+  `heteronyms.py`, `context.py`, `contextlabels.py`, `readings.py`, `measure.py` - the heteronym tokens' readings
+  measured in the training speech, by the CTC vote or the vowels' formants, each method gated by controls - the G2P's
+  heteronym evidence), the data (`tts.py` - the training speech: book sentences, the heteronyms' coverage first,
+  spoken by a local TTS model through Ollama - the recipe's `tts`, its model pinned by digest, a voice of it for each of
+  the package's voices - cached, CTC-aligned, checked, and built in `data.py`'s format; `ctc.py` - our speech
+  measurement, a wav2vec2 phoneme recognizer: the forced alignment, the greedy phone checks, and the candidate vote;
+  `data.py`, `align.py`, `wav.py`, `books.py` - the pinned book texts, `corpora.py` - the pinned downloads: the
+  dictionary and the Whisper model), the differentiable synthesizer (`params.py`, `dsynth.py`, `lf.py`,
   `rng.py`, `spectral.py`), the model and its training (`model.py`, `trainmulti.py`, `losses.py`, `discriminator.py`,
   `quant.py`, `optim.py` - the training step's options), distillation (`distill.py`), export (`export.py`, `package.py`),
   the listener panel (`panel.py`, and the listener models, `listeners.py` - `build/venv-train`),
   and the pipeline's tools (`gpulock.py`, `smoke.py`, `stepcheck.py`, `trained.py` - make train's report and make
-  train-install - and `quality.py` - the voices' quality measures against their readers' recordings).
+  train-install - and `quality.py` - the voices' quality measures against their TTS source clips).
   `picovox_train/__init__.py` documents each module. `make train` runs it from its source (`PYTHONPATH=train/src`) in
   its environment (`build/venv-train` - `train/requirements.txt`: the training, the listener models, and spaCy). Its
-  data, `train/data/`: the recipe `train.json`, the stage graph `train-stages.json`, the pinned book texts `books.json`,
-  the speaker pool, and the G2P and heteronym data (the CMU Pronouncing Dictionary is downloaded - `downloads/`).
+  data, `train/data/`: the recipe `train.json` (its `tts` section - the TTS engine and its voices), the stage graph
+  `train-stages.json`, the pinned book texts `books.json`, and the G2P and heteronym data (the CMU Pronouncing
+  Dictionary is downloaded - `downloads/`; the training speech is generated - `downloads/tts/`).
 - `tools/` - Node development tools on the package's modules (not part of the package): `speak.js` (text to WAV with an
   exported or packaged model - the listener panel's renderer), `loadVoice.js` (a model's loader, for `speak.js` and
   `trainsamples.js`), `unpack.js`, `packagecheck.js`, `pronounceLines.js` (for the Python checks), and `renderLines.js`
@@ -54,11 +61,13 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
 - `test/` - unit tests (`node:test`), one `test<Module>.js` per `lib/` module (`testIndex.js` for the API - including
   `speak` with a fake AudioContext, and the package's browser safety and exports), and the dashboard's and make train's
   (`testTrainDashboard.js`, `testTrainSamplesIndex.js`, `testTrainStages.js`, `testTrainAbReport.js`);
-  `parity-inputs.json` - the parity checks' inputs (below); `voices.json` - the designed voices, the design record of
-  `lib/synthesis.js`'s voice and style tables (`testSynthesis.js` checks them).
-- `downloads/` - gitignored: make train's downloads - the corpora and the pinned files (`picovox_train/corpora.py`: the
-  CMU Pronouncing Dictionary, `downloads/cmudict/`, and the Whisper model; `cremad fetch`), and the listener models (on
-  first use); `make clean` keeps it
+  `parity-inputs.json` - the parity checks' inputs (below); `voices.json` - the voices' design record (each a TTS voice's
+  archetype; the styles' transforms) of `lib/synthesis.js`'s voice and style tables (`testSynthesis.js` checks them).
+- `downloads/` - gitignored: make train's downloads and its training speech - the pinned files
+  (`picovox_train/corpora.py`: the CMU Pronouncing Dictionary, `downloads/cmudict/`, and the Whisper model,
+  `downloads/whisper/`), the training speech's corpus (`downloads/tts/<model>-<digest>/` - the TTS model's clips, their
+  alignments, and the measured readings; generated once - the engine isn't deterministic), and the listener models and
+  the phoneme recognizer (on first use, `downloads/listeners/`); `make clean` keeps it
 - `paper/` - the paper (`paper.md`; `index.html` renders it with MarkdownUp).
 
 ## javascript-build
@@ -74,14 +83,17 @@ Local Makefile overrides:
 
 - `commit` - also runs the training package's gate (`commit-train`: `make -C train commit`, after `make parity`); `make
   clean` cleans it too
-- `superclean` - also the downloads (`downloads/` - the corpora, the listener models, and Whisper; about 14 GB)
+- `superclean` - also the downloads (`downloads/` - the training speech, the listener models, and Whisper; about 10 GB)
 
 `make commit` (test, lint, doc, cover, and the training's gate) is the gate before committing. `npm pack --dry-run`
 lists the package's files (`package.json` `files`: `lib/`). `make -j train` trains both generated models from the recipe
 (`train/data/train.json`, with its book texts pinned in `train/data/books.json` - a revised text fails the fetch, never trains):
-`make -j train-g2p` (the G2P and the heteronym relabeling, CPU - `G2P_STANDALONE_JOBS` workers alone) and `make -j
+`make -j train-g2p` (the G2P and the heteronym relabeling, CPU - `G2P_STANDALONE_JOBS` workers alone - from the
+training speech's measured readings) and `make -j
 train-voice` at once, each model gated, its module in `build/train/` (`lib/models/` unchanged), then a report
-(`picovox_train.trained`: sizes, the voice's scores against the shipped model's, which modules differ). The flow: `make
+(`picovox_train.trained`: sizes, the voice's scores against the shipped model's, which modules differ). The first run
+needs Ollama running (the recipe's `tts.engine` - its model pulled if missing, its digest the pin); with the training
+speech cached in `downloads/tts/`, none. The flow: `make
 -j train`, the training dashboard, `make train-check` (the package's tests with the trained models, by
 `tools/trainmodels.js`, then the blind A/B of the trained voice in the browser - `tools/trainab.js` - and its report
 and recommendation), then `make train-install` (the trained modules that differ into `lib/models/`; `make

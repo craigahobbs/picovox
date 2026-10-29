@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.0 (unreleased)
+
+- new voices - every voice is new: the voice network is trained on speech a local TTS model (Gradium's Phonon, through Ollama) speaks at train time, one of its voices for each of the package's twelve, instead of human recordings (CMU ARCTIC, LibriTTS-R, CREMA-D). The voice keys (male - the default - female, sarah, helen, amy, kate, grace, james, robert, michael, david, and thomas), the style keys, and the API are unchanged; each voice is its own row of the model's speaker table, with new descriptions in voices() - no blends of readers, and no per-voice pitch, tract, effort, pulse, or rate adjustments (every voice's -5 dB source shelf kept). UTMOS, word error rate, and speaker similarity: TODO(results)
+- the happy, sad, fearful, and disgusted styles are transforms only, like angry: the model has no style table - each style's transforms are the measured effects (pitch, pitch range, pulse, frication, level, and pace) the former emotion embeddings, learned from CREMA-D's actors, had on every voice; the styles' listener-panel scores: TODO(results)
+- lib/model.js conditions on a speaker only - its speaker blends ({id: weight}) and its style option removed; tools/speak.js loses --blend, --style, and --intensity
+- training: make train generates its training speech - book sentences, the heteronyms' coverage first, about 4 hours a voice - from the local TTS model (pinned by digest, cached in downloads/tts/), aligns and checks it with a wav2vec2 phoneme recognizer, and measures its heteronym tokens' readings, the G2P's heteronym evidence; the human speech corpora, the speaker pool, and the CREMA-D pipeline are gone
+
 ## 1.6.8 (2026-10-27)
 
 - [bd62a80](https://github.com/craigahobbs/picovox/commit/bd62a80) - pronunciation: the heteronym context network retrained on the context labels 1.6.5's reading fixes changed - "a minute amount of dust" and "he spoke Polish" now right (the context regression set 53 of 54, was 51); 38 of 519,548 words of the pinned books are pronounced differently, all heteronyms. The voice retrained from scratch by the new make train flow - no audible difference in blind A/B listening, its listener-panel scores within noise

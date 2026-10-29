@@ -55,18 +55,17 @@ def write_config(root, teacher):
         file.write('We went home. A dark night fell on the town. Oh. Call me Ishmael.\n')
     recipe['distill'] = {
         'teacher': teacher,
-        'targets': {'books': books, 'bookCopies': 2, 'actorShare': 0.3, 'blendShare': 0.5, 'emotionShare': 0.5,
-                    'intensity': [0.25, 1.0], 'minTokens': 4, 'maxTokens': 256, 'valItems': 3, 'seed': 1},
+        'targets': {'books': books, 'bookCopies': 2, 'minTokens': 4, 'maxTokens': 256, 'valItems': 3, 'seed': 1},
         'train': {'steps': 3, 'batch': 4, 'maxFrames': 4000, 'lr': 0.001, 'warmup': 1, 'schedule': 'wsd', 'cooldown': 0.25,
                   'durationWeight': 0.25, 'dropout': 0.05, 'weightDecay': 0.0001, 'valEvery': 2},
         'student': 'tiny',
         'students': [{'name': 'tiny', 'config': {'dim': 8, 'decoderDim': 8, 'encoderLayers': 1, 'decoderLayers': 1}},
                      {'name': 'small', 'config': {'dim': 12, 'decoderDim': 12, 'encoderLayers': 1, 'decoderLayers': 1}}],
-        'polish': {'steps': 2, 'batch': 2, 'max-frames': 2000, 'crop': 0.2, 'lr': 0.0002, 'warmup': 1, 'cremad': 0.5,
+        'polish': {'steps': 2, 'batch': 2, 'max-frames': 2000, 'crop': 0.2, 'lr': 0.0002, 'warmup': 1,
                    'adversarial': 0.0, 'val-every': 2, 'val-count': 2, 'log-every': 1, 'keep-every': 0},
-        'eval': {'speakers': [['arctic-slt', 'female'], ['arctic-bdl', 'male']], 'rate': 16000},
+        'eval': {'speakers': [['female', 'female'], ['male', 'male']], 'rate': 16000},
         'tolerance': {'mos': 0.05, 'wer': 1.0, 'similarity': 0.85},
-        'samples': {'speakers': ['arctic-bdl'], 'texts': ['melville-moby'], 'rate': 16000}
+        'samples': {'speakers': ['male'], 'texts': ['melville-moby'], 'rate': 16000}
     }
     path = os.path.join(root, 'train.json')
     with open(path, 'w', encoding='utf-8') as file:
@@ -189,17 +188,11 @@ class TestBooks(DistillCase):
 
 class TestTargets(DistillCase):
 
-    def test_blend_vectors(self):
-        table = torch.tensor([[1.0, 0.0], [0.0, 1.0]])
-        vectors = distill.blend_vectors(table, torch.tensor([0, 1]), torch.tensor([1, 1]), torch.tensor([0.25, 0.0]))
-        self.assertTrue(torch.allclose(vectors, torch.tensor([[0.75, 0.25], [0.0, 1.0]])))
-
     def test_teacher_outputs(self):
         model, _ = export.load_model(self.teacher)
         tokens = torch.tensor([[2, 20, 30, 3, 40, 5]])
         with torch.no_grad():
-            duration_outputs, durations, unit = distill.teacher_outputs(model, tokens, model.speaker.weight[:1], torch.tensor([-1]),
-                                                                        torch.tensor([0.0]))
+            duration_outputs, durations, unit = distill.teacher_outputs(model, tokens, torch.tensor([0]))
             inferred = model.infer(tokens, speaker=torch.tensor([0]))
         self.assertEqual(duration_outputs.shape, (1, 6, 3))
         self.assertTrue(torch.equal(durations, inferred['durations']))
@@ -212,26 +205,22 @@ class TestTargets(DistillCase):
         with unittest.mock.patch('os.cpu_count', return_value=None):
             token_lists, records, report = distill.target_inputs(state, settings, {9: 10}, lines.append)
         self.assertEqual(len(token_lists), len(records))
-        sources = [record[9] for record in records]
+        sources = [record[5] for record in records]
         self.assertEqual(sources.count(0), 4)
-        self.assertEqual(sources.count(1), 4)
         self.assertEqual(report['book.txt']['sentences'], 8)
         # (a sentence too short, and one already seen, left out)
         self.assertEqual(report['plain.txt'], {'sentences': 4, 'kept': 2})
-        books = [record for record in records if record[9] == 2]
+        books = [record for record in records if record[5] == 1]
         # (each kept sentence twice, but the validation ones once)
         kept = report['book.txt']['kept'] + 2
         self.assertEqual(len(books), 2 * kept - 3)
-        self.assertEqual(sum(1 for record in books if record[10] == 1), 3)
-        self.assertTrue(any(record[6] > 0 for record in books))
-        self.assertTrue(any(record[7] >= 0 for record in books))
-        self.assertTrue(any(record[4] >= 2 for record in books))
+        self.assertEqual(sum(1 for record in books if record[6] == 1), 3)
+        # (each book sentence spoken by a random voice)
+        self.assertEqual({record[4] for record in books}, {0, 1})
         self.assertTrue(all(9 not in tokens for tokens in token_lists))
-        # (the actors' records have their emotion and intensity)
-        actors = [record for record in records if record[9] == 1]
-        self.assertEqual(sorted(record[7] for record in actors), [-1, -1, 0, 0])
-        self.assertEqual(sorted(record[8] for record in actors), [0.0, 0.0, 1.0, 1.0])
-        self.assertIn('training utterances: 8 (4 readers, 4 actors)', lines)
+        # (the training utterances with their own speakers)
+        self.assertEqual(sorted(record[4] for record in records if record[5] == 0), [0, 0, 1, 1])
+        self.assertIn('training utterances: 4', lines)
 
     def test_make_targets(self):
         out = os.path.join(self.root, 'targets-all')
@@ -241,7 +230,7 @@ class TestTargets(DistillCase):
         index = targets.index
         self.assertEqual(index['teacher'], self.teacher)
         self.assertEqual(index['count'], len(targets.items))
-        self.assertEqual(index['sources']['readers'], 4)
+        self.assertEqual(index['sources']['corpus'], 4)
         self.assertEqual(index['validation'], 3)
         self.assertEqual(len(targets.split(1)), 3)
         self.assertEqual(index['tokens'], int(targets.items['tokenCount'].sum()))
@@ -252,11 +241,8 @@ class TestTargets(DistillCase):
         item = targets.items[0]
         token_slice = slice(item['tokenOffset'], item['tokenOffset'] + item['tokenCount'])
         tokens = torch.tensor(targets.arrays['tokens'][token_slice][None].astype(numpy.int64))
-        speaker = distill.blend_vectors(model.speaker.weight.detach(), torch.tensor([int(item['speakerA'])]),
-                                        torch.tensor([int(item['speakerB'])]), torch.tensor([float(item['blend'])]))
         with torch.no_grad():
-            _, durations, unit = distill.teacher_outputs(model, tokens, speaker, torch.tensor([int(item['emotion'])]),
-                                                         torch.tensor([float(item['intensity'])]))
+            _, durations, unit = distill.teacher_outputs(model, tokens, torch.tensor([int(item['speaker'])]))
         self.assertEqual(targets.arrays['durations'][token_slice].tolist(), durations[0].tolist())
         frames = targets.arrays['frames'][item['frameOffset']:item['frameOffset'] + 2 * item['frameCount']]
         self.assertTrue(numpy.allclose(frames, unit[0].numpy(), atol=1e-3))
@@ -369,10 +355,10 @@ class TestTraining(DistillCase):
     def test_build_student(self):
         teacher, state = export.load_model(self.teacher)
         model, copied = distill.build_student({'dim': 8, 'decoderDim': 8}, teacher, state, 0.05)
-        self.assertEqual(sorted(copied), ['eq_free', 'speaker.weight', 'style'])
+        self.assertEqual(sorted(copied), ['eq_free', 'speaker.weight'])
         self.assertEqual(model.config['dim'], 8)
         self.assertFalse(model.speaker.weight.requires_grad)
-        self.assertTrue(torch.equal(model.style, teacher.style))
+        self.assertTrue(torch.equal(model.speaker.weight, teacher.speaker.weight))
 
     def test_losses(self):
         targets = distill.Targets(self.targets)
@@ -408,11 +394,9 @@ class TestTraining(DistillCase):
         teacher, state = export.load_model(self.teacher)
         checkpoint = distill.checkpoint_state(teacher, state, 7, {'name': 'x'}, {'total': 1.0}, {'distill': {'student': {}}})
         self.assertEqual(checkpoint['step'], 7)
-        self.assertEqual(checkpoint['args'], {'name': 'x', 'cremad': 0.2})
+        self.assertEqual(checkpoint['args'], {'name': 'x'})
         self.assertEqual(checkpoint['speakers'], model_fixtures.SPEAKERS)
         self.assertIn('distill', checkpoint)
-        state['args'] = {}
-        self.assertEqual(distill.checkpoint_state(teacher, state, 1, {})['args'], {'cremad': 0})
 
     def test_train_student(self):
         validate = distill.validate_student
@@ -548,7 +532,7 @@ class TestEvaluation(DistillCase):
         with open(os.path.join(out_dir, 'result.json'), encoding='utf-8') as file:
             self.assertEqual(json.load(file), result)
         with open(os.path.join(out_dir, 'model.json'), encoding='utf-8') as file:
-            self.assertEqual(json.load(file)['defaultSpeaker'], 1)
+            self.assertEqual(json.load(file)['defaultSpeaker'], 0)
         # (no panel)
         result = distill.evaluate_model('tiny', self.student, config, listen_panel=False)
         self.assertNotIn('panel', result)
@@ -590,7 +574,7 @@ class TestEvaluation(DistillCase):
         out_dir = os.path.join(distill.DISTILL_DIR, 'eval', name)
         os.makedirs(out_dir, exist_ok=True)
         with open(os.path.join(out_dir, 'model.json'), 'w', encoding='utf-8') as file:
-            json.dump({'speakers': [{'key': key} for key in model_fixtures.SPEAKERS]}, file)
+            json.dump({'speakers': [{'key': key} for key in model_fixtures.SPEAKERS], 'defaultSpeaker': 0}, file)
         return out_dir
 
     def test_measure_speed(self):
@@ -607,7 +591,7 @@ class TestEvaluation(DistillCase):
             self.assertTrue(model_path.endswith('model'))
             self.assertTrue(batch_path.endswith('speed-batch.json'))
             self.assertEqual(rate, 16000)
-            self.assertEqual({item['speaker'] for item in batch}, {1})
+            self.assertEqual({item['speaker'] for item in batch}, {0})
             for item in batch:
                 with open(item['wav'], 'wb') as file:
                     file.write(b'RIFF')
@@ -626,9 +610,9 @@ class TestEvaluation(DistillCase):
         self.write_export('tiny')
         with unittest.mock.patch.object(distill.panel, 'speak') as speak:
             paths = distill.render_samples('tiny', config)
-        self.assertEqual(paths, [os.path.join(distill.SAMPLES_DIR, 'distill-tiny-arctic-bdl-melville-moby.wav')])
+        self.assertEqual(paths, [os.path.join(distill.SAMPLES_DIR, 'distill-tiny-male-melville-moby.wav')])
         batch = speak.call_args[0][1]
-        self.assertEqual(batch[0]['speaker'], 1)
+        self.assertEqual(batch[0]['speaker'], 0)
         self.assertTrue(batch[0]['text'].startswith('Call me Ishmael.'))
 
     def test_brief(self):
@@ -673,7 +657,7 @@ class TestEvaluation(DistillCase):
             json.dump({'name': name, 'checkpoint': f'{name}.pt', 'parameters': parameters,
                        'size': {'moduleBytes': parameters * 2, 'moduleGzipBytes': parameters},
                        'panel': {'mos': mos, 'wer': wer, **({'similarity': similarity} if similarity is not None else {})},
-                       'speakers': {'arctic-bdl': {'mos': mos, 'embedding': [1.0]}}}, file)
+                       'speakers': {'male': {'mos': mos, 'embedding': [1.0]}}}, file)
 
     def test_pick(self):
         self.write_result('teacher', 1000, 3.5, 2.0)
@@ -695,7 +679,7 @@ class TestEvaluation(DistillCase):
         self.assertEqual(rows['small']['within'], {'mos': False, 'wer': True, 'similarity': True})
         self.assertEqual(rows['big']['realTimeTotal'], 10.0)
         self.assertEqual(summary['samples'], ['teacher.wav', 'big-polish.wav', 'big.wav', 'small.wav'])
-        self.assertNotIn('embedding', summary['results']['big']['speakers']['arctic-bdl'])
+        self.assertNotIn('embedding', summary['results']['big']['speakers']['male'])
 
         # Against a baseline, no speed, the samples named - and no student within the tolerance fails
         self.write_result('baseline', 800, 3.9, 1.0, 1.0)

@@ -37,17 +37,16 @@ class TestSynthesize(unittest.TestCase):
         self.checkpoint = DATA.run_path('voice', 'last.pt')
 
     def test_speaker_id(self):
-        state = {'speakers': ['arctic-slt', 'arctic-bdl']}
+        state = {'speakers': ['male', 'female']}
         self.assertEqual(synthesize.speaker_id(state, 1), 1)
         self.assertEqual(synthesize.speaker_id(state, '1'), 1)
-        self.assertEqual(synthesize.speaker_id(state, 'arctic-bdl'), 1)
+        self.assertEqual(synthesize.speaker_id(state, 'female'), 1)
 
     def test_voice(self):
-        voice = synthesize.Voice(self.checkpoint, speaker='arctic-bdl')
+        voice = synthesize.Voice(self.checkpoint, speaker='female')
         self.assertEqual(voice.speaker, 1)
         self.assertFalse(voice.model.training)
         self.assertEqual(voice.speaker_input.tolist(), [1])
-        self.assertEqual(voice.emotion.tolist(), [-1])
         self.assertEqual(voice.eq.shape, (params.EQ_BAND_COUNT,))
         # The export's weights
         model, _ = export.load_model(self.checkpoint)
@@ -63,11 +62,9 @@ class TestSynthesize(unittest.TestCase):
         empty, parts = voice.frames('')
         self.assertEqual((empty.shape, parts), ((0, params.COUNT), []))
 
-    def test_voice_style(self):
-        voice = synthesize.Voice(self.checkpoint, emotion='happy', intensity=0.5)
+    def test_voice_default(self):
+        voice = synthesize.Voice(self.checkpoint)
         self.assertEqual(voice.speaker, 0)
-        self.assertEqual(voice.emotion.tolist(), [3])
-        self.assertEqual(voice.intensity.tolist(), [0.5])
         values, _ = voice.frames('Hello.')
-        neutral, _ = synthesize.Voice(self.checkpoint).frames('Hello.')
-        self.assertFalse(numpy.array_equal(values, neutral))
+        other, _ = synthesize.Voice(self.checkpoint, speaker=1).frames('Hello.')
+        self.assertFalse(numpy.array_equal(values, other))

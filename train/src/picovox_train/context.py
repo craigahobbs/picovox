@@ -420,18 +420,20 @@ class WeightQuantizer:
             parameter.data.copy_(saved)
 
 
-# The cross-validation folds of the aligned speakers (fold 0 is the labels' held-out tenth - contextlabels.py)
+# The cross-validation folds - by book (fold 0 is the labels' held-out books - contextlabels.py; a book of the others is in
+# fold 1 + its hash's remainder by FOLDS - 1)
 FOLDS = RECIPE['gate']['folds']
 
 
 def fold_labels(labels, fold):
-    """The labels with the aligned examples of one fold of the speakers held out (by the hash contextlabels.py
-    holds out with), the others trained on"""
+    """The labels with one fold's books' examples (every source's) held out, the others trained on - fold 0 the labels'
+    own split; in the others, the held-out books' and the seeds' examples train"""
     def split(example):
-        if example['source'] != 'aligned':
+        if fold == 0:
             return example['split']
-        bucket = int(hashlib.sha1(example['group'].encode('utf-8')).hexdigest(), 16) % 100
-        return 'heldout' if bucket * FOLDS // 100 == fold else 'train'
+        if example['split'] == 'heldout' or example['source'] == 'seed':
+            return 'train'
+        return 'heldout' if 1 + int(hashlib.sha1(example['group'].encode('utf-8')).hexdigest(), 16) % (FOLDS - 1) == fold else 'train'
     return {**labels, 'examples': [{**example, 'split': split(example)} for example in labels['examples']]}
 
 
@@ -922,7 +924,7 @@ def fold_done(path, digest):
 
 
 # One fold of the cross-validation (a worker task) - (labels path, fold, results path, log path, settings, the fold's
-# teachers' states): the context network trained without the fold's aligned speakers, and its held-out results (with the
+# teachers' states): the context network trained without the fold's books, and its held-out results (with the
 # inputs' digest) written to the results path
 def fold_task(task):
     labels_path, fold, path, log, settings, states = task
@@ -937,7 +939,7 @@ def fold_task(task):
 
 
 def command_cross_validate(args):
-    """Train the context network once per fold of the aligned speakers - each fold's held-out results to
+    """Train the context network once per fold of the books - each fold's held-out results to
     <out>/fold-<k>.json (resumable: a fold with results from the same labels and settings is skipped - one from other
     inputs is retrained) - then the cross-validated gate (command_folds). Every fold's teachers, then every fold's
     network: -j trains that many at once, each in a worker process, and every training is one thread (the results are the

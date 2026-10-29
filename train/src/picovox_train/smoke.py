@@ -11,14 +11,15 @@ directory, each checked to finish and write its outputs:
 - g2p - picovox_train.g2p train (each stage 3 steps)
 - context - picovox_train.context train-g2p and train-context (3 steps) and export, from the g2p stage (when build/nn/context has the
   context labels - picovox_train.contextlabels)
-- data - picovox_train.multi build --out on a few utterances of two speakers
-- teacher - picovox_train.trainmulti stage A (3 steps), then stage B from it (the critic, the emotional speech)
+- data - picovox_train.tts build --out on a few clips of the training speech (when its corpus is generated and aligned -
+  picovox_train.tts generate, align; the smoke test never runs the engine)
+- teacher - picovox_train.trainmulti stage A (3 steps), then stage B from it (the critic)
 - distill - picovox_train.distill targets (32 items, one short book) from the stage-B teacher, train (3 steps), and polish
   (2 steps)
 - package - picovox_train.export and picovox_train.package of the polished student
 
-The voice stages read the training data (build/nn/data/multi and cremad); everything is written under --out (runs go
-to <out>/runs - NN_RUNS_DIR).
+The voice stages read the training data the data stage built (<out>/data/tts), else build/nn/data/tts; everything is
+written under --out (runs go to <out>/runs - NN_RUNS_DIR).
 """
 
 import argparse
@@ -29,7 +30,7 @@ import subprocess
 import sys
 import time
 
-from . import ROOT, SOURCE_DIR
+from . import ROOT, SOURCE_DIR, tts
 
 
 PYTHON = sys.executable
@@ -89,10 +90,12 @@ def main(argv=None):
                     run('context-export', ['picovox_train.context', 'export', '--g2p', g2p_checkpoint, '--context', context_checkpoint,
                                            '--out', os.path.join(out, 'g2pModel.js')], [os.path.join(out, 'g2pModel.js')])
 
-    if 'data' in stages:
-        corpus = os.path.join(out, 'multi')
-        run('data-build', ['picovox_train.multi', 'build', '--out', corpus, '--speakers', 'arctic-slt', 'libritts-5895', '--limit', '3',
-                           '-j', '2'], [os.path.join(corpus, 'index.json')])
+    # The training data - a few clips of the corpus (if generated and aligned)
+    if 'data' in stages and os.path.exists(os.path.join(tts.corpus_dir(tts.load_settings()), 'alignments.jsonl')):
+        corpus = os.path.join(out, 'data', 'tts')
+        if run('data-build', ['picovox_train.tts', 'build', '--out', corpus, '--limit', '48', '-j', '2'],
+               [os.path.join(corpus, 'index.json')]):
+            env['NN_DATA_DIR'] = os.path.join(out, 'data')
 
     common = ['--device', 'cpu', '--batch', '4', '--val-count', '4', '--keep-every', '0', '--log-every', '1']
     teacher = os.path.join(runs, 'smoke-b', 'last.pt')

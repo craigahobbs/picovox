@@ -8,7 +8,8 @@ soxr==1.1.0
 praat-parselmouth==0.4.7
 #   The listener models (picovox_train/listeners.py): UTMOS22 strong (naturalness MOS) through torch.hub
 #   tarepan/SpeechMOS (which needs torchaudio), ECAPA-TDNN speaker embeddings (speechbrain/spkrec-ecapa-voxceleb), and
-#   the CREMA-D aligner's wav2vec2 phoneme recognizer (transformers - picovox_train/cremad.py align)
+#   the training speech's wav2vec2 phoneme recognizer (transformers - picovox_train/ctc.py: the alignment and the
+#   readings' measurement)
 torchaudio==2.11.0
 speechbrain==1.1.2
 transformers==5.20.2

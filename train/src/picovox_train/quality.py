@@ -2,17 +2,16 @@
 # https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
-Voice quality measures - each of the package's voices, and each of their readers synthesized, measured against the
-readers' own recordings (the voices' tinniness and warble, 2026-10-23):
+Voice quality measures - each of the package's voices, synthesized, measured against its source: the training
+speech's clips of its engine voice (tts.py - the voices' tinniness and warble, 2026-10-23):
 
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.quality measure --out build/quality \\
-        [--per-reader 16] [--edits '{"add": {"shelf": -5}}'] [-j 8]
+        [--per-voice 16] [--edits '{"add": {"shelf": -5}}'] [-j 8]
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.quality report build/quality/results.json
 
-measure renders each voice over the panel texts (tools/panel-texts.json) and each of the voices' readers over their
-held-out utterances (train/data/multi-split.json's test, then val, then training utterances to --per-reader) with the
-package (tools/renderLines.js - --edits are frame edits, for an experiment), and measures them and the readers'
-recordings (downloads/corpora) in voiced frames (Praat's pitch):
+measure renders each voice over the panel texts (tools/panel-texts.json) and over its held-out clips' texts (the
+corpus's test, then val clips, to --per-voice) with the package (tools/renderLines.js - --edits are frame edits, for
+an experiment), and measures them and those clips (downloads/tts) in voiced frames (Praat's pitch):
 
 - bands - third-octave levels (dB re the voiced power from 90 Hz to 95% of the source's bandwidth), and their summaries:
   tilt (dB/octave, 300 Hz to 5 kHz), alpha (50 Hz-1 kHz less 1-5 kHz), hammarberg (the 0-2 kHz peak less the 2-5 kHz),
@@ -21,8 +20,8 @@ recordings (downloads/corpora) in voiced frames (Praat's pitch):
 - crest2k - the 2-5 kHz band's envelope crest factor (30 ms windows) - how pulse-like the upper harmonics are
 - f0Flutter - the pitch's 4-20 Hz movement (cents RMS) and f0Wobble - its 1.5-6 Hz movement, in voiced runs of 250 ms+
 
-report prints each reader's synthesized measures less its recordings', and each voice's less its readers' (weighted by
-the voice's blend). The measures are guides, not verdicts: listeners heard the voices as tinny, and lowering the source
+report prints each voice's synthesized measures (its held-out texts, and the panel texts) less its source clips'. The
+measures are guides, not verdicts: listeners heard the voices as tinny, and lowering the source
 shelf fixed it while moving presence further below the recordings' (the energy isn't the cue), and phase dispersion cut
 crest2k below the recordings' without helping - blind listening decides (tools/voicelab/). Formant and
 band modulation and spectral peakiness were measured too and dropped - they didn't track what listeners heard.
@@ -33,7 +32,6 @@ import json
 import math
 import multiprocessing
 import os
-import re
 import subprocess
 import sys
 
@@ -173,40 +171,23 @@ def analyze(task):
     return result
 
 
-# The voices - [(key, sex, blend {reader key: share})] - from lib/synthesis.js's voice table
-def voice_table():
-    with open(os.path.join(ROOT, 'lib', 'synthesis.js'), encoding='utf-8') as file:
-        source = file.read()
-    voices = []
-    entry = r"\{'key': '([a-z]+)', 'label': '[^']*', 'sex': '(male|female)', "
-    for key, sex, speaker, blend in re.findall(entry + r"(?:'speaker': '([^']+)'|'rate': [0-9.]+,\s*'blend': (\{[^}]*\}))", source):
-        voices.append((key, sex, {speaker: 1.0} if speaker else {reader: float(share) for reader, share in
-                                                                re.findall(r"'([^']+)': ([0-9.]+)", blend)}))
-    return voices
-
-
 # The render jobs (tools/renderLines.js's items) and analysis tasks [(kind, who, task)] of a measurement: each voice over
-# the panel texts, each reader synthesized over per_reader of its utterances, and those utterances' recordings
-def plan(out_dir, per_reader, edits, speakers, split, utterances, panel_texts, voices):
+# the panel texts ('voice') and over per_voice of its held-out clips' texts ('synth'), and those clips ('source');
+# speakers, the training data's ({key: {pitchFloor, pitchCeiling, bandwidth}}); clips, each voice's held-out clips
+# [{id, text, wav}] (test, then val)
+def plan(out_dir, per_voice, edits, speakers, clips, panel_texts):
     jobs, tasks = [], []
-    for key, _, blend in voices:
-        readers = [speakers[reader] for reader in blend]
-        floor, ceiling = min(reader['pitchFloor'] for reader in readers), max(reader['pitchCeiling'] for reader in readers)
+    for key, info in speakers.items():
+        settings = (info['pitchFloor'], info['pitchCeiling'], info['bandwidth'])
         for text in panel_texts:
             wav = os.path.join(out_dir, 'voices', f'{key}-{text["id"]}.wav')
             jobs.append({'text': text['text'], 'voice': key, 'wav': wav, **({'edits': edits} if edits else {})})
-            tasks.append(('voice', key, (wav, floor, ceiling, VOICE_BANDWIDTH)))
-    for reader in sorted({reader for _, _, blend in voices for reader in blend}):
-        info = speakers[reader]
-        held_out = [sentence for sentence in split.get(reader, []) if sentence in utterances[reader]]
-        others = [sentence for sentence in utterances[reader] if sentence not in held_out]
-        for sentence in (held_out + others[::max(1, len(others) // per_reader)])[:per_reader]:
-            utterance = utterances[reader][sentence]
-            wav = os.path.join(out_dir, 'readers', f'{reader}-{sentence}.wav')
-            jobs.append({'text': utterance['text'], 'speaker': reader, 'wav': wav, **({'edits': edits} if edits else {})})
-            settings = (info['pitchFloor'], info['pitchCeiling'], info['bandwidth'])
-            tasks.append(('synth', reader, (wav, *settings)))
-            tasks.append(('human', reader, (utterance['wav'], *settings)))
+            tasks.append(('voice', key, (wav, info['pitchFloor'], info['pitchCeiling'], VOICE_BANDWIDTH)))
+        for clip in clips.get(key, [])[:per_voice]:
+            wav = os.path.join(out_dir, 'synth', f'{key}-{clip["id"]}.wav')
+            jobs.append({'text': clip['text'], 'voice': key, 'wav': wav, **({'edits': edits} if edits else {})})
+            tasks.append(('synth', key, (wav, *settings)))
+            tasks.append(('source', key, (clip['wav'], *settings)))
     return jobs, tasks
 
 
@@ -224,30 +205,29 @@ def render(jobs, processes):
 
 
 def measure_command(args):
-    from . import multi  # pylint: disable=import-outside-toplevel
-    with open(os.path.join(ROOT, 'train', 'data', 'speakers.json'), encoding='utf-8') as file:
-        speakers = {speaker['key']: speaker for speaker in json.load(file)['speakers']}
-    with open(os.path.join(ROOT, 'train', 'data', 'multi-split.json'), encoding='utf-8') as file:
-        split_file = json.load(file)
-    split = {key: list(split_file['test'].get(key, [])) + list(split_file['val'].get(key, []))
-             for key in set(split_file['test']) | set(split_file['val'])}
+    from . import tts  # pylint: disable=import-outside-toplevel
+    from .data import DATA_DIR, CorpusData  # pylint: disable=import-outside-toplevel
+    settings = tts.load_settings()
+    directory = tts.corpus_dir(settings)
+    speakers = CorpusData(os.path.join(DATA_DIR, 'tts')).index['speakers']
+    clips = {}
+    for split in ('test', 'val'):
+        for clip in tts.selection(settings):
+            if clip['split'] == split and os.path.exists(tts.wav_path(directory, clip)):
+                clips.setdefault(clip['key'], []).append({**clip, 'wav': tts.wav_path(directory, clip)})
     with open(os.path.join(ROOT, 'tools', 'panel-texts.json'), encoding='utf-8') as file:
         panel_texts = json.load(file)['texts']
-    voices = voice_table()
-    readers = {reader for _, _, blend in voices for reader in blend}
-    utterances = {key: {utterance['sentence']: utterance for utterance in info['utterances']}
-                  for key, info in multi.candidate_speakers().items() if key in readers}
     edits = json.loads(args.edits) if args.edits else None
-    jobs, tasks = plan(args.out, args.per_reader, edits, speakers, split, utterances, panel_texts, voices)
-    for directory in ('voices', 'readers'):
-        os.makedirs(os.path.join(args.out, directory), exist_ok=True)
+    jobs, tasks = plan(args.out, args.per_voice, edits, speakers, clips, panel_texts)
+    for name in ('voices', 'synth'):
+        os.makedirs(os.path.join(args.out, name), exist_ok=True)
     render(jobs, args.jobs)
     with multiprocessing.Pool(args.jobs) as pool:
         results = pool.map(analyze, [task for _, _, task in tasks], chunksize=4)
     rows = [{'kind': kind, 'who': who, **result} for (kind, who, _), result in zip(tasks, results)]
     path = os.path.join(args.out, 'results.json')
     with open(path, 'w', encoding='utf-8') as file:
-        json.dump({'edits': edits, 'blends': {key: blend for key, _, blend in voices}, 'rows': rows}, file)
+        json.dump({'edits': edits, 'rows': rows}, file)
     print(f'quality: {len(rows)} measured - {path}')
     return report(path)
 
@@ -258,46 +238,36 @@ def mean(rows, name):
     return sum(values) / len(values) if values else None
 
 
-# Print the readers' synthesized measures less their recordings', and the voices' less their readers' (blend-weighted)
+# Print each voice's synthesized measures (its held-out texts, then the panel texts) less its source clips'
 def report(path):
     with open(path, encoding='utf-8') as file:
         results = json.load(file)
     groups = {}
     for row in results['rows']:
         groups.setdefault((row['kind'], row['who']), []).append(row)
-    human = {who: {name: mean(rows, name) for name in MEASURES} for (kind, who), rows in groups.items() if kind == 'human'}
+    source = {who: {name: mean(rows, name) for name in MEASURES} for (kind, who), rows in groups.items() if kind == 'source'}
 
     def cells(values):
         return ''.join(f'{value:+10.2f}' if value is not None else '       n/a' for value in values)
     header = ''.join(f'{name[:9]:>10}' for name in MEASURES)
-    print(f'Readers synthesized, less their recordings\n{"reader":16}{header}')
-    for (kind, who), rows in sorted(groups.items()):
-        if kind == 'synth':
-            deltas = [None if mean(rows, name) is None or human[who][name] is None else mean(rows, name) - human[who][name]
-                      for name in MEASURES]
-            print(f'{who:16}{cells(deltas)}')
-    print(f'\nVoices (the panel texts), less their readers\' recordings (blend-weighted)\n{"voice":16}{header}')
-    for (kind, who), rows in groups.items():
-        if kind == 'voice':
-            blend = results['blends'][who]
-            deltas = []
-            for name in MEASURES:
-                parts = [(share, human.get(reader, {}).get(name)) for reader, share in blend.items()]
-                value = mean(rows, name)
-                if value is None or any(part is None for _, part in parts):
-                    deltas.append(None)
-                else:
-                    deltas.append(value - sum(share * part for share, part in parts) / sum(share for share, _ in parts))
-            print(f'{who:16}{cells(deltas)}')
+    for kind, title in (('synth', 'Voices synthesized (their held-out texts), less their source clips'),
+                        ('voice', 'Voices (the panel texts), less their source clips')):
+        print(f'{title}\n{"voice":16}{header}')
+        for (row_kind, who), rows in sorted(groups.items()):
+            if row_kind == kind:
+                deltas = [None if mean(rows, name) is None or source.get(who, {}).get(name) is None else
+                          mean(rows, name) - source[who][name] for name in MEASURES]
+                print(f'{who:16}{cells(deltas)}')
+        print()
     return 0
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog='picovox_train.quality', description='Voice quality measures against the readers\' recordings')
+    parser = argparse.ArgumentParser(prog='picovox_train.quality', description='Voice quality measures against their source clips')
     commands = parser.add_subparsers(dest='command', required=True)
-    measure_parser = commands.add_parser('measure', help='render and measure the voices and their readers')
+    measure_parser = commands.add_parser('measure', help='render and measure the voices and their source clips')
     measure_parser.add_argument('--out', default=os.path.join(ROOT, 'build', 'quality'), help='the output directory')
-    measure_parser.add_argument('--per-reader', type=int, default=16, help='utterances per reader')
+    measure_parser.add_argument('--per-voice', type=int, default=16, help='held-out clips per voice')
     measure_parser.add_argument('--edits', help='frame edits for every rendering (tools/renderLines.js\'s, JSON)')
     measure_parser.add_argument('-j', '--jobs', type=int, default=8, help='Node renderers and analysis workers')
     report_parser = commands.add_parser('report', help='print a measurement\'s results')

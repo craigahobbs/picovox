@@ -3,7 +3,6 @@
 
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
-import contextlib
 import json
 import os
 import runpy
@@ -12,7 +11,7 @@ import unittest
 import unittest.mock
 import warnings
 
-from picovox_train import stepcheck, trainmulti
+from picovox_train import stepcheck
 
 from . import helpers
 from .test_trainmulti import TrainData
@@ -31,20 +30,13 @@ def tearDownModule():  # pylint: disable=invalid-name
     DATA.cleanup()
 
 
-# Run stepcheck.main in a working directory (the tree it checks), with the tests' data (or only its readers) - (its
-# output, stderr)
-def run_stepcheck(directory, *arguments, readers_only=False):
+# Run stepcheck.main in a working directory (the tree it checks), with the tests' data - (its output, stderr)
+def run_stepcheck(directory, *arguments):
     out = os.path.join(directory, 'out.json')
     previous = os.getcwd()
     os.chdir(directory)
     try:
-        with DATA.patched(), helpers.captured() as (_, stderr), contextlib.ExitStack() as stack:
-            if readers_only:
-                data_dir = os.path.join(directory, 'data')
-                os.makedirs(data_dir, exist_ok=True)
-                if not os.path.exists(os.path.join(data_dir, 'multi')):
-                    os.symlink(os.path.join(DATA.data_dir, 'multi'), os.path.join(data_dir, 'multi'))
-                stack.enter_context(unittest.mock.patch.object(trainmulti, 'DATA_DIR', data_dir))
+        with DATA.patched(), helpers.captured() as (_, stderr):
             status = stepcheck.main(['--init', DATA.run_path('init', 'last.pt'), '--out', out, *arguments])
     finally:
         os.chdir(previous)
@@ -55,31 +47,31 @@ def run_stepcheck(directory, *arguments, readers_only=False):
 
 class TestStepcheck(unittest.TestCase):
 
-    def test_readers(self):
+    def test_stepcheck(self):
         with tempfile.TemporaryDirectory() as directory:
-            result, stderr = run_stepcheck(directory, '--batches', '1', '--batch', '2', readers_only=True)
-            again, _ = run_stepcheck(directory, '--batches', '1', '--batch', '2', readers_only=True)
+            result, stderr = run_stepcheck(directory, '--batches', '1', '--batch', '2')
+            again, _ = run_stepcheck(directory, '--batches', '1', '--batch', '2')
         self.assertEqual(result, again)
         self.assertEqual(result['device'], 'cpu')
         self.assertEqual(result['config'], {})
         self.assertEqual(len(result['batches']), 1)
         row = result['batches'][0]
-        self.assertEqual(row['corpus'], 'multi')
-        self.assertEqual(sorted(row['items']), ['arctic-bdl/0002', 'arctic-slt/0002'])
+        self.assertEqual(row['corpus'], 'tts')
+        self.assertEqual(sorted(row['items']), ['female/0002', 'male/0002'])
         for mode in ('eval', 'train'):
             self.assertEqual(set(row[mode]) >= {'spectral', 'total', 'durPhone', 'b1'}, True)
             float.fromhex(row[mode]['total'])
         self.assertNotEqual(row['eval']['total'], row['train']['total'])
         self.assertGreater(float.fromhex(row['gradNorm']), 0)
-        self.assertEqual(json.loads(stderr.splitlines()[0])['corpus'], 'multi')
+        self.assertEqual(json.loads(stderr.splitlines()[0])['corpus'], 'tts')
 
-    def test_emotional_corpus(self):
-        # The emotional corpus too, when it is built; a model config override
+    def test_config(self):
+        # A model config override
         with tempfile.TemporaryDirectory() as directory:
             result, _ = run_stepcheck(directory, '--batches', '1', '--batch', '1', '--config', '{"jitter": 0.01}')
-        self.assertEqual([row['corpus'] for row in result['batches']], ['multi', 'cremad'])
+        self.assertEqual([row['corpus'] for row in result['batches']], ['tts'])
         self.assertEqual(result['config'], {'jitter': 0.01})
-        self.assertEqual(len(result['batches'][1]['items']), 1)
+        self.assertEqual(len(result['batches'][0]['items']), 1)
 
     def test_module_main(self):
         with unittest.mock.patch('sys.argv', ['stepcheck.py']), helpers.captured() as (_, stderr), warnings.catch_warnings():

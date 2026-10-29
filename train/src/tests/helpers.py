@@ -40,8 +40,8 @@ def tiny_config(**overrides):
     return {
         'vocab': len(frontend.vocabulary()), 'dim': 16, 'encoderLayers': 1, 'heads': 2, 'encoderKernel': 3, 'ffnMultiple': 2,
         'durationKernel': 3, 'durationDropout': 0.2, 'decoderDim': 16, 'decoderLayers': 1, 'decoderKernel': 3, 'subframes': 2,
-        'speakers': 4, 'styleDim': 4, 'jitter': 0.005, 'shimmer': 0.02, 'positionFeatures': 5, 'kind': 'multi',
-        'speakerDim': 4, 'styles': 5, **overrides
+        'speakers': 2, 'jitter': 0.005, 'shimmer': 0.02, 'positionFeatures': 5, 'kind': 'multi', 'speakerDim': 4,
+        **overrides
     }
 
 
@@ -93,12 +93,11 @@ TEXTS = ['Call me Ishmael.', 'It was the best of times.', 'Is it cold?', 'Wait, 
 
 
 # Write a tiny corpus directory in data.py's format (index.json, tokens.npy, durations.npy, seconds.npy, audio.npy,
-# frames.npy, alignment.jsonl) - speakers {key: {sex, index[, pitchRanges]}}, count utterances per speaker (the splits
-# cycle train, train, val, test; the last one excluded), synthetic voiced audio. emotions gives the utterances emotion and
-# intensity fields (cremad.py's), cycling. Returns the index.
-def write_corpus(directory, speakers=None, count=4, seed=0, emotions=None, frames_per_token=3):
+# frames.npy, alignment.jsonl - tts.py's) - speakers {key: {sex, index}}, count utterances per speaker (the splits cycle
+# train, train, val, test; the last one excluded), synthetic voiced audio. Returns the index.
+def write_corpus(directory, speakers=None, count=4, seed=0, frames_per_token=3):
     rng = numpy.random.default_rng(seed)
-    speakers = speakers or {'arctic-slt': {'sex': 'female', 'index': 0}, 'arctic-bdl': {'sex': 'male', 'index': 1}}
+    speakers = speakers or {'male': {'sex': 'male', 'index': 0}, 'female': {'sex': 'female', 'index': 1}}
     os.makedirs(directory, exist_ok=True)
     splits = ['train', 'train', 'val', 'test']
     tokens_all, durations_all, seconds_all, audio_all, frames_all = [], [], [], [], []
@@ -128,9 +127,6 @@ def write_corpus(directory, speakers=None, count=4, seed=0, emotions=None, frame
                 'tokenOffset': token_offset, 'tokenCount': len(ids), 'frameOffset': frame_offset, 'frameCount': frame_count,
                 'sampleOffset': frame_offset * data.HOP, 'sampleCount': frame_count * data.HOP, 'trimStart': 0.0
             }
-            if emotions:
-                emotion, intensity = emotions[number % len(emotions)]
-                entry.update({'emotion': emotion, 'intensity': intensity})
             entries.append(entry)
             tokens_all.append(ids)
             durations_all.append(durations)
@@ -141,9 +137,11 @@ def write_corpus(directory, speakers=None, count=4, seed=0, emotions=None, frame
             frame_offset += frame_count
     index = {
         'version': data.FORMAT_VERSION, 'sampleRate': data.SAMPLE_RATE, 'hop': data.HOP, 'frameRate': data.SAMPLE_RATE / data.HOP,
-        'channels': data.CHANNELS, 'vocab': frontend.vocabulary(),
-        'speakers': {key: {'pitchFloor': 60.0, 'pitchCeiling': 400.0, 'formantCeiling': 5000, 'bandwidth': 8000,
-                           'sourceSampleRate': 16000, **info} for key, info in speakers.items()},
+        'channels': data.CHANNELS, 'vocab': frontend.vocabulary(), 'license': 'Phonon (Apache 2.0)',
+        'speakers': {key: {'pitchFloor': 60.0, 'pitchCeiling': 400.0, 'formantCeiling': 5000, 'bandwidth': 12000,
+                           'sourceSampleRate': 24000, 'medianF0': 150.0,
+                           'engine': {'model': 'phonon', 'digest': '0123456789ab', 'voice': key.title()}, **info}
+                     for key, info in speakers.items()},
         'utterances': entries
     }
     numpy.save(os.path.join(directory, 'tokens.npy'), numpy.concatenate(tokens_all))
@@ -156,12 +154,6 @@ def write_corpus(directory, speakers=None, count=4, seed=0, emotions=None, frame
     with open(os.path.join(directory, 'alignment.jsonl'), 'w', encoding='utf-8') as file:
         file.write(''.join(json.dumps({'id': entry['id']}) + '\n' for entry in entries))
     return index
-
-
-# The emotional corpus's speakers and styles (cremad.py's) for write_corpus
-CREMAD_SPEAKERS = {'cremad-1001': {'sex': 'male', 'index': 0, 'pitchRanges': {'angry': [80.0, 300.0]}},
-                   'cremad-1002': {'sex': 'female', 'index': 1}}
-CREMAD_EMOTIONS = [('angry', 'high'), ('neutral', 'unspecified'), ('happy', 'low'), ('sad', 'medium')]
 
 
 # Capture stdout and stderr - a context manager yielding (stdout, stderr) StringIO objects

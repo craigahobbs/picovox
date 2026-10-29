@@ -21,17 +21,18 @@ from . import helpers
 # Each stage's outputs (relative to the smoke run's directory)
 OUTPUTS = {
     'g2p-train': 'g2p/done.json', 'context-g2p': 'context-g2p.pt', 'context-train': 'context.pt', 'context-export': 'g2pModel.js',
-    'data-build': 'multi/index.json', 'teacher-a': 'runs/smoke-a/last.pt', 'teacher-b': 'runs/smoke-b/last.pt',
+    'data-build': 'data/tts/index.json', 'teacher-a': 'runs/smoke-a/last.pt', 'teacher-b': 'runs/smoke-b/last.pt',
     'distill-targets': 'targets/index.json', 'distill-train': 'runs/distill-s32/best.pt',
     'distill-polish': 'runs/distill-s32-polish/best.pt', 'export': 'export/smoke.json', 'package': 'voiceModel.js'
 }
 
 
 # A smoke test of the smoke test - the entry points mocked: each stage writes its outputs, or fails (exit 1) or writes
-# none (exit 0); with or without the context labels (in a temporary repository root)
+# none (exit 0); with or without the context labels (in a temporary repository root), and with or without the training
+# speech's aligned corpus
 class SmokeRun:
 
-    def __init__(self, failing=(), missing=(), labels=True):
+    def __init__(self, failing=(), missing=(), labels=True, corpus=True):
         self.failing = set(failing)
         self.missing = set(missing)
         self.temp = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
@@ -43,11 +44,18 @@ class SmokeRun:
             os.makedirs(os.path.join(self.root, 'build', 'nn', 'context'))
             with open(os.path.join(self.root, 'build', 'nn', 'context', 'labels.json'), 'w', encoding='utf-8') as file:
                 file.write('{}')
+        self.corpus = os.path.join(self.temp.name, 'tts')
+        if corpus:
+            os.makedirs(self.corpus)
+            with open(os.path.join(self.corpus, 'alignments.jsonl'), 'w', encoding='utf-8') as file:
+                file.write('{}\n')
         self.calls = []
+        self.data_dirs = {}
 
     def fake_run(self, command, cwd, env, stdout, stderr, check):
         name = os.path.basename(stdout.name)[:-len('.log')]
         self.calls.append((name, command))
+        self.data_dirs[name] = env.get('NN_DATA_DIR')
         assert (cwd, env['PYTHONPATH'], env['NN_RUNS_DIR'], stderr, check) == \
             (self.root, SOURCE_DIR, os.path.join(self.out, 'runs'), subprocess.STDOUT, False)
         assert command[:3] == [smoke.PYTHON, '-B', '-m']
@@ -62,6 +70,7 @@ class SmokeRun:
 
     def main(self, *arguments):
         with unittest.mock.patch.object(smoke, 'ROOT', self.root), \
+                unittest.mock.patch.object(smoke.tts, 'corpus_dir', return_value=self.corpus), \
                 unittest.mock.patch.object(smoke.subprocess, 'run', side_effect=self.fake_run), helpers.captured() as (stdout, _):
             status = smoke.main(['--out', self.out, *arguments])
         return status, stdout.getvalue()
@@ -105,6 +114,10 @@ class TestSmoke(unittest.TestCase):
                                                         '--steps', '3'])
         self.assertEqual(run.command('context-g2p')[6], os.path.join(run.root, 'build', 'nn', 'context', 'labels.json'))
         self.assertIn('--adversarial-start', run.command('teacher-b'))
+        # The data stage's clips, and the voice stages on its data
+        self.assertEqual(run.command('data-build')[3:], ['picovox_train.tts', 'build', '--out', os.path.join(run.out, 'data', 'tts'),
+                                                         '--limit', '48', '-j', '2'])
+        self.assertEqual(run.data_dirs['teacher-a'], os.path.join(run.out, 'data'))
         # The distillation's recipe - a short book, few validation items
         with open(os.path.join(run.out, 'train.json'), encoding='utf-8') as file:
             recipe = json.load(file)
@@ -147,6 +160,21 @@ class TestSmoke(unittest.TestCase):
         run = self.smoke_run(failing=['export'])
         self.assertEqual(run.main()[0], 1)
         self.assertEqual(run.names()[-3:], ['distill-train', 'distill-polish', 'export'])
+
+    def test_data_failure(self):
+        # A failed data build - the voice stages read build/nn/data
+        run = self.smoke_run(failing=['data-build'])
+        self.assertEqual(run.main('--only', 'data,teacher')[0], 1)
+        self.assertEqual(run.names(), ['data-build', 'teacher-a', 'teacher-b'])
+        self.assertIsNone(run.data_dirs['teacher-a'])
+
+    def test_no_corpus(self):
+        # No aligned corpus (picovox_train.tts generate and align not run) - the data stage is skipped, the voice stages
+        # read build/nn/data
+        run = self.smoke_run(corpus=False)
+        self.assertEqual(run.main('--only', 'data,teacher')[0], 0)
+        self.assertEqual(run.names(), ['teacher-a', 'teacher-b'])
+        self.assertIsNone(run.data_dirs['teacher-a'])
 
     def test_no_labels(self):
         # No context labels (nn.contextlabels not run) - the context stage is skipped

@@ -1,7 +1,26 @@
 {
     "description": "make train's recipe - every stage's settings and seeds: the G2P network (nn/g2p.py) and its heteronym models (nn/context.py), the teacher (nn/trainmulti.py --recipe), and the distilled student with its evaluation and gate (nn/distill.py, nn/panel.py)",
+    "tts": {
+        "description": "The training speech (picovox_train/tts.py): book sentences spoken by a local TTS model through Ollama's speech endpoint (engine - its model pinned by digest: a new model is a new corpus, downloads/tts/<model>-<digest>/), one engine voice for each of the package's voices (voices - the model's speaker rows in this order; male, the first, the default), the heteronym coverage first (coverage - sentences a word: the context gate's words, the context labels' candidate words, the other measured words - readings.py) from the context labels' books, then the distillation's books at random, to hoursPerVoice hours of speech a voice (wordsPerSecond - the engine's speaking rate, for the estimate); split by a hash of the text (split - test and val percents); a clip excluded by the checks (the recognizer's greedy phone error above maxPhoneError; cut short - truncatedTail final phones missing with under truncatedSilence seconds of trailing silence, or truncatedAlways at any; maxClipped of its samples at full scale); analysed with the formant ceilings by sex, at the engine's bandwidth (Hz)",
+        "engine": {"url": "http://localhost:11434", "model": "phonon", "digest": "58f58601e4e8",
+                   "license": "Phonon (Gradium) - its English checkpoint and voices under the Apache License 2.0 (ollama.com/library/phonon, huggingface.co/gradium/phonon-voices); its training data is undocumented"},
+        "voices": {
+            "male": {"voice": "Trevor", "sex": "male"}, "female": {"voice": "Harper", "sex": "female"},
+            "sarah": {"voice": "Juniper", "sex": "female"}, "helen": {"voice": "Delia", "sex": "female"},
+            "amy": {"voice": "Zoey", "sex": "female"}, "kate": {"voice": "Hadley", "sex": "female"},
+            "grace": {"voice": "Everly", "sex": "female"}, "james": {"voice": "Miles", "sex": "male"},
+            "robert": {"voice": "Preston", "sex": "male"}, "michael": {"voice": "Micah", "sex": "male"},
+            "david": {"voice": "Easton", "sex": "male"}, "thomas": {"voice": "Russell", "sex": "male"}
+        },
+        "hoursPerVoice": 4, "wordsPerSecond": 3.18, "workers": 8, "seed": 1,
+        "texts": {"books": "build/nn/books", "pins": "train/data/books.json", "minWords": 6, "maxWords": 40},
+        "coverage": {"gate": 200, "context": 24, "other": 12},
+        "split": {"test": 5, "val": 5},
+        "checks": {"maxPhoneError": 0.35, "truncatedTail": 3, "truncatedAlways": 5, "truncatedSilence": 0.05, "maxClipped": 0.005},
+        "analysis": {"formantCeilings": {"female": 5500, "male": 5000}, "bandwidth": 12000}
+    },
     "g2p": {
-        "description": "The G2P network (nn/g2p.py): the AR encoder-decoder trained on every dictionary word, frequency-weighted, with teacher-labeled unknown words, in four stages (base, two polishes over the most frequent words, then the readers' pronunciations of the relabeled words - focus), exported at 6 bits",
+        "description": "The G2P network (nn/g2p.py): the AR encoder-decoder trained on every dictionary word, frequency-weighted, with teacher-labeled unknown words, in four stages (base, two polishes over the most frequent words, then the training speech's pronunciations of the relabeled words - focus), exported at 6 bits",
         "model": {"embed": 32, "hidden": 96},
         "batch": 512,
         "alpha": 0.5,
@@ -17,7 +36,7 @@
         ]
     },
     "context": {
-        "description": "The heteronym models (nn/contextlabels.py, nn/context.py): the context labels (the readers' aligned readings; part-of-speech tags over the Project Gutenberg books texts - pinned texts, pins (nn/books.py), fetched to books - where the tag mapping agrees with the audio; the hand-written seeds of train/data/context-labels.json; and unlabeled transfer windows of the ambiguous words in the books, up to maxTransfer a word), the G2P's reading stage from the g2p recipe's last stage (the reading vectors, the ambiguity head, and the decoder), the context network (distilled from teachers - that many networks of their own seeds - toward their mean probabilities on its examples and the transfer windows, for steadiness), the export to lib/models/g2pModel.js, and the gates - the held-out aligned accuracy over the gate's words (less the S/Z-only pairs), and make train's comparison with the committed module (identical, else within these tolerances)",
+        "description": "The heteronym models (nn/contextlabels.py, nn/context.py): the context labels (the training speech's measured readings - picovox_train/measure.py; part-of-speech tags over the Project Gutenberg books texts - pinned texts, pins (nn/books.py), fetched to books - where the tag mapping agrees with the audio; the hand-written seeds of train/data/context-labels.json; and unlabeled transfer windows of the ambiguous words in the books, up to maxTransfer a word), the G2P's reading stage from the g2p recipe's last stage (the reading vectors, the ambiguity head, and the decoder), the context network (distilled from teachers - that many networks of their own seeds - toward their mean probabilities on its examples and the transfer windows, for steadiness), the export to lib/models/g2pModel.js, and the gates - the cross-validated held-out aligned accuracy over the gate's words (less the S/Z-only pairs; the folds by book), and make train's comparison with the committed module (identical, else within these tolerances)",
         "labels": {
             "books": "build/nn/books",
             "pins": "train/data/books.json",
@@ -35,8 +54,8 @@
                 "pg51252", "pg51428", "pg53154", "pg53416", "pg53874", "pg55179", "pg57641", "pg59828", "pg61851",
                 "pg62215", "pg64317", "pg65238", "pg67979", "pg68283", "pg69087", "pg70854", "pg71046", "pg75201",
                 "pg76178", "pg76639", "pg76668"],
-            "heldOutBooks": ["pg1342", "pg2701"], "heldOutPercent": 10,
-            "minAgreement": 0.95, "minValidate": 10, "minAlternate": 5, "minAlternateShare": 0.02, "maxSilver": 3000,
+            "heldOutBooks": ["pg1342", "pg2701"],
+            "minAgreement": 0.95, "minValidate": 10, "minFamilyValidate": 200, "minAlternate": 5, "minAlternateShare": 0.02, "maxSilver": 3000,
             "maxTransfer": 3000
         },
         "g2p": {
@@ -56,17 +75,17 @@
         }
     },
     "teacher": {
-        "description": "The teacher (nn/trainmulti.py --recipe teacher.a, then teacher.b): stage A on the readers (the 30,000-step schedule, stopped at 15,000), then stage B from A's weights with the emotional speech and the adversarial critic, 10,000 steps of the warmup-stable-decay schedule (constant, then the last 25% cooled down by 1 - sqrt - picovox_train/optim.py) - B's best validation checkpoint (validated every 1,000 steps through the cooldown, from step 7,500) is the teacher; A, whose last checkpoint B starts from, validates every 5,000; the keys are nn/trainmulti.py's flags, defaults every training setting's default",
+        "description": "The teacher (nn/trainmulti.py --recipe teacher.a, then teacher.b): stage A on the training speech (the 30,000-step schedule, stopped at 15,000), then stage B from A's weights with the adversarial critic, 10,000 steps of the warmup-stable-decay schedule (constant, then the last 25% cooled down by 1 - sqrt - picovox_train/optim.py) - B's best validation checkpoint (validated every 1,000 steps through the cooldown, from step 7,500) is the teacher; A, whose last checkpoint B starts from, validates every 5,000; the keys are nn/trainmulti.py's flags, defaults every training setting's default",
         "defaults": {
             "steps": 30000, "batch": 16, "max-frames": 16000, "crop": 2.0, "bucket-ratio": 1.125, "rate": 24000, "max-hz": 10500,
-            "cremad": 0.0, "lr": 0.001, "warmup": 1000, "duration-weight": 1.0, "f0-weight": 2.0, "formant-weight": 1.0,
+            "lr": 0.001, "warmup": 1000, "duration-weight": 1.0, "f0-weight": 2.0, "formant-weight": 1.0,
             "guide-floor": 0.1, "guide-steps": 0.3, "smooth-weight": 0.05, "frication-max-hz": 11000, "sonorant-frication": 1.0,
             "sonorant-af-db": 40.0, "speaker-noise": 0.03, "dropout": 0.1, "weight-decay": 0.0001, "adversarial": 0.0,
             "feature-matching": 1.0, "adversarial-start": 500, "critic-lr": 0.0002, "critic-precision": "bfloat16", "val-count": 480,
             "seed": 1
         },
         "a": {"steps": 30000, "stop": 15000, "lr": 0.001, "warmup": 1000, "val-every": 5000, "lean-clip": true, "seed": 1},
-        "b": {"steps": 10000, "lr": 0.0005, "warmup": 500, "schedule": "wsd", "cooldown": 0.25, "cremad": 0.2,
+        "b": {"steps": 10000, "lr": 0.0005, "warmup": 500, "schedule": "wsd", "cooldown": 0.25,
               "adversarial": 0.1, "adversarial-start": 1000, "guide-steps": 0.001, "val-from": 7500, "lean-clip": true,
               "critic-channels": 16, "seed": 1}
     },
@@ -79,10 +98,6 @@
             "texts": ["pg2701", "pg1342", "pg84", "pg64317", "pg11", "pg98", "pg1661", "pg345", "pg1400", "pg174", "pg76", "pg74",
                 "pg768", "pg1260", "pg158", "pg161", "pg120", "pg43", "pg219", "pg2554-2026-10-16", "pg36", "pg35"],
             "bookCopies": 2,
-            "actorShare": 0.08,
-            "blendShare": 0.1,
-            "emotionShare": 0.3,
-            "intensity": [0.25, 1.0],
             "minTokens": 4,
             "maxTokens": 256,
             "valItems": 1500,
@@ -110,21 +125,22 @@
             {"name": "s48", "config": {"dim": 48, "decoderDim": 48, "encoderLayers": 2, "decoderLayers": 4}},
             {"name": "s32", "config": {"dim": 32, "decoderDim": 32, "encoderLayers": 2, "decoderLayers": 3}}
         ],
-        "polish": {"steps": 2000, "lr": 0.0002, "warmup": 200, "cremad": 0.2, "adversarial": 0.1, "feature-matching": 1.0,
+        "polish": {"steps": 2000, "lr": 0.0002, "warmup": 200, "adversarial": 0.1, "feature-matching": 1.0,
                    "adversarial-start": 200, "guide-steps": 0.001, "val-every": 500, "keep-every": 0, "critic-channels": 16},
         "eval": {
-            "speakers": [["arctic-slt", "female"], ["libritts-5895", "female"], ["libritts-6345", "female"],
-                         ["arctic-bdl", "male"], ["libritts-5750", "male"], ["libritts-2843", "male"]],
+            "speakers": [["female", "female"], ["sarah", "female"], ["helen", "female"], ["amy", "female"], ["kate", "female"],
+                         ["grace", "female"], ["male", "male"], ["james", "male"], ["robert", "male"], ["michael", "male"],
+                         ["david", "male"], ["thomas", "male"]],
             "rate": 16000
         },
         "tolerance": {
-            "description": "The smallest student whose mean UTMOS is within mos of the basis's (nn.distill pick --against: the teacher, or make train's baseline - the shipped lib/models/voiceModel.js, evaluated as packaged), whose Whisper WER is at most wer points worse, and whose speaker similarity to the teacher is at least similarity - the per-speaker cosine of the mean ECAPA embedding of the student's panel renderings with the mean of the teacher's renderings of the same texts, averaged over the six speakers",
+            "description": "The smallest student whose mean UTMOS is within mos of the basis's (nn.distill pick --against: the teacher, or make train's baseline - the shipped lib/models/voiceModel.js, evaluated as packaged), whose Whisper WER is at most wer points worse, and whose speaker similarity to the teacher is at least similarity - the per-speaker cosine of the mean ECAPA embedding of the student's panel renderings with the mean of the teacher's renderings of the same texts, averaged over the voices",
             "mos": 0.05,
             "wer": 1.0,
             "similarity": 0.85
         },
         "samples": {
-            "speakers": ["arctic-bdl", "arctic-slt"],
+            "speakers": ["male", "female"],
             "texts": ["melville-moby", "austen-pride"],
             "rate": 44100
         }
@@ -137,12 +153,12 @@
             {"key": "heteronyms", "label": "Heteronyms", "text": "They read the lead story about how lives could be saved, and she will read it to the crowd before she leads them out."}
         ],
         "speakers": [
-            {"key": "arctic-slt", "label": "ARCTIC slt", "sex": "female"},
-            {"key": "libritts-5895", "label": "reader 5895", "sex": "female"},
-            {"key": "libritts-6345", "label": "reader 6345", "sex": "female"},
-            {"key": "arctic-bdl", "label": "ARCTIC bdl", "sex": "male"},
-            {"key": "libritts-5750", "label": "reader 5750", "sex": "male"},
-            {"key": "libritts-2843", "label": "reader 2843", "sex": "male"}
+            {"key": "female", "label": "Female", "sex": "female"},
+            {"key": "sarah", "label": "Sarah", "sex": "female"},
+            {"key": "amy", "label": "Amy", "sex": "female"},
+            {"key": "male", "label": "Male", "sex": "male"},
+            {"key": "james", "label": "James", "sex": "male"},
+            {"key": "michael", "label": "Michael", "sex": "male"}
         ]
     }
 }

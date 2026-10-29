@@ -239,8 +239,8 @@ function runCard(run, onSelect, selected) {
 
 
 // What the training measurements mean - each chart's (?) explanation. Losses are lower-is-better. "val" is measured on
-// held-out recordings every 1,000 steps; "train (smoothed)" is the training batches' running value. A "cremad." prefix
-// is the same measurement on the emotional speech (the CREMA-D actors).
+// held-out recordings (the training speech's validation clips) every 1,000 steps; "train (smoothed)" is the training
+// batches' running value.
 const chartHelp = {
     'total': 'The weighted sum of every training loss below - what the optimizer minimizes. It mixes units, so compare it ' +
         'only within one run; the spectral loss is the cleaner yardstick.',
@@ -256,9 +256,9 @@ const chartHelp = {
     'lr': 'The learning rate - how big each update is. It warms up, then decays on a cosine schedule.',
     'durPhone': 'Phone-duration error (log units) - how far the predicted length of each speech sound is from the ' +
         'recording\'s.',
-    'durPause': 'Pause-placement error - whether the model puts a pause at each word or phrase boundary where the reader ' +
+    'durPause': 'Pause-placement error - whether the model puts a pause at each word or phrase boundary where the voice ' +
         'did (a classification loss).',
-    'durPaused': 'Pause-length error (log units), at the boundaries where the reader paused.',
+    'durPaused': 'Pause-length error (log units), at the boundaries where the voice paused.',
     'f0': 'Pitch (F0) error in log units on voiced frames - the training loss behind the cents chart.',
     'formant': 'The formant guide - how far the first three formants (F1-F3, the vocal-tract resonances that make vowels) ' +
         'are from Praat\'s measurements of the recording. Weighted heavily early, then faded (guide), so the spectral loss ' +
@@ -289,13 +289,9 @@ const chartHelp = {
 };
 
 
-// The explanation of a measurement - its own, or an emotional-speech variant of one
+// The explanation of a measurement, or null
 function measureHelp(key) {
-    if (key in chartHelp) {
-        return chartHelp[key];
-    }
-    const base = key.startsWith('cremad.') ? key.slice('cremad.'.length) : null;
-    return base !== null && base in chartHelp ? `On the emotional speech (CREMA-D): ${chartHelp[base]}` : null;
+    return chartHelp[key] ?? null;
 }
 
 
@@ -574,7 +570,7 @@ const trainSamplesHelp = 'make train renders listening samples of each training 
     '(its own CPU stage, beside the next GPU stage): teacher A (its last checkpoint, which teacher B starts from), teacher B ' +
     '(its best - the distillation\'s teacher), the student (its best, before the polish), and the polished student (its ' +
     'best - the model the package stage packages, if it passes the gate). Each speaks the recipe\'s texts ' +
-    '(train/data/train.json samples) in six of the training speakers\' voices, three female and three male, exactly as the ' +
+    '(train/data/train.json samples) in six of the voices, three female and three male, exactly as the ' +
     'package speaks (exported and quantized as the package stage exports it, its G2P network, 24 kHz, its gain). Beside each ' +
     'is the shipped model, ' +
     'lib/models/voiceModel.js, rendered the same way - so the new model can be judged by ear (make train installs ' +
@@ -640,7 +636,7 @@ async function renderTrainSamples() {
         if (model.samples.length === 0) {
             const stageName = model.stage;
             const status = {
-                'waiting': `waiting - rendered when the ${model.key === 'reference' ? 'readers\' data' : model.key} stage finishes`,
+                'waiting': `waiting - rendered when the ${model.key === 'reference' ? 'voices\' data' : model.key} stage finishes`,
                 'queued': 'rendering...', 'running': 'rendering...', 'stopped': 'stopped - make train isn\'t running',
                 'failed': `failed - see logs/${stageName}.log`, 'skipped': 'not in this run\'s make target'
             }[model.status] ?? model.status;
@@ -896,7 +892,7 @@ const trainHelp = {
     'util': 'How busy the machine is over the run: the CPU busy % (all cores, from top) and the GPU utilization % ' +
         '(ioreg\'s "Device Utilization %"), sampled every 20 seconds into TRAIN_DIR/util.log by make train. Shaded: ' +
         'the GPU idle (under 10%) - time the GPU-bound critical path isn\'t moving, unless a CPU stage on it is running. ' +
-        'Below, each stage as a band over its time (blue: GPU stage, green: CPU stage, gray: network); the faded bands ' +
+        'Below, each stage as a band over its time (blue: GPU stage, green: CPU stage); the faded bands ' +
         'after now are the forecast. The goal is both near 100% for the shortest time.',
     'stages': 'Every stage of make train, grouped, in the order they can run: waiting (its inputs aren\'t done), queued ' +
         '(waiting for the GPU lock), running, done, failed, stopped (started, but make isn\'t running - resumable), or ' +
@@ -1292,7 +1288,7 @@ function drawUtilization(canvas, data) {
     context.scale(ratio, ratio);
     const styles = getComputedStyle(document.documentElement);
     const color = (name) => styles.getPropertyValue(name).trim();
-    const classColor = {'gpu': color('--accent'), 'cpu': color('--series-3'), 'network': color('--muted')};
+    const classColor = {'gpu': color('--accent'), 'cpu': color('--series-3')};
     const start = Number.isFinite(data.start) ? data.start : data.now;
     const end = Math.max(data.end ?? data.now, data.status === 'finished' ? 0 : plan.eta, start + 60000);
     const plotX = (time) => pad.left + (time - start) / (end - start) * (width - pad.left - pad.right);
@@ -1383,7 +1379,7 @@ function drawUtilization(canvas, data) {
 // The utilization chart's legend
 document.getElementById('utilLegend').append(...[
     ['CPU busy %', '--series-3'], ['GPU utilization %', '--accent'], ['GPU idle (shaded)', '--warn'], ['GPU stage', '--accent'],
-    ['CPU stage', '--series-3'], ['network stage', '--muted']
+    ['CPU stage', '--series-3']
 ].map(([label, name]) => {
     const swatch = make('span', '', label);
     swatch.style.setProperty('--swatch', `var(${name})`);

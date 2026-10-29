@@ -84,48 +84,21 @@ test('speakFrames, multi', () => {
 
 test('speakFrames, speakers', () => {
     const text = 'Call me Ishmael.';
-    const female = speakFrames(multi, text, {'speaker': 0});
-    const male = speakFrames(multi, text, {'speaker': 1});
+    const male = speakFrames(multi, text, {'speaker': 0});
+    const female = speakFrames(multi, text, {'speaker': 1});
     assert.notDeepEqual(plain(female.frames), plain(male.frames));
     assert.notDeepEqual(female.eq, male.eq);
 
-    // The default speaker is the manifest's
-    assert.equal(multi.manifest.defaultSpeaker, 1);
+    // The default speaker is the manifest's (ids may be strings)
+    assert.equal(multi.manifest.defaultSpeaker, 0);
     assert.deepEqual(plain(speakFrames(multi, text).frames), plain(male.frames));
     assert.deepEqual(plain(speakFrames(multi, text, {'speaker': null}).frames), plain(male.frames));
-
-    // A blend of one speaker is the speaker (ids may be strings; the weights are normalized)
-    assert.deepEqual(plain(speakFrames(multi, text, {'speaker': {'0': 2}}).frames), plain(female.frames));
-    const blend = speakFrames(multi, text, {'speaker': {'0': 1, '1': 1}});
-    assert.notDeepEqual(plain(blend.frames), plain(female.frames));
-    assert.deepEqual(blend.eq, female.eq.map((value, ix) => 0.5 * value + 0.5 * male.eq[ix]));
+    assert.deepEqual(plain(speakFrames(multi, text, {'speaker': '1'}).frames), plain(female.frames));
 
     // Invalid speakers
-    for (const speaker of [{'0': 0}, {'x': 1}, {'999': 1}, {'0': 1, '1': -0.5}, 1.5, -1, multi.config.speakers]) {
+    for (const speaker of [{'0': 1}, 'x', 1.5, -1, multi.config.speakers]) {
         assert.throws(() => speakFrames(multi, text, {speaker}), {'message': `invalid speaker ${JSON.stringify(speaker)}`});
     }
-});
-
-
-test('speakFrames, styles', () => {
-    const text = 'Call me Ishmael.';
-    const neutral = plain(speakFrames(multi, text, {'speaker': 0}).frames);
-    const happy = plain(speakFrames(multi, text, {'speaker': 0, 'style': {'emotion': 'happy'}}).frames);
-    assert.notDeepEqual(happy, neutral);
-
-    // The intensity defaults to 1; a blend of one emotion is the emotion; neutral is no style
-    assert.deepEqual(plain(speakFrames(multi, text, {'speaker': 0, 'style': {'emotion': 'happy', 'intensity': 1}}).frames), happy);
-    assert.deepEqual(plain(speakFrames(multi, text, {'speaker': 0, 'style': {'happy': 1}}).frames), happy);
-    assert.deepEqual(plain(speakFrames(multi, text, {'speaker': 0, 'style': {'emotion': 'neutral', 'intensity': 1}}).frames), neutral);
-    assert.deepEqual(plain(speakFrames(multi, text, {'speaker': 0, 'style': {'neutral': 0.5}}).frames), neutral);
-    assert.deepEqual(plain(speakFrames(multi, text, {'speaker': 0, 'style': null}).frames), neutral);
-    assert.deepEqual(plain(speakFrames(multi, text, {'speaker': 0, 'style': {'happy': 0}}).frames), neutral);
-    const mixed = plain(speakFrames(multi, text, {'speaker': 0, 'style': {'happy': 0.5, 'sad': 0.2}}).frames);
-    assert.notDeepEqual(mixed, happy);
-    assert.notDeepEqual(plain(speakFrames(multi, text, {'speaker': 0, 'style': {'emotion': 'happy', 'intensity': 0.5}}).frames), happy);
-
-    // An unknown emotion
-    assert.throws(() => speakFrames(multi, text, {'style': {'emotion': 'bored'}}), {'message': 'unknown style bored'});
 });
 
 

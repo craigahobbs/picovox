@@ -40,6 +40,7 @@ set's word error (any pronunciation).
 import argparse
 import collections
 import datetime
+import hashlib
 import json
 import math
 import os
@@ -190,18 +191,19 @@ def add_books(path, pronunciations, first, labels, stems):
 
 # The rule-labeled words derived from dictionary words with new targets follow them (in place): a spelling variant
 # takes the target, and a derived form (-s, -'s) the target with its suffix - the -s suffix chosen again by the target's
-# last phone
+# last phone; a possessive the books added (add_books - a target of first, no longer a label) follows them too
 def derive_targets(labels, stems, first, targets):
     for word, (stem, kind) in stems.items():
         old = first.get(stem)
         if stem in targets and old is not None:
-            if kind == 'spelling' and labels[word] == old:
-                labels[word] = targets[stem]
-            elif labels[word][:len(old)] == old:
-                suffix = labels[word][len(old):]
+            table = labels if word in labels else first
+            if kind == 'spelling' and table[word] == old:
+                table[word] = targets[stem]
+            elif table[word][:len(old)] == old:
+                suffix = table[word][len(old):]
                 if suffix in (['S'], ['Z'], ['IH0', 'Z']) and suffix == s_suffix(old):
                     suffix = s_suffix(targets[stem])
-                labels[word] = targets[stem] + suffix
+                table[word] = targets[stem] + suffix
 
 
 # The -s suffix after a pronunciation's last phone - IH0 Z after a sibilant, S after another voiceless consonant, else Z
@@ -453,8 +455,28 @@ def train_stage(settings, stage, init, out_path, data, log):
     return result
 
 
+# A text file's contents
+def read_text(path):
+    with open(path, encoding='utf-8') as file:
+        return file.read()
+
+
+# The data's digest - the dictionary, the words, the fixes, and the books' labels every stage reads
+def data_digest():
+    data = [corpora.read_dictionary(), read_json(WORDS_PATH), read_json(FIXES_PATH), read_json(BOOKS_PATH)]
+    return hashlib.sha256(json.dumps(data, sort_keys=True).encode('utf-8')).hexdigest()
+
+
+# A stage's inputs' digest - the settings, the stage, the previous stage's digest, the data's, and its relabeled words
+# - a stage resumes only from a checkpoint of the same inputs (<stage>.pt.digest)
+def stage_digest(settings, stage, previous, data, relabel):
+    inputs = [settings, stage, previous, data, read_json(relabel) if relabel else None]
+    return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode('utf-8')).hexdigest()
+
+
 def command_train(args):
-    """Every stage of the recipe, each resumed if its checkpoint exists - <out>/<stage>.pt, train.log, done.json"""
+    """Every stage of the recipe, each resumed if its checkpoint of the same inputs exists - <out>/<stage>.pt (and its
+    .digest), train.log, done.json"""
     config = load_config(args.config)
     os.makedirs(args.out, exist_ok=True)
     log_path = os.path.join(args.out, 'train.log')
@@ -463,16 +485,21 @@ def command_train(args):
         log_line(log_path, text)
     settings = {key: value for key, value in config.items() if key != 'stages'}
     init = None
+    digest = None
+    data = data_digest()
     results = {}
     for stage in config['stages']:
         stage = {**stage, **({'steps': args.steps} if args.steps else {})}
         path = os.path.join(args.out, f'{stage["name"]}.pt')
-        if os.path.exists(path):
+        relabel = stage.get('relabel', settings.get('relabel'))
+        relabel = relabel and os.path.join(ROOT, relabel)
+        digest = stage_digest(settings, stage, digest, data, relabel)
+        if os.path.exists(path) and os.path.exists(path + '.digest') and read_text(path + '.digest') == digest:
             log(f'{stage["name"]}: done before ({path})')
         else:
-            relabel = stage.get('relabel', settings.get('relabel'))
-            data = load_data(relabel and os.path.join(ROOT, relabel))
-            results[stage['name']] = train_stage(settings, stage, init, path, data, log)
+            results[stage['name']] = train_stage(settings, stage, init, path, load_data(relabel), log)
+            with open(path + '.digest', 'w', encoding='utf-8') as file:
+                file.write(digest)
         init = path
     with open(os.path.join(args.out, 'done.json'), 'w', encoding='utf-8') as file:
         json.dump({'checkpoint': init, 'config': config, 'results': results}, file, indent=1)

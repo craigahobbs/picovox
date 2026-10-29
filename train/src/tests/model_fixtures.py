@@ -3,7 +3,7 @@
 
 """
 The export, packaging, panel, and distillation tests' fixtures - a tiny teacher checkpoint (trainmulti.py's format) and
-its training data (the readers and the emotional speech, helpers.write_corpus), with the modules' directories patched
+its training data (the training speech, helpers.write_corpus), with the modules' directories patched
 """
 
 import contextlib
@@ -13,19 +13,17 @@ import unittest.mock
 import torch
 
 from picovox_train import distill, export, trainmulti
-from picovox_train.model import STYLE_NAMES, MultiModel
+from picovox_train.model import MultiModel
 from tests import helpers
 
 
-# The tiny checkpoints' speaker table - the readers (train/data/speakers.json ids 0 and 1), then the emotional corpus's actors
-SPEAKERS = ['arctic-slt', 'arctic-bdl', 'cremad-1001', 'cremad-1002']
+# The tiny checkpoints' speaker table - the training speech's voices (rows 0 and 1)
+SPEAKERS = ['male', 'female']
 
 
-# Write the training data - DATA_DIR/multi and DATA_DIR/cremad
+# Write the training data - DATA_DIR/tts
 def write_data(data_dir):
-    helpers.write_corpus(os.path.join(data_dir, 'multi'))
-    helpers.write_corpus(os.path.join(data_dir, 'cremad'), speakers=helpers.CREMAD_SPEAKERS, emotions=helpers.CREMAD_EMOTIONS,
-                         seed=1)
+    helpers.write_corpus(os.path.join(data_dir, 'tts'))
 
 
 # A tiny model's checkpoint state (trainmulti.py's format, the critic aside)
@@ -33,8 +31,7 @@ def checkpoint_state(seed=1, args=None, **config):
     torch.manual_seed(seed)
     model = MultiModel(helpers.tiny_config(speakers=len(SPEAKERS), **config), priors=trainmulti.MULTI_PRIORS)
     return {'model': model.state_dict(), 'config': model.config, 'priors': trainmulti.MULTI_PRIORS, 'speakers': list(SPEAKERS),
-            'readerCount': 2, 'styles': list(STYLE_NAMES), 'step': 3, 'val': {'score': 1.5},
-            'args': {'cremad': 0.2, **(args or {})}}
+            'step': 3, 'val': {'score': 1.5}, 'args': dict(args or {})}
 
 
 # Write a tiny model's checkpoint - its path

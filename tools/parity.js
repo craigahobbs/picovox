@@ -37,11 +37,11 @@ function mathBits(fn, hex) {
 
 
 // An exported model's frames, durations, and eq of its texts
-function exportOutputs({manifest, bin, speaker, style, intensity, texts}) {
+function exportOutputs({manifest, bin, speaker, texts}) {
     const bytes = Buffer.from(bin, 'base64');
     const model = loadModel(manifest, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
     return texts.map((text) => {
-        const spoken = speakFrames(model, text, {speaker, 'style': style === null ? undefined : {'emotion': style, intensity}});
+        const spoken = speakFrames(model, text, {speaker});
         return {
             'durations': spoken.sentences.flatMap((sentence) => sentence.durations),
             'frames': spoken.frames.map((frame) => Array.from(frame.subarray(0, NAMES.length))),
@@ -75,8 +75,7 @@ const outputs = {
         'samplesEq': Array.from(render(renderInputs.frames,
             {'sampleRate': renderInputs.sampleRate, 'seed': renderInputs.seed, 'eq': renderInputs.eq}))
     },
-    'export': exportOutputs(inputs.export),
-    'export-style': exportOutputs(inputs['export-style'])
+    'export': exportOutputs(inputs.export)
 };
 mkdirSync(dirname(outPath), {'recursive': true});
 writeFileSync(outPath, JSON.stringify(outputs));

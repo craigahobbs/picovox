@@ -5,13 +5,11 @@
 // network (lib/g2p.js), as the package pronounces
 //
 // The model is an export (picovox_train.export's MODEL.json and MODEL.bin) or a packaged module (lib/models/voiceModel.js).
-// The multi-speaker, multi-style model takes a speaker and a style (--rate is the duration multiplier - 0.9 is 10% faster):
+// The multi-speaker model takes a speaker (--rate is the duration multiplier - 0.9 is 10% faster):
 //
 //     node tools/speak.js -m build/voice "Hello, world." -o hello.wav [-r 44100] [-s seed] [--params out.json] [--rate 1]
-//     node tools/speak.js -m build/voice --batch list.json    # [{text, wav, params, seed, speaker, style, rate}, ...]
-//     node tools/speak.js -m build/voice "Hello." -o hello.wav --speaker 5            # a speaker id (train/data/speakers.json)
-//         [--blend '{"5": 0.6, "12": 0.4}']                                        # or a blend
-//         [--style happy --intensity 0.7] [--style '{"happy": 0.5, "sad": 0.2}']   # an emotion, or a blend
+//     node tools/speak.js -m build/voice --batch list.json    # [{text, wav, params, seed, speaker, rate}, ...]
+//     node tools/speak.js -m build/voice "Hello." -o hello.wav --speaker 3            # a speaker id (the manifest's speakers)
 //
 // It prints one JSON line: the audio seconds, and the seconds spent loading, in the network, and rendering.
 
@@ -36,7 +34,7 @@ const PEAK = 0.89;
 // Parse the command line
 function parseArgs(argv) {
     const args = {'model': null, 'text': null, 'wav': null, 'params': null, 'sampleRate': 44100, 'seed': 1, 'batch': null,
-        'rate': 1, 'speaker': undefined, 'style': undefined, 'intensity': 1};
+        'rate': 1, 'speaker': undefined};
     for (let ix = 0; ix < argv.length; ix++) {
         const arg = argv[ix];
         const take = () => argv[++ix];
@@ -56,13 +54,6 @@ function parseArgs(argv) {
             args.rate = Number(take());
         } else if (arg === '--speaker') {
             args.speaker = Number(take());
-        } else if (arg === '--blend') {
-            args.speaker = JSON.parse(take());
-        } else if (arg === '--style') {
-            const style = take();
-            args.style = style.startsWith('{') ? JSON.parse(style) : style;
-        } else if (arg === '--intensity') {
-            args.intensity = Number(take());
         } else {
             args.text = arg;
         }
@@ -90,7 +81,6 @@ async function main() {
     if (args.model === null) {
         throw new Error('usage: node tools/speak.js -m MODEL (an export without its .json and .bin, or a packaged module) TEXT -o WAV');
     }
-    const defaultStyle = typeof args.style === 'string' ? {'emotion': args.style, 'intensity': args.intensity} : args.style;
     const startLoad = performance.now();
     const model = await loadVoice(args.model);
     const loadSeconds = (performance.now() - startLoad) / 1000;
@@ -101,7 +91,7 @@ async function main() {
     let audioSeconds = 0;
     for (const item of items) {
         const startNetwork = performance.now();
-        const options = {'rate': item.rate ?? args.rate, 'speaker': item.speaker ?? args.speaker, 'style': item.style ?? defaultStyle};
+        const options = {'rate': item.rate ?? args.rate, 'speaker': item.speaker ?? args.speaker};
         const {frames, eq, sentences} = speakFrames(model, item.text, options);
         networkSeconds += (performance.now() - startNetwork) / 1000;
         if (item.params) {

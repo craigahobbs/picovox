@@ -23,10 +23,10 @@ F0 gets no useful gradient through the synthesizer (dsynth.py), so the F0 column
 recordings' Praat F0 (trainmulti.py, losses.py), and training renders with the recorded F0 (teacher forcing, as
 FastPitch does).
 
-Conditioning: MultiModel's condition vector - a speaker embedding (a row, or a blend of rows, of the speaker table)
-and a style embedding (an emotion row of the style table, scaled by its intensity) - is added to the token features,
-the duration predictor's input, and the decoder's input, and modulates every conv-FFN block (FiLM). (The first,
-single-speaker model and its trainer, nn/train.py, are in git history.)
+Conditioning: MultiModel's condition vector - a speaker embedding (a row of the speaker table: one voice) - is added
+to the token features, the duration predictor's input, and the decoder's input, and modulates every conv-FFN block
+(FiLM). (The first, single-speaker model and its trainer, nn/train.py, and the style table and speaker blends of the
+models trained on human recordings, before 1.7, are in git history.)
 
 No absolute positional encoding - order comes from the convolutions - so any length works; lib/model.js (and the
 export's parity reference, tests/synthesize.py) speaks long texts a sentence at a time, like the training data.
@@ -58,14 +58,12 @@ MULTI_CONFIG = {
     'decoderLayers': 6,
     'decoderKernel': 9,        # depthwise convolution kernel in the decoder (10 ms frames)
     'subframes': 2,            # parameter frames (5 ms) per decoder frame (10 ms)
-    'speakers': 328,           # the speaker table's rows (train/data/speakers.json ids, then the style corpus's actors)
-    'styleDim': 8,             # the style embedding's width
+    'speakers': 12,            # the speaker table's rows (train/data/train.json's tts voices, in order)
     'jitter': 0.005,
     'shimmer': 0.02,
     'positionFeatures': 5,
     'kind': 'multi',
-    'speakerDim': 16,          # the speaker embedding's width
-    'styles': 5                # the emotions with a style row (neutral is the zero vector) - STYLE_NAMES
+    'speakerDim': 16           # the speaker embedding's width
 }
 
 
@@ -152,14 +150,8 @@ def core_parameter_count(model):
 
 
 #
-# The multi-speaker, multi-style model
+# The multi-speaker model
 #
-
-# The style rows of the multi-speaker model's style table, in order - neutral is the absence of style (the zero vector)
-STYLE_NAMES = ('angry', 'disgusted', 'fearful', 'happy', 'sad')
-
-# The style intensities of CREMA-D's intensity labels
-INTENSITY = {'low': 0.5, 'medium': 0.75, 'high': 1.0, 'unspecified': 0.75}
 
 
 class FiLMConvFFN(ConvFFN):
@@ -181,25 +173,20 @@ class FiLMConvFFN(ConvFFN):
 
 
 class MultiModel(torch.nn.Module):
-    """The multi-speaker, multi-style model - the tokens-to-durations-to-frames network, conditioned on a condition
-    vector c = [speaker embedding (speakerDim), style embedding (styleDim)]:
-
-    - the speaker embedding - a row of the speaker table, or any blend (a convex combination of rows) or raw vector
-    - the style embedding - intensity x a row of the style table (STYLE_NAMES; neutral is zero), or any blend of rows
-
-    c is added (projected) to the token embeddings, the duration predictor's input, and the decoder's input, and
-    modulates every conv-FFN block (FiLM). The channel equalizer is a table per speaker (blended in dB at inference)."""
+    """The multi-speaker model - the tokens-to-durations-to-frames network, conditioned on a condition vector c, the
+    speaker embedding (a row of the speaker table, speakerDim): c is added (projected) to the token embeddings, the
+    duration predictor's input, and the decoder's input, and modulates every conv-FFN block (FiLM). The channel
+    equalizer is a table per speaker."""
 
     def __init__(self, config=None, priors=None, dropout=0.1):
         super().__init__()
         self.config = {**MULTI_CONFIG, **(config or {})}
         cfg = self.config
         dim, decoder_dim = cfg['dim'], cfg['decoderDim']
-        condition_dim = cfg['speakerDim'] + cfg['styleDim']
+        condition_dim = cfg['speakerDim']
         self.embedding = torch.nn.Embedding(cfg['vocab'], dim, padding_idx=PAD)
         self.speaker = torch.nn.Embedding(cfg['speakers'], cfg['speakerDim'])
         torch.nn.init.normal_(self.speaker.weight, std=0.3)
-        self.style = torch.nn.Parameter(torch.randn(cfg['styles'], cfg['styleDim']) * 0.3)
         self.condition_encoder = torch.nn.Linear(condition_dim, dim)
         layers = []
         for _ in range(cfg['encoderLayers']):
@@ -245,32 +232,10 @@ class MultiModel(torch.nn.Module):
         self.register_buffer('fixed', fixed, persistent=False)
         self.register_buffer('fixed_mask', fixed_mask, persistent=False)
 
-    def speaker_vector(self, speaker):
-        """Speaker embeddings [B, speakerDim] of speaker ids [B], or of blends - weights [B, speakers] (rows summing to
-        1)"""
-        if speaker.dim() == 2 and speaker.is_floating_point():
-            return speaker @ self.speaker.weight
-        return self.speaker(speaker)
-
-    def style_vector(self, emotion, intensity):
-        """Style embeddings [B, styleDim] of emotion ids [B] (STYLE_NAMES indexes; -1 is neutral) and intensities [B]
-        (0-1), or of blends - weights [B, styles] (intensity included)"""
-        if emotion.dim() == 2:
-            return emotion @ self.style
-        rows = self.style[emotion.clamp(min=0)]
-        return rows * ((emotion >= 0).float() * intensity)[:, None]
-
-    def condition(self, speaker, emotion=None, intensity=None, speaker_vector=None):
-        """The condition vectors [B, 1, C]"""
-        speaker_vectors = self.speaker_vector(speaker) if speaker_vector is None else speaker_vector
-        batch = speaker_vectors.shape[0]
-        if emotion is None:
-            style = speaker_vectors.new_zeros(batch, self.config['styleDim'])
-        else:
-            if intensity is None:
-                intensity = torch.ones(batch, device=speaker_vectors.device)
-            style = self.style_vector(emotion, intensity)
-        return torch.cat([speaker_vectors, style], dim=-1)[:, None, :]
+    def condition(self, speaker, speaker_vector=None):
+        """The condition vectors [B, 1, C] of speaker ids [B] (or of speaker embeddings [B, speakerDim] - training's
+        noised rows)"""
+        return (self.speaker(speaker) if speaker_vector is None else speaker_vector)[:, None, :]
 
     def encode(self, tokens, condition):
         """Token features [B, N, D] and the token mask [B, N, 1]"""
@@ -342,19 +307,16 @@ class MultiModel(torch.nn.Module):
         return torch.sigmoid(logits.reshape(batch, frames * self.config['subframes'], params.COUNT))
 
     def eq(self, speaker):
-        """The channel equalizer gains (dB) [B, EQ_BAND_COUNT] of speaker ids [B] or blend weights [B, speakers]"""
-        table = params.EQ_RANGE_DB * torch.tanh(self.eq_free)
-        if speaker.dim() == 2 and speaker.is_floating_point():
-            return speaker @ table
-        return table[speaker]
+        """The channel equalizer gains (dB) [B, EQ_BAND_COUNT] of speaker ids [B]"""
+        return (params.EQ_RANGE_DB * torch.tanh(self.eq_free))[speaker]
 
-    def forward(self, tokens, durations, speaker=None, emotion=None, intensity=None, speaker_vector=None, frame_count=None):
+    def forward(self, tokens, durations, speaker=None, speaker_vector=None, frame_count=None):
         """Training forward pass (teacher-forced durations [B, N], 10 ms frames) - {duration (the predictor's outputs
         [B, N, 3]), unit (normalized parameter frames [B, 2F, COUNT]), frameMask [B, F, 1]}; frame_count is F if known
         (regulate)"""
         if speaker is None and speaker_vector is None:
             speaker = torch.zeros(tokens.shape[0], dtype=torch.long, device=tokens.device)
-        condition = self.condition(speaker, emotion, intensity, speaker_vector)
+        condition = self.condition(speaker, speaker_vector)
         features, mask = self.encode(tokens, condition)
         duration_outputs = self.durations(features, mask, condition)
         regulated, positions, frame_mask = self.regulate(features, durations, frame_count)
@@ -362,11 +324,11 @@ class MultiModel(torch.nn.Module):
         return {'duration': duration_outputs, 'unit': unit, 'frameMask': frame_mask}
 
     @torch.no_grad()
-    def infer(self, tokens, speaker=None, emotion=None, intensity=None):
+    def infer(self, tokens, speaker=None):
         """Inference - {durations [B, N] (10 ms frames), values (parameter frames [B, 2F + 1, COUNT]), frames}"""
         if speaker is None:
             speaker = torch.zeros(tokens.shape[0], dtype=torch.long, device=tokens.device)
-        condition = self.condition(speaker, emotion, intensity)
+        condition = self.condition(speaker)
         features, mask = self.encode(tokens, condition)
         durations = self.predicted_durations(self.durations(features, mask, condition), tokens)
         regulated, positions, frame_mask = self.regulate(features, durations)

@@ -24,18 +24,16 @@ build/nn/distill-samples/.
 
 The method:
 
-- Targets - sequence-level distillation in parameter space. The teacher speaks (tokens, speaker, style) to its
-  durations (pauses included) and its normalized parameter frames (params.py, 5 ms), exactly as inference does
-  (model.infer's duration rounding and pause threshold) but without rendering audio. The inputs are (a) the training
-  utterances' tokens with their own speakers and styles (the readers, and the emotional corpus's actors with their
-  emotions and intensities) and (b) sentences of real book text (Project Gutenberg books - pinned texts, books.py -
-  tokenized by the Python front end - the training-time label source - and split into sentences as inference splits
-  them), each spoken by a random reader (or actor, or a blend of two readers) in a neutral or random emotional style at
-  a random intensity. Tokens are remapped as inference remaps them (export.py token_remap). Frames are stored as
-  float16.
-- Students - MultiModel with smaller widths and depths. They share the teacher's conditioning space: the speaker,
-  style, and channel-equalizer tables are copied from the teacher and frozen, so voices designed as blends of the
-  teacher's table are the same voices in a student. A student learns, with the teacher's durations (teacher forcing on
+- Targets - sequence-level distillation in parameter space. The teacher speaks (tokens, speaker) to its durations
+  (pauses included) and its normalized parameter frames (params.py, 5 ms), exactly as inference does (model.infer's
+  duration rounding and pause threshold) but without rendering audio. The inputs are (a) the training utterances'
+  tokens with their own speakers (the training speech's voices) and (b) sentences of real book text (Project
+  Gutenberg books - pinned texts, books.py - tokenized by the Python front end - the training-time label source - and
+  split into sentences as inference splits them), each spoken by a random voice. Tokens are remapped as inference
+  remaps them (export.py token_remap). Frames are stored as float16.
+- Students - MultiModel with smaller widths and depths. They share the teacher's conditioning space: the speaker and
+  channel-equalizer tables are copied from the teacher and frozen, so a voice is the same voice in a student. A
+  student learns, with the teacher's durations (teacher forcing on
   its length regulator), L1 on the normalized parameter frames (all but the constant jitter and shimmer) plus the
   duration losses against the teacher's duration outputs: phones' log durations (MSE), the pause decision (the KL
   divergence from the teacher's pause probability), and the paused durations (MSE weighted by the teacher's pause
@@ -46,7 +44,7 @@ The method:
   stage B used them, the critic starting from the teacher's).
 - Evaluation - through the browser path: each model is exported (export.py, 8-bit), packaged (package.py - the
   generated JavaScript module's bytes and gzip bytes), and spoken by tools/speak.js on the listener panel's texts
-  (tools/panel-texts.json) for six speakers, then scored: UTMOS (listeners.py), Whisper's WER (whisper.cpp
+  (tools/panel-texts.json) for the recipe's speakers (the voices), then scored: UTMOS (listeners.py), Whisper's WER (whisper.cpp
   base.en), and the ECAPA speaker similarity to the teacher's rendering of the same speaker and texts. The speed is
   tools/speak.js's real-time factor at 44.1 kHz. pick chooses the smallest student within the tolerance.
 """
@@ -69,11 +67,10 @@ import time
 import numpy
 import torch
 
-from .data import DATA_DIR, ArcticData
+from .data import DATA_DIR, CorpusData
 from .export import export, load_model, token_remap, training_token_counts
 from .frontend import pronounce_texts, set_pronunciations, tokenize, vocabulary
-from .model import (BOS, FIRST_PHONE, FIXED_NAMES, INTENSITY, PAD, STYLE_NAMES, MultiModel, core_parameter_count, is_boundary,
-                    parameter_count, save_checkpoint)
+from .model import BOS, FIRST_PHONE, FIXED_NAMES, PAD, MultiModel, core_parameter_count, is_boundary, parameter_count, save_checkpoint
 from .trainmulti import RUNS_DIR
 from . import RECIPE_PATH, ROOT, books, optim, panel, params, trainmulti
 
@@ -85,7 +82,7 @@ SAMPLES_DIR = os.path.join(ROOT, 'build', 'nn', 'distill-samples')
 torch.backends.nnpack.set_flags(False)
 
 # The distillation set's sources
-SOURCES = ('readers', 'actors', 'books')
+SOURCES = ('corpus', 'books')
 
 # The sentence-ending tokens - inference speaks a text a sentence at a time
 SENTENCE_ENDS = {'<period>', '<question>', '<wh>', '<exclamation>'}
@@ -93,8 +90,7 @@ SENTENCE_ENDS = {'<period>', '<question>', '<wh>', '<exclamation>'}
 # The distillation set's per-item record
 ITEM_DTYPE = numpy.dtype([
     ('tokenOffset', '<i8'), ('tokenCount', '<i4'), ('frameOffset', '<i8'), ('frameCount', '<i4'),
-    ('speakerA', '<i2'), ('speakerB', '<i2'), ('blend', '<f4'), ('emotion', '<i1'), ('intensity', '<f4'),
-    ('source', '<i1'), ('split', '<i1')
+    ('speaker', '<i2'), ('source', '<i1'), ('split', '<i1')
 ])
 
 
@@ -188,10 +184,10 @@ def book_sentences(path):
 # The teacher's targets
 #
 
-def teacher_outputs(model, tokens, speaker_vector, emotion, intensity):
+def teacher_outputs(model, tokens, speaker):
     """The teacher's inference outputs for a batch - (duration outputs [B, N, 3], integer durations [B, N] (10 ms
     frames, as model.infer), normalized parameter frames [B, 2F, COUNT])"""
-    condition = model.condition(None, emotion, intensity, speaker_vector)
+    condition = model.condition(speaker)
     features, mask = model.encode(tokens, condition)
     duration_outputs = model.durations(features, mask, condition)
     durations = model.predicted_durations(duration_outputs, tokens)
@@ -200,39 +196,25 @@ def teacher_outputs(model, tokens, speaker_vector, emotion, intensity):
     return duration_outputs, durations, unit
 
 
-# The speaker vectors [B, speakerDim] of a batch's speakers - blends (1 - blend) A + blend B of the speaker table's rows
-def blend_vectors(table, speaker_a, speaker_b, blend):
-    return table[speaker_a] * (1 - blend)[:, None] + table[speaker_b] * blend[:, None]
-
-
 # The distillation set's inputs - (token lists, item records without offsets), the source counts, and the book report
 def target_inputs(state, settings, remap, log):
     rng = numpy.random.default_rng(settings['seed'])
-    reader_count = state['readerCount']
-    readers = [index for index in range(reader_count) if state['speakers'][index]]
-    actors = list(range(reader_count, len(state['speakers'])))
+    voices = [index for index, key in enumerate(state['speakers']) if key]
     token_lists = []
     records = []
 
-    def add(tokens, source, speaker_a, speaker_b=None, blend=0.0, emotion=-1, intensity=0.0, split=0):
+    def add(tokens, source, speaker, split=0):
         token_lists.append(numpy.array([remap.get(int(token), int(token)) for token in tokens], dtype=numpy.int16))
-        records.append((0, len(tokens), 0, 0, speaker_a, speaker_a if speaker_b is None else speaker_b, blend, emotion,
-                        intensity, source, split))
+        records.append((0, len(tokens), 0, 0, speaker, source, split))
 
-    # (a) the training utterances with their own speakers and styles
-    for corpus, source, offset in (('multi', 0, 0), ('cremad', 1, reader_count)):
-        data = ArcticData(os.path.join(DATA_DIR, corpus))
-        speakers = data.index['speakers']
-        for entry in data.entries('train'):
-            emotion = entry.get('emotion')
-            style = STYLE_NAMES.index(emotion) if emotion in STYLE_NAMES else -1
-            tokens = data.tokens[entry['tokenOffset']:entry['tokenOffset'] + entry['tokenCount']]
-            add(tokens, source, offset + speakers[entry['speaker']]['index'], emotion=style,
-                intensity=INTENSITY.get(entry.get('intensity'), 0.75) if style >= 0 else 0.0)
-    log(f'training utterances: {len(records)} ({sum(1 for record in records if record[9] == 0)} readers, '
-        f'{sum(1 for record in records if record[9] == 1)} actors)')
+    # (a) the training utterances with their own speakers
+    data = CorpusData(os.path.join(DATA_DIR, 'tts'))
+    speakers = data.index['speakers']
+    for entry in data.entries('train'):
+        add(data.tokens[entry['tokenOffset']:entry['tokenOffset'] + entry['tokenCount']], 0, speakers[entry['speaker']]['index'])
+    log(f'training utterances: {len(records)}')
 
-    # (b) the books' sentences, each with a random speaker and style
+    # (b) the books' sentences, each with a random voice
     paths = book_paths(settings)
     book_report = {}
     seen = set()
@@ -260,21 +242,7 @@ def target_inputs(state, settings, remap, log):
             split = 1 if rank < val_count else 0
             if split and copy_index:
                 continue
-            draw = rng.random()
-            blend = 0.0
-            if draw < settings['actorShare']:
-                speaker_a = speaker_b = int(rng.choice(actors))
-            else:
-                speaker_a = int(rng.choice(readers))
-                speaker_b = speaker_a
-                if rng.random() < settings['blendShare']:
-                    speaker_b = int(rng.choice(readers))
-                    blend = float(rng.uniform(0.2, 0.8))
-            emotion, intensity = -1, 0.0
-            if rng.random() < settings['emotionShare']:
-                emotion = int(rng.integers(len(STYLE_NAMES)))
-                intensity = float(rng.uniform(*settings['intensity']))
-            add(sentence_list[index], 2, speaker_a, speaker_b, blend, emotion, intensity, split)
+            add(sentence_list[index], 1, int(rng.choice(voices)), split)
     return token_lists, records, book_report
 
 
@@ -291,16 +259,16 @@ def make_targets(args):
     start = time.time()
     log(f'teacher {teacher_path}; out {out_dir}; device {device}')
     model, state = load_model(teacher_path, device)
-    counts, vocab = training_token_counts(state)
+    counts, vocab = training_token_counts()
     remap_names = token_remap(vocab, counts)
     remap = {vocab.index(source): vocab.index(target) for source, target in remap_names.items()}
     token_lists, records, book_report = target_inputs(state, settings, remap, log)
     if args.limit:
         # (a quarter of the items validation)
         order = numpy.random.default_rng(0).permutation(len(records))
-        keep = [index for index in order if records[index][10] == 1][:args.limit // 4]
-        keep += [index for index in order if records[index][10] == 0][:args.limit - len(keep)]
-        keep = sorted(keep, key=lambda index: (records[index][10] == 0, index))
+        keep = [index for index in order if records[index][6] == 1][:args.limit // 4]
+        keep += [index for index in order if records[index][6] == 0][:args.limit - len(keep)]
+        keep = sorted(keep, key=lambda index: (records[index][6] == 0, index))
         token_lists = [token_lists[index] for index in keep]
         records = [records[index] for index in keep]
     items = numpy.array(records, dtype=ITEM_DTYPE)
@@ -324,7 +292,6 @@ def make_targets(args):
         current.append(index)
     if current:
         batches.append(current)
-    table = model.speaker.weight.detach()
     generate_start = time.time()
     totals = {'tokens': 0, 'frames': 0}
 
@@ -359,14 +326,8 @@ def make_targets(args):
             tokens = numpy.zeros((len(batch), length), dtype=numpy.int64)
             for row, index in enumerate(batch):
                 tokens[row, :items['tokenCount'][index]] = token_lists[index]
-            record = items[batch]
-            speaker_vector = blend_vectors(table, torch.tensor(record['speakerA'].astype(numpy.int64), device=device),
-                                           torch.tensor(record['speakerB'].astype(numpy.int64), device=device),
-                                           torch.tensor(record['blend'].astype(numpy.float32), device=device))
-            outputs = teacher_outputs(
-                model, torch.tensor(tokens, device=device), speaker_vector,
-                torch.tensor(record['emotion'].astype(numpy.int64), device=device),
-                torch.tensor(record['intensity'].astype(numpy.float32), device=device))
+            outputs = teacher_outputs(model, torch.tensor(tokens, device=device),
+                                      torch.tensor(items[batch]['speaker'].astype(numpy.int64), device=device))
             copies = [output.float().to('cpu', non_blocking=True) if output.is_floating_point() else output.to('cpu', non_blocking=True)
                       for output in outputs]
             event = None
@@ -387,8 +348,7 @@ def make_targets(args):
     hours = {name: round(float(items['frameCount'][items['source'] == index].sum()) / 100 / 3600, 2) for index, name in enumerate(SOURCES)}
     index = {
         'format': 'picovox-distill', 'version': 1, 'teacher': teacher_path, 'teacherStep': state.get('step'),
-        'teacherConfig': state['config'], 'speakers': state['speakers'], 'readerCount': state['readerCount'],
-        'styles': state['styles'], 'remap': remap_names, 'vocab': vocab, 'settings': settings,
+        'teacherConfig': state['config'], 'speakers': state['speakers'], 'remap': remap_names, 'vocab': vocab, 'settings': settings,
         'count': len(items), 'sources': {name: int((items['source'] == ix).sum()) for ix, name in enumerate(SOURCES)},
         'validation': int((items['split'] == 1).sum()), 'tokens': token_total, 'frames': frame_total, 'hours': hours,
         'arrays': {'tokens': ['<i2', [token_total]], 'durations': ['<i2', [token_total]],
@@ -446,10 +406,7 @@ def collate_targets(targets, indices):
         'tokens': torch.from_numpy(tokens), 'durations': torch.from_numpy(durations),
         'durationOutputs': torch.from_numpy(duration_outputs), 'unit': torch.from_numpy(unit),
         'frameCounts': torch.from_numpy(items['frameCount'].astype(numpy.int64)),
-        'speakerA': torch.from_numpy(items['speakerA'].astype(numpy.int64)),
-        'speakerB': torch.from_numpy(items['speakerB'].astype(numpy.int64)),
-        'blend': torch.from_numpy(items['blend'].astype(numpy.float32)), 'emotion': torch.from_numpy(items['emotion'].astype(numpy.int64)),
-        'intensity': torch.from_numpy(items['intensity'].astype(numpy.float32)), 'frameCount': frame_count
+        'speaker': torch.from_numpy(items['speaker'].astype(numpy.int64)), 'frameCount': frame_count
     }
 
 
@@ -526,9 +483,7 @@ class BatchPrefetcher:
 def run_model(model, batch, durations=None):
     """A model's forward pass on a distillation batch with the teacher's durations - {duration [B, N, 3], unit [B, 2F,
     COUNT], frameMask [B, F, 1]}"""
-    table = model.speaker.weight
-    speaker_vector = blend_vectors(table, batch['speakerA'], batch['speakerB'], batch['blend'])
-    condition = model.condition(None, batch['emotion'], batch['intensity'], speaker_vector)
+    condition = model.condition(batch['speaker'])
     features, mask = model.encode(batch['tokens'], condition)
     duration_outputs = model.durations(features, mask, condition)
     durations = batch['durations'] if durations is None else durations
@@ -568,8 +523,8 @@ def student_config(config, name):
 
 
 def build_student(student_cfg, teacher, teacher_state, dropout):
-    """A student - the teacher's config with the student's widths and depths, and the teacher's speaker, style, and
-    equalizer tables (copied, frozen)"""
+    """A student - the teacher's config with the student's widths and depths, and the teacher's speaker and equalizer
+    tables (copied, frozen)"""
     config = dict(teacher_state['config'])
     config.update(student_cfg)
     model = MultiModel(config, priors=teacher_state.get('priors'), dropout=dropout)
@@ -577,11 +532,11 @@ def build_student(student_cfg, teacher, teacher_state, dropout):
     state = model.state_dict()
     copied = []
     for name, tensor in state.items():
-        if name in ('speaker.weight', 'style', 'eq_free') and teacher_tensors[name].shape == tensor.shape:
+        if name in ('speaker.weight', 'eq_free') and teacher_tensors[name].shape == tensor.shape:
             state[name] = teacher_tensors[name].detach().clone().to(tensor.dtype)
             copied.append(name)
     model.load_state_dict(state)
-    for parameter in (model.speaker.weight, model.style, model.eq_free):
+    for parameter in (model.speaker.weight, model.eq_free):
         parameter.requires_grad_(False)
     return model, copied
 
@@ -611,12 +566,9 @@ def validate_student(model, targets, indices, device, column_mask, batch_size=48
 
 
 def checkpoint_state(model, teacher_state, step, args_dict, val=None, extra=None):
-    """A student checkpoint - export.py's and trainmulti.py's format (the teacher's speaker list, priors, and
-    style names; args with the teacher's cremad share, so the export's token remap is the teacher's)"""
+    """A student checkpoint - export.py's and trainmulti.py's format (the teacher's speaker list and priors)"""
     return {'model': model.state_dict(), 'config': model.config, 'priors': teacher_state.get('priors'),
-            'speakers': teacher_state['speakers'], 'readerCount': teacher_state['readerCount'], 'styles': teacher_state['styles'],
-            'step': step, 'val': val, 'args': {**args_dict, 'cremad': teacher_state['args'].get('cremad', 0)},
-            **(extra or {})}
+            'speakers': teacher_state['speakers'], 'step': step, 'val': val, 'args': args_dict, **(extra or {})}
 
 
 def train_student(args):
@@ -817,7 +769,7 @@ def evaluate_model(name, checkpoint, config, reference=None, listen_panel=True, 
               'config': {key: model.config[key] for key in ('dim', 'decoderDim', 'encoderLayers', 'decoderLayers', 'heads', 'ffnMultiple')},
               'parameters': parameter_count(model),
               'parametersCore': core_parameter_count(model)}
-    export(model, state, 'model', out_dir, speaker=state['speakers'].index('arctic-bdl'))
+    export(model, state, 'model', out_dir, speaker=0)
     _, sizes = package(os.path.join(out_dir, 'model'))
     result['size'] = {'binBytes': sizes['binBytes'], 'manifestBytes': sizes['manifestBytes'], 'encoding': sizes['chosen'],
                       'moduleBytes': sizes[sizes['chosen']]['bytes'], 'moduleGzipBytes': sizes[sizes['chosen']]['gzipBytes']}
@@ -855,7 +807,8 @@ def evaluate_module(name, module_path, config, reference, listen_panel, whisper_
 
 def measure_speed(names, config, repeats=3):
     """The real-time factors of the exported models (tools/speak.js at the samples' rate on the panel texts for the
-    app's male voice) - the best of repeats, interleaved - {name: {realTimeNetwork, realTimeTotal, ...}}"""
+    model's default speaker - the app's male voice) - the best of repeats, interleaved - {name: {realTimeNetwork,
+    realTimeTotal, ...}}"""
     rate = config['samples']['rate']
     texts = panel.panel_texts()
     best = {}
@@ -863,9 +816,9 @@ def measure_speed(names, config, repeats=3):
         for name in names:
             out_dir = os.path.join(DISTILL_DIR, 'eval', name)
             with open(os.path.join(out_dir, 'model.json'), encoding='utf-8') as file:
-                keys = [speaker['key'] for speaker in json.load(file)['speakers']]
+                speaker = json.load(file)['defaultSpeaker']
             batch = [{'text': text['text'], 'wav': os.path.join(out_dir, f'speed-{number:02d}.wav'), 'seed': number + 1,
-                      'speaker': keys.index('arctic-bdl')} for number, text in enumerate(texts)]
+                      'speaker': speaker} for number, text in enumerate(texts)]
             report = panel.speak(os.path.join(out_dir, 'model'), batch, os.path.join(out_dir, 'speed-batch.json'), rate)
             for item in batch:
                 os.remove(item['wav'])

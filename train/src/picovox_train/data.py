@@ -2,49 +2,35 @@
 # https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
-The training data's featurization and format, shared by the corpora (multi.py - the reader pool, and cremad.py -
-the emotional speech): each utterance's tokens (our front end's, frontend.py), each token's duration in frames
-(pauses included, reconciled with the corpus's phone labels - align.py), the audio (24 kHz, 16-bit), and auxiliary
-frame tracks (Praat F0, voicing, pitch strength, harmonicity, energy, formants F1-F4 and their bandwidths).
+The training data's featurization and format (tts.py builds it - the training speech): each utterance's tokens (our
+front end's, frontend.py), each token's duration in frames (pauses included, from its CTC alignment - ctc.py, align.py),
+the audio (24 kHz, 16-bit), and auxiliary frame tracks (Praat F0, voicing, pitch strength, harmonicity, energy,
+formants F1-F4 and their bandwidths).
 
 A corpus directory (build/nn/data/<corpus>/) - concatenated arrays and an index of offsets into them:
 
 - index.json - format constants, the channel names, the speakers, and the utterances: {id, speaker, sentence,
-  split, text, include, reason, tokenOffset, tokenCount, frameOffset, frameCount, sampleOffset, sampleCount, trimStart,
-  match}. Every array is memory-mapped by ArcticData.
+  split, text, include, reason, tokenOffset, tokenCount, frameOffset, frameCount, sampleOffset, sampleCount, trimStart}.
+  Every array is memory-mapped by CorpusData.
 - tokens.npy (int16) - token ids (vocab.json)
 - durations.npy (int16) - each token's duration in frames; an utterance's durations sum to its frame count
 - seconds.npy (float32) - each token's duration in seconds, before quantization
 - audio.npy (int16) - 24 kHz audio, frameCount x 240 samples per utterance (sampleOffset = frameOffset x 240)
 - frames.npy (float32, [frames, channels]) - the auxiliary tracks at 100 frames per second (frame k is the 10 ms of
   samples [240k, 240k + 240), its center at (k + 0.5) x 10 ms)
-- alignment.jsonl - per utterance, the alignment's edits (diagnostics)
+- alignment.jsonl - per utterance, the alignment's tokens, frames, and the recognizer's greedy phones (diagnostics)
 
-An ARCTIC utterance's split is by sentence (the same sentences held out for every ARCTIC speaker): about 5% validation
-and 5% test, by a hash of the sentence id. (The single-speaker ARCTIC slt/bdl corpus this module once built, and its
-statistics and LibriTTS-R survey, are in git history.)
+(The human corpora this module read - CMU ARCTIC's and LibriTTS-R's labels - are in git history.)
 """
 
-import collections
-import hashlib
 import json
 import os
-import re
 
 import numpy as np
 
-from . import ROOT, align
-from .frontend import tokenize
-from .wav import read_wav
+from . import ROOT
 
 
-CORPORA_DIR = os.path.join(ROOT, 'downloads', 'corpora')
-ARCTIC_DIR = os.path.join(CORPORA_DIR, 'arctic')
-
-# The LibriTTS-R alignments (LibriTTSLabel's MFA phone labels) and the LibriTTS-R subsets in the pool (multi.py,
-# readings.py)
-LABEL_DIR = os.path.join(CORPORA_DIR, 'libritts_label', 'lab', 'phone')
-SUBSETS = ['train-clean-100', 'dev-clean']
 DATA_DIR = os.environ.get('NN_DATA_DIR', os.path.join(ROOT, 'build', 'nn', 'data'))
 
 # The format
@@ -55,7 +41,7 @@ MAX_EDGE_SILENCE = 0.2                     # seconds of leading and trailing sil
 FORMAT_VERSION = 1
 CHANNELS = ['f0', 'voiced', 'strength', 'hnr', 'energy', 'f1', 'f2', 'f3', 'f4', 'b1', 'b2', 'b3', 'b4']
 CHANNEL_NOTES = {
-    'f0': 'Praat autocorrelation F0 (Hz), 0 where unvoiced - the speaker\'s range (train/data/speakers.json)',
+    'f0': 'Praat autocorrelation F0 (Hz), 0 where unvoiced - the voice\'s two-pass range (index.json\'s speakers)',
     'voiced': '1 where Praat finds the frame voiced, else 0',
     'strength': 'Praat pitch strength (autocorrelation peak, 0-1) of the selected candidate, 0 where unvoiced',
     'hnr': 'Harmonics-to-noise ratio (dB, cross-correlation), clipped to [-20, 40] (-20 in silence)',
@@ -63,102 +49,6 @@ CHANNEL_NOTES = {
     'f1': 'Burg formant 1 (Hz) at the speaker\'s formant ceiling (5 formants, 25 ms window), 0 where undefined',
     'b1': 'Bandwidth of formant 1 (Hz), 0 where undefined'
 }
-
-# The minimum share of our phones paired exactly or nearly with a label phone for an utterance to be used in training,
-# and the minimum for its worst word (of two or more phones) - our letter-to-sound fallback's spelled-out guesses at
-# unknown words (names, possessives of names) don't match what was said, and would teach the network nonsense
-MIN_MATCH = 0.85
-MIN_WORD_MATCH = 0.5
-
-
-#
-# Corpus reading
-#
-
-# Read an ARCTIC/Festival prompt file - {id: text}
-def read_prompts(path):
-    prompts = {}
-    with open(path, encoding='utf-8', errors='replace') as file:
-        for line in file:
-            match = re.match(r'\(\s*(\S+)\s+"(.*)"\s*\)\s*$', line.strip())
-            if match:
-                prompts[match.group(1)] = match.group(2)
-    return prompts
-
-
-# Read an xwaves (ARCTIC) label file - [(label, start, end)] in seconds
-def read_xwaves(path):
-    labels = []
-    start = 0.0
-    in_body = False
-    with open(path, encoding='utf-8', errors='replace') as file:
-        for line in file:
-            if not in_body:
-                in_body = line.strip() == '#'
-                continue
-            fields = line.split()
-            if len(fields) >= 3:
-                end = float(fields[0])
-                labels.append((fields[2], start, end))
-                start = end
-    return labels
-
-
-# An utterance's phone labels - [(label, start, end)] in seconds, from its xwaves (ARCTIC) or MFA (LibriTTSLabel,
-# utterance['labelFormat'] == 'mfa') label file
-def read_labels(utterance):
-    if utterance.get('labelFormat') == 'mfa':
-        return read_mfa(utterance['lab'])
-    return read_xwaves(utterance['lab'])
-
-
-# Read a LibriTTSLabel (MFA) tab-separated label file - [(label, start, end)], gaps as pauses
-def read_mfa(path):
-    labels = []
-    previous_end = 0.0
-    with open(path, encoding='utf-8') as file:
-        for line in file:
-            fields = line.rstrip('\n').split('\t')
-            if len(fields) >= 2:
-                start, end = float(fields[0]), float(fields[1])
-                if start > previous_end + 1e-4:
-                    labels.append(('sil', previous_end, start))
-                labels.append((fields[2] if len(fields) > 2 else '', start, end))
-                previous_end = end
-    return labels
-
-
-# The ARCTIC utterances of a speaker - [{speaker, sentence, wav, lab, text}]
-def arctic_utterances(speaker):
-    directory = os.path.join(ARCTIC_DIR, f'cmu_us_{speaker}_arctic')
-    prompts = read_prompts(os.path.join(directory, 'etc', 'txt.done.data'))
-    utterances = []
-    for name in sorted(os.listdir(os.path.join(directory, 'wav'))):
-        # Only the recordings (earlier evaluations cached whisper.cpp transcripts beside them)
-        if not name.endswith('.wav'):
-            continue
-        sentence = os.path.splitext(name)[0]
-        utterances.append({'speaker': speaker, 'sentence': sentence, 'wav': os.path.join(directory, 'wav', name),
-                           'lab': os.path.join(directory, 'lab', sentence + '.lab'), 'text': prompts.get(sentence)})
-    return utterances
-
-
-# The split of a sentence - 'test' or 'val' (about 5% each, by a hash of the sentence id), else 'train'
-def sentence_split(sentence):
-    bucket = int(hashlib.sha1(sentence.encode('utf-8')).hexdigest(), 16) % 100
-    return 'test' if bucket < 5 else ('val' if bucket < 10 else 'train')
-
-
-# Typical label durations (seconds) by comparison key over a speaker's labels - for splitting alignment blocks
-def mean_label_seconds(utterances):
-    totals = collections.defaultdict(lambda: [0.0, 0])
-    for utterance in utterances:
-        if os.path.exists(utterance['lab']):
-            for label, start, end in read_labels(utterance):
-                key = align.label_key(label)
-                totals[key][0] += end - start
-                totals[key][1] += 1
-    return {key: total / count for key, (total, count) in totals.items() if count}
 
 
 #
@@ -191,44 +81,6 @@ def silent_runs(samples, rate):
         else:
             index += 1
     return runs
-
-
-# Align an utterance's tokens with its labels - (tokens, seconds per token, cut start, cut end, report)
-def align_utterance(utterance, mean_seconds, samples, rate):
-    tokenized = tokenize(utterance['text'], readings=utterance.get('readings'))   # heteronym readings (readings.py)
-    tokens = tokenized['tokens']
-    labels = read_labels(utterance)
-    wav_seconds = len(samples) / rate
-
-    # Clip the labels to the audio (the last label extends to its end)
-    labels = [(label, start, min(end, wav_seconds)) for label, start, end in labels if start < wav_seconds]
-    if labels[-1][2] < wav_seconds:
-        labels.append(('pau', labels[-1][2], wav_seconds))
-    seconds, report = align.assign_durations(tokens, [(label, end - start) for label, start, end in labels], mean_seconds)
-
-    # Move silences folded into the phones next to boundaries into the boundary tokens
-    seconds, report['pausesRefined'], report['pauseSecondsMoved'] = align.refine_pauses(tokens, seconds, silent_runs(samples, rate))
-
-    # Cut the leading and trailing silences to at most MAX_EDGE_SILENCE
-    speech_start = seconds[0]
-    speech_end = wav_seconds - seconds[-1]
-    cut_start = max(0.0, speech_start - MAX_EDGE_SILENCE)
-    cut_end = min(wav_seconds, speech_end + MAX_EDGE_SILENCE)
-    seconds[0] = speech_start - cut_start
-    seconds[-1] = cut_end - speech_end
-    # Word agreement - the share of each word's phones paired exactly (or AH/AX), an inserted label phone counting
-    # as one more phone; the worst word of the utterance
-    report['words'] = len(tokenized['words'])
-    report['worstWord'], report['worstWordMatch'] = None, 1.0
-    for word in tokenized['words']:
-        statuses = report['status'][word['start']:word['end']]
-        good = sum(1 for item in statuses if item in ('exact', 'near'))
-        total = len(statuses) + sum(1 for item in statuses if item and item.endswith('+inserted'))
-        word_match = good / max(1, total)
-        if total >= 2 and word_match < report['worstWordMatch']:
-            report['worstWord'], report['worstWordMatch'] = word['text'], round(word_match, 3)
-    report['ids'] = tokenized['ids']
-    return tokens, seconds, cut_start, cut_end, report
 
 
 # Frame-center sampling of a Praat track - values at times (k + 0.5) x FRAME_SECONDS, from track times and values
@@ -283,37 +135,30 @@ def frame_tracks(samples, frame_count, pitch_floor, pitch_ceiling, formant_ceili
     return tracks
 
 
-# Process one utterance - its tokens, durations, audio, and tracks (a worker task)
-def process_utterance(task):
-    utterance, mean_seconds, settings = task
-    import soxr  # pylint: disable=import-outside-toplevel
-    samples, rate = read_wav(utterance['wav'])
-    samples = samples.mean(axis=1)
-    tokens, seconds, cut_start, cut_end, report = align_utterance(utterance, mean_seconds, samples, rate)
-    frames = align.durations_to_frames(seconds, FRAME_SECONDS, tokens)
-    frame_count = sum(frames)
-
-    # Resample to 24 kHz, then cut to the frames
-    resampled = samples if rate == SAMPLE_RATE else soxr.resample(samples, rate, SAMPLE_RATE, quality='VHQ')
-    start = int(round(cut_start * SAMPLE_RATE))
-    audio = resampled[start:start + frame_count * HOP]
-    audio = np.pad(audio, (0, frame_count * HOP - len(audio)))
-    tracks = frame_tracks(audio, frame_count, *settings)
-    pcm = np.clip(np.round(audio * 32768), -32768, 32767).astype(np.int16)
-    return {'utterance': utterance, 'tokens': tokens, 'seconds': seconds, 'frames': frames, 'cutStart': cut_start,
-            'cutEnd': cut_end, 'report': report, 'audio': pcm, 'tracks': tracks}
-
-
-# The match measures of an alignment report - the share of our phones paired exactly or nearly with a label phone
-def match_rate(report):
-    return (report['exact'] + report['near']) / max(1, report['phones'])
+# Convert a raw array file to .npy (in chunks), removing the raw file
+def raw_to_npy(raw_path, npy_path, dtype, shape):
+    output = np.lib.format.open_memmap(npy_path, mode='w+', dtype=dtype, shape=shape)
+    flat = output.reshape(-1)
+    chunk = 1 << 26
+    with open(raw_path, 'rb') as file:
+        offset = 0
+        while True:
+            buffer = file.read(chunk * np.dtype(dtype).itemsize)
+            if not buffer:
+                break
+            values = np.frombuffer(buffer, dtype=dtype)
+            flat[offset:offset + len(values)] = values
+            offset += len(values)
+    output.flush()
+    del output
+    os.remove(raw_path)
 
 
 #
 # Loading (for the trainer)
 #
 
-class ArcticData:
+class CorpusData:
     """The memory-mapped data of a corpus directory (build/nn/data/<corpus>/)"""
 
     def __init__(self, directory):

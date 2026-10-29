@@ -16,13 +16,14 @@ from . import params, spectral
 from .model import BOS, FIRST_PHONE, PAD, is_boundary
 
 
-# Parameter priors per speaker (the analysis-by-synthesis fits' medians - the former nn/fit.py) - the head's starting point
+# Parameter priors by sex (the analysis-by-synthesis fits' medians of CMU ARCTIC slt and bdl - the former nn/fit.py) -
+# the head's starting point
 PRIORS = {
-    'slt': {'f0': 185, 'av': -30, 'rd': 1.0, 'shelf': 10, 'ah': -65, 'af': -50, 'f1': 600, 'f2': 1800, 'f3': 3000, 'f4': 4100,
+    'female': {'f0': 185, 'av': -30, 'rd': 1.0, 'shelf': 10, 'ah': -65, 'af': -50, 'f1': 600, 'f2': 1800, 'f3': 3000, 'f4': 4100,
             'f5': 5100, 'f6': 5900, 'b1': 150, 'b2': 180, 'b3': 200, 'b4': 220, 'b5': 300, 'b6': 320, 'fnp': 260, 'bnp': 100,
             'fnz': 290, 'bnz': 100, 'fp1': 2400, 'bp1': 600, 'ap1': -4, 'fp2': 5800, 'bp2': 700, 'ap2': -6, 'ab': -32,
             'fhp': 2000},
-    'bdl': {'f0': 122, 'av': -30, 'rd': 1.0, 'shelf': 10, 'ah': -65, 'af': -45, 'f1': 500, 'f2': 1550, 'f3': 2700, 'f4': 3500,
+    'male': {'f0': 122, 'av': -30, 'rd': 1.0, 'shelf': 10, 'ah': -65, 'af': -45, 'f1': 500, 'f2': 1550, 'f3': 2700, 'f4': 3500,
             'f5': 4200, 'f6': 5300, 'b1': 90, 'b2': 110, 'b3': 150, 'b4': 160, 'b5': 200, 'b6': 500, 'fnp': 270, 'bnp': 100,
             'fnz': 270, 'bnz': 100, 'fp1': 2600, 'bp1': 450, 'ap1': -5, 'fp2': 5500, 'bp2': 550, 'ap2': -5, 'ab': -33,
             'fhp': 1800}

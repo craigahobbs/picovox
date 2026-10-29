@@ -322,6 +322,31 @@ def publish_command(args):
     return 0
 
 
+# The book counts of words' capitalizations mid-sentence - {word: [capitalized, lowercase]} (a word after the start of a
+# paragraph, or after anything but a space or a comma since the previous word, isn't mid-sentence)
+def book_capitals(books_dir, words):
+    counts = {word: [0, 0] for word in words}
+    pattern = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)*")
+    for name in sorted(os.listdir(books_dir)):
+        if not name.endswith('.txt'):
+            continue
+        with open(os.path.join(books_dir, name), encoding='utf-8', errors='replace') as file:
+            paragraphs = re.split(r'\n\s*\n', file.read())
+        for paragraph in paragraphs:
+            paragraph = ' '.join(paragraph.split())
+            end = None
+            for match in pattern.finditer(paragraph):
+                token = match.group(0)
+                count = counts.get(token.lower())
+                if count is not None and end is not None and re.fullmatch(r'[ ,]*', paragraph[end:match.start()]):
+                    if token[0].isupper() and not token.isupper():
+                        count[0] += 1
+                    elif token.islower():
+                        count[1] += 1
+                end = match.end()
+    return counts
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='python -m picovox_train.books', description='The pinned book texts')
     parser.add_argument('--pins', default=PINS_PATH, help='the pins (default train/data/books.json)')
