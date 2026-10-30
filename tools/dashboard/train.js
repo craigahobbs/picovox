@@ -94,6 +94,24 @@ export function parseStageEvents(text) {
 }
 
 
+// The start of the latest session of stage activity (ms) - the stages' latest attempts ({start, end, fail} - an
+// unfinished one runs to now) merged, the session the last block after a gap of more than gapMs with nothing running;
+// null without attempts
+export function sessionStart(events, now, gapMs) {
+    const spans = [...events.values()].filter((event) => event.start !== null).
+        map((event) => [event.start, Math.max(event.start, event.end ?? event.fail ?? now)]).sort((first, second) => first[0] - second[0]);
+    let start = null;
+    let reach = -Infinity;
+    for (const [from, to] of spans) {
+        if (from - reach > gapMs) {
+            start = from;
+        }
+        reach = Math.max(reach, to);
+    }
+    return start;
+}
+
+
 // Parse util.log (tools/trainutil.sh, or an earlier sampler's "HH:MM:SS cpu gpu stages" lines dated from baseTime) -
 // [{time, cpu, gpu, mem, system, powerIn, thermal}] (system and powerIn - the system's power and the power it takes in,
 // watts; thermal - macOS's thermal pressure level, 0 nominal to 4; NaN when not sampled) - each header line names the

@@ -375,6 +375,41 @@ class TestContextLabels(unittest.TestCase):
         self.assertTrue(calls[0].endswith(os.path.join('train', 'data', 'g2p-relabel.json')))
         self.assertIsNone(calls[1])
 
+    def test_labels_unmeasured(self):
+        # Words whose readings the corpus can't measure: a family word (only its family's rule maps it) needs
+        # MIN_UNMEASURED_ALTERNATE examples of its less common readings; a seeded reading always counts as common
+        out = self.path('out')
+        self.write(os.path.join(out, 'aligned.jsonl'), '')
+        self.write(os.path.join(out, 'aligned-tags.jsonl'), '')
+        stress = {'family': 'stress', 'curated': False, 'tags': {}}
+        words = {'record': {**stress, 'readings': [['R EH1 K ER0 D'], ['R IH0 K AO1 R D']]},
+                 'conduct': {**stress, 'readings': [['K AA1 N D AH0 K T'], ['K AA0 N D AH1 K T']]},
+                 'object': {**stress, 'readings': [['AA1 B JH EH0 K T'], ['AH0 B JH EH1 K T']]}}
+        books = []
+        for word, nouns, verbs in (('record', 3, 3), ('conduct', 3, 2), ('object', 4, 0)):
+            books.extend({'book': 'pg1', 'text': f'The {word}.', 'tags': {'4': 'NN'}} for _ in range(nouns))
+            books.extend({'book': 'pg1', 'text': f'They {word} it.', 'tags': {'5': 'VB'}} for _ in range(verbs))
+        self.write(os.path.join(out, 'books.jsonl'), ''.join(json.dumps(record) + '\n' for record in books))
+        spec = {'exclude': [], 'collocations': {}, 'seeds': [{'word': 'object', 'phones': 'AH0 B JH EH1 K T', 'texts': ['I object.']}]}
+        with unittest.mock.patch.object(contextlabels, 'load_spec', lambda: spec), \
+                unittest.mock.patch.object(contextlabels, 'candidate_words', lambda spec: words), \
+                unittest.mock.patch.object(contextlabels, 'default_readings', lambda words: {word: 0 for word in words}), \
+                unittest.mock.patch.object(contextlabels, 'measured_classes', lambda: {}), \
+                unittest.mock.patch.object(contextlabels, 'regression_windows', set), \
+                unittest.mock.patch.object(contextlabels, 'MIN_FAMILY_VALIDATE', 0), \
+                unittest.mock.patch.object(contextlabels, 'MIN_ALTERNATE', 2), \
+                unittest.mock.patch.object(contextlabels, 'MIN_ALTERNATE_SHARE', 0), \
+                unittest.mock.patch.object(contextlabels, 'MIN_UNMEASURED_ALTERNATE', 3), \
+                unittest.mock.patch.object(contextlabels, 'MAX_SILVER', 10), \
+                captured():
+            self.assertEqual(contextlabels.main(['labels', '--out', out]), 0)
+        with open(os.path.join(out, 'labels.json'), encoding='utf-8') as file:
+            labels = json.load(file)
+        # (record - three verbs, kept; conduct - two, common but too few; object - one seeded verb, fewer than MIN_ALTERNATE)
+        self.assertEqual(sorted(labels['words']), ['object', 'record'])
+        self.assertEqual(labels['words']['record']['counts'], [3, 3])
+        self.assertEqual(labels['words']['object']['counts'], [4, 1])
+
     def test_labels(self):
         out = self.path('out')
         aligned = []
@@ -397,6 +432,8 @@ class TestContextLabels(unittest.TestCase):
                                               'curated': False, 'tags': {}}}
         # (read - an inventory word here, its aligned tokens examples; lead - curated, its aligned token not an example)
         words['read'] = {**words['read'], 'curated': False}
+        # (lead's noun tag maps to L IY1 D - "the lead pipes" is tagged a noun, but its collocation decides it: no silver)
+        words['lead'] = {**words['lead'], 'tags': {'NN': 0}}
         aligned.append({'id': 'l', 'book': 'pg1', 'voice': 'male', 'text': 'They lead us.',
                         'tokens': [{'offset': 5, 'word': 'lead', 'reading': 0}]})
         tags.append({'id': 'l', 'tags': {}})

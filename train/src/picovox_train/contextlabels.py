@@ -83,9 +83,12 @@ MIN_VALIDATE = SETTINGS['minValidate']
 MIN_FAMILY_VALIDATE = SETTINGS['minFamilyValidate']
 
 # A candidate word is ambiguous (trained with readings) when its alternate readings have at least MIN_ALTERNATE examples
-# and MIN_ALTERNATE_SHARE of its examples
+# and MIN_ALTERNATE_SHARE of its examples (a seeded reading always counts - the seeds say it occurs); a word whose
+# mapping only its family's rule gives (readings the corpus can't measure) needs MIN_UNMEASURED_ALTERNATE examples of
+# readings other than its most common - the book texts' noun/verb pairs common enough to learn, not every family word
 MIN_ALTERNATE = SETTINGS['minAlternate']
 MIN_ALTERNATE_SHARE = SETTINGS['minAlternateShare']
+MIN_UNMEASURED_ALTERNATE = SETTINGS['minUnmeasuredAlternate']
 
 # The books (pinned Project Gutenberg texts - books.py - fetched to the books directory), and the held-out books
 BOOKS_DIR = os.path.join(ROOT, SETTINGS['books'])
@@ -417,7 +420,12 @@ def labels_command(args):
     valid = {word for word, entry in words.items()
              if entry['curated'] or mapping_valid(word, by_word, entry['family'], by_family,
                                                   classes.get(readings_module.word_class(entry['readings']), False))}
-    eligible = valid | {word for word, entry in words.items() if entry['curated']} | {seed['word'] for seed in spec['seeds']}
+    seeded = collections.defaultdict(set)
+    for seed in spec['seeds']:
+        seeded[seed['word']].add(readings_module.reading_of(seed['phones'], words[seed['word']]['readings']))
+    unmeasured = {word for word in valid if not words[word]['curated'] and word not in seeded and
+                  not mapping_valid(word, by_word, words[word]['family'], by_family)}
+    eligible = valid | {word for word, entry in words.items() if entry['curated']} | set(seeded)
 
     # The examples (readings in dictionary order) - aligned (a collocation's token aside), silver, seeds, and collocations
     collocations = {word: [(re.compile(pattern), variant) for pattern, variant in entries]
@@ -454,12 +462,14 @@ def labels_command(args):
                 entry = words[item]
                 tag = record['tags'].get(str(offset))
                 surface = record['text'][offset:offset + len(item)]
-                reading = tag_reading(entry, tag, surface, previous.get(offset, '')) if tag and item in valid else None
-                if reading is not None:
-                    labeled.append((offset, item, reading))
+                # (a collocation decides its token - no silver example of it, which may disagree)
                 reading = collocation_reading(collocations, words, record['text'], offset, item)
                 if reading is not None:
                     colloc.append((offset, item, reading))
+                    continue
+                reading = tag_reading(entry, tag, surface, previous.get(offset, '')) if tag and item in valid else None
+                if reading is not None:
+                    labeled.append((offset, item, reading))
             for source, labeled_items in (('silver', labeled), ('collocation', colloc)):
                 for example in text_examples(record['text'], labeled_items):
                     if source == 'silver':
@@ -492,8 +502,10 @@ def labels_command(args):
         if default is None or word in spec['exclude']:
             continue
         total = sum(counts[word].values())
-        common = [reading for reading, count in counts[word].items() if count >= max(MIN_ALTERNATE, MIN_ALTERNATE_SHARE * total)]
-        if word not in eligible or len(common) < 2:
+        common = {reading for reading, count in counts[word].items() if count >= max(MIN_ALTERNATE, MIN_ALTERNATE_SHARE * total)}
+        if word not in eligible or len(common | seeded[word]) < 2:
+            continue
+        if word in unmeasured and total - max(counts[word].values()) < MIN_UNMEASURED_ALTERNATE:
             continue
         others = sorted((reading for reading in range(len(entry['readings'])) if reading != default),
                         key=lambda reading, word=word: (-aligned_counts[word][reading], reading))

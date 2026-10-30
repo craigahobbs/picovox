@@ -413,7 +413,7 @@ class TestReadings(unittest.TestCase):
         self.assertEqual([(record['text'], [(token['word'], token['frontEnd'], token['vote'], token['reading'])
                                             for token in record['tokens']])
                           for record in measured], [
-            ('I read the lead, we went home.', [('read', 1, 0, 0), ('lead', 1, 0, 0)]),
+            ('I read the lead, we went home.', [('read', 1, 0, 0), ('lead', 0, 0, 0)]),
             ('The cats use a record, the best went home.', [('use', 1, 0, 0), ('record', 0, 0, None)]),
             ('Look, the dawn went dark.', [('dawn', 1, None, None)]),
             ('I read the use.', [('read', 1, 0, 0), ('use', 0, 0, 0)]),
@@ -424,7 +424,7 @@ class TestReadings(unittest.TestCase):
         self.assertEqual(measured[3]['voice'], 'Harper')
 
         # The voice's tokens take the CTC readings that differ from the front end's
-        self.assertEqual(overrides, {measured[0]['id']: {'1': 'R IY1 D', '3': 'L EH1 D'}, measured[1]['id']: {'2': 'Y UW1 S'},
+        self.assertEqual(overrides, {measured[0]['id']: {'1': 'R IY1 D'}, measured[1]['id']: {'2': 'Y UW1 S'},
                                      measured[3]['id']: {'1': 'R IY1 D'}})
 
     def test_main_module(self):

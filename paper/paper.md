@@ -2,27 +2,30 @@
 
 Craig A. Hobbs, with Claude (Anthropic)
 
-October 2026 - a working paper, updated as the work it describes finishes; this version describes picovox 1.2.0.
+October 2026 - a working paper, updated as the work it describes finishes; this version describes picovox 2.0.0.
 Sections marked *in progress* report interim results.
 
 
 ## Abstract
 
 We build American English text-to-speech that runs entirely on the listener's device - in a web browser or in Node -
-from a package of 806 KB (npm's compressed tarball; 1.2 MB unpacked), with no server, no recorded speech, no
+from a package of 727 KB (npm's compressed tarball; 1.1 MB unpacked), with no server, no recorded speech, no
 WebAssembly, and no runtime dependencies. A small neural network predicts the 32 interpretable parameters of a classic
 source-filter synthesizer every 5 ms, trained end to end through a differentiable copy of the synthesizer; a
 rule-based version of the same synthesizer, calibrated against measurements of 43 human speakers, had been rated 1-2
-out of 5 for naturalness. A multi-speaker, multi-style teacher of 966K parameters, trained on 237 American audiobook
-readers and 7,442 emotional clips, is distilled to a student of 305K parameters that scores 4.15 on an automatic
-naturalness predictor (UTMOS; human recordings score 3.8-4.4 on it) with a 1.1% Whisper word error rate, and runs
-about 52 times faster than real time in Node and about 2.7 times real time on an iPhone running JavaScript
-without a JIT (as Safari does on any page served over plain http). Every word is pronounced by a
+out of 5 for naturalness. A teacher of 932K parameters, trained on 46 hours of speech that a local text-to-speech
+model generates at train time in twelve voices - no human recordings - is distilled to a student of 283K parameters
+that scores 4.31 on an automatic naturalness predictor (UTMOS; human recordings score 3.8-4.4 on it) with a 1.1%
+Whisper word error rate, and runs about 52 times faster than real time in Node and about 2.7 times real time on an
+iPhone running JavaScript without a JIT (as Safari does on any page served over plain http). Every word is pronounced
+by a
 neural grapheme-to-phoneme network of 373K parameters, with a 48K-parameter context network for heteronyms, in place of
 a 3.6 MB pronouncing dictionary. A cross-validated audit of that dictionary against audiobook readers' speech found
-label errors the network had faithfully learned - "Hobbes" read as "hobbies" - and corrected them. One command
-rebuilds both networks from public corpora and pinned book texts in 71 minutes on a laptop GPU, and ships a new model
-only if it is no worse than the one it replaces.
+label errors the network had faithfully learned - "Hobbes" read as "hobbies" - and corrected them; the heteronyms'
+readings are now measured in the synthetic speech by our own phoneme recognizer, each measure trusted only if it passes
+its controls. One command generates the training speech, measures it, and rebuilds both networks from pinned book
+texts in 83 minutes on a laptop GPU (the speech cached), and ships a new model only if it is no worse than the one it
+replaces.
 
 
 ## 1. Introduction
@@ -44,7 +47,8 @@ The work proceeded in stages, each judged by measurement: a rule-based synthesiz
 same arc - from a pronouncing dictionary to one small network that pronounces every word, reads heteronyms from their
 context, and was cleaned of the dictionary's own errors (Section 9). Section 3 describes how we measure; Section 10
 describes `make train`, which rebuilds every model from scratch; Section 11, how its time came down from 114 to 71
-minutes; and Section 12, the package (picovox on npm) and the audiobook player built on it (PicoShelf).
+minutes; Section 12, the package (picovox on npm) and the audiobook player built on it (PicoShelf); and Section 13,
+the switch from human recordings to speech a local TTS model generates at train time.
 
 
 ## 2. System overview
@@ -288,6 +292,9 @@ against it), beside the model's ARCTIC bdl (male) and slt (female) speakers.
 
 ### 7.1 Data
 
+*Through version 1.6. Since 2.0 the voice trains on speech a local TTS model generates, with no human recordings
+(Section 13.2).*
+
 - **American audiobook readers.** LibriTTS-R train-clean-100 and dev-clean (CC BY 4.0) plus four CMU ARCTIC
   speakers. An accent classifier (SpeechBrain's CommonAccent ECAPA model), run on 16 clips per speaker, kept speakers
   confidently classified as American: **237 speakers (120 female, 117 male), 52.7 hours**.
@@ -492,6 +499,9 @@ under Node.
 
 ### 9.4 What readers say
 
+*Through version 1.6, from the human readers. Since 2.0 the readings are measured in the training speech (Section
+13.3).*
+
 The dictionary's first pronunciation is not always the usual reading: its first "lead" is the metal, its first "lives"
 the verb. For each word with several dictionary pronunciations, we counted which one the LibriTTS-R readers used, by
 the forced alignments, and relabeled the word where the readers' majority is statistically clear (the Wilson 95% lower
@@ -501,6 +511,9 @@ not a function word), and the vowel's formants (or the fricative's voicing) agre
 wind, wound, tears, record, content, subject, address, ...); all 56 come out right, at no cost to the held-out error.
 
 ### 9.5 Heteronyms by context
+
+*The aligned examples below were the human readers' through version 1.6; since 2.0 they are the training speech's,
+held out by book (Section 13.3).*
 
 Some words have readings their neighbors decide - "I read it yesterday" and "I will read it", "their lives" and "she
 lives", "a lead pipe", the noun/verb stress pairs. The G2P module holds two small additions for them, and no word list
@@ -531,6 +544,9 @@ words, less the S/Z-only pairs) 89.3% of the time against the majority reading's
 points over the majority.
 
 ### 9.6 Auditing the dictionary: "Hobbes"
+
+*The audit ran on the human readers' speech; its fixes stand as committed. Since 2.0 its audio step uses the training
+speech (Section 13.3).*
 
 A listener reported that the audiobook player read "Hobbes" as "hobbies". The network was not wrong about its training
 data: the dictionary's first entry is HOBBES HH AA1 B IY0 Z - "hobbies" - while its second variant, HOBBS, and every
@@ -760,8 +776,9 @@ run one at a time under a lock (two at once each run at about half speed), and t
 
 | Stage | Runs on |
 | --- | --- |
-| corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D | network (once) |
-| readers' data, emotional data (aligned) | CPU (every core); GPU 2 minutes |
+| the training speech - generated by the local TTS model and aligned (Section 13; before 2.0, the corpora: CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D) | GPU (once, then cached) |
+| the heteronyms' readings, measured in it | GPU (once, then cached) |
+| the voices' data | CPU (every core) |
 | teacher A, teacher B | GPU |
 | teacher evaluation | CPU |
 | distillation targets, student, polish | GPU |
@@ -1156,10 +1173,199 @@ Charles* and "The paper! Of course!" *yelled Holmes* neutral. A punctuation rule
 quotations ending in "!" are neutral by the teacher, 7% shouted.
 
 
-## 13. Limitations and future work
+## 13. Training on synthetic speech
 
-- One human listener has rated the voices; the human results are indicative only, and the shipped voices have had no
-  formal listening round since the single-speaker ones.
+Through version 1.6 both networks learned from human recordings, and from those recordings' tools: the voice's phone
+durations came from LibriTTSLabel's forced alignments of LibriTTS-R, the G2P's heteronym evidence from the same
+alignments (Sections 9.4 and 9.5), and the emotional styles from CREMA-D's actors. Neither network could improve past
+its corpora and their aligner. Version 2.0 replaces all three: `make train` generates its own training speech from a
+local text-to-speech model and measures it with its own tools, and both networks train from that speech alone.
+
+### 13.1 A pilot and its control
+
+Before the switch, one pilot and one control tested whether a TTS model's speech helps. The pilot added twelve voices of
+Gradium's Phonon (a local TTS model served by Ollama; Apache 2.0) - 9.3 hours of book sentences - to the 237 readers'
+56 hours; the control trained the same recipe on the readers alone. Each ran the full `make train` voice chain against
+the shipped model:
+
+| Run | Training speech | Student UTMOS | Student WER |
+| --- | --- | --- | --- |
+| The shipped model (1.6.8) | the readers and CREMA-D | 4.131 | 1.36% |
+| Control - the same recipe retrained | the readers and CREMA-D | 4.136 | 1.56% |
+| Pilot - Phonon's twelve voices added | the readers, CREMA-D, and 9.3 h of Phonon | 4.151 | 0.96% |
+
+The control matched the shipped model, as the retrain of Section 10.1 had. The pilot's gains, small but on the right
+side of both measures, came from the synthetic speech. The pilot's voices still sounded like the shipped ones: each
+shipped voice was a blend of the readers' rows, which the pilot left as they were, so the new speakers added little but
+pronunciation. A voice that sounds like a TTS model's voice has to be trained on that voice alone, so 2.0 trains on
+the synthetic speech only.
+
+### 13.2 The training speech
+
+`picovox_train/tts.py` makes the corpus from the recipe's `tts` section: the engine (an Ollama URL, the model, and its
+digest - the pin), a TTS voice for each of the package's twelve voice keys, and the hours per voice (4).
+
+- **The texts.** Book sentences from the pinned books, first passed through the package's own front end (Section 9), so
+  the engine speaks exactly the words the tokens spell - numbers, abbreviations, and dashes already read out. The panel
+  texts and the listening samples' texts are excluded.
+- **The heteronyms first.** Coverage quotas fill first, rarest word first: 200 sentences for each of the context gate's
+  words (read, lives), 24 for each context network word, and 12 for each other measured word. A random fill from the
+  distillation's books makes up the rest of the hours.
+- **Stable under change.** Each clip's voice and split (5% test, 5% validation) come from a hash of its text, and its id
+  from a hash of the voice and the text, so a larger corpus or a changed selection adds clips without regenerating the
+  ones it keeps. The engine is not deterministic, so the clips are generated once and cached
+  (`downloads/tts/<model>-<digest>/`; `make clean` keeps them).
+- **Measured with our own tools.** Each clip is force-aligned to its tokens by CTC with a wav2vec2 phoneme recognizer
+  (`facebook/wav2vec2-lv-60-espeak-cv-ft`, the model that aligned CREMA-D before) and checked: its greedy phones against
+  the expected phones (an error rate above 0.35 is garbled), a truncated ending, and clipping. Only 21 of 29,475 clips
+  failed, all garbled.
+
+Phonon speaks at about 40-78 times real time on the M3 Max's GPU. The corpus - 29,475 clips, 46.1 hours, about 4 hours a
+voice - took about an hour of the GPU to generate and 26 minutes to align, once. On the listener panel the training speech itself scores
+UTMOS 4.43 on its held-out book sentences (16 per voice) and a Whisper word error rate of 4.2% (the books' archaic words
+and names, which the panel texts avoid, cost Whisper more than any voice does). Section 3.2's human readers score
+3.8-4.4 on the same measure.
+
+### 13.3 Heteronyms measured in synthetic speech
+
+The G2P's heteronym evidence (Sections 9.4 and 9.5) came from the human readers' alignments: which reading of "lead",
+"live", or "close" each reader said. In 2.0 it comes from the training speech, measured by `picovox_train/measure.py`.
+Each heteronym token's two readings are classed by how they differ, and each class has its own measure:
+
+- **strong** - a full vowel or consonant differs (lead, live, wind): the recognizer's CTC vote, the likelihood of each
+  reading's phones over the token's aligned audio, with a margin;
+- **voicing** - S against Z only (close, use, house): the same vote, with strict voicing tokens;
+- **weak** and **merger** - a reduced against a full vowel, or vowels the recognizer merges: the vowels' formants
+  against each voice's own vowel space;
+- **stress** - stress alone (conduct, insult): not measured.
+
+Each measure is checked before it is trusted. The controls are words with one pronunciation, scored against a reading
+with one phone swapped, and a measure is used only if at most 3% of 100 or more control votes choose the swap. The CTC
+vote erred on 6 of 882 controls (0.7%) and the voicing vote on 6 of 866 (0.7%); both are used. The formants erred on 54
+of 568 (9.5%) and are not used, so the weak and merger classes go unmeasured, like stress. Of the 23,346 heteronym
+tokens measured, the strong and voicing votes judge 8,897.
+
+**Relabeling.** A word is relabeled - its dictionary's first pronunciation replaced by what the voices say - when the
+majority reading is significant (a Wilson 95% lower bound above one half) in votes from at least 3 books. The book is the
+independent unit, not the voice, since the twelve voices share one engine. Function words, names (words the books
+capitalize), and the context network's words are never relabeled: names would teach the network spellings it cannot
+see, and the context network reads its own words from context. A committed word the corpus cannot judge (its class
+unmeasured, or too few votes) keeps its earlier evidence, marked kept. The result is 98 words: 43 by the CTC vote, 7 by
+the voicing vote, and 48 kept from 1.6's 56. Two of 1.6's words were dropped ("getting", "paths"), and 44 are new.
+
+**The context labels.** The context network's aligned examples now come from the training speech, held out by book (two
+held-out books, and the cross-validation's folds by book, not by speaker). The TTS model is a fallible reader: it read
+"feet of lead" with the verb's vowel, and its readings disagree with the curated collocations on 11 of their 21 tokens.
+So the curated words (the context network's own) learn from their seeds, collocations, and hand-written mappings, and
+the training speech teaches only the noun/verb families and the gate's two words. The labels: 129 ambiguous words, 810
+validated mappings, 54,731 examples.
+
+**The G2P's result.** The first retrains failed the regression set's context sentences (36, then 44 of 54, against
+the committed module's 53), and three faults the human evidence had hidden came out:
+
+- **Too many context words.** With no measure of stress, admitting every noun/verb stress pair as a context word gave
+  the network 129 words (1.6 had 47) at the same 48K parameters, and the curated words lost to them. A stress word
+  is now a context word only if its less common reading has at least 16 examples in the books: 86 words.
+- **Contradicting labels.** A book token a collocation decides also got a part-of-speech label, sometimes the other
+  reading - "minute" had 62, mostly "a minute amount" tagged as the noun. A collocation now decides its token alone,
+  as it already did in the aligned speech.
+- **Thin words.** The books rarely put "speak" before "Polish", or a plural noun before the verb "contract", and the
+  silver labels are full of "to polish". Varied hand-labeled seed sentences give those readings, and a seeded reading
+  always counts as common: the verb "subject", 59 examples beside 2,965 nouns, otherwise fell under the 2% share an
+  alternate reading needs.
+
+A larger context network (79K parameters) and doubled training steps did not help; the network's size is unchanged.
+
+| G2P | Context set | Default set | Names | Book error | Top-10K wrong | Fresh probes |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1.6.8 (the human readers' evidence) | 53/54 | 52/52 | 80/86 | 0.093% | 21 | 26/38 |
+| **2.0 (the training speech's)** | **54/54** | 51/52 | 80/86 | **0.061%** | **7** | **34/38** |
+
+The context set's 54 sentences are few, and its thin words flip between training seeds, so we also scored 38 fresh
+sentences - both readings of polish, contract, winds, bass, minute, and invalid, none in the seeds or the set. The
+committed module, which reads "She speaks Polish" as the verb, scores 26; the new one 34. Its misses are the next
+G2P release's: "invalid" before a noun ("her invalid mother", whose adjective tag maps to "not valid"), "cold makes
+the metal contract", "the bass swam away", and "every minute change". The cross-validated gate (read and lives, ten
+folds by book) holds 86.5% against the majority reading's 50.7%.
+
+### 13.4 One speaker row per voice
+
+The model loses its style table and its blends. Each voice key is one row of a twelve-row speaker table, `male` (row 0)
+the default; the teacher has 931,619 parameters and the distilled student 282,627 (305,035 before, with 328 speaker rows
+and a style table). The voices are the TTS voices as the model learned them, with no pitch, tract, or rate adjustments
+of their own - only the -5 dB source shelf every voice has had since 1.6.6.
+
+Without CREMA-D the four emotions became transforms, as angry already was. Their transforms are the former emotion
+embeddings' measured effects on the parameter frames - the mean change in pitch, pitch range, pulse, frication, level,
+and duration over the panel texts in every voice - less the breathiness they added:
+
+| Style | Transforms | Pace |
+| --- | --- | --- |
+| happy | pressed (+5), pitch x1.23, level -0.8 dB | 1 |
+| sad | pitch range x0.93, pressed (+2), pitch x0.97, level -3.3 dB, frication +2.9 dB | 0.97 |
+| fearful | whisper 0.15, pitch x1.23, level -2.4 dB, frication +2.9 dB | 1.1 |
+| disgusted | pressed (+4.8), pitch x0.95, level -2.4 dB, frication +1.9 dB | 0.83 |
+
+On the listener panel's texts, in the female and male voices, every style stays intelligible (Whisper's word error
+rate 0.6-3.0%, whispering 2.4-3.9%), every voiced style's UTMOS is within 0.05 of neutral's but fearful's (0.08 and 0.15
+below - the breathy, high voice UTMOS likes least), and every style but whisper and soft is within 4.1 dB of neutral's
+loudness. Style `'auto'` (Section 12.7) keeps UTMOS within 0.04 of neutral's in all twelve voices, its word error rate
+at most 2.4%.
+
+### 13.5 Results
+
+The voice chain ran in 83 minutes with the training speech cached (71 before - Section 11.5): the voices' data
+10, teacher A 28, teacher B 25, the targets 7, the student and its polish 5 each. The student passed the gate against the
+shipped model:
+
+| Model | Parameters | Module (gzip) | UTMOS | WER | Similarity to its teacher |
+| --- | --- | --- | --- | --- | --- |
+| The shipped model (1.6.8, human recordings) | 305,035 | 554 KB (385 KB) | 4.131 | 1.36% | - |
+| The teacher (2.0) | 931,619 | 1,333 KB (1,003 KB) | 4.327 | 1.59% | 1 |
+| **The student (2.0)** | 282,627 | 451 KB (334 KB) | **4.311** | **1.13%** | 0.983 |
+
+Each voice, against its TTS source (the training speech's held-out book sentences; the voices on the panel texts):
+
+| Voice | TTS voice | Sex | Median F0 | TTS UTMOS | TTS WER | Voice UTMOS | Voice WER |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `female` | Harper | female | 185 Hz | 4.47 | 3.6% | 4.38 | 0.6% |
+| `sarah` | Juniper | female | 164 Hz | 4.42 | 4.0% | 4.34 | 1.2% |
+| `helen` | Delia | female | 173 Hz | 4.42 | 6.1% | 4.31 | 1.2% |
+| `amy` | Zoey | female | 188 Hz | 4.43 | 2.4% | 4.38 | 1.2% |
+| `kate` | Hadley | female | 175 Hz | 4.50 | 3.2% | 4.41 | 1.2% |
+| `grace` | Everly | female | 171 Hz | 4.44 | 3.3% | 4.28 | 0.9% |
+| `male` | Trevor | male | 122 Hz | 4.40 | 3.9% | 4.27 | 1.2% |
+| `james` | Miles | male | 130 Hz | 4.39 | 6.9% | 4.24 | 0.9% |
+| `robert` | Preston | male | 103 Hz | 4.43 | 2.8% | 4.17 | 0.9% |
+| `michael` | Micah | male | 116 Hz | 4.34 | 5.6% | 4.31 | 1.5% |
+| `david` | Easton | male | 131 Hz | 4.43 | 5.8% | 4.33 | 1.5% |
+| `thomas` | Russell | male | 115 Hz | 4.46 | 2.2% | 4.30 | 1.2% |
+
+Each voice scores 0.03-0.26 below its TTS source's UTMOS (on different texts, so the comparison is loose), the
+lowest-pitched voice losing the most (robert, 103 Hz: 4.43 to 4.17). In a
+blind A/B (pre-rendered pairs of the shipped and the new voice, the same text, one trial per voice and three repeats,
+fifteen forced choices) the listener chose the new voices in all fifteen.
+
+### 13.6 What the switch costs
+
+- **A model's reading errors become the teacher's.** The TTS model's mistakes ("feet of lead") are measured as readings.
+  Seeds and collocations outrank them, and relabels need three books, but a consistent error in the engine can still
+  teach the G2P a wrong reading.
+- **The engine is not deterministic.** A regenerated corpus is a different corpus; its relabels and context labels can
+  move at the margins, so the corpus is generated once and cached, and the relabel file names the corpus it came from.
+- **The dependency moves.** LibriTTS-R and its aligner are gone, but the voices now come from Phonon, whose training
+  data is undocumented. The model is one line of the recipe: any Ollama speech model with distinct voices can replace
+  it, and a better local model would improve both networks with no code change.
+- **The style evidence is frozen.** The four emotion transforms are measurements of embeddings learned from CREMA-D,
+  kept as numbers; a new emotional corpus would have to be synthetic too.
+
+
+## 14. Limitations and future work
+
+- One human listener has rated the voices; the human results are indicative only. The shipped voices' listening is
+  blind A/B against the voices they replace (fifteen trials for 2.0), not an absolute rating.
+- **The training speech is one TTS model's.** The voices can be no better than Phonon's, and its reading errors and
+  habits are the networks' (Section 13.6); a better local model is a recipe change, untried.
 - UTMOS and the emotion model are imperfect proxies - UTMOS barely moved under rule calibration that a listener could
   hear, and the emotion model has likely seen CREMA-D. The gate's similarity is to each run's own teacher, so it does
   not compare across teachers.
@@ -1176,34 +1382,36 @@ quotations ending in "!" are neutral by the teacher, 7% shouted.
   times with one (Section 12.4); the network and the renderer now take about equal time, so each further gain needs
   both. Safari on the iPhone interprets JavaScript over plain http and compiles it over https (Section 12.4); the
   speed of a phone compiling JavaScript - the player's case - was not measured.
-- **The designed voices.** The ten voices with emotional styles (Section 7) are specified but not shipped; the package
-  has two.
+- **Unmeasured heteronym classes.** The formant measure failed its controls (9.5%), so heteronyms that differ by a
+  reduced vowel, a merged vowel, or stress alone are judged by no evidence from the training speech (Section 13.3).
 - **Expressive reading** follows the text's structure only (Section 12.7): no quotation is read angry, shouted, or
   frightened - a classifier precise enough to choose them was not found, even on a large model's embeddings.
 - The voices are American English only, by design.
 
 
-## 14. Data and licenses
+## 15. Data and licenses
 
 | Data | Use | License |
 | --- | --- | --- |
 | CMU Pronouncing Dictionary | the G2P network's training labels (not shipped) | BSD-style |
-| CMU ARCTIC | training; targets | CMU ARCTIC free license |
-| LibriTTS-R (train-clean-100, dev-clean) | multi-speaker training; targets; the readers' pronunciations and the dictionary audit | CC BY 4.0 |
-| LibriTTSLabel alignments | phone durations; readers' readings | none stated - used locally, not redistributed |
-| CREMA-D | emotional styles; emotion-model calibration | ODbL |
+| Phonon (Gradium, through Ollama) | the training speech (2.0 on): every voice, and the heteronyms' readings | Apache 2.0 (its training data undocumented) |
+| wav2vec2 phoneme recognizer (`facebook/wav2vec2-lv-60-espeak-cv-ft`) | the training speech's alignment, checks, and reading votes (CREMA-D's alignment before) | Apache 2.0 |
+| CMU ARCTIC | training; targets (before 2.0) | CMU ARCTIC free license |
+| LibriTTS-R (train-clean-100, dev-clean) | multi-speaker training; targets; the readers' pronunciations and the dictionary audit (before 2.0) | CC BY 4.0 |
+| LibriTTSLabel alignments | phone durations; readers' readings (before 2.0) | none stated - used locally, not redistributed |
+| CREMA-D | emotional styles; emotion-model calibration (before 2.0 - the emotion transforms are its embeddings' measured effects) | ODbL |
 | Standard Ebooks, Project Gutenberg | the books read aloud; the G2P's frequency weights and heteronym labels; the distillation's sentences | public domain |
 
 PicoVox is distributed under the MIT License.
 
 
-## 15. Reproducing the results
+## 16. Reproducing the results
 
 ```sh
 npm install picovox                                             # the package
 make commit                                                     # tests, lint, docs, 100% coverage of lib/ and train/
 make build/venv-train.build                                     # make train's Python environment (the listener panel's too)
-make -j train                                                   # both models from scratch: the G2P, and the voice - the corpora, the teacher, the student, the gate
+make -j train                                                   # both models from scratch: the training speech (Ollama running, the first time), the G2P, and the voice - the teacher, the student, the gate
 make -j train-g2p                                               # reproduce the G2P chain and check it against the committed module
 make train-check                                                # the package's tests with the trained models, and the voice lab staged to listen
 make train-install                                              # the trained models that differ into lib/models/

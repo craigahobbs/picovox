@@ -436,6 +436,60 @@
     "\\b(most|so|very|too|more) minute\\b",
     "M AY0 N UW1 T"
    ]
+  ],
+  "close": [
+   [
+    "\\bthe close of\\b",
+    "K L OW1 Z"
+   ],
+   [
+    "\\b(at|toward|towards|near|before|after|till|until) the close\\b",
+    "K L OW1 Z"
+   ]
+  ],
+  "winds": [
+   [
+    "\\b(road|path|river|stream|track|trail|lane|street|valley|creek|stair|staircase|passage) winds\\b",
+    "W AY1 N D Z"
+   ]
+  ],
+  "polish": [
+   [
+    "\\b(speaks?|spoke|spoken|speaking|knows?|knew|learn(ed|t|s)?|understands?|understood|in) polish\\b",
+    "P OW1 L IH0 SH"
+   ],
+   [
+    "\\bpolish (people|nation|nobles?|army|jews?|king|language|count|countess|prince|princess|lady|gentleman|officers?|soldiers?|peasants?)\\b",
+    "P OW1 L IH0 SH"
+   ]
+  ],
+  "subject": [
+   [
+    "\\b(would|will|to|shall|should|must|could|might|cannot|can|may|not|never) subject (him|her|them|it|me|us|you|himself|herself|themselves|itself|myself|ourselves|yourself)\\b",
+    "S AH0 B JH EH1 K T"
+   ]
+  ],
+  "graduate": [
+   [
+    "\\b(to|will|would|shall|should|could|might|must|did|cannot|can|not|never) graduate\\b",
+    "G R AE1 JH AH0 W EY2 T"
+   ]
+  ],
+  "contract": [
+   [
+    "\\b(muscles|pupils|metals|vessels|veins|arteries|brows) contract\\b",
+    "K AH0 N T R AE1 K T"
+   ],
+   [
+    "(?<!according )\\bto contract\\b",
+    "K AH0 N T R AE1 K T"
+   ]
+  ],
+  "invalid": [
+   [
+    "\\b(an|the|poor|her|his|my|their|our|your|old|confirmed|chronic|helpless|sick|aged) invalid (mother|father|wife|husband|sister|brother|aunt|uncle|daughter|son|child|girl|boy|lady|gentleman|woman|man|chair|cousin|friend|master|mistress|grandmother|grandfather)\\b",
+    "IH1 N V AH0 L AH0 D"
+   ]
   ]
  },
  "seeds": [
@@ -1409,6 +1463,110 @@
     "The bass were biting in the pond.",
     "We hooked a bass near the dock.",
     "The boy caught a small bass and let it go."
+   ]
+  },
+  {
+   "word": "winds",
+   "phones": "W AY1 N D Z",
+   "texts": [
+    "The narrow lane winds down to the harbour.",
+    "He winds the old clock every Sunday night.",
+    "The river winds slowly across the plain.",
+    "She winds the wool into a tight ball.",
+    "A footpath winds between the hedges.",
+    "The procession winds up the hill to the church.",
+    "He winds the rope around the post.",
+    "The stair winds upward into darkness."
+   ]
+  },
+  {
+   "word": "subject",
+   "phones": "S AH0 B JH EH1 K T",
+   "texts": [
+    "I will not subject you to such questions.",
+    "They meant to subject the prisoners to hard labour.",
+    "Do not subject yourself to his temper.",
+    "The king tried to subject the whole island.",
+    "She refused to subject her children to the cold.",
+    "You must not subject the metal to great heat."
+   ]
+  },
+  {
+   "word": "graduate",
+   "phones": "G R AE1 JH AH0 W EY2 T",
+   "texts": [
+    "She hopes to graduate next spring.",
+    "Few of the students graduate with honours.",
+    "He did not graduate until he was thirty.",
+    "They will graduate from the college together.",
+    "If he works hard he may graduate early.",
+    "Most of the class expect to graduate."
+   ]
+  },
+  {
+   "word": "invalid",
+   "phones": "IH1 N V AH0 L AH0 D",
+   "texts": [
+    "He cared for his invalid father.",
+    "They had an invalid daughter at home.",
+    "The invalid lady sat by the fire.",
+    "She wheeled her invalid aunt to church.",
+    "His invalid wife seldom left the house.",
+    "An invalid son lived with them."
+   ]
+  },
+  {
+   "word": "polish",
+   "phones": "P OW1 L IH0 SH",
+   "texts": [
+    "My grandmother speaks Polish to the cat.",
+    "We heard them speaking Polish in the hall.",
+    "He knows Polish, French, and Latin.",
+    "She had forgotten her Polish.",
+    "Can you read Polish?",
+    "The letter was written in Polish.",
+    "They were talking Polish when I came in.",
+    "Her husband taught her Polish.",
+    "He answered them in broken Polish.",
+    "I understand Polish better than I speak it."
+   ]
+  },
+  {
+   "word": "contract",
+   "phones": "K AH0 N T R AE1 K T",
+   "texts": [
+    "Iron rails contract on a frosty night.",
+    "The heart muscles contract and relax.",
+    "Wet leather will contract as it dries.",
+    "Her fingers began to contract with the cold.",
+    "The arteries contract when the body is chilled.",
+    "Most things contract when they cool.",
+    "Watch the snail contract into its shell.",
+    "The cells contract and grow smaller."
+   ]
+  },
+  {
+   "word": "winds",
+   "phones": "W AY1 N D Z",
+   "texts": [
+    "The canal winds past the old mill.",
+    "A dirt track winds over the moor.",
+    "Each evening he winds the music box.",
+    "The creek winds among the willows.",
+    "The highway winds along the coast.",
+    "She winds a scarf around her neck."
+   ]
+  },
+  {
+   "word": "bass",
+   "phones": "B EY1 S",
+   "texts": [
+    "He plucked the bass with his thumb.",
+    "The band hired a new bass player.",
+    "The bass made the windows rattle.",
+    "She plays bass in the school orchestra.",
+    "The bass was too loud for the small room.",
+    "He tuned his bass before the show."
    ]
   }
  ]

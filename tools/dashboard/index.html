@@ -494,6 +494,36 @@
         gap: 6px;
         min-width: 0;
     }
+    .log h3 {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+    }
+    .log-expand {
+        flex: none;
+        padding: 1px 8px;
+        border: 1px solid var(--rule);
+        border-radius: 4px;
+        background: var(--panel);
+        color: var(--muted);
+        font-size: 0.72rem;
+        cursor: pointer;
+    }
+    .log-expand:hover,
+    .log-expand[aria-expanded="true"] {
+        color: var(--accent);
+        border-color: var(--accent);
+    }
+    .facts label:has(input:disabled) {
+        opacity: 0.5;
+    }
+    .log.expanded {
+        grid-column: 1 / -1;
+    }
+    .log.expanded pre {
+        max-height: 70vh;
+    }
     pre {
         margin: 0;
         padding: 10px;
@@ -609,7 +639,11 @@
         <section>
             <div class="pipeline-head">
                 <h2>Activity logs</h2>
-                <label class="facts"><input type="checkbox" id="olderLogs"> Show older logs <span id="olderCount"></span></label>
+                <span class="facts">
+                    <label><input type="checkbox" id="activeLogs"> Active only <span id="activeCount"></span></label>
+                    &nbsp;
+                    <label><input type="checkbox" id="olderLogs"> Show older logs <span id="olderCount"></span></label>
+                </span>
             </div>
             <div id="logs" class="logs"><p class="empty">Looking for make train's logs...</p></div>
         </section>

@@ -115,7 +115,9 @@ make train's training speech (`train/data/train.json`'s `tts` voices - see [the 
 `test/voices.json` is their design record. The voices are the model's speakers as it speaks them - no blends, and no
 pitch, tract, or rate adjustments of their own - except that every voice's source is 5 dB darker than the network
 predicts it (`lib/synthesis.js` `sourceShelf`): in blind A/B listening (1.6.6) the network's source sounded tinny, and
-darker it was less tinny and never less natural. On the listener panel's texts the voices score TODO(results).
+darker it was less tinny and never less natural. On the listener panel's texts the voices score a mean UTMOS of
+4.18-4.41 (4.31 over the twelve) and a Whisper word error rate of 0.6-1.5% (1.13%) - the voices before 2.0 scored 4.13
+and 1.36%, and a blind A/B preferred the new voices in all 15 trials.
 
 ### `styles()`
 
@@ -137,11 +139,14 @@ The speaking styles - `[{key, label, kind, description}]`, neutral (the default)
 
 Every style transforms the synthesizer's parameters (`lib/transforms.js` - a pressed or relaxed glottal pulse, pitch and
 pitch range, whisper, level, frication) and the pace; the voice model has no style input. The emotions' transforms are
-measured: before 1.7 the voice model had emotion embeddings learned from CREMA-D's actors, and happy, sad, fearful, and
+measured: before 2.0 the voice model had emotion embeddings learned from CREMA-D's actors, and happy, sad, fearful, and
 disgusted are those embeddings' effects on the parameter frames (pitch, pitch range, pulse, voicing, frication, level,
 and duration, over the panel texts in every voice), less the breathiness they added; angry was transforms alone already.
-The styles' listener-panel measurements (Whisper's word error rate, UTMOS, and loudness against neutral) were of the
-former model and its embeddings; they will be re-measured for the new voices - TODO(results).
+On the listener panel's texts, in the female and male voices, every style stays intelligible (Whisper's word error
+rate 0.6-3.0%, whispering 2.4-3.9%); UTMOS - a judge of plain read speech - scores every voiced style within 0.05 of
+neutral's (4.40 and 4.26) but fearful (0.08 and 0.15 below), and can't score a whisper; and every style but whisper
+(6.5-9.7 dB quieter) and soft (5 dB) is within 4.1 dB of neutral's loudness - angry 3.3-3.8 dB louder, sad 3.4-3.6
+quieter.
 
 ### Expressive reading: `style: 'auto'`
 
@@ -158,10 +163,9 @@ Style `'auto'` needs no model - it reads the text's quotation marks, exclamation
 quotation angry, shouting, or fearful was tried and dropped: even a classifier on a 4-billion-parameter embedding model
 couldn't choose those styles reliably enough - see the paper's Section 12.7.)
 
-On the listener panel (the voices before 1.7) the beats kept the voices intelligible and natural: the dialogue style's
-UTMOS was within 0.04 of neutral's in four voices, its word error rate unchanged; the exclaim style's, read over whole
-texts in all twelve voices, within 0.13 of neutral's, its word error rate at most 2.1% - for the new voices,
-TODO(results). The output is deterministic, as every style's; without `'auto'` the audio is the same as before, bit for
+On the listener panel's texts the beats keep the voices intelligible and natural: in all twelve voices style
+`'auto'`'s UTMOS is within 0.04 of neutral's, its word error rate at most 2.4% (neutral's 0.6-1.8%), and it reads about
+2.3 dB louder. The output is deterministic, as every style's; without `'auto'` the audio is the same as before, bit for
 bit.
 
 ### `toWav(samples, sampleRate)`
@@ -217,15 +221,15 @@ that runs its own synthesis loop (PicoShelf's worker does):
 
 | | |
 | --- | --- |
-| The package (`npm pack`) | TODO(results) packed, TODO(results) unpacked - the G2P network 419 KB and the voice network TODO(results) of it, as base64 |
-| The voice network | 282,627 parameters, 8-bit weights - TODO(results) gzipped |
+| The package (`npm pack`) | 727 KB packed, 1.1 MB unpacked - the G2P network 420 KB and the voice network 451 KB of it, as base64 |
+| The voice network | 282,627 parameters, 8-bit weights - 334 KB gzipped |
 | The G2P network | 373,256 parameters (and the heteronym context network's 47,779), 6-bit weights |
 | Speed, Apple M3 Max (Node) | The voice network about 127x real time, the renderer about 97x; synthesis end to end (24 kHz) about 55x |
 | Speed, iPhone without a JIT (Safari over plain http, or in Lockdown Mode) | About 2.6x real time in one worker; about 3.1-3.4x with the network and the renderer in two workers (`sentenceFrames` and `createSentenceRenderer`) |
 | Startup | About 0.1 s to load both networks (Node, M3 Max) |
 
-The voices score a mean UTMOS (a neural predictor of listeners' naturalness ratings, 1-5) of TODO(results) on the
-listener panel's texts, with a Whisper word error rate of TODO(results) - see [the listener panel](#the-listener-panel).
+The voices score a mean UTMOS (a neural predictor of listeners' naturalness ratings, 1-5) of 4.31 on the
+listener panel's texts, with a Whisper word error rate of 1.13% - see [the listener panel](#the-listener-panel).
 
 
 ## How the models are trained
@@ -236,9 +240,10 @@ generates: Project Gutenberg sentences spoken by a local TTS model (Gradium's Ph
 for each of the package's twelve), aligned and checked with our own phoneme recognizer, then a large teacher model
 trained through a differentiable copy of the synthesizer, distilled to the small student that ships. The G2P network
 learns from the CMU Pronouncing Dictionary (downloaded, pinned; it is not used at runtime), its heteronyms' readings
-measured in the training speech. The whole run takes TODO(results) on an M3 Max (the training speech generated once,
-then cached). See [make train](#make-train) below, and the paper,
-[PicoVox: Realistic Neural Speech Synthesis in Under 1 MB of JavaScript](paper/paper.md), for the methods and results.
+measured in the training speech. The whole run takes about 85 minutes on an M3 Max (the training speech generated once,
+then cached - generating and aligning it the first time adds about an hour and a half). See [make train](#make-train)
+below, and the paper, [PicoVox: Realistic Neural Speech Synthesis in Under 1 MB of
+JavaScript](paper/paper.md), for the methods and results.
 
 
 ## PicoShelf
@@ -320,7 +325,8 @@ end, and time against the expected time, and its mean CPU and GPU use; the train
 and the gates (the heteronym and G2P checks, the listener panel's scores, and the pick). Listen plays the `make train`
 run's listening samples (each training stage's final model beside the shipped model - see make train, below; the
 stages not rendered yet listed as waiting), and marks new samples until they're heard. Logs has the tails of `make
-train`'s 12 most recently updated logs (all of them with "Show older logs"). It refreshes every second, read-only,
+train`'s 12 most recently updated logs (all of them with "Show older logs", only those updated in the last 3 minutes
+with "Active only"; "Expand" shows a log's last 500 lines, the full width). It refreshes every second, read-only,
 re-fetching only what changed, and reloads itself when its own code changes.
 
 
@@ -368,7 +374,7 @@ audio (WAV files are read with the standard library - `picovox_train/wav.py`). (
 FunASR's - about 40 packages more - was the style experiments'; it's in git history.)
 
 Calibration (the evaluation set, or 16 recordings of each human speaker - measured in October 2026, on the human
-corpora the voice model trained on before 1.7):
+corpora the voice model trained on before 2.0):
 
 | Speech | MOS mean | MOS min | WER |
 | --- | --- | --- | --- |
@@ -378,7 +384,7 @@ corpora the voice model trained on before 1.7):
 | Apple Samantha (unit selection) | 3.94 | 3.58 | 3.9% |
 | Apple Daniel (unit selection, British) | 3.41 | 3.07 | 5.7% |
 | Apple Fred (1980s formant synthesis) | 2.81 | 2.52 | 10.6% |
-| The training speech - the local TTS model's twelve voices (their held-out clips) | TODO(results) | TODO(results) | TODO(results) |
+| The training speech - the local TTS model's twelve voices (16 held-out book sentences each) | 4.34-4.50 | 3.75-4.46 | 2.2-6.9% |
 
 Speaker similarity: every human pair 0.0-0.48; halves of one human speaker's recordings about 0.9.
 
@@ -448,10 +454,10 @@ time (`picovox_train/gpulock.py` - two at once each run at about half speed) whi
 | g2p-network, context-labels, context-network, g2p - the G2P (the network; the heteronym labels from the pinned books; the context network and its cross-validation; the reading stage, the export, and the gate) | CPU - the network one core, ~30 min | the labels: tts-readings (after data-tts) |
 | samples-reference, samples-teacher-a, -teacher-b, -student, -polish - the listening samples | CPU, under a minute each | the shipped model (after data-tts); each stage's model |
 
-The critical path - the training speech (generated and aligned once - about an hour the first time, a minute or two
-cached), the voices' data (TODO(results)), teacher A (TODO(results)) and B (TODO(results)), the targets (TODO(results)),
-the student (TODO(results)) and its polish (TODO(results)), the gate, the package - took TODO(results) from scratch on
-an M3 Max on full power (94 W; the training speech cached), with the G2P chain beside it. (Before 1.7, on the human
+The critical path - the training speech (generated and aligned once - about an hour and a half the first time, a minute
+or two cached), the voices' data (10 minutes), teacher A (28) and B (25), the targets (7), the student (5) and its polish (5),
+the gate, the package - took 83 minutes on an M3 Max on full power (94 W; the training speech cached), with the G2P
+chain beside it. (Before 2.0, on the human
 corpora, it took 71 minutes.) The package's manifest records its provenance: the commit, the recipe's and the training
 data's hashes, and the gate's scores. `python -m picovox_train.smoke` runs every stage's entry point for a few steps on
 the CPU.
@@ -560,11 +566,18 @@ PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.distill pic
 
 Progress lines go to `build/nn/distill/` (`targets.log`, `students.log`, `eval.log`).
 
-The distillation of the voices trained on the training speech (1.7): TODO(results) - the targets' size and time, and the
-teacher and the chosen student's parameters, module size, UTMOS, WER, and similarity (the teacher 931,619 parameters,
-the d64 student 282,627, by their twelve-row speaker tables).
+The distillation of the voices trained on the training speech (2.0): 280,602 sentence-voice pairs - 26,536 of the
+training speech's utterances and 254,066 book sentences - 377 hours of teacher speech, 17.6 GB, made in 7 minutes on an
+M3 Max's GPU; the student trained in 5 minutes and its polish in 5. Twelve voices by 16 panel texts, against the shipped
+model (the gate's basis):
 
-The measurements below are of the models trained on human recordings before 1.7 (CMU ARCTIC and LibriTTS-R readers, and
+| Model | Parameters | Module (gzip) | UTMOS | WER | Similarity | Real time (network / total) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Teacher | 931,619 | 1,333 KB (1,003 KB) | 4.327 | 1.59% | 1 | 32x / 20x |
+| **d64 student + polish - chosen** | 282,627 | 451 KB (334 KB) | 4.311 | 1.13% | 0.983 | 99x / 36x |
+| The shipped model (1.6.8, trained on human recordings) | 305,035 | 554 KB (385 KB) | 4.131 | 1.36% | - | - |
+
+The measurements below are of the models trained on human recordings before 2.0 (CMU ARCTIC and LibriTTS-R readers, and
 CREMA-D's actors - their speaker and style tables larger), kept as the ladder's record. The first distillation (October
 2026), from stage B's best checkpoint (`multi-b` step 19,000): 294,678 sentence-speaker pairs - 40,624 training
 utterances and 254,054 book sentences - 397 hours of teacher speech, 18.5 GB, made in 9 minutes on an M3 Max's GPU. Each
@@ -633,7 +646,7 @@ shipped model's weights bit for bit.
 word is relabeled when the voices' majority isn't the first (significant - the Wilson 95% lower bound above one half,
 from 3 or more books, the independent unit: the voices share one front end), the difference is lexical (a stressed
 vowel's quality, or the primary stress moving with it - not vowel reduction or stress alone), and it isn't a function
-word. The committed words were chosen from the LibriTTS-R readers' usage before 1.7 (their evidence is in the file);
+word. The committed words were chosen from the LibriTTS-R readers' usage before 2.0 (their evidence is in the file);
 with `--keep` (make train's heteronyms stage), a committed word the training speech can't judge - its readings
 unmeasured, or no significant majority either way - is kept, and one whose first reading the voices significantly
 prefer is dropped, and the stage checks the result reproduces `train/data/g2p-relabel.json`.
@@ -678,7 +691,7 @@ not a function word or a one- or two-letter word) on up to 12 of its aligned tok
 for a candidate 2 (log) more likely than the rest, and a confirmed error needs the votes' Wilson 95% lower bound above
 one half from 3 or more books. Control words (both models agree with the label, against a model's second guess)
 measure the method. The TTS model's pronunciation of a rare word or a name is its own G2P's guess, so a verdict is the
-engine and the fold models together. (The committed fixes were found before 1.7 with the LibriTTS-R readers'
+engine and the fold models together. (The committed fixes were found before 2.0 with the LibriTTS-R readers'
 recordings: 140 control words, no false errors and 1.5% of the tokens' votes for the wrong candidate; the audio
 confirmed 13 errors and 143 labels, the rest without audio evidence.)
 
@@ -806,7 +819,7 @@ make build/venv-train.build                                         # build/venv
 build/venv-train/bin/python -I train/src/picovox_train/corpora.py   # the dictionary and the Whisper model into downloads/
 ```
 
-(The human speech corpora the voice model was trained on before 1.7 - CMU ARCTIC, LibriTTS-R with LibriTTSLabel's
+(The human speech corpora the voice model was trained on before 2.0 - CMU ARCTIC, LibriTTS-R with LibriTTSLabel's
 alignments, and CREMA-D - and the speaker pool, `train/data/speakers.json`, are in git history.)
 
 

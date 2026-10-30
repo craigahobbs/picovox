@@ -20,9 +20,14 @@ event() {
     printf '{"stage": "%s", "event": "%s", "time": %s%s}\n' "$stage" "$1" "$(date +%s)" "${2:-}" >> "$dir/stages.jsonl"
 }
 
-# The start and end events
+# The start and end events - a start also starts the utilization sampler for the life of this make, if none runs (make
+# train starts it first; a stage target run alone doesn't)
 if [ "${1:-}" = start ] || [ "${1:-}" = end ]; then
     event "$1"
+    if [ "$1" = start ]; then
+        make_pid=$(ps -o ppid= -p "$PPID" | tr -d ' ')
+        nohup "$(dirname "$0")/trainutil.sh" "$dir" "$make_pid" >/dev/null 2>&1 &
+    fi
     exit 0
 fi
 

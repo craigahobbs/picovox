@@ -92,6 +92,29 @@ test('train.parseStageEvents', () => {
 });
 
 
+test('train.sessionStart', () => {
+    const minute = 60000;
+    const event = (start, end, fail = null) => ({start, end, fail, 'failure': null});
+    // (two sessions - the second starts after more than the gap with nothing running; overlapping and unfinished
+    // attempts run on, and an attempt without a start is ignored)
+    const events = new Map([
+        ['data', event(0, 10 * minute)],
+        ['teacher', event(5 * minute, 40 * minute)],
+        ['eval', event(41 * minute, null, 50 * minute)],
+        ['student', event(200 * minute, null)],
+        ['package', event(205 * minute, 206 * minute)],
+        ['check', event(null, null, 3 * minute)]
+    ]);
+    assert.equal(train.sessionStart(events, 300 * minute, 60 * minute), 200 * minute);
+    // (within the gap - one session)
+    assert.equal(train.sessionStart(events, 300 * minute, 160 * minute), 0);
+    // (an unfinished attempt runs to now - nothing after it starts a session)
+    assert.equal(train.sessionStart(new Map([['data', event(0, null)], ['teacher', event(100 * minute, 110 * minute)]]),
+        300 * minute, 60 * minute), 0);
+    assert.equal(train.sessionStart(new Map(), 0, 60 * minute), null);
+});
+
+
 test('train.parseUtilLog', () => {
     const text = [
         'time cpu_busy% gpu% stage',

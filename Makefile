@@ -123,8 +123,9 @@ TRAIN_RUNS := $(TRAIN_DIR)/runs
 # The bookkeeping, for the training dashboard (tools/dashboard/): each stage's start, end, and failure in
 # $(TRAIN_DIR)/stages.jsonl and each command's output also in $(TRAIN_DIR)/logs/<stage>.log (tools/trainstage.sh - the
 # teacher's output also in its run's train.log), and the CPU, GPU, and memory use with the running stages every 20 seconds
-# in $(TRAIN_DIR)/util.log (tools/trainutil.sh, for the life of make train). The stages, their dependencies, and their
-# expected times are train/data/train-stages.json's (test/testTrainStages.js checks it against these targets).
+# in $(TRAIN_DIR)/util.log (tools/trainutil.sh, for the life of make - make train starts it, and a stage's start does if
+# none runs). The stages, their dependencies, and their expected times are train/data/train-stages.json's
+# (test/testTrainStages.js checks it against these targets).
 STAGE = tools/trainstage.sh $(TRAIN_DIR) $(basename $(@F))
 
 # Record a make target's run in stages.jsonl (the training dashboard shows its stages), and keep the Mac awake while make

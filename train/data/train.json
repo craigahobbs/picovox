@@ -55,8 +55,8 @@
                 "pg62215", "pg64317", "pg65238", "pg67979", "pg68283", "pg69087", "pg70854", "pg71046", "pg75201",
                 "pg76178", "pg76639", "pg76668"],
             "heldOutBooks": ["pg1342", "pg2701"],
-            "minAgreement": 0.95, "minValidate": 10, "minFamilyValidate": 200, "minAlternate": 5, "minAlternateShare": 0.02, "maxSilver": 3000,
-            "maxTransfer": 3000
+            "minAgreement": 0.95, "minValidate": 10, "minFamilyValidate": 200, "minAlternate": 5, "minAlternateShare": 0.02,
+            "minUnmeasuredAlternate": 16, "maxSilver": 3000, "maxTransfer": 3000
         },
         "g2p": {
             "readings": 3, "ambiguityHidden": 16, "steps": 3000, "batch": 512, "lr": 0.0003, "warmup": 100, "readingShare": 0.04,
