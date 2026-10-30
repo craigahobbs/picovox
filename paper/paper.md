@@ -1320,7 +1320,7 @@ shipped model:
 
 | Model | Parameters | Module (gzip) | UTMOS | WER | Similarity to its teacher |
 | --- | --- | --- | --- | --- | --- |
-| The shipped model (1.6.8, human recordings) | 305,035 | 554 KB (385 KB) | 4.131 | 1.36% | - |
+| 1.6.8's model (human recordings) | 305,035 | 554 KB (385 KB) | 4.131 | 1.36% | - |
 | The teacher (2.0) | 931,619 | 1,333 KB (1,003 KB) | 4.327 | 1.59% | 1 |
 | **The student (2.0)** | 282,627 | 451 KB (334 KB) | **4.311** | **1.13%** | 0.983 |
 

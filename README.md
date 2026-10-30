@@ -568,14 +568,14 @@ Progress lines go to `build/nn/distill/` (`targets.log`, `students.log`, `eval.l
 
 The distillation of the voices trained on the training speech (2.0): 280,602 sentence-voice pairs - 26,536 of the
 training speech's utterances and 254,066 book sentences - 377 hours of teacher speech, 17.6 GB, made in 7 minutes on an
-M3 Max's GPU; the student trained in 5 minutes and its polish in 5. Twelve voices by 16 panel texts, against the shipped
+M3 Max's GPU; the student trained in 5 minutes and its polish in 5. Twelve voices by 16 panel texts, against 1.6.8's
 model (the gate's basis):
 
 | Model | Parameters | Module (gzip) | UTMOS | WER | Similarity | Real time (network / total) |
 | --- | --- | --- | --- | --- | --- | --- |
 | Teacher | 931,619 | 1,333 KB (1,003 KB) | 4.327 | 1.59% | 1 | 32x / 20x |
 | **d64 student + polish - chosen** | 282,627 | 451 KB (334 KB) | 4.311 | 1.13% | 0.983 | 99x / 36x |
-| The shipped model (1.6.8, trained on human recordings) | 305,035 | 554 KB (385 KB) | 4.131 | 1.36% | - | - |
+| 1.6.8's model (trained on human recordings) | 305,035 | 554 KB (385 KB) | 4.131 | 1.36% | - | - |
 
 The measurements below are of the models trained on human recordings before 2.0 (CMU ARCTIC and LibriTTS-R readers, and
 CREMA-D's actors - their speaker and style tables larger), kept as the ladder's record. The first distillation (October
