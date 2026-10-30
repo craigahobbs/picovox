@@ -833,11 +833,11 @@ async function loadTrain() {
     await Promise.all(manifest.stages.filter((stage) => !events.has(stage.stage)).map(async (stage) => {
         const stamp = await fetchText(new URL(`${encodeURIComponent(stage.stage)}.done`, dirUrl));
         if (stamp !== null) {
-            events.set(stage.stage, {'start': stamp.modified, 'end': stamp.modified, 'fail': null, 'failure': null});
+            events.set(stage.stage, {'start': stamp.modified, 'end': stamp.modified, 'fail': null, 'failure': null, 'stamped': true});
         }
     }));
     const stageLogs = new Map();
-    await Promise.all(manifest.stages.filter((stage) => events.has(stage.stage)).map(async (stage) => {
+    await Promise.all(manifest.stages.filter((stage) => events.has(stage.stage) && !events.get(stage.stage).stamped).map(async (stage) => {
         const result = await fetchText(new URL(`logs/${encodeURIComponent(stage.stage)}.log`, dirUrl));
         if (result !== null) {
             stageLogs.set(stage.stage, result);
@@ -845,7 +845,7 @@ async function loadTrain() {
     }));
     // (a running stage's progress from its log - the manifest's progress)
     const progress = new Map();
-    await Promise.all(manifest.stages.filter((stage) => stage.progress && events.has(stage.stage)).map(async (stage) => {
+    await Promise.all(manifest.stages.filter((stage) => stage.progress && stageLogs.has(stage.stage)).map(async (stage) => {
         const result = await fetchText(new URL(stage.progress.log, dirUrl));
         if (result !== null) {
             progress.set(stage.stage, trainModel.logProgress(result.text, stage.progress));
@@ -855,13 +855,8 @@ async function loadTrain() {
     const queued = new Set([...stageLogs].filter(([, result]) => (
         /^gpulock: waiting/.test(lastMatch([result.text], /^gpulock: /) || '')
     )).map(([name]) => name));
-    // (make runs while its utilization sampler writes, or while a started stage writes its log - a stage target run alone
-    // has no sampler)
-    const writing = [...stageLogs].some(([name, result]) => {
-        const event = events.get(name);
-        return event.end === null && event.fail === null && Date.now() - result.modified < stalledMs;
-    });
-    const alive = (utilResult !== null && Date.now() - utilResult.modified < 90000) || writing;
+    // (make runs while its utilization sampler writes - make train starts it, and so does any stage's start)
+    const alive = utilResult !== null && Date.now() - utilResult.modified < 90000;
     // (the run's target and start - make train and its targets record them in stages.jsonl; the run starts no earlier
     // than the latest session of stage activity - an hour with nothing running ends a session)
     const runTarget = eventsResult === null ? null : trainModel.parseRunTarget(eventsResult.text);
@@ -1556,18 +1551,29 @@ function setTabFact(id, text) {
 }
 
 
-// Reload the page when the dashboard's own files change (checked every 5 seconds), so it never runs stale code
+// Reload the page when the dashboard's own files change (checked every 5 seconds), so it never runs stale code - only
+// on a settled change: every file served, with the same new versions on two checks in a row (not mid-checkout or
+// mid-write)
 const codeFiles = ['index.html', 'dashboard.js', 'train.js'].map((name) => new URL(`tools/dashboard/${name}`, rootUrl));
 let codeVersions = null;
+let changedVersions = null;
 async function checkCode() {
     try {
-        const versions = await Promise.all(codeFiles.map(async (url) => (
-            (await fetch(url, {'method': 'HEAD', 'cache': 'no-store'})).headers.get('Last-Modified')
-        )));
+        const responses = await Promise.all(codeFiles.map((url) => fetch(url, {'method': 'HEAD', 'cache': 'no-store'})));
+        const versions = responses.map((response) => response.headers.get('Last-Modified'));
+        if (responses.some((response) => !response.ok) || versions.some((version) => !version)) {
+            changedVersions = null;
+            return;
+        }
+        const key = versions.join('\n');
         if (codeVersions === null) {
-            codeVersions = versions;
-        } else if (versions.some((version, index) => version !== codeVersions[index])) {
+            codeVersions = key;
+        } else if (key === codeVersions) {
+            changedVersions = null;
+        } else if (key === changedVersions) {
             window.location.reload();
+        } else {
+            changedVersions = key;
         }
     } catch {
         // Unreachable server - check again later
