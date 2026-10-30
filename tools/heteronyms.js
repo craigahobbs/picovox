@@ -2,12 +2,15 @@
 // the package's front end (lib/lexicon.js textToPhrases with the G2P network as the pronouncer), each expected reading
 // scored: right when the word's phones are one of the reading's variants (or match one without stress and no rejected
 // variant's). Kinds: "default" (the reading a context-free G2P should give), "context" (another reading - needs the
-// neighboring words), "missing" (no dictionary variant), "names" (surnames, first names, and place names - verified
-// pronunciations: the readers' audio, the dictionary's own derived forms, and well-established names). Prints one line and
-// exits 1 when a kind's score is below its minimum (the make train gate): default 0.9, context 0.85 when the module has a
-// context network (else 0), missing 0, names the shipped module's score when it was added (it can only go up).
+// neighboring words), "missing" (no dictionary variant), "probe" (both readings of the context network's thin words, in
+// sentences written apart from its seeds and collocations - its generalization beyond the context set), "names" (surnames,
+// first names, and place names - verified pronunciations: the readers' audio, the dictionary's own derived forms, and
+// well-established names). Prints one line and exits 1 when a kind's score is below its minimum (the make train gate):
+// default 0.9, context and probe 0.85 when the module has a context network (else 0), missing 0, names the shipped
+// module's score when it was added (it can only go up).
 //
-// node tools/heteronyms.js [-m modulePath] [--min-default 0.9] [--min-context 0.85] [--min-missing 0] [--min-names N] [--show]
+// node tools/heteronyms.js [-m modulePath] [--min-default 0.9] [--min-context 0.85] [--min-probe 0.85] [--min-missing 0]
+//     [--min-names N] [--show]
 
 import {setPronouncer, textToPhrases} from '../lib/lexicon.js';
 import {loadG2p} from '../lib/g2p.js';
@@ -59,10 +62,10 @@ export function scoreHeteronyms(items) {
 }
 
 
-// The gate's minimums - the default reading, the context-dependent readings (when the module has a context network; a
-// context-free G2P gives one reading per word), and the names (the shipped module's score - raised to 0.91 with the
-// dictionary fixes, 67/73, and to 0.93 with Don Quixote's names, 80/86)
-export const minimums = {'default': 0.9, 'context': 0.85, 'missing': 0, 'names': 0.93};
+// The gate's minimums - the default reading, the context-dependent readings and the probes (when the module has a context
+// network; a context-free G2P gives one reading per word), and the names (the shipped module's score - raised to 0.91 with
+// the dictionary fixes, 67/73, and to 0.93 with Don Quixote's names, 80/86)
+export const minimums = {'default': 0.9, 'context': 0.85, 'probe': 0.85, 'missing': 0, 'names': 0.93};
 
 
 // The one-line result - kinds' scores against their minimums, and whether any is below (or has no minimum - a kind
@@ -97,6 +100,7 @@ async function main() {
     const kindMinimums = {
         'default': Number(option('--min-default', minimums.default)),
         'context': Number(option('--min-context', g2pModel.context ? minimums.context : 0)),
+        'probe': Number(option('--min-probe', g2pModel.context ? minimums.probe : 0)),
         'missing': Number(option('--min-missing', minimums.missing)),
         'names': Number(option('--min-names', minimums.names))
     };
