@@ -700,6 +700,12 @@ names, and place names with verified pronunciations - HOBBES first (the dictiona
 HOBBS, and every other -bes word), the audio's confirmed errors and labels, and well-established names. Its minimum is
 the shipped module's score when it was added (63/73), so it can only go up.
 
+The probes (kind `probe` in `train/data/heteronyms-test.json`): both readings of the context network's thin words -
+polish, contract, winds, bass, minute, and invalid - in 38 sentences written apart from the labels' seeds and
+collocations, so the context set's few sentences aren't the only measure of how the network generalizes (the regression
+set's sentences, the probes too, are never training examples). 1.6.8's module scores 26 of 38, 2.0's 34; the minimum is
+0.85.
+
 ### Heteronyms
 
 Some words have readings their neighbors decide - "I read it yesterday" and "I will read it", "their lives" and "she
