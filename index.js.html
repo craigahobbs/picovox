@@ -66,8 +66,8 @@ const playbackAhead = 4;
 
 
 /**
- * The built-in voices - the default ("male") first, then "female", then the designed voices (blends of the model's
- * audiobook readers - Sarah, Helen, Amy, Kate, and Grace; James, Robert, Michael, David, and Thomas)
+ * The built-in voices - the default ("male") first, then "female", then Sarah, Helen, Amy, Kate, and Grace; James,
+ * Robert, Michael, David, and Thomas - each a voice of the model's speaker table
  *
  * @returns {Voice[]} The voices
  */
@@ -290,7 +290,7 @@ export function speak(text, options = {}) {
     if (options.context !== undefined &amp;&amp; (options.context === null || typeof options.context !== 'object')) {
         throw new TypeError(`The context must be an AudioContext, not ${describe(options.context)}`);
     }
-    const AudioContextClass = globalThis.AudioContext ?? globalThis.webkitAudioContext;
+    const AudioContextClass = globalThis.AudioContext;
     if (options.context === undefined &amp;&amp; typeof AudioContextClass !== 'function') {
         throw new Error('speak requires Web Audio (AudioContext), as in a browser - under Node, use synthesize and toWav');
     }
