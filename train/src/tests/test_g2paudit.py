@@ -5,7 +5,6 @@
 
 import argparse
 import json
-import math
 import os
 import runpy
 import sys
@@ -17,10 +16,11 @@ import warnings
 import numpy
 import torch
 
-from picovox_train import corpora, cremad, g2p, g2paudit, heteronyms
+from picovox_train import RECIPE_PATH, corpora, ctc, frontend, g2p, g2paudit, measure, read_json, tts
+from picovox_train import books as books_module
 
-from . import data_fixtures, helpers
-from .helpers import captured, write_wav
+from . import ctc_fixtures, data_fixtures, helpers
+from .helpers import captured
 
 
 # The tiny dictionary - a few dozen words, some with variants (hobbes's first is the error)
@@ -68,22 +68,6 @@ CONFIG = {'model': {'embed': 4, 'hidden': 4}, 'batch': 8, 'alpha': 0.5, 'uniform
 def tiny_model():
     torch.manual_seed(0)
     return g2p.build_model({'embed': 4, 'hidden': 4})
-
-
-# The recognizer's fake vocabulary - every strict token, the blank, and a token no phone claims
-def fake_vocab():
-    tokens = sorted({token for tokens in g2paudit.STRICT_TOKENS.values() for token in tokens} | set(g2paudit.REDUCTIONS))
-    return {'<pad>': 0, 'x': 1, **{token: index + 2 for index, token in enumerate(tokens)}}
-
-
-# Log posteriors that spell tokens (each for frames frames, a blank frame between) - [frames, vocab]
-def spelled(tokens, vocab, frames=3):
-    rows = []
-    for token in tokens:
-        rows.extend([vocab[token]] * frames + [0])
-    posteriors = numpy.full((len(rows), len(vocab)), 0.001)
-    posteriors[numpy.arange(len(rows)), rows] = 1.0
-    return numpy.log(posteriors / posteriors.sum(1, keepdims=True))
 
 
 class TestG2pAudit(unittest.TestCase):
@@ -185,7 +169,7 @@ class TestG2pAudit(unittest.TestCase):
             file.write('Hobbes said so. Then Mr. Hobbes and hobbes, Hobbes;\nHobbes\n\nHobbes went. HOBBES and Hobbes the cat, HOBBES.\n')
         with open(os.path.join(books, 'skip.md'), 'w', encoding='utf-8') as file:
             file.write('a Hobbes')
-        counts = g2paudit.book_capitals(books, ['hobbes', 'cat'])
+        counts = books_module.book_capitals(books, ['hobbes', 'cat'])
         # (mid-sentence: "Mr. Hobbes" no - after a period; "and hobbes" lowercase; ", Hobbes" yes; "; Hobbes" no; "and Hobbes" yes)
         self.assertEqual(counts['hobbes'], [2, 1])
         self.assertEqual(counts['cat'], [0, 1])
@@ -275,112 +259,63 @@ class TestG2pAudit(unittest.TestCase):
             self.assertEqual(json.load(file), [])
         self.assertEqual(controls, [{'word': 'hobbs', 'label': 'HH AA1 B Z', 'alternative': 'HH OW1 B Z', 'count': 22}])
 
-    def test_ctc(self):
-        vocab = fake_vocab()
-        self.assertEqual(g2paudit.phone_token_ids('IY1', vocab), [vocab[token] for token in g2paudit.STRICT_TOKENS['IY']])
-        self.assertIn(vocab['ə'], g2paudit.phone_token_ids('IY0', vocab))
-        self.assertEqual(g2paudit.phone_token_ids('Z', {'z': 3}), [3])
-
-        # Hobbes spoken without the vowel - the label (hobbies) less likely
-        posteriors = spelled(['h', 'ɑː', 'b', 'z'], vocab)
-        label = g2paudit.ctc_log_likelihood(posteriors, 'HH AA1 B IY0 Z'.split(), vocab)
-        alternative = g2paudit.ctc_log_likelihood(posteriors, 'HH AA1 B Z'.split(), vocab)
-        self.assertGreater(alternative, label + g2paudit.VOTE_MARGIN)
-        self.assertEqual(g2paudit.vote([label, alternative]), 1)
-        self.assertIsNone(g2paudit.vote([-1.0, -1.5]))
-        self.assertEqual(g2paudit.ctc_log_likelihood(posteriors[:2], 'HH AA1 B Z'.split(), vocab), -math.inf)
-
-        # An r-colored token of one frame - the vowel and its R as one
-        posteriors = spelled(['s', 't', 'ɑːɹ', 't', 's'], vocab, frames=1)
-        full = g2paudit.ctc_log_likelihood(posteriors, 'S T AA1 R T S'.split(), vocab)
-        either = g2paudit.candidate_log_likelihood(posteriors, ['S'], 'T AA1 R T'.split(), ['S'], vocab)
-        self.assertGreater(either, full + g2paudit.VOTE_MARGIN)
-        self.assertGreater(either, g2paudit.candidate_log_likelihood(posteriors, ['S'], 'T ER1 T'.split(), ['S'], vocab))
-        self.assertEqual(g2paudit.candidate_log_likelihood(posteriors, [], 'S T ER1 T S'.split(), [], vocab),
-                         g2paudit.ctc_log_likelihood(posteriors, 'S T ER1 T S'.split(), vocab))
-
-    def write_labels(self):
-        labels = os.path.join(self.directory.name, 'lab')
-        audio = os.path.join(self.directory.name, 'audio')
-        utterances = {
-            ('train-clean-100', '19', '198', '19_198_000000_000000'): (
-                [(0.0, 0.3, 'mister'), (0.3, 0.7, 'hobbes'), (0.7, 0.9, 'sat'), (1.5, 1.8, 'hobbes')],
-                [(0.0, 0.05, 'M'), (0.05, 0.1, 'IH1'), (0.1, 0.15, 'S'), (0.15, 0.2, 'T'), (0.2, 0.3, 'ER0'), (0.3, 0.4, 'HH'),
-                 (0.4, 0.5, 'AA1'), (0.5, 0.6, 'B'), (0.6, 0.7, 'Z'), (0.7, 0.8, 'S'), (0.8, 0.85, 'AE1'), (0.85, 0.9, 'T'),
-                 (0.9, 1.5, 'sil'), (1.5, 1.8, 'spn')]),
-            ('dev-clean', '84', '121', '84_121_000000_000000'): (
-                [(0.0, 0.4, 'hobbes'), (0.4, 0.6, 'cat')],
-                [(0.0, 0.1, 'HH'), (0.1, 0.2, 'AA1'), (0.2, 0.3, 'B'), (0.3, 0.4, 'Z'), (0.4, 0.45, 'K'), (0.45, 0.5, 'AE1'),
-                 (0.5, 0.6, 'T')])
-        }
-        for (subset, speaker, chapter, name), (words, phones) in utterances.items():
-            for kind, rows in (('word', words), ('phone', phones)):
-                directory = os.path.join(labels, kind, subset, speaker, chapter)
-                os.makedirs(directory, exist_ok=True)
-                with open(os.path.join(directory, name + '.lab'), 'w', encoding='utf-8') as file:
-                    file.write(''.join(f'{start}\t{end}\t{label}\n' for start, end, label in rows))
-            with open(os.path.join(labels, 'word', subset, speaker, chapter, 'notes.txt'), 'w', encoding='utf-8') as file:
-                file.write('not a label')
-            directory = os.path.join(audio, subset, speaker, chapter)
-            os.makedirs(directory, exist_ok=True)
-            write_wav(os.path.join(directory, name + '.wav'), numpy.zeros(48000), 24000)
-        return labels, audio
+    # A clip's alignment record (tts.py's) - its tokens, and its phones' labels ([phone, start, end] - None: not aligned)
+    @staticmethod
+    def alignment(tokens, labels, seconds):
+        return {'id': 'unused', 'tokens': tokens, 'seconds': seconds, 'labels': labels}
 
     def test_tokens(self):
-        labels, _ = self.write_labels()
-        found = g2paudit.find_tokens({'hobbes', 'cat'}, labels)
-        self.assertEqual(len(found['hobbes']), 3)
-        first = found['hobbes'][0]
-        self.assertEqual(first['rel'], os.path.join('train-clean-100', '19', '198', '19_198_000000_000000.lab'))
-        self.assertEqual((first['before'], first['after']), ((0.0, 0.3, 'mister'), (0.7, 0.9, 'sat')))
-        self.assertIsNone(found['hobbes'][2]['before'])
-        self.assertIsNone(found['cat'][0]['after'])
+        # A clip's words by its alignment - a word without phones, and the words past its alignment's, have no tokens
+        hobbes = ['HH', 'AA1', 'B', 'Z']
+        first = {'id': 'c1', 'book': 'pg1.txt', 'voice': 'Trevor', 'text': 'Hobbes saw Hobbes.'}
+        first_labels = [['pau', 0.0, 0.1]] + [[phone, 0.1 * index, 0.1 * index + 0.1] for index, phone in enumerate(hobbes, 1)] + \
+            [[phone, 0.1 * index + 0.1, 0.1 * index + 0.2] for index, phone in enumerate(hobbes, 5)] + [['pau', 1.0, 1.2]]
+        first_record = self.alignment(['<bos>', *hobbes, '_', '_', *hobbes, '<period>'], first_labels, 1.2)
+        second = {'id': 'c2', 'book': 'pg2.txt', 'voice': 'Harper', 'text': 'The cat sat and Hobbes.'}
+        second_labels = [['pau', 0.0, 0.1], ['DH', 0.1, 0.2], ['AH0', 0.2, 0.3], ['K', 0.3, 0.4], ['AE1', 0.4, 0.5], ['T', 0.5, 0.6],
+                         ['pau', 0.6, 0.8]]
+        second_record = self.alignment(['<bos>', 'DH', 'AH0', '_', 'K', 'AE1', 'T', '<period>'], second_labels, 0.8)
+        # (clips not aligned - no record, or no labels)
+        unaligned = [({'id': 'c3', 'book': 'pg1.txt', 'text': 'Hobbes.'}, None),
+                     ({'id': 'c4', 'book': 'pg1.txt', 'text': 'Hobbes.'}, self.alignment(['<bos>', *hobbes, '<period>'], None, 1.0))]
+        clips = [(first, first_record), (second, second_record)] + unaligned
+        found = g2paudit.find_tokens({'hobbes', 'saw', 'cat'}, clips, lambda clip: f'{clip["voice"]}/{clip["id"]}.wav')
+        self.assertEqual(sorted(found), ['cat', 'hobbes'])
+        self.assertEqual([(token['clip'], token['wav'], token['book']) for token in found['hobbes']],
+                         [('c1', 'Trevor/c1.wav', 'pg1.txt'), ('c1', 'Trevor/c1.wav', 'pg1.txt')])
+        timed = measure.word_times(first_record)
+        self.assertEqual([token['segment'] for token in found['hobbes']],
+                         [measure.word_context(timed, 0, 1.2), measure.word_context(timed, 2, 1.2)])
+        self.assertEqual([round(seconds, 3) for seconds in found['hobbes'][0]['segment'][:2]], [0.0, 0.62])
+        start, end, before, after = found['cat'][0]['segment']
+        self.assertEqual((round(start, 3), round(end, 3), before, after), (0.1, 0.72, ['DH', 'AH0'], []))
 
-        # Contexts - adjacent neighbors' phones; a gap, an unknown word, or none: padding
-        phones = heteronyms.read_lab(os.path.join(labels, 'phone', first['rel']))
-        self.assertEqual(g2paudit.token_context(first, phones), (0.0, 0.9, ['M', 'IH1', 'S', 'T', 'ER0'], ['S', 'AE1', 'T']))
-        last = found['hobbes'][1]
-        start, end, before, after = g2paudit.token_context(last, phones)
-        self.assertEqual((round(start, 3), round(end, 3), before, after), (1.38, 1.92, [], []))
-        spoken = dict(first, after=(0.7, 0.9, 'sat'), before=(1.5, 1.8, 'hobbes'))
-        spoken['start'] = 1.81
-        self.assertEqual(g2paudit.token_context(spoken, phones)[2], [])
-        gap = dict(first, after=(0.95, 1.0, 'sat'))
-        self.assertEqual(g2paudit.token_context(gap, phones)[1], 0.82)
-        unknown = dict(first, after=(0.7, 0.9, 'x'), end=0.7)
-        self.assertEqual(g2paudit.token_context(dict(unknown, after=(1.5, 1.8, 'x'), end=1.49), phones)[3], [])
-
-        # Up to count tokens, a speaker at a time
-        tokens = [{'rel': os.path.join('s', speaker, 'c', f'{number}.lab')} for speaker in ('1', '2') for number in range(3)]
+        # Up to count tokens, a book at a time
+        tokens = [{'clip': f'{book}-{number}', 'book': book} for book in ('pg1.txt', 'pg2.txt') for number in range(3)]
         chosen = g2paudit.choose_tokens(tokens, 3, g2paudit.random.Random(1))
         self.assertEqual(len(chosen), 3)
-        self.assertEqual(len({token['rel'].split(os.sep)[1] for token in chosen[:2]}), 2)
+        self.assertEqual(len({token['book'] for token in chosen[:2]}), 2)
         self.assertEqual(len(g2paudit.choose_tokens(tokens[:2], 5, g2paudit.random.Random(1))), 2)
-
-    def test_read_segment(self):
-        path = os.path.join(self.directory.name, 'one.wav')
-        write_wav(path, numpy.zeros((24000, 2)), 24000)
-        self.assertEqual(len(g2paudit.read_segment(path, 0.25, 0.75)), 8000)
 
     def test_audio_plan(self):
         suspects = [{'word': 'hobbes', 'label': 'HH AA1 B IY0 Z', 'models': [['HH AA1 B Z', -9, -1], ['HH AA1 B Z', -9, -1]],
                      'variants': ['HH AA1 B IY0 Z', 'HH AA2 B Z', 'HH OW1 B Z']}]
         controls = [{'word': 'cat', 'label': 'K AE1 T', 'alternative': 'K AA1 T'},
                     {'word': 'dog', 'label': 'D AO1 G', 'alternative': 'D AA1 G'}]
-        token = {'rel': os.path.join('s', '1', 'c', 'u.lab'), 'start': 0.0}
-        other = dict(token, rel=os.path.join('s', '2', 'c', 'u.lab'))
+        token = {'clip': 'c1', 'book': 'pg1.txt'}
+        other = {'clip': 'c2', 'book': 'pg2.txt'}
         found = {'hobbes': [token, other], 'hobbs': [token], 'cat': [token, other], 'dog': [token]}
         suspects.append(dict(suspects[0], word='hobbs'))
         suspects.append({'word': 'the', 'label': 'DH AH0', 'models': [['DH IY0', -9, -1]], 'variants': ['DH AH0']})
         found['the'] = [token, other]
         controls.append({'word': 'often', 'label': 'AO1 F AH0 N', 'alternative': 'AO1 F IH0 N'})
         found['often'] = [token, other]
-        with unittest.mock.patch.object(g2paudit, 'MIN_SPEAKERS', 2):
+        with unittest.mock.patch.object(g2paudit, 'MIN_BOOKS', 2):
             plan = g2paudit.audio_plan(suspects, controls, found)
         self.assertEqual([(item['word'], item['control']) for item in plan],
                          [('hobbes', False), ('hobbes', False), ('cat', True), ('cat', True)])
         self.assertEqual(plan[0]['candidates'], ['HH AA1 B IY0 Z', 'HH AA1 B Z', 'HH OW1 B Z'])
-        with unittest.mock.patch.object(g2paudit, 'CONTROL_WORDS', 0), unittest.mock.patch.object(g2paudit, 'MIN_SPEAKERS', 2):
+        with unittest.mock.patch.object(g2paudit, 'CONTROL_WORDS', 0), unittest.mock.patch.object(g2paudit, 'MIN_BOOKS', 2):
             self.assertEqual(len(g2paudit.audio_plan(suspects, controls, found)), 2)
 
     def test_unfixable(self):
@@ -396,12 +331,8 @@ class TestG2pAudit(unittest.TestCase):
         self.assertEqual(g2paudit.unfixable('longer', 'L AO1 NG G ER0', 'L AA1 NG G ER0'), 'merger only')
         self.assertIsNone(g2paudit.unfixable('bet', 'B EH1 T', 'B AE1 T'))
         self.assertEqual(g2paudit.unfixable('character', 'K EH1 R IH0 K T ER0', 'K AE1 R AH0 K T ER0'), 'merger only')
-        self.assertEqual(g2paudit.merged('M EH1 R IY0'), 'M E* R IY')
-        self.assertEqual(g2paudit.merged('K EH1 R IH0 K T ER0'), 'K E* R @ K T ER')
-        self.assertEqual(g2paudit.merged('M EH1'), 'M EH')
 
     def test_audio_and_adjudicate(self):
-        labels, audio = self.write_labels()
         os.makedirs(self.out)
         suspects = [
             {'word': 'hobbes', 'label': 'HH AA1 B IY0 Z', 'models': [['HH AA1 B Z', -9.0, -1.0], ['HH AA1 B Z', -8.0, -1.0]],
@@ -420,44 +351,82 @@ class TestG2pAudit(unittest.TestCase):
             json.dump(suspects, file)
         with open(os.path.join(self.out, 'controls.json'), 'w', encoding='utf-8') as file:
             json.dump([{'word': 'cat', 'label': 'K AE1 T', 'alternative': 'K AA1 T', 'count': 30}], file)
-        vocab = fake_vocab()
 
-        # The recognizer hears hobbes without the vowel (and the context), cat as itself
+        # The recognizer (its posteriors one row per 20 ms) prefers hobbes without the vowel, and cat as itself
+        heard = {'HH AA1 B Z', 'K AE1 T'}
+        segments, contexts = [], []
+
         def posteriors(model, device, samples_list):  # pylint: disable=unused-argument
-            return [spelled(['m', 'ɪ', 's', 't', 'ɚ', 'h', 'ɑː', 'b', 'z', 's', 'æ', 't'], vocab) for _ in samples_list]
-        with captured(), unittest.mock.patch.object(heteronyms, 'LABELS', labels), \
-                unittest.mock.patch.object(heteronyms, 'AUDIO', audio), \
-                unittest.mock.patch.object(cremad, 'load_ctc', lambda device: (None, vocab, device)), \
-                unittest.mock.patch.object(cremad, 'ctc_log_posteriors', posteriors), \
-                unittest.mock.patch.object(g2paudit, 'MIN_SPEAKERS', 2):
-            self.assertEqual(g2paudit.command_audio(argparse.Namespace(out=self.out, batch=2, threads=1, log=None)), 0)
-        with open(os.path.join(self.out, 'audio.jsonl'), encoding='utf-8') as file:
-            items = [json.loads(line) for line in file]
-        # (sat - one speaker - no tokens)
-        self.assertEqual([item['word'] for item in items], ['hobbes', 'hobbes', 'hobbes'])
-        self.assertEqual(items[0]['candidates'], ['HH AA1 B IY0 Z', 'HH AA1 B Z'])
-        self.assertEqual([item['vote'] for item in items], [1, 1, 1])
+            segments.extend(len(samples) for samples in samples_list)
+            return [numpy.zeros((len(samples) // 320, len(ctc_fixtures.VOCAB))) for samples in samples_list]
 
-        # Resumed - the tokens before kept
-        with captured() as (_, stderr), unittest.mock.patch.object(heteronyms, 'LABELS', labels), \
-                unittest.mock.patch.object(heteronyms, 'AUDIO', audio), \
-                unittest.mock.patch.object(cremad, 'load_ctc', lambda device: (None, vocab, device)), \
-                unittest.mock.patch.object(cremad, 'ctc_log_posteriors', posteriors), \
-                unittest.mock.patch.object(g2paudit, 'MIN_SPEAKERS', 2):
-            g2paudit.command_audio(argparse.Namespace(out=self.out, batch=2, threads=1, log=None))
-        self.assertIn('0 tokens to score (3 before)', stderr.getvalue())
+        def likelihood(log_posteriors, before, phones, after, vocab):  # pylint: disable=unused-argument
+            contexts.append((before, after))
+            return 0.0 if ' '.join(phones) in heard else -10.0
 
-        # The verdicts - more votes, from several speakers, for the error (the votes added here)
-        votes = [{'word': 'hobbes', 'control': False, 'rel': os.path.join('s', str(speaker), 'c', f'{number}.lab'), 'start': 0.0,
+        def audio(**options):
+            args = argparse.Namespace(out=self.out, batch=2, threads=1, log=None, speak=False, jobs=None)
+            vars(args).update(options)
+            with captured() as (_, stderr), \
+                    unittest.mock.patch.object(ctc, 'load_ctc', lambda device: (None, ctc_fixtures.VOCAB, device)), \
+                    unittest.mock.patch.object(ctc, 'ctc_log_posteriors', posteriors), \
+                    unittest.mock.patch.object(g2paudit, 'candidate_log_likelihood', likelihood), \
+                    unittest.mock.patch.object(g2paudit, 'MIN_BOOKS', 1):
+                self.assertEqual(g2paudit.command_audio(args), 0)
+            return stderr.getvalue()
+
+        texts = [('male', 'Hobbes ran on the mat.', 'train'), ('female', 'The cat and Hobbes ran.', 'train'),
+                 ('male', 'Then Hobbes left.', 'train')]
+        with ctc_fixtures.tts_corpus(texts) as (directory, settings, clips):
+            log = audio()
+            with open(os.path.join(self.out, 'audio.jsonl'), encoding='utf-8') as file:
+                items = [json.loads(line) for line in file]
+            # (sat - no tokens; read and close - the relabeled and the heteronym words, the G2P's own models')
+            self.assertIn('audio: 4 tokens to score (0 before), 1 suspects', log)
+            self.assertEqual(sorted((item['word'], item['control'], item['clip']) for item in items),
+                             sorted([('hobbes', False, clip['id']) for clip in clips] + [('cat', True, clips[1]['id'])]))
+            hobbes = next(item for item in items if item['word'] == 'hobbes')
+            self.assertEqual((hobbes['candidates'], hobbes['scores'], hobbes['vote'], hobbes['book']),
+                             (['HH AA1 B IY0 Z', 'HH AA1 B Z'], [-10.0, 0.0], 1, 'pg1.txt'))
+            self.assertEqual(next(item['vote'] for item in items if item['word'] == 'cat'), 0)
+            # (each token's segment, its neighbors' phones the context)
+            self.assertEqual(len(segments), 4)
+            self.assertTrue(all(before or after for before, after in contexts))
+
+            # Resumed - the tokens before kept; with --speak, the extra clips' tokens (the suspects' words of too few)
+            audit = os.path.join(directory, 'audit')
+            extra_clip = {'id': 'extra1', 'voice': 'Harper', 'book': 'pg2.txt', 'text': 'Hobbes sat.'}
+            labels, seconds = ctc_fixtures.clip_labels(extra_clip['text'])
+            extra_record = {'id': 'extra1', 'tokens': frontend.tokenize(extra_clip['text'])['tokens'], 'seconds': seconds, 'labels': labels}
+            os.makedirs(os.path.dirname(tts.wav_path(audit, extra_clip)))
+            helpers.write_wav(tts.wav_path(audit, extra_clip), numpy.zeros(int(seconds * 24000)), 24000)
+            calls = []
+
+            def speak_extra(words, found, extra_settings, extra_directory, jobs):
+                calls.append((words, sorted(found), extra_settings, extra_directory, jobs))
+                return [(extra_clip, extra_record)]
+            with unittest.mock.patch.object(g2paudit, 'speak_extra', speak_extra):
+                log = audio(speak=True, jobs=3)
+            self.assertEqual(calls, [({'hobbes', 'sat', 'are'}, ['cat', 'hobbes'], settings, directory, 3)])
+            self.assertIn('audio: 2 tokens to score (4 before), 2 suspects', log)
+            with open(os.path.join(self.out, 'audio.jsonl'), encoding='utf-8') as file:
+                items = [json.loads(line) for line in file]
+            # (sat - neither candidate heard: no vote)
+            self.assertEqual(sorted((item['word'], item['clip'], item['book'], item['vote']) for item in items[4:]),
+                             [('hobbes', 'extra1', 'pg2.txt', 1), ('sat', 'extra1', 'pg2.txt', None)])
+            self.assertIn('0 tokens to score (6 before)', audio())
+
+        # The verdicts - more votes, from several books, for the error (the votes added here)
+        votes = [{'word': 'hobbes', 'control': False, 'clip': f'{book}-{number}', 'book': f'pg{book}.txt',
                   'candidates': ['HH AA1 B IY0 Z', 'HH AA1 B Z'], 'scores': [-9.0, -1.0], 'vote': 1}
-                 for speaker in range(3) for number in range(2)]
-        votes += [{'word': 'hobbes', 'control': False, 'rel': os.path.join('s', '9', 'c', '0.lab'), 'start': 0.0,
+                 for book in range(3) for number in range(2)]
+        votes += [{'word': 'hobbes', 'control': False, 'clip': '9-0', 'book': 'pg9.txt',
                    'candidates': ['HH AA1 B IY0 Z', 'HH OW1 B Z', 'HH AA1 B Z'], 'scores': [-9.0, -5.0, -1.0], 'vote': 2}]
-        votes += [{'word': 'are', 'control': False, 'rel': os.path.join('s', str(speaker), 'c', '0.lab'), 'start': 0.0,
-                   'candidates': ['AA1 R', 'ER0'], 'scores': [-9.0, -1.0], 'vote': 1} for speaker in range(5)]
-        votes += [{'word': 'cat', 'control': True, 'rel': os.path.join('s', str(speaker), 'c', '0.lab'), 'start': 0.0,
+        votes += [{'word': 'are', 'control': False, 'clip': f'{book}-0', 'book': f'pg{book}.txt',
+                   'candidates': ['AA1 R', 'ER0'], 'scores': [-9.0, -1.0], 'vote': 1} for book in range(5)]
+        votes += [{'word': 'cat', 'control': True, 'clip': f'{book}-0', 'book': f'pg{book}.txt',
                    'candidates': ['K AE1 T', 'K AA1 T'], 'scores': [-1.0, -9.0], 'vote': vote}
-                  for speaker, vote in [(number, 0) for number in range(8)] + [(8, 1), (9, None)]]
+                  for book, vote in [(number, 0) for number in range(8)] + [(8, 1), (9, None)]]
         with open(os.path.join(self.out, 'audio.jsonl'), 'a', encoding='utf-8') as file:
             file.write(''.join(json.dumps(item) + '\n' for item in votes))
         extra = os.path.join(self.directory.name, 'extra.json')
@@ -468,16 +437,17 @@ class TestG2pAudit(unittest.TestCase):
             self.assertEqual(g2paudit.command_adjudicate(argparse.Namespace(out=self.out, extra=extra, log=None)), 0)
         with open(os.path.join(self.out, 'verdicts.json'), encoding='utf-8') as file:
             verdicts = json.load(file)
-        self.assertEqual(verdicts['summary'], {'error': 1, 'excluded': 1, 'none': 3})
+        self.assertEqual(verdicts['summary'], {'error': 1, 'inconclusive': 1, 'excluded': 1, 'none': 2})
         self.assertEqual(next(item for item in verdicts['verdicts'] if item['word'] == 'are')['reason'], 'function word')
         self.assertEqual(verdicts['controls']['words'], 1)
         self.assertEqual(verdicts['controls']['falseErrors'], 0)
         self.assertEqual(verdicts['controls']['confirmedCorrect'], 1)
-        self.assertEqual((verdicts['controls']['tokenVotes'], verdicts['controls']['tokenVotesForAlternative']), (9, 1))
+        self.assertEqual((verdicts['controls']['tokenVotes'], verdicts['controls']['tokenVotesForAlternative']), (10, 1))
         with open(os.path.join(self.out, 'fixes.json'), encoding='utf-8') as file:
             fixes = json.load(file)
         self.assertEqual(fixes['fixes'], {'hobbes': 'HH AA1 B Z', 'hobbs': 'HH AA1 B Z'})
-        self.assertEqual(fixes['evidence']['hobbes']['audio']['votes'], [0, 10, 0])
+        self.assertEqual(fixes['evidence']['hobbes']['audio']['votes'], [0, 11, 0])
+        self.assertEqual(fixes['evidence']['hobbes']['audio']['books'], [0, 4, 0])
         self.assertEqual(fixes['evidence']['hobbes']['audio']['candidates'], ['HH AA1 B IY0 Z', 'HH AA1 B Z', 'HH OW1 B Z'])
         self.assertEqual(fixes['evidence']['hobbes']['folds'], [['HH AA1 B Z', 8.0], ['HH AA1 B Z', 7.0]])
         self.assertEqual(fixes['evidence']['hobbs']['note'], 'hobbesian')
@@ -487,12 +457,96 @@ class TestG2pAudit(unittest.TestCase):
         with open(os.path.join(self.out, 'fixes.json'), encoding='utf-8') as file:
             self.assertEqual(list(json.load(file)['fixes']), ['hobbes'])
 
+    def test_speak_extra(self):
+        settings = ctc_fixtures.tts_settings()
+        directory = os.path.join(self.directory.name, 'corpus')
+        audit = os.path.join(directory, 'audit')
+        sentences = {
+            os.path.join('books', 'pg5.txt'): ['Hobbes sat down.', 'Hobbes ran.'] + [f'Hobbes ran {number} times.' for number in range(8)],
+            os.path.join('books', 'pg6.txt'): ['The cat sat.', 'A bad sentence sat.', 'They sat.']
+        }
+        sections, checks = [], []
+
+        def book_paths(section):
+            sections.append(section)
+            return list(sentences)
+
+        def checked(texts, check_settings, jobs):
+            checks.append((texts, check_settings, jobs))
+            return {sentence: None if 'bad' in sentence else sentence for sentence in texts}
+
+        # The recognizer - 'They sat.' isn't aligned (its clip's 16 kHz samples are short)
+        def read_16k(path):
+            return numpy.zeros(8000 if path.endswith(f'{tts.clip_id("Harper", "They sat.")}.wav') else 16000)
+
+        def ctc_labels(tokens, log_posteriors, vocab, samples):  # pylint: disable=unused-argument
+            phones = [token for token in tokens if token not in frontend.BOUNDARIES]
+            return None if len(samples) < 16000 else ([(phone, 0.1 * index, 0.1 * index + 0.1) for index, phone in enumerate(phones)],)
+        speak = unittest.mock.Mock(return_value=b'RIFF-wav')
+        check_engine = unittest.mock.Mock()
+        load_ctc = unittest.mock.Mock(return_value=('model', ctc_fixtures.VOCAB, 'cpu'))
+        posteriors = unittest.mock.Mock(side_effect=lambda model, device, samples_list: [numpy.zeros((50, 3)) for _ in samples_list])
+
+        def extra(words, found):
+            with unittest.mock.patch.object(tts, 'book_paths', book_paths), \
+                    unittest.mock.patch.object(tts, 'book_candidates', lambda path: list(enumerate(sentences[path]))), \
+                    unittest.mock.patch.object(tts, 'checked', checked), \
+                    unittest.mock.patch.object(tts, 'check_engine', check_engine), \
+                    unittest.mock.patch.object(tts, 'speak', speak), \
+                    unittest.mock.patch.object(ctc, 'load_ctc', load_ctc), \
+                    unittest.mock.patch.object(ctc, 'read_16k', read_16k), \
+                    unittest.mock.patch.object(ctc, 'ctc_log_posteriors', posteriors), \
+                    unittest.mock.patch.object(ctc, 'ctc_labels', ctc_labels), \
+                    unittest.mock.patch.object(g2paudit, 'PER_WORD', 3):
+                return g2paudit.speak_extra(words, found, settings, directory, 2)
+
+        # No word of too few tokens - nothing spoken
+        self.assertEqual(extra({'cat'}, {'cat': [{}] * 3}), [])
+        self.assertEqual((sections, speak.call_count), ([], 0))
+
+        # The words of too few tokens (PER_WORD less theirs) - the context labels' books' sentences with them (at most four
+        # times the tokens wanted a word, checked by the front end), in turn by the voices; a sentence of two words once
+        # in a voice
+        result = extra({'hobbes', 'sat', 'cat'}, {'hobbes': [{}], 'cat': [{}] * 3})
+        self.assertEqual(sections, [{'books': settings['texts']['books'], 'pins': settings['texts']['pins'],
+                                     'texts': read_json(RECIPE_PATH)['context']['labels']['texts']}])
+        self.assertEqual([(sorted(texts), check_settings, jobs) for texts, check_settings, jobs in checks],
+                         [(sorted(['Hobbes sat down.', 'Hobbes ran.', 'Hobbes ran 0 times.', 'Hobbes ran 1 times.', 'Hobbes ran 2 times.',
+                                   'Hobbes ran 3 times.', 'Hobbes ran 4 times.', 'Hobbes ran 5 times.', 'Hobbes sat down.', 'The cat sat.',
+                                   'A bad sentence sat.', 'They sat.']), settings, 2)])
+        self.assertEqual([(clip['voice'], clip['book'], clip['text']) for clip, _ in result],
+                         [('Trevor', 'pg5.txt', 'Hobbes sat down.'), ('Harper', 'pg5.txt', 'Hobbes ran.'),
+                          ('Trevor', 'pg6.txt', 'The cat sat.'), ('Harper', 'pg6.txt', 'They sat.')])
+        self.assertEqual([clip['id'] for clip, _ in result], [tts.clip_id(clip['voice'], clip['text']) for clip, _ in result])
+        check_engine.assert_called_once_with(settings['engine'])
+        self.assertEqual([call.args for call in speak.call_args_list],
+                         [(settings['engine'], clip['voice'], clip['text']) for clip, _ in result])
+        for clip, _ in result:
+            with open(tts.wav_path(audit, clip), 'rb') as file:
+                self.assertEqual(file.read(), b'RIFF-wav')
+        self.assertFalse(any(name.endswith('.part') for _, _, names in os.walk(audit) for name in names))
+
+        # (each clip aligned - its tokens, seconds, and labels; None if the recognizer can't align it)
+        load_ctc.assert_called_once_with()
+        first, record = result[0]
+        tokens = frontend.tokenize(first['text'])['tokens']
+        self.assertEqual(record, {'id': first['id'], 'tokens': tokens, 'seconds': 1.0,
+                                  'labels': [[phone, round(0.1 * index, 4), round(0.1 * index + 0.1, 4)] for index, phone in
+                                             enumerate(token for token in tokens if token not in frontend.BOUNDARIES)]})
+        self.assertEqual([record['labels'] is None for _, record in result], [False, False, False, True])
+        self.assertEqual(result[3][1]['seconds'], 0.5)
+        self.assertEqual(tts.read_alignments(audit), {clip['id']: record for clip, record in result})
+
+        # Kept - spoken and aligned once
+        self.assertEqual(extra({'hobbes', 'sat', 'cat'}, {'hobbes': [{}], 'cat': [{}] * 3}), result)
+        self.assertEqual((speak.call_count, load_ctc.call_count, posteriors.call_count), (4, 1, 1))
+
     def test_verdict(self):
         candidates = ['A', 'B', 'C']
-        self.assertEqual(g2paudit.verdict(candidates, [(1, speaker) for speaker in 'abcd'])['verdict'], 'error')
+        self.assertEqual(g2paudit.verdict(candidates, [(1, book) for book in 'abcd'])['verdict'], 'error')
         self.assertEqual(g2paudit.verdict(candidates, [(1, 'a')] * 3 + [(1, 'b')] * 3)['verdict'], 'inconclusive')
-        result = g2paudit.verdict(candidates, [(0, speaker) for speaker in 'abcdefgh'] + [(2, 'i'), (None, 'j')])
-        self.assertEqual((result['verdict'], result['best'], result['votes'], result['speakers']), ('correct', 2, [8, 0, 1], [8, 0, 1]))
+        result = g2paudit.verdict(candidates, [(0, book) for book in 'abcdefgh'] + [(2, 'i'), (None, 'j')])
+        self.assertEqual((result['verdict'], result['best'], result['votes'], result['books']), ('correct', 2, [8, 0, 1], [8, 0, 1]))
         self.assertEqual(g2paudit.verdict(candidates, [])['verdict'], 'none')
         self.assertIsNone(g2paudit.verdict(candidates, [])['lower'])
 

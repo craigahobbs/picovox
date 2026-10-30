@@ -89,7 +89,7 @@ class TestProvenance(unittest.TestCase):
             self.assertEqual(command[:3], ['git', '-C', ROOT])
             return subprocess.CompletedProcess(command, 0, stdout=outputs[command[3]])
         with tempfile.TemporaryDirectory() as directory:
-            data_dir = os.path.join(directory, 'data', 'multi')
+            data_dir = os.path.join(directory, 'data', 'tts')
             os.makedirs(data_dir)
             with open(os.path.join(data_dir, 'index.json'), 'w', encoding='utf-8') as file:
                 file.write('{}')
@@ -102,7 +102,7 @@ class TestProvenance(unittest.TestCase):
         self.assertEqual(result, {
             'commit': 'abc123', 'dirty': True,
             'recipe': {'path': 'train/data/train.json', 'sha256': package.file_sha256(recipe)},
-            'data': {'multi': hashlib.sha256(b'{}').hexdigest()},
+            'data': {'tts': hashlib.sha256(b'{}').hexdigest()},
             'scores': {'mos': 3.1235, 'wer': 2.5}
         })
         outputs['status'] = ''

@@ -131,18 +131,19 @@ class TestPanelScore(unittest.TestCase):
 
     def score(self, out_dir, reference=None):
         os.makedirs(out_dir)
-        embeddings = {'arctic-slt': [1.0, 0.0], 'arctic-bdl': [0.0, 1.0]}
+        embeddings = {'female': [1.0, 0.0], 'male': [0.0, 1.0]}
 
         def listen(paths):
             for path in paths:
                 self.assertTrue(os.path.exists(path))
-            return {path: {'mos': 3.0 if 'slt' in path else 4.0, 'embedding': embeddings[os.path.basename(path).rsplit('-', 1)[0]]}
+            return {path: {'mos': 3.0 if os.path.basename(path).startswith('female') else 4.0,
+                           'embedding': embeddings[os.path.basename(path).rsplit('-', 1)[0]]}
                     for path in paths}
 
         def transcribe_all(paths, workers):
             self.assertEqual(workers, 2)
             return {path: 'call me ishmael' if path.endswith('one.wav') else 'is it hot' for path in paths}
-        settings = {'speakers': [['arctic-slt', 'female'], ['arctic-bdl', 'male']], 'rate': 16000}
+        settings = {'speakers': [['female', 'female'], ['male', 'male']], 'rate': 16000}
         with unittest.mock.patch.object(panel, 'panel_texts', return_value=TEXTS), \
                 unittest.mock.patch.object(panel, 'listen', side_effect=listen), \
                 unittest.mock.patch.object(panel, 'transcribe_all', side_effect=transcribe_all):
@@ -153,23 +154,23 @@ class TestPanelScore(unittest.TestCase):
     def test_score_model(self):
         result = self.score(os.path.join(self.root, 'score'))
         self.assertGreater(result['panelSpeed']['audioSeconds'], 0)
-        self.assertEqual(set(result['speakers']), {'arctic-slt', 'arctic-bdl'})
-        slt = result['speakers']['arctic-slt']
-        self.assertEqual((slt['sex'], slt['mos'], slt['mosMin']), ('female', 3.0, 3.0))
+        self.assertEqual(set(result['speakers']), {'female', 'male'})
+        female = result['speakers']['female']
+        self.assertEqual((female['sex'], female['mos'], female['mosMin']), ('female', 3.0, 3.0))
         # (one word wrong of six)
-        self.assertAlmostEqual(slt['wer'], 100 / 6)
-        self.assertEqual(slt['embedding'], [1.0, 0.0])
+        self.assertAlmostEqual(female['wer'], 100 / 6)
+        self.assertEqual(female['embedding'], [1.0, 0.0])
         self.assertEqual(set(result['utterances']),
-                         {'arctic-slt-one.wav', 'arctic-slt-two.wav', 'arctic-bdl-one.wav', 'arctic-bdl-two.wav'})
-        self.assertEqual(result['utterances']['arctic-bdl-two.wav']['transcript'], 'is it hot')
+                         {'female-one.wav', 'female-two.wav', 'male-one.wav', 'male-two.wav'})
+        self.assertEqual(result['utterances']['male-two.wav']['transcript'], 'is it hot')
         self.assertEqual(result['panel'], {'mos': 3.5, 'wer': 100 / 6})
 
         # Against a reference - the speaker similarity
-        reference = {'speakers': {'arctic-slt': {'embedding': [1.0, 1.0]}, 'arctic-bdl': {'embedding': [0.0, 1.0]}},
+        reference = {'speakers': {'female': {'embedding': [1.0, 1.0]}, 'male': {'embedding': [0.0, 1.0]}},
                      'utterances': {name: {'embedding': [0.0, 1.0]} for name in result['utterances']}}
         result = self.score(os.path.join(self.root, 'score-reference'), reference)
-        self.assertAlmostEqual(result['speakers']['arctic-slt']['similarity'], 2 ** -0.5)
-        self.assertAlmostEqual(result['speakers']['arctic-slt']['pairedSimilarity'], 0.0)
+        self.assertAlmostEqual(result['speakers']['female']['similarity'], 2 ** -0.5)
+        self.assertAlmostEqual(result['speakers']['female']['pairedSimilarity'], 0.0)
         self.assertAlmostEqual(result['panel']['similarity'], (2 ** -0.5 + 1) / 2)
         self.assertAlmostEqual(result['panel']['pairedSimilarity'], 0.5)
         self.assertAlmostEqual(result['panel']['similarityMin'], 2 ** -0.5)

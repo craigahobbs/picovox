@@ -32,7 +32,7 @@ test('trainStages', () => {
     for (const stage of manifest.stages) {
         assert.deepEqual([...stage.needs].sort(), [...stages[stage.stage].needs].sort(), stage.stage);
         assert.deepEqual([...stage.after || []].sort(), [...stages[stage.stage].after].sort(), stage.stage);
-        assert(['cpu', 'gpu', 'network'].includes(stage.on), stage.stage);
+        assert(['cpu', 'gpu'].includes(stage.on), stage.stage);
         assert(stage.minutes > 0, stage.stage);
         assert.equal(typeof stage.group, 'string');
         assert.equal(typeof stage.title, 'string');

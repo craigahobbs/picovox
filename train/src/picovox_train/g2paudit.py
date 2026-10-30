@@ -4,12 +4,12 @@
 """
 The dictionary audit - the CMU Pronouncing Dictionary's label errors the G2P network would learn (HOBBES HH AA1 B IY0
 Z - "hobbies" - beside the dictionary's own HOBBESIAN HH AA1 B Z IY0 AH0 N), found by cross-validated disagreement and
-adjudicated with the LibriTTS-R readers' audio; the confirmed corrections are train/data/g2p-fixes.json, which g2p.py's
+adjudicated with the training speech's audio (tts.py's corpus); the confirmed corrections are train/data/g2p-fixes.json, which g2p.py's
 data applies in every stage (python is PYTHONPATH=train/src build/venv-train/bin/python -B):
 
     python -m picovox_train.g2paudit folds --out DIR [-j 5]          # the screening models (resumable)
     python -m picovox_train.g2paudit suspects --out DIR --books BOOKS [--catalog CATALOG]
-    listeners -m picovox_train.g2paudit audio --out DIR [-j 4]       # the readers' audio votes (resumable)
+    python -m picovox_train.g2paudit audio --out DIR [--speak]       # the training speech's votes (resumable)
     python -m picovox_train.g2paudit adjudicate --out DIR            # verdicts.json, fixes.json (g2p-fixes.json's format)
 
 1. folds - REPEATS independent partitions of the dictionary's words into FOLDS folds (a word's possessive forms in
@@ -20,28 +20,31 @@ data applies in every stage (python is PYTHONPATH=train/src build/venv-train/bin
    alone) with a log-probability margin of at least MARGIN, ranked by its count in the books (g2p-words.json
    evalCounts + weightCounts), with its proper-noun share (capitalized mid-sentence in the books) and whether a name
    PicoShelf speaks (its catalog's authors and titles) contains it
-3. audio - for each suspect the LibriTTS-R readers spoke (the MFA word alignments, up to PER_WORD tokens, speakers
-   first), the CTC phoneme recognizer's (cremad.py) likelihood of the label and of the alternative on the word with
-   its neighbors (their aligned phones) - a vote when one is VOTE_MARGIN more likely; and the same for control words
-   (the models agree with the label) against their models' second guess, the method's error rate
+3. audio - for each suspect the corpus's voices spoke (its clips' CTC alignments, up to PER_WORD tokens, books first;
+   with --speak, a word of fewer has the context labels' books' sentences with it spoken by the engine, in turn by
+   the voices, and aligned - <corpus>/audit/), the CTC phoneme recognizer's (ctc.py) likelihood of the label and of
+   the alternative on the word with its neighbors (their aligned phones) - a vote when one is VOTE_MARGIN more likely;
+   and the same for control words (the models agree with the label) against their models' second guess, the method's
+   error rate. The engine's pronunciation of a rare word or a name is its own G2P's guess: a verdict is the engine and
+   the fold models together.
 4. adjudicate - a confirmed error when the alternative's votes are a significant majority (the Wilson 95% lower bound
-   above one half, from 3+ speakers), confirmed correct when the label's are, else no evidence
+   above one half, from MIN_BOOKS books or more), confirmed correct when the label's are, else no evidence
 """
 
 import argparse
 import collections
 import datetime
 import json
-import math
 import multiprocessing
 import os
 import random
 import re
 import sys
 
-from . import ROOT, g2p
+from . import RECIPE_PATH, ROOT, g2p, read_json
+from .books import book_capitals
+from .ctc import candidate_log_likelihood, merged, vote
 from .g2p import log_line
-from .wav import read_wav
 
 
 # The audit's partitions - REPEATS partitions of FOLDS folds (every word held out REPEATS times)
@@ -201,31 +204,6 @@ def continue_greedy(model, letters, prefix):
     return [g2p.PHONES[index] for index in result]
 
 
-# The book counts of words' capitalizations mid-sentence - {word: [capitalized, lowercase]} (a word after the start of a
-# paragraph, or after anything but a space or a comma since the previous word, isn't mid-sentence)
-def book_capitals(books_dir, words):
-    counts = {word: [0, 0] for word in words}
-    pattern = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)*")
-    for name in sorted(os.listdir(books_dir)):
-        if not name.endswith('.txt'):
-            continue
-        with open(os.path.join(books_dir, name), encoding='utf-8', errors='replace') as file:
-            paragraphs = re.split(r'\n\s*\n', file.read())
-        for paragraph in paragraphs:
-            paragraph = ' '.join(paragraph.split())
-            end = None
-            for match in pattern.finditer(paragraph):
-                token = match.group(0)
-                count = counts.get(token.lower())
-                if count is not None and end is not None and re.fullmatch(r'[ ,]*', paragraph[end:match.start()]):
-                    if token[0].isupper() and not token.isupper():
-                        count[0] += 1
-                    elif token.islower():
-                        count[1] += 1
-                end = match.end()
-    return counts
-
-
 # The words of the names PicoShelf speaks - its catalog's authors and titles, lowercase, without accents
 def catalog_words(path):
     import unicodedata  # pylint: disable=import-outside-toplevel
@@ -348,146 +326,42 @@ def held_out_accuracy(scores, labels, every):
 
 
 #
-# 3. The readers' audio
+# 3. The training speech's audio
 #
 
-# The recognizer's IPA tokens each phone may be heard as (cremad.py's IPA_TOKENS, without the tokens of another vowel's
-# quality - the candidates differ there); an unstressed vowel may be reduced (REDUCTIONS)
-STRICT_TOKENS = {
-    'AA': ['ɑː', 'ɑ', 'ɑːɹ', 'a', 'aː', 'ɒ'],
-    'AE': ['æ', 'a', 'æː', 'eə'],
-    'AH': ['ʌ', 'ə', 'ɐ'],
-    'AO': ['ɔː', 'ɔ', 'ɒ', 'ɔːɹ', 'oːɹ', 'ɑː', 'ɑ'],
-    'AW': ['aʊ', 'au'],
-    'AY': ['aɪ', 'aɪɚ', 'aɪə', 'ai'],
-    'EH': ['ɛ', 'e', 'ɛɹ', 'eː', 'eə'],
-    'ER': ['ɜː', 'ɚ', 'ɜ'],
-    'EY': ['eɪ', 'e', 'eː', 'ɛɪ'],
-    'IH': ['ɪ', 'ᵻ', 'ɪɹ'],
-    'IY': ['iː', 'i', 'iə', 'ɪɹ'],
-    'OW': ['oʊ', 'o', 'oː', 'əʊ', 'oːɹ'],
-    'OY': ['ɔɪ', 'oɪ'],
-    'UH': ['ʊ', 'ʊɹ'],
-    'UW': ['uː', 'u', 'ʉ'],
-    'B': ['b', 'β'],
-    'CH': ['tʃ'],
-    'D': ['d', 'ɾ'],
-    'DH': ['ð'],
-    'F': ['f'],
-    'G': ['ɡ'],
-    'HH': ['h'],
-    'JH': ['dʒ'],
-    'K': ['k', 'kh', 'kʰ'],
-    'L': ['l', 'ɫ', 'əl', 'l̩'],
-    'M': ['m'],
-    'N': ['n', 'n̩'],
-    'NG': ['ŋ'],
-    'P': ['p', 'ph', 'pʰ'],
-    'R': ['ɹ', 'r', 'ɚ', 'ɑːɹ', 'ɔːɹ', 'oːɹ', 'ɛɹ', 'ɪɹ', 'ʊɹ'],
-    'S': ['s', 'z'],
-    'SH': ['ʃ'],
-    'T': ['t', 'ɾ', 'ʔ', 'th', 'tʰ'],
-    'TH': ['θ'],
-    'V': ['v'],
-    'W': ['w'],
-    'Y': ['j'],
-    'Z': ['z', 's'],
-    'ZH': ['ʒ']
-}
-REDUCTIONS = ['ə', 'ɐ', 'ɪ', 'ᵻ']
-
-# The tokens - of the words MIN_SPEAKERS spoke (a verdict needs them), at most PER_WORD a word (speakers first) and
-# CONTROL_TOKENS a control word, CONTROL_WORDS controls; a
-# neighboring word is the context when it's adjacent (within ADJACENT seconds) and at most NEIGHBOR_SECONDS long, else
-# PAD seconds of the audio (silence)
+# The tokens - of the words MIN_BOOKS books spoke (a verdict needs them), at most PER_WORD a word (books first) and
+# CONTROL_TOKENS a control word, CONTROL_WORDS controls; a verdict - its votes from MIN_BOOKS books or more (as
+# heteronyms.py's)
 PER_WORD = 12
 CONTROL_TOKENS = 6
 CONTROL_WORDS = 150
-ADJACENT = 0.03
-NEIGHBOR_SECONDS = 1.0
-PAD = 0.12
-
-# A token's vote - the candidate at least VOTE_MARGIN more likely (log) than every other; a verdict - its votes from
-# MIN_SPEAKERS speakers or more (as heteronyms.py's)
-VOTE_MARGIN = 2.0
-MIN_SPEAKERS = 3
+MIN_BOOKS = 3
 
 
-# The recognizer token ids of an aligned phone (stress digit and all)
-def phone_token_ids(phone, vocab):
-    tokens = STRICT_TOKENS[unstressed(phone)] + (REDUCTIONS if phone[-1:] == '0' else [])
-    return [vocab[token] for token in dict.fromkeys(tokens) if token in vocab]
-
-
-# The CTC log likelihood of a phone sequence (each phone a class of recognizer tokens, never merged with its neighbor)
-# given a segment's log posteriors [frames, vocab]
-def ctc_log_likelihood(log_posteriors, phones, vocab):
-    import numpy  # pylint: disable=import-outside-toplevel
-    frames = len(log_posteriors)
-    count = len(phones)
-    if frames < count:
-        return -math.inf
-    blank = log_posteriors[:, vocab['<pad>']]
-    emit = numpy.empty((frames, 2 * count + 1))
-    emit[:, 0::2] = blank[:, None]
-    for index, phone in enumerate(phones):
-        emit[:, 2 * index + 1] = numpy.logaddexp.reduce(log_posteriors[:, phone_token_ids(phone, vocab)], axis=1)
-    score = numpy.full(2 * count + 1, -numpy.inf)
-    score[0], score[1] = emit[0, 0], emit[0, 1]
-    for frame in range(1, frames):
-        step = numpy.concatenate(([-numpy.inf], score[:-1]))
-        skip = numpy.concatenate(([-numpy.inf, -numpy.inf], score[:-2]))
-        skip[0::2] = -numpy.inf
-        score = numpy.logaddexp(numpy.logaddexp(score, step), skip) + emit[frame]
-    return float(numpy.logaddexp(score[-1], score[-2]))
-
-
-# A candidate's log likelihood in its context - the better of its phones and (when it has a vowel and R the recognizer
-# may hear as one r-colored token, which a run of one frame can't split) the phones with those Rs dropped
-def candidate_log_likelihood(log_posteriors, before, phones, after, vocab):
-    sequence = before + phones + after
-    merged_r = [phone for index, phone in enumerate(sequence)
-                if not (phone == 'R' and index and unstressed(sequence[index - 1]) in R_COLORED)]
-    score = ctc_log_likelihood(log_posteriors, sequence, vocab)
-    return max(score, ctc_log_likelihood(log_posteriors, merged_r, vocab)) if merged_r != sequence else score
-
-
-# The vowels with an r-colored token (STRICT_TOKENS) - ɑːɹ, ɔːɹ, oːɹ, ɛɹ, ɪɹ, ʊɹ
-R_COLORED = {'AA', 'AO', 'OW', 'EH', 'IH', 'IY', 'UH'}
-
-
-# A token's vote among candidate scores - the best's index when it's VOTE_MARGIN above the rest, else None
-def vote(scores):
-    order = sorted(range(len(scores)), key=lambda index: -scores[index])
-    return order[0] if scores[order[0]] - scores[order[1]] >= VOTE_MARGIN else None
-
-
-# The aligned occurrences of words in the LibriTTS-R labels - {word: [{rel, start, end, before, after}]}, before and after
-# the neighboring words' (start, end, word) or None
-def find_tokens(words, labels_dir):
-    from . import heteronyms  # pylint: disable=import-outside-toplevel
+# The corpus's tokens of words - {word: [{clip, wav, book, segment}]} (each clip's words by its alignment - readings.py's
+# word times and context); clips, [(clip, alignment record)]
+def find_tokens(words, clips, wav_of):
+    from . import measure  # pylint: disable=import-outside-toplevel
+    from .frontend import tokenize  # pylint: disable=import-outside-toplevel
     found = collections.defaultdict(list)
-    for subset in heteronyms.SUBSETS:
-        root = os.path.join(labels_dir, 'word', subset)
-        for dirpath, _, names in sorted(os.walk(root)):
-            for name in sorted(names):
-                if not name.endswith('.lab'):
-                    continue
-                rows = heteronyms.read_lab(os.path.join(dirpath, name))
-                for index, (start, end, word) in enumerate(rows):
-                    if word in words:
-                        found[word].append({'rel': os.path.relpath(os.path.join(dirpath, name), os.path.join(labels_dir, 'word')),
-                                            'start': start, 'end': end, 'before': rows[index - 1] if index else None,
-                                            'after': rows[index + 1] if index + 1 < len(rows) else None})
+    for clip, record in clips:
+        if not record or not record['labels']:
+            continue
+        names = [word['text'] for word in tokenize(clip['text'])['words']]
+        timed = measure.word_times(record)
+        for position, name in enumerate(names):
+            if name in words and position < len(timed) and timed[position][1] is not None:
+                found[name].append({'clip': clip['id'], 'wav': wav_of(clip), 'book': clip['book'],
+                                    'segment': measure.word_context(timed, position, record['seconds'])})
     return found
 
 
-# Up to count of a word's tokens - one a speaker at a time (seeded)
+# Up to count of a word's tokens - one a book at a time (seeded)
 def choose_tokens(tokens, count, rng):
-    by_speaker = collections.defaultdict(list)
+    by_book = collections.defaultdict(list)
     for token in tokens:
-        by_speaker[token['rel'].split(os.sep)[1]].append(token)
-    queues = [by_speaker[speaker] for speaker in sorted(by_speaker)]
+        by_book[token['book']].append(token)
+    queues = [by_book[book] for book in sorted(by_book)]
     for queue in queues:
         rng.shuffle(queue)
     rng.shuffle(queues)
@@ -497,34 +371,6 @@ def choose_tokens(tokens, count, rng):
             if queue and len(chosen) < count:
                 chosen.append(queue.pop())
     return chosen
-
-
-# A token's segment and context - (start, end, phones before, phones after) from the utterance's aligned phones
-def token_context(token, phones):
-    def inside(span):
-        return [phone for start, end, phone in phones if start >= span[0] - 1e-4 and end <= span[1] + 1e-4]
-    start, end, before, after = token['start'], token['end'], [], []
-    neighbor = token['before']
-    if neighbor and token['start'] - neighbor[1] <= ADJACENT and neighbor[1] - neighbor[0] <= NEIGHBOR_SECONDS and \
-            'spn' not in inside(neighbor):
-        start, before = neighbor[0], inside(neighbor)
-    else:
-        start = max(neighbor[1] if neighbor else 0.0, token['start'] - PAD)
-    neighbor = token['after']
-    if neighbor and neighbor[0] - token['end'] <= ADJACENT and neighbor[1] - neighbor[0] <= NEIGHBOR_SECONDS and \
-            'spn' not in inside(neighbor):
-        end, after = neighbor[1], inside(neighbor)
-    else:
-        end = min(neighbor[0] if neighbor else token['end'] + PAD, token['end'] + PAD)
-    return start, end, [phone for phone in before if phone not in ('sil', 'sp')], [phone for phone in after if phone not in ('sil', 'sp')]
-
-
-# A segment of an utterance's audio at 16 kHz
-def read_segment(path, start, end):
-    import soxr  # pylint: disable=import-outside-toplevel
-    from .cremad import CTC_SAMPLE_RATE  # pylint: disable=import-outside-toplevel
-    samples, rate = read_wav(path)
-    return soxr.resample(samples[int(start * rate):int(end * rate)].mean(axis=1), rate, CTC_SAMPLE_RATE, quality='VHQ')
 
 
 # Why an alternative can't correct a label (None if it can) - as heteronyms.py selects its relabeled words: not a
@@ -548,23 +394,13 @@ def unfixable(word, label, alternative):
     return None
 
 
-# A pronunciation with the mergers' vowels merged, the reduced vowels (AH0, IH0) one schwa, and without stress
-def merged(phones):
-    items = phones.split()
-    bases = unstressed(phones).split()
-    return ' '.join('A*' if phone in ('AA', 'AO') else
-                    ('E*' if phone in ('AE', 'EH', 'EY') and index + 1 < len(bases) and bases[index + 1] == 'R' else
-                     ('@' if items[index] in ('AH0', 'IH0') else phone))
-                    for index, phone in enumerate(bases))
-
-
 # The audio plan - [{word, control, candidates, token}] for the suspects (the label and the alternatives that could
 # correct it - the fold models' predictions and the dictionary's variants) and controls the readers spoke
 def audio_plan(suspects, controls, found):
     rng = random.Random(PARTITION_SEED)
     plan = []
-    def speakers(tokens):
-        return len({token['rel'].split(os.sep)[1] for token in tokens})
+    def books(tokens):
+        return len({token['book'] for token in tokens})
     for entry in suspects:
         candidates = [entry['label']]
         for phones in [prediction for prediction, _, _ in entry['models']] + entry['variants']:
@@ -572,13 +408,13 @@ def audio_plan(suspects, controls, found):
                     unfixable(entry['word'], entry['label'], phones) is None:
                 candidates.append(phones)
         tokens = found.get(entry['word'], [])
-        if len(candidates) > 1 and speakers(tokens) >= MIN_SPEAKERS:
+        if len(candidates) > 1 and books(tokens) >= MIN_BOOKS:
             for token in choose_tokens(tokens, PER_WORD, rng):
                 plan.append({'word': entry['word'], 'control': False, 'candidates': candidates, 'token': token})
     used = 0
     for entry in controls:
         tokens = found.get(entry['word'], [])
-        if speakers(tokens) >= MIN_SPEAKERS and used < CONTROL_WORDS and \
+        if books(tokens) >= MIN_BOOKS and used < CONTROL_WORDS and \
                 unfixable(entry['word'], entry['label'], entry['alternative']) is None:
             used += 1
             for token in choose_tokens(tokens, CONTROL_TOKENS, rng):
@@ -587,43 +423,99 @@ def audio_plan(suspects, controls, found):
     return plan
 
 
+# The audit's extra clips - book sentences with the words of too few tokens (at most PER_WORD a word), spoken by the
+# engine in turn by the voices and aligned - [(clip, alignment record)], in <corpus>/audit/ (kept)
+def speak_extra(words, found, settings, directory, jobs):
+    from . import ctc, tts  # pylint: disable=import-outside-toplevel
+    from .frontend import tokenize  # pylint: disable=import-outside-toplevel
+    wanted = {word: PER_WORD - len(found.get(word, [])) for word in words if len(found.get(word, [])) < PER_WORD}
+    if not wanted:
+        return []
+    recipe = read_json(RECIPE_PATH)
+    section = {'books': settings['texts']['books'], 'pins': settings['texts']['pins'], 'texts': recipe['context']['labels']['texts']}
+    candidates = collections.defaultdict(list)
+    for path in tts.book_paths(section):
+        for _, sentence in tts.book_candidates(path):
+            for word in set(tts.WORD.findall(sentence.lower())) & wanted.keys():
+                if len(candidates[word]) < 4 * wanted[word]:
+                    candidates[word].append((os.path.basename(path), sentence))
+    texts = tts.checked([sentence for items in candidates.values() for _, sentence in items], settings, jobs)
+    order = tts.dealing_order(settings['voices'])
+    clips, spoken = [], set()
+    for word in sorted(candidates):
+        chosen = [(book, texts[sentence]) for book, sentence in candidates[word] if texts.get(sentence)][:wanted[word]]
+        for book, text in chosen:
+            # (a sentence of two words chosen again in the same voice is the same clip - its tokens once)
+            voice = settings['voices'][order[len(clips) % len(order)]]
+            clip = {'id': tts.clip_id(voice['voice'], text), 'voice': voice['voice'], 'book': book, 'text': text}
+            if clip['id'] not in spoken:
+                spoken.add(clip['id'])
+                clips.append(clip)
+    audit = os.path.join(directory, 'audit')
+    tts.check_engine(settings['engine'])
+    for clip in clips:
+        path = tts.wav_path(audit, clip)
+        if not os.path.exists(path):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path + '.part', 'wb') as file:
+                file.write(tts.speak(settings['engine'], clip['voice'], clip['text']))
+            os.replace(path + '.part', path)
+    records = tts.read_alignments(audit)
+    todo = [clip for clip in clips if clip['id'] not in records]
+    if todo:
+        model, vocab, device = ctc.load_ctc()
+        samples_list = [ctc.read_16k(tts.wav_path(audit, clip)) for clip in todo]
+        with open(os.path.join(audit, 'alignments.jsonl'), 'a', encoding='utf-8') as file:
+            for clip, samples, log_posteriors in zip(todo, samples_list, ctc.ctc_log_posteriors(model, device, samples_list)):
+                tokens = tokenize(clip['text'])['tokens']
+                result = ctc.ctc_labels(tokens, log_posteriors, vocab, samples)
+                labels = None if result is None else [[label, round(begin, 4), round(end, 4)] for label, begin, end in result[0]]
+                record = {'id': clip['id'], 'tokens': tokens, 'seconds': round(len(samples) / ctc.CTC_SAMPLE_RATE, 4), 'labels': labels}
+                file.write(json.dumps(record, ensure_ascii=False) + '\n')
+        records = tts.read_alignments(audit)
+    return [(clip, records.get(clip['id'])) for clip in clips]
+
+
 def command_audio(args):
     """audio.jsonl - each planned token's candidate log likelihoods and vote (resumable: tokens scored before are kept)"""
     import torch  # pylint: disable=import-outside-toplevel
-    from . import cremad, heteronyms  # pylint: disable=import-outside-toplevel
+    from . import ctc, tts  # pylint: disable=import-outside-toplevel
     torch.set_num_threads(args.threads)
     with open(os.path.join(args.out, 'suspects.json'), encoding='utf-8') as file:
         suspects = [entry for entry in json.load(file) if not entry['relabeled'] and not entry['heteronym']]
     with open(os.path.join(args.out, 'controls.json'), encoding='utf-8') as file:
         controls = json.load(file)
-    found = find_tokens({entry['word'] for entry in suspects} | {entry['word'] for entry in controls}, heteronyms.LABELS)
+    settings = tts.load_settings()
+    directory = tts.corpus_dir(settings)
+    records = tts.read_alignments(directory)
+    clips = [(clip, records.get(clip['id'])) for clip in tts.selection(settings)]
+    words = {entry['word'] for entry in suspects} | {entry['word'] for entry in controls}
+    found = find_tokens(words, clips, lambda clip: tts.wav_path(directory, clip))
+    if args.speak:
+        extra = speak_extra({entry['word'] for entry in suspects}, found, settings, directory, args.jobs)
+        for word, tokens in find_tokens(words, extra, lambda clip: tts.wav_path(os.path.join(directory, 'audit'), clip)).items():
+            found[word].extend(tokens)
     plan = audio_plan(suspects, controls, found)
     path = os.path.join(args.out, 'audio.jsonl')
     done = set()
     if os.path.exists(path):
         with open(path, encoding='utf-8') as file:
-            done = {(item['word'], item['rel'], item['start']) for item in map(json.loads, file)}
-    plan = [item for item in plan if (item['word'], item['token']['rel'], item['token']['start']) not in done]
+            done = {(item['word'], item['clip']) for item in map(json.loads, file)}
+    plan = [item for item in plan if (item['word'], item['token']['clip']) not in done]
     log_line(args.log, f'audio: {len(plan)} tokens to score ({len(done)} before), '
                        f'{len({item["word"] for item in plan if not item["control"]})} suspects')
-    model, vocab, device = cremad.load_ctc('cpu')
+    model, vocab, device = ctc.load_ctc('cpu')
     with open(path, 'a', encoding='utf-8') as file:
         for offset in range(0, len(plan), args.batch):
             group = plan[offset:offset + args.batch]
-            segments = []
-            for item in group:
-                token = item['token']
-                subset, speaker, chapter, name = token['rel'].split(os.sep)
-                phones = heteronyms.read_lab(os.path.join(heteronyms.LABELS, 'phone', token['rel']))
-                start, end, before, after = token_context(token, phones)
-                wav = os.path.join(heteronyms.AUDIO, subset, speaker, chapter, name[:-4] + '.wav')
-                segments.append((before, after, read_segment(wav, start, end)))
-            posteriors = cremad.ctc_log_posteriors(model, device, [samples for _, _, samples in segments])
-            for item, (before, after, _), log_posteriors in zip(group, segments, posteriors):
+            segments = [ctc.read_segment(item['token']['wav'], *item['token']['segment'][:2]) for item in group]
+            posteriors = ctc.ctc_log_posteriors(model, device, segments)
+            for item, log_posteriors in zip(group, posteriors):
+                _, _, before, after = item['token']['segment']
                 scores = [candidate_log_likelihood(log_posteriors, before, candidate.split(), after, vocab)
                           for candidate in item['candidates']]
-                file.write(json.dumps({'word': item['word'], 'control': item['control'], 'rel': item['token']['rel'],
-                                       'start': item['token']['start'], 'candidates': item['candidates'],
+                file.write(json.dumps({'word': item['word'], 'control': item['control'], 'clip': item['token']['clip'],
+                                       'book': item['token']['book'], 'candidates': item['candidates'],
                                        'scores': [round(score, 3) for score in scores], 'vote': vote(scores)}) + '\n')
             file.flush()
             log_line(args.log, f'audio: {offset + len(group)}/{len(plan)} tokens')
@@ -634,22 +526,22 @@ def command_audio(args):
 # 4. The verdicts
 #
 
-# A word's verdict from its tokens' votes - {verdict, votes (per candidate), speakers (per candidate), best (the
+# A word's verdict from its tokens' votes - {verdict, votes (per candidate), books (per candidate), best (the
 # alternative with the most votes), lower (the Wilson lower bound of the winner's share against the label or the best)}
 def verdict(candidates, votes):
     from .heteronyms import wilson_lower  # pylint: disable=import-outside-toplevel
     counts = [0] * len(candidates)
-    speakers = [set() for _ in candidates]
-    for index, speaker in votes:
+    books = [set() for _ in candidates]
+    for index, book in votes:
         if index is not None:
             counts[index] += 1
-            speakers[index].add(speaker)
+            books[index].add(book)
     best = max(range(1, len(candidates)), key=lambda index: (counts[index], -index))
     label_votes, best_votes = counts[0], counts[best]
-    result = {'votes': counts, 'speakers': [len(names) for names in speakers], 'best': best, 'tokens': len(votes)}
-    if wilson_lower(best_votes, best_votes + label_votes) > 0.5 and len(speakers[best]) >= MIN_SPEAKERS:
+    result = {'votes': counts, 'books': [len(names) for names in books], 'best': best, 'tokens': len(votes)}
+    if wilson_lower(best_votes, best_votes + label_votes) > 0.5 and len(books[best]) >= MIN_BOOKS:
         result.update(verdict='error', lower=round(wilson_lower(best_votes, best_votes + label_votes), 3))
-    elif wilson_lower(label_votes, best_votes + label_votes) > 0.5 and len(speakers[0]) >= MIN_SPEAKERS:
+    elif wilson_lower(label_votes, best_votes + label_votes) > 0.5 and len(books[0]) >= MIN_BOOKS:
         result.update(verdict='correct', lower=round(wilson_lower(label_votes, best_votes + label_votes), 3))
     else:
         result.update(verdict='inconclusive' if votes else 'none', lower=None)
@@ -657,11 +549,10 @@ def verdict(candidates, votes):
 
 
 # A word's scored tokens' candidates (every token's, in order - the label first) and votes [(candidate index or None,
-# speaker)] - the tokens may have been scored with different candidates
+# book)] - the tokens may have been scored with different candidates
 def token_votes(items):
     candidates = list(dict.fromkeys(candidate for item in items for candidate in item['candidates']))
-    votes = [(None if item['vote'] is None else candidates.index(item['candidates'][item['vote']]), item['rel'].split(os.sep)[1])
-             for item in items]
+    votes = [(None if item['vote'] is None else candidates.index(item['candidates'][item['vote']]), item['book']) for item in items]
     return candidates, votes
 
 
@@ -725,7 +616,7 @@ def command_adjudicate(args):
                 'was': result['label'], 'date': today,
                 'folds': [[prediction, round(prediction_score - label_score, 2)]
                           for prediction, label_score, prediction_score in entry['models']],
-                'audio': {'candidates': result['candidates'], 'votes': result['votes'], 'speakers': result['speakers'],
+                'audio': {'candidates': result['candidates'], 'votes': result['votes'], 'books': result['books'],
                           'tokens': result['tokens'], 'lower': result['lower']}
             }
     if args.extra:
@@ -746,11 +637,12 @@ FIXES_DESCRIPTION = (
     'The CMU Pronouncing Dictionary\'s corrected labels (picovox_train/g2paudit.py; g2p.py applies them in every stage, before '
     'g2p-relabel.json, and the rule-labeled words derived from them follow) - words whose first pronunciation the '
     'cross-validated screening models confidently disagree with (fold models trained without the word: every model\'s '
-    'phones differ, by a log-probability margin) and whose LibriTTS-R readers\' audio confirms the alternative (the CTC '
-    'phoneme recognizer\'s likelihood of each candidate on the aligned word with its neighbors: the votes\' Wilson 95% '
-    'lower bound above one half, from 3+ speakers) - or, where noted, the dictionary\'s own evidence (its derived forms). '
-    'evidence: was (the dictionary\'s first), folds ([prediction, margin] per fold model), audio (candidates - the label '
-    'first - votes and speakers per candidate, tokens, lower), date'
+    'phones differ, by a log-probability margin) and whose audio confirms the alternative (the CTC phoneme recognizer\'s '
+    'likelihood of each candidate on the aligned word with its neighbors: the votes\' Wilson 95% lower bound above one '
+    'half, from 3+ speakers - the LibriTTS-R readers, before 1.7 - or 3+ books of the training speech) - or, where noted, '
+    'the dictionary\'s own evidence (its derived forms). evidence: was (the dictionary\'s first), folds ([prediction, '
+    'margin] per fold model), audio (candidates - the label first - votes and speakers or books per candidate, tokens, '
+    'lower), date'
 )
 
 
@@ -774,8 +666,10 @@ def main(argv=None):
     suspects_parser.add_argument('--threads', type=int, default=1)
     suspects_parser.add_argument('--log')
     suspects_parser.set_defaults(func=command_suspects)
-    audio_parser = commands.add_parser('audio', help='the readers\' audio votes (resumable)')
+    audio_parser = commands.add_parser('audio', help='the training speech\'s votes (resumable)')
     audio_parser.add_argument('--out', required=True)
+    audio_parser.add_argument('--speak', action='store_true', help='speak sentences for the suspects of too few tokens (Ollama)')
+    audio_parser.add_argument('-j', '--jobs', type=int, default=None, help='the sentences\' check\'s worker processes')
     audio_parser.add_argument('--batch', type=int, default=32)
     audio_parser.add_argument('--threads', type=int, default=2)
     audio_parser.add_argument('--log')

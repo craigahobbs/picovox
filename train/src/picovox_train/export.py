@@ -7,18 +7,17 @@ and <out>/<voice>.json (default train/data/), which lib/model.js loads (and pack
 
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.export build/nn/runs/multi-b/best.pt --voice multi
 
-The multi-speaker, multi-style model (model.py's MultiModel) exports whole: its speaker table (a row per speaker -
-the readers' train/data/speakers.json ids, then the emotional corpus's actors), its style table (model.py's
-STYLE_NAMES; neutral is the zero vector), and its channel equalizers (eq_table, dB, a row per speaker, float32); the
-manifest lists the speakers (id, key, sex, corpus, role) and the styles, so lib/model.js can blend speakers and
-scale styles.
+The multi-speaker model (model.py's MultiModel) exports whole: its speaker table (a row per voice - the training
+speech's voices, tts.py, in the recipe's order) and its channel equalizers (eq_table, dB, a row per speaker,
+float32); the manifest lists the speakers (id, key - the package's voice key, sex, source - the engine's model and
+voice, median F0).
 
 The weights are quantized to 8 bits: every weight matrix, convolution kernel, and embedding table as int8 with one
 float32 scale per output channel (row) - symmetric, the scale the row's largest magnitude / 127; the biases and layer
 norm parameters, a small fraction of the model, stay float32. The .bin is the tensors' data back to back (each
 tensor's int8 data, then its float32 scales; or its float32 data), aligned to 4 bytes; the .json manifest lists each
 tensor's name, shape, encoding, and byte offsets, with the model config, the vocabulary remap, and the default speaker's
-channel equalizer (the command's - arctic-bdl's).
+channel equalizer (the first's, male - the package's default voice).
 
 The quantization (quant.py) is the only lossy step - quantized_model() gives the PyTorch model with the exported
 weights (dequantized), which lib/model.js must match.
@@ -38,8 +37,8 @@ import numpy
 import torch
 
 from . import ROOT, params, quant
-from .data import DATA_DIR, ArcticData
-from .model import STYLE_NAMES, MultiModel, core_parameter_count, parameter_count
+from .data import DATA_DIR, CorpusData
+from .model import MultiModel, core_parameter_count, parameter_count
 
 
 OUT_DIR = os.path.join(ROOT, 'build', 'export')
@@ -99,34 +98,27 @@ def token_remap(vocab, counts, minimum=10):
     return remap
 
 
-# The training token counts of a checkpoint (its state) - of the multi-speaker model's corpora
-def training_token_counts(state):
+# The training token counts of the training speech (the multi-speaker model's corpus) - (counts, its vocabulary)
+def training_token_counts():
     counts = collections.Counter()
-    corpora = ['multi'] + (['cremad'] if state.get('args', {}).get('cremad', 0) > 0 else [])
-    for corpus in corpora:
-        data = ArcticData(os.path.join(DATA_DIR, corpus))
-        for entry in data.entries('train'):
-            counts.update(numpy.asarray(data.tokens[entry['tokenOffset']:entry['tokenOffset'] + entry['tokenCount']]).tolist())
+    data = CorpusData(os.path.join(DATA_DIR, 'tts'))
+    for entry in data.entries('train'):
+        counts.update(numpy.asarray(data.tokens[entry['tokenOffset']:entry['tokenOffset'] + entry['tokenCount']]).tolist())
     return counts, data.index['vocab']
 
 
-# The multi-speaker model's speaker list - [{id, key, sex, corpus, role ('reader' - the American reader pool, or
-# 'style' - an actor of the emotional corpus), and for readers the reader's name, median F0, and UTMOS}]
+# The multi-speaker model's speaker list - [{id, key, sex, source, medianF0}] from the training speech's index (each
+# speaker's row its index)
 def speaker_list(state):
-    with open(os.path.join(ROOT, 'train', 'data', 'speakers.json'), encoding='utf-8') as file:
-        readers = {speaker['key']: speaker for speaker in json.load(file)['speakers']}
-    cremad = ArcticData(os.path.join(DATA_DIR, 'cremad')).index['speakers']
+    speakers = CorpusData(os.path.join(DATA_DIR, 'tts')).index['speakers']
     out = []
     for index, key in enumerate(state['speakers']):
-        if key in readers:
-            reader = readers[key]
-            if reader['id'] != index:
-                raise ValueError(f'speaker {key}: table row {index} is not its train/data/speakers.json id {reader["id"]}')
-            out.append({'id': index, 'key': key, 'sex': reader['sex'], 'corpus': reader['source'], 'role': 'reader',
-                        'reader': reader.get('reader'), 'medianF0': reader.get('medianF0'), 'utmos': reader.get('utmos')})
-        else:
-            actor = cremad.get(key, {})
-            out.append({'id': index, 'key': key, 'sex': actor.get('sex'), 'corpus': 'CREMA-D', 'role': 'style'})
+        speaker = speakers[key]
+        if speaker['index'] != index:
+            raise ValueError(f'speaker {key}: table row {index} is not its index {speaker["index"]}')
+        engine = speaker['engine']
+        out.append({'id': index, 'key': key, 'sex': speaker['sex'], 'source': f'{engine["model"]} {engine["voice"]} ({engine["digest"]})',
+                    'medianF0': speaker['medianF0']})
     return out
 
 
@@ -164,25 +156,21 @@ def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0):
             offset += len(data)
         tensors.append(entry)
     binary = b''.join(chunks)
-    counts, vocab = training_token_counts(state)
+    counts, vocab = training_token_counts()
     with torch.no_grad():
         eq = [round(float(value), 3) for value in model.eq(torch.tensor([speaker]))[0]]
     manifest = {
         'format': 'voice-synth-nn', 'version': FORMAT_VERSION, 'voice': voice, 'kind': 'multi',
-        'description': 'The multi-speaker, multi-style neural model (picovox_train/trainmulti.py) - tokens to durations to '
-                       'synthesizer parameter frames (picovox_train/params.py), rendered by lib/render.js; a voice is any blend of '
-                       'the speaker table\'s rows, a style any blend of the style table\'s rows (neutral is zero)',
+        'description': 'The multi-speaker neural model (picovox_train/trainmulti.py) - tokens to durations to synthesizer '
+                       'parameter frames (picovox_train/params.py), rendered by lib/render.js; a voice is a row of the speaker table',
         'config': model.config, 'parameterNames': params.NAMES, 'frameRate': params.FRAME_RATE,
-        'speakers': speaker_list(state), 'styles': list(STYLE_NAMES), 'defaultSpeaker': speaker,
+        'speakers': speaker_list(state), 'defaultSpeaker': speaker,
         'eq': eq, 'remap': token_remap(vocab, counts), 'vocab': vocab,
         'parameterCount': parameter_count(model),
         'parameterCountCore': core_parameter_count(model),
         'bytes': len(binary), 'tensors': tensors,
         'training': {'step': state.get('step'), 'val': state.get('val'), 'args': relative_paths(state.get('args'))},
-        'license': 'Trained on LibriTTS-R (CC BY 4.0), CMU ARCTIC (free use with attribution), and CREMA-D (a Produced '
-                   'Work of the Open Database License 1.0 database - Cao, Cooper, Keutmann, Gur, Nenkova, and Verma, '
-                   '"CREMA-D: Crowd-sourced Emotional Multimodal Actors Dataset", IEEE Transactions on Affective '
-                   'Computing 5(4), 2014)', **(extra or {})
+        'license': f'Trained on speech generated by {CorpusData(os.path.join(DATA_DIR, "tts")).index["license"]}', **(extra or {})
     }
     with open(os.path.join(out_dir, f'{voice}.bin'), 'wb') as file:
         file.write(binary)
@@ -202,7 +190,7 @@ def main(argv=None):
     parser.add_argument('--out', default=OUT_DIR)
     args = parser.parse_args(argv)
     model, state = load_model(args.checkpoint)
-    manifest = export(model, state, args.voice, args.out, speaker=state['speakers'].index('arctic-bdl'))
+    manifest = export(model, state, args.voice, args.out)
     sizes = {suffix: os.path.getsize(os.path.join(args.out, f'{args.voice}.{suffix}')) for suffix in ('bin', 'json')}
     print(json.dumps({'voice': args.voice, 'parameters': manifest['parameterCount'], 'bytes': sizes,
                       'quantized': sum(1 for tensor in manifest['tensors'] if tensor['encoding'] == 'int8'),

@@ -25,8 +25,8 @@ from picovox_train.model import MultiModel
 from . import helpers
 
 
-# The tests' training data - a temporary directory with the readers' and the emotional corpora (data/multi,
-# data/cremad), a tiny recipe (train.json), and the runs' directory (runs/)
+# The tests' training data - a temporary directory with the training speech (data/tts), a tiny recipe (train.json),
+# and the runs' directory (runs/)
 class TrainData:
 
     def __init__(self):
@@ -34,14 +34,12 @@ class TrainData:
         self.root = self.temp.name
         self.data_dir = os.path.join(self.root, 'data')
         self.runs_dir = os.path.join(self.root, 'runs')
-        helpers.write_corpus(os.path.join(self.data_dir, 'multi'))
-        helpers.write_corpus(os.path.join(self.data_dir, 'cremad'), speakers=helpers.CREMAD_SPEAKERS,
-                             emotions=helpers.CREMAD_EMOTIONS)
+        helpers.write_corpus(os.path.join(self.data_dir, 'tts'))
         with open(trainmulti.RECIPE_PATH, encoding='utf-8') as file:
             recipe = json.load(file)
         recipe['teacher']['defaults'].update({'steps': 3, 'batch': 2, 'max-frames': 400, 'crop': 0.1, 'val-count': 4,
                                               'warmup': 1})
-        recipe['teacher']['b'] = {'description': 'stage B', 'cremad': 0.5, 'adversarial': 0.1, 'adversarial-start': 1}
+        recipe['teacher']['b'] = {'description': 'stage B', 'adversarial': 0.1, 'adversarial-start': 1}
         self.recipe = os.path.join(self.root, 'train.json')
         with open(self.recipe, 'w', encoding='utf-8') as file:
             json.dump(recipe, file)
@@ -118,19 +116,15 @@ class TestHelpers(unittest.TestCase):
 
     def test_corpus(self):
         with DATA.patched():
-            corpus = trainmulti.Corpus('cremad', 'train', speaker_offset=10)
-            limited = trainmulti.Corpus('multi', 'train', max_items=1)
+            corpus = trainmulti.Corpus('tts', 'train')
+            limited = trainmulti.Corpus('tts', 'train', max_items=1)
         self.assertEqual(len(corpus), 4)
         self.assertEqual(len(limited), 1)
-        angry = corpus.items[0]
-        self.assertEqual(angry['speaker'], 10)
-        self.assertEqual(angry['emotion'], 0)
-        self.assertEqual(angry['intensity'], 1.0)
-        neutral = corpus.items[1]
-        self.assertEqual(neutral['emotion'], -1)
-        self.assertEqual(neutral['intensity'], 0.0)
-        # (the angry utterances' pitch range - the actor's emotion range, 80-300 Hz)
-        self.assertTrue(numpy.all(angry['f0'] >= 80) and numpy.all(angry['f0'] <= 300))
+        angry = corpus.items[2]
+        self.assertEqual(angry['speaker'], 1)
+        self.assertEqual(angry['bandwidth'], 12000)
+        # (the voice's pitch range - 60-400 Hz)
+        self.assertTrue(numpy.all(angry['f0'] >= 60) and numpy.all(angry['f0'] <= 400))
         self.assertEqual(len(angry['f0']), 2 * angry['frameCount'] + 1)
         self.assertEqual(len(angry['voiced']), 2 * angry['frameCount'])
         self.assertEqual(angry['formants'].shape, (angry['frameCount'], 3))
@@ -143,7 +137,7 @@ class TestHelpers(unittest.TestCase):
 
     def test_make_batches(self):
         with DATA.patched():
-            corpus = trainmulti.Corpus('multi', 'train')
+            corpus = trainmulti.Corpus('tts', 'train')
         rng = numpy.random.default_rng(1)
         batches = trainmulti.make_batches(corpus, 2, 10000, rng)
         self.assertEqual(sorted(len(batch) for batch in batches), [2, 2])
@@ -164,7 +158,7 @@ class TestHelpers(unittest.TestCase):
 
     def test_collate(self):
         with DATA.patched():
-            corpus = trainmulti.Corpus('multi', 'train')
+            corpus = trainmulti.Corpus('tts', 'train')
         batch = trainmulti.collate(corpus, [0, 1], 'cpu')
         items = batch['items']
         frames = max(item['frameCount'] for item in items)
@@ -179,7 +173,7 @@ class TestHelpers(unittest.TestCase):
 
     def test_crops(self):
         with DATA.patched():
-            corpus = trainmulti.Corpus('multi', 'train')
+            corpus = trainmulti.Corpus('tts', 'train')
         batch = trainmulti.collate(corpus, [0, 1], 'cpu')
         rng = numpy.random.default_rng(3)
         starts, length = trainmulti.crop_starts(batch['items'], 41, 20, rng)
@@ -237,7 +231,7 @@ class TestHelpers(unittest.TestCase):
 
     def test_batch_losses(self):
         with DATA.patched():
-            corpus = trainmulti.Corpus('multi', 'train')
+            corpus = trainmulti.Corpus('tts', 'train')
         settings = trainmulti.default_settings(crop=0.1)
         torch.manual_seed(1)
         model = MultiModel(helpers.tiny_config(), priors=trainmulti.MULTI_PRIORS)
@@ -267,13 +261,13 @@ class TestPrefetcher(unittest.TestCase):
 
     def setUp(self):
         with DATA.patched():
-            self.corpora = {'multi': trainmulti.Corpus('multi', 'train'), 'cremad': trainmulti.Corpus('cremad', 'train')}
+            self.corpora = {'tts': trainmulti.Corpus('tts', 'train')}
         self.rng = numpy.random.default_rng(2)
         self.streams = {name: trainmulti.batch_stream(corpus, 2, 10000, self.rng) for name, corpus in self.corpora.items()}
         self.synth = dsynth.DSynth(24000)
 
     def test_steps(self):
-        args = argparse.Namespace(cremad=0.5, crop_frames=20, rate=24000, bucket_ratio=1.125)
+        args = argparse.Namespace(crop_frames=20, rate=24000, bucket_ratio=1.125)
         prefetcher = trainmulti.Prefetcher(self.corpora, self.streams, args, self.rng, self.synth, 0.005, depth=1)
         # (the queue fills - the thread waits for room)
         time.sleep(0.3)
@@ -283,25 +277,25 @@ class TestPrefetcher(unittest.TestCase):
             names.add(prepared['corpusName'])
             self.assertEqual(prepared['length'], 20)
             self.assertEqual(tuple(prepared['batch']['host']['target'].shape), (2, 2400))
-            self.assertEqual(prepared['cutoffs'], [7600.0, 7600.0])
+            self.assertEqual(prepared['cutoffs'], [11400.0, 11400.0])
             self.assertEqual(prepared['plan']['count'], 2400)
             self.assertIn('host', prepared['plan'])
         prefetcher.close()
         self.assertFalse(prefetcher.thread.is_alive())
-        self.assertEqual(names, {'multi', 'cremad'})
+        self.assertEqual(names, {'tts'})
 
     def test_no_plan(self):
         # (no samples to render - a zero-length crop)
-        args = argparse.Namespace(cremad=0.0, crop_frames=0, rate=24000)
-        prefetcher = trainmulti.Prefetcher({'multi': self.corpora['multi']}, self.streams, args, self.rng, self.synth, 0.005)
+        args = argparse.Namespace(crop_frames=0, rate=24000)
+        prefetcher = trainmulti.Prefetcher(self.corpora, self.streams, args, self.rng, self.synth, 0.005)
         prepared = prefetcher.next()
         prefetcher.close()
-        self.assertEqual(prepared['corpusName'], 'multi')
+        self.assertEqual(prepared['corpusName'], 'tts')
         self.assertIsNone(prepared['plan'])
 
     def test_error(self):
-        args = argparse.Namespace(cremad=0.0, crop_frames=20, rate=24000)
-        prefetcher = trainmulti.Prefetcher({'multi': self.corpora['multi']}, {'multi': iter(())}, args, self.rng, self.synth,
+        args = argparse.Namespace(crop_frames=20, rate=24000)
+        prefetcher = trainmulti.Prefetcher(self.corpora, {'tts': iter(())}, args, self.rng, self.synth,
                                            0.005)
         with self.assertRaises(StopIteration):
             prefetcher.next()
@@ -326,7 +320,7 @@ class TestValidate(unittest.TestCase):
 
     def test_validate(self):
         with DATA.patched():
-            corpus = trainmulti.Corpus('multi', 'val')
+            corpus = trainmulti.Corpus('tts', 'val')
         settings = trainmulti.default_settings(crop=0.1, batch=1)
         model = MultiModel(helpers.tiny_config())
         sonorants = torch.tensor(trainmulti.sonorant_mask(corpus.data.index['vocab']))
@@ -349,8 +343,7 @@ class TestMain(unittest.TestCase):
         self.assertEqual(files, ['best.pt', 'last.pt', 'log.jsonl', 'step-2.pt'])
         state = torch.load(DATA.run_path('a', 'last.pt'), weights_only=False)
         self.assertEqual(state['step'], 3)
-        self.assertEqual(state['speakers'], ['arctic-slt', 'arctic-bdl', 'cremad-1001', 'cremad-1002'])
-        self.assertEqual(state['readerCount'], 2)
+        self.assertEqual(state['speakers'], ['male', 'female'])
         self.assertEqual(state['args']['steps'], 3)
         self.assertNotIn('critic', state)
         self.assertEqual(state['val']['score'], state['best'])
@@ -359,19 +352,18 @@ class TestMain(unittest.TestCase):
         self.assertEqual([next(iter(row)) for row in rows], ['train', 'val', 'val'])
         self.assertEqual(rows[0]['train']['step'], 2)
         self.assertEqual(rows[2]['val']['step'], 3)
-        self.assertIn('data: 4 reader utterances, 0 emotional, val multi 2', DATA.last_log)
+        self.assertIn('data: 4 utterances, val 2', DATA.last_log)
 
     def test_recipe_stage_b(self):
-        # Stage B (the recipe's section): the emotional speech and the critic, from stage A's weights
+        # Stage B (the recipe's section): the critic, from stage A's weights
         init = tiny_checkpoint()
         self.assertEqual(DATA.train('b', '--recipe', 'teacher.b', '--init', init, '--log-every', '1'), 0)
         self.assertIn(f'init from {init}: missing [], unexpected []', DATA.last_log)
         state = torch.load(DATA.run_path('b', 'last.pt'), weights_only=False)
         self.assertIn('critic', state)
-        self.assertEqual(state['args']['cremad'], 0.5)
-        self.assertIn('cremad.score', state['val'])
+        self.assertEqual(state['args']['adversarial'], 0.1)
+        self.assertIn('score', state['val'])
         self.assertIn('critic', DATA.last_log)
-        self.assertIn('cremad.durPhone', DATA.last_log)
 
     def test_critic(self):
         # The critic alone, then with the generator's adversarial and feature-matching losses; the critic's initial
@@ -447,7 +439,7 @@ class TestMain(unittest.TestCase):
 class TestStepOptions(unittest.TestCase):
 
     def test_options(self):
-        # Stage B (the critic, the emotional speech's validation) with every training step option, stopped and resumed
+        # Stage B (the critic) with every training step option, stopped and resumed
         init = tiny_checkpoint()
         options = ['--recipe', 'teacher.b', '--init', init, '--lean-clip', '--schedule', 'wsd', '--cooldown', '0.5', '--val-every', '1']
         self.assertEqual(DATA.train('options', *options, '--stop', '2', '--resume'), 0)
@@ -455,7 +447,7 @@ class TestStepOptions(unittest.TestCase):
         self.assertIn('options: 3 steps from 2', DATA.last_log)
         last = torch.load(DATA.run_path('options', 'last.pt'), weights_only=False)
         self.assertEqual(last['step'], 3)
-        self.assertIn('cremad.score', last['val'])
+        self.assertIn('score', last['val'])
         # (the lean optimizer's state - AdamW's shared step count)
         self.assertTrue(all(state['step'].item() == 3 for state in last['optimizer']['state'].values()))
 

@@ -4,11 +4,9 @@
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
 import hashlib
-import io
 import os
 import runpy
 import sys
-import tarfile
 import tempfile
 import unittest
 import unittest.mock
@@ -18,17 +16,6 @@ import warnings
 from picovox_train import corpora
 from tests import helpers
 from tests.data_fixtures import FakeResponse
-
-
-
-
-# Write a tar.gz archive of {name: bytes}
-def write_archive(path, files):
-    with tarfile.open(path, 'w:gz') as tar:
-        for name, content in files.items():
-            info = tarfile.TarInfo(name)
-            info.size = len(content)
-            tar.addfile(info, io.BytesIO(content))
 
 
 class TestDownload(unittest.TestCase):
@@ -108,89 +95,7 @@ class TestDownload(unittest.TestCase):
         self.assertEqual(stderr.getvalue(), '  a.tar: 0 MB, 0.0 MB/s\n')
 
 
-class TestArchives(unittest.TestCase):
-
-    def test_concatenate(self):
-        with tempfile.TemporaryDirectory() as directory:
-            parts = []
-            for number, content in enumerate((b'ab', b'cd')):
-                parts.append(os.path.join(directory, f'p{number}'))
-                with open(parts[-1], 'wb') as file:
-                    file.write(content)
-            path = os.path.join(directory, 'all')
-            corpora.concatenate(parts, path)
-            os.remove(parts[0])
-            corpora.concatenate(parts, path)
-            with open(path, 'rb') as file:
-                self.assertEqual(file.read(), b'abcd')
-
-    def test_unpack(self):
-        with tempfile.TemporaryDirectory() as directory:
-            archive = os.path.join(directory, 'a.tar.gz')
-            write_archive(archive, {'lab/phone/dev-clean/a.lab': b'1', './lab/word/dev-clean/a.lab': b'2', 'lab/phone/train/b.lab': b'3'})
-            corpora.unpack(archive, os.path.join(directory, 'all'))
-            corpora.unpack(archive, os.path.join(directory, 'some'), ('lab/phone/dev-clean/', 'lab/word/dev-clean/'))
-            self.assertTrue(os.path.exists(os.path.join(directory, 'all', 'lab', 'phone', 'train', 'b.lab')))
-            self.assertTrue(os.path.exists(os.path.join(directory, 'some', 'lab', 'word', 'dev-clean', 'a.lab')))
-            self.assertFalse(os.path.exists(os.path.join(directory, 'some', 'lab', 'phone', 'train')))
-            self.assertEqual(corpora.directory_size(os.path.join(directory, 'all')), 3)
-
-
 class TestFetch(unittest.TestCase):
-
-    # The corpora table with two test corpora under a directory, and urlopen serving their archives
-    def corpora_patches(self, directory, archives):
-        def urlopen(request, timeout):
-            self.assertEqual(timeout, 60)
-            return FakeResponse(archives[request.full_url])
-        test_corpora = {
-            'one': {'urls': ['https://x/one.tar.gz'], 'dest': os.path.join(directory, 'one'),
-                    'check': os.path.join(directory, 'one', 'data'), 'description': 'One corpus', 'license': 'CC0'},
-            'split': {'urls': ['https://x/split.tar.gz-0', 'https://x/split.tar.gz-1'], 'dest': os.path.join(directory, 'split'),
-                      'check': os.path.join(directory, 'split', 'lab', 'phone'), 'members': ('lab/phone/',),
-                      'sizePaths': [os.path.join(directory, 'split', 'lab')], 'description': 'A split corpus', 'license': 'MIT'},
-            'doc': {'urls': ['https://x/doc.tar.gz'], 'dest': os.path.join(directory, 'doc'),
-                    'check': os.path.join(directory, 'doc', 'speakers.tsv'), 'description': 'Documentation', 'license': 'CC0'}
-        }
-        return [unittest.mock.patch.dict(corpora.CORPORA, test_corpora, clear=True),
-                unittest.mock.patch.object(corpora, 'CORPORA_DIR', directory),
-                unittest.mock.patch.object(corpora, 'ARCHIVES_DIR', os.path.join(directory, 'archives')),
-                unittest.mock.patch('urllib.request.urlopen', side_effect=urlopen)]
-
-    def test_fetch(self):
-        with tempfile.TemporaryDirectory() as directory:
-            one = os.path.join(directory, 'one.tar.gz')
-            write_archive(one, {'data/a.wav': b'12345'})
-            split = os.path.join(directory, 'split.tar.gz')
-            write_archive(split, {'lab/phone/a.lab': b'1', 'lab/word/a.lab': b'2'})
-            with open(one, 'rb') as file:
-                one_bytes = file.read()
-            with open(split, 'rb') as file:
-                split_bytes = file.read()
-            archives = {'https://x/one.tar.gz': one_bytes, 'https://x/split.tar.gz-0': split_bytes[:10],
-                        'https://x/split.tar.gz-1': split_bytes[10:]}
-            patches = self.corpora_patches(directory, archives)
-            for patch in patches:
-                patch.start()
-            try:
-                with helpers.captured() as (_, stderr):
-                    self.assertEqual(corpora.fetch('one', False), len(one_bytes))
-                    self.assertEqual(corpora.fetch('one', False), 0)
-                    self.assertEqual(corpora.fetch('split', True), len(split_bytes))
-                archives_kept = sorted(os.listdir(os.path.join(directory, 'archives')))
-                self.assertTrue(os.path.exists(os.path.join(directory, 'one', 'data', 'a.wav')))
-                self.assertTrue(os.path.exists(os.path.join(directory, 'split', 'lab', 'phone', 'a.lab')))
-                self.assertFalse(os.path.exists(os.path.join(directory, 'split', 'lab', 'word')))
-                # An archive without the corpus's check path
-                archives['https://x/doc.tar.gz'] = one_bytes
-                with helpers.captured(), self.assertRaisesRegex(IOError, 'doc: unpacking did not produce'):
-                    corpora.fetch('doc', False)
-            finally:
-                for patch in reversed(patches):
-                    patch.stop()
-        self.assertEqual(archives_kept, ['split.tar.gz', 'split.tar.gz-0', 'split.tar.gz-1'])
-        self.assertIn('one: downloading https://x/one.tar.gz\n', stderr.getvalue())
-        self.assertIn('one: unpacking 0 MB\none: present\nsplit: downloading https://x/split.tar.gz-0\n', stderr.getvalue())
 
     def test_fetch_file(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -218,52 +123,6 @@ class TestFetch(unittest.TestCase):
         self.assertTrue(stderr.getvalue().startswith('model: downloading https://x/model.bin\n'))
         self.assertIn('model: present\n', stderr.getvalue())
 
-    def test_write_readme(self):
-        with tempfile.TemporaryDirectory() as directory:
-            patches = self.corpora_patches(directory, {})
-            for patch in patches:
-                patch.start()
-            try:
-                os.makedirs(os.path.join(directory, 'one', 'data'))
-                with open(os.path.join(directory, 'one', 'data', 'a.wav'), 'wb') as file:
-                    file.write(b'x' * 2000000)
-                os.makedirs(os.path.join(directory, 'split', 'lab', 'phone'))
-                corpora.write_readme()
-                with open(os.path.join(directory, 'README.md'), encoding='utf-8') as file:
-                    first = file.read()
-                # An older README (no other sections) is rewritten
-                with open(os.path.join(directory, 'README.md'), 'w', encoding='utf-8') as file:
-                    file.write('# An older README\n')
-                corpora.write_readme()
-                with open(os.path.join(directory, 'README.md'), encoding='utf-8') as file:
-                    rewritten = file.read()
-                # Another tool's section is kept
-                with open(os.path.join(directory, 'README.md'), 'a', encoding='utf-8') as file:
-                    file.write('\n<!-- other -->\n## other\n<!-- other end -->\n\n')
-                os.makedirs(os.path.join(directory, 'doc'))
-                with open(os.path.join(directory, 'doc', 'speakers.tsv'), 'w', encoding='utf-8') as file:
-                    file.write('x')
-                corpora.write_readme()
-                with open(os.path.join(directory, 'README.md'), encoding='utf-8') as file:
-                    second = file.read()
-                corpora.write_readme()
-                with open(os.path.join(directory, 'README.md'), encoding='utf-8') as file:
-                    third = file.read()
-            finally:
-                for patch in reversed(patches):
-                    patch.stop()
-        self.assertTrue(first.startswith('# Speech corpora\n'))
-        self.assertEqual(rewritten, first)
-        self.assertIn('## one\n\n- Source: https://x/one.tar.gz\n- Contents: One corpus\n- License: CC0\n- Size: 2 MB unpacked\n', first)
-        self.assertIn('## split\n\n- Source: https://x/split.tar.gz-0 (and parts)\n', first)
-        self.assertIn('- Size: 0 MB unpacked\n', first)
-        self.assertIn('## doc\n\n- Source: https://x/doc.tar.gz\n- Contents: Documentation\n- License: CC0\n'
-                      '- Size: not downloaded\n', first)
-        self.assertIn('- Size: small (documentation files)\n', second)
-        self.assertTrue(second.endswith('<!-- other -->\n## other\n<!-- other end -->\n'))
-        self.assertEqual(second, third)
-
-
 class TestDictionary(unittest.TestCase):
 
     def test_parse_dictionary(self):
@@ -283,40 +142,25 @@ class TestMain(unittest.TestCase):
 
     def test_list(self):
         with tempfile.TemporaryDirectory() as directory, \
-                unittest.mock.patch.dict(corpora.CORPORA, {'one': {'check': directory, 'description': 'One'},
-                                                           'two': {'check': os.path.join(directory, 'x'), 'description': 'Two'}},
-                                         clear=True), \
-                unittest.mock.patch.dict(corpora.FILES, {'three': {'path': os.path.join(directory, 'y'), 'description': 'Three'}},
+                unittest.mock.patch.dict(corpora.FILES, {'one': {'path': directory, 'description': 'One'},
+                                                         'two': {'path': os.path.join(directory, 'y'), 'description': 'Two'}},
                                          clear=True), \
                 unittest.mock.patch.object(sys, 'argv', ['corpora.py', '--list']), helpers.captured() as (stdout, _):
             corpora.main()
-        self.assertEqual(stdout.getvalue(), f'{"one":28s} present  One\n{"two":28s} missing  Two\n{"three":28s} missing  Three\n')
+        self.assertEqual(stdout.getvalue(), f'{"one":28s} present  One\n{"two":28s} missing  Two\n')
 
     def test_main(self):
-        with tempfile.TemporaryDirectory() as directory, \
-                unittest.mock.patch.object(corpora, 'CORPORA_DIR', os.path.join(directory, 'corpora')), \
-                unittest.mock.patch.object(corpora, 'fetch', return_value=2000000) as fetch, \
-                unittest.mock.patch.object(corpora, 'fetch_file', return_value=1000000) as fetch_file, \
-                unittest.mock.patch.object(corpora, 'write_readme') as write_readme, helpers.captured() as (_, stderr):
-            with unittest.mock.patch.object(sys, 'argv', ['corpora.py', 'arctic-slt', '--keep-archives']):
-                corpora.main()
-            self.assertEqual(fetch.call_args_list, [unittest.mock.call('arctic-slt', True)])
-            self.assertEqual(fetch_file.call_count, 0)
-            # A file alone - no corpora README
+        with unittest.mock.patch.object(corpora, 'fetch_file', return_value=1000000) as fetch_file, helpers.captured() as (_, stderr):
             with unittest.mock.patch.object(sys, 'argv', ['corpora.py', 'cmudict']):
                 corpora.main()
             self.assertEqual(fetch_file.call_args_list, [unittest.mock.call('cmudict')])
-            self.assertEqual(write_readme.call_count, 1)
             with unittest.mock.patch.object(sys, 'argv', ['corpora.py']):
                 corpora.main()
             self.assertEqual([call.args[0] for call in fetch_file.call_args_list[1:]], list(corpora.FILES))
-            self.assertEqual([call.args[0] for call in fetch.call_args_list[1:]], list(corpora.CORPORA))
-            self.assertTrue(os.path.isdir(os.path.join(directory, 'corpora')))
             with unittest.mock.patch.object(sys, 'argv', ['corpora.py', 'nope']), self.assertRaises(SystemExit):
                 corpora.main()
-        self.assertEqual(write_readme.call_count, 2)
-        self.assertIn('Downloaded 2 MB in 0 s', stderr.getvalue())
-        self.assertIn('unknown corpora: nope', stderr.getvalue())
+        self.assertIn('Downloaded 1 MB in 0 s', stderr.getvalue())
+        self.assertIn('unknown files: nope', stderr.getvalue())
 
     def test_module_main(self):
         with unittest.mock.patch.object(sys, 'argv', ['corpora.py', 'nope']), self.assertRaises(SystemExit), \

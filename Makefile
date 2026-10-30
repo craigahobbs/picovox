@@ -123,8 +123,9 @@ TRAIN_RUNS := $(TRAIN_DIR)/runs
 # The bookkeeping, for the training dashboard (tools/dashboard/): each stage's start, end, and failure in
 # $(TRAIN_DIR)/stages.jsonl and each command's output also in $(TRAIN_DIR)/logs/<stage>.log (tools/trainstage.sh - the
 # teacher's output also in its run's train.log), and the CPU, GPU, and memory use with the running stages every 20 seconds
-# in $(TRAIN_DIR)/util.log (tools/trainutil.sh, for the life of make train). The stages, their dependencies, and their
-# expected times are train/data/train-stages.json's (test/testTrainStages.js checks it against these targets).
+# in $(TRAIN_DIR)/util.log (tools/trainutil.sh, for the life of make - make train starts it, and a stage's start does if
+# none runs). The stages, their dependencies, and their expected times are train/data/train-stages.json's
+# (test/testTrainStages.js checks it against these targets).
 STAGE = tools/trainstage.sh $(TRAIN_DIR) $(basename $(@F))
 
 # Record a make target's run in stages.jsonl (the training dashboard shows its stages), and keep the Mac awake while make
@@ -160,7 +161,7 @@ train-voice:
 	@$(MAKE) --no-print-directory train-util $(TRAIN_VOICE)
 	@$(TRAIN_REPORT)
 
-# make train-g2p - the G2P alone, on every core (G2P_STANDALONE_JOBS workers at the default QoS, not after the readers'
+# make train-g2p - the G2P alone, on every core (G2P_STANDALONE_JOBS workers at the default QoS, not after the voices'
 # data build)
 train-g2p:
 	$(call TRAIN_TARGET,train-g2p)
@@ -219,25 +220,46 @@ train-clean:
 downloads/cmudict/cmudict.dict: | build/venv-train.build
 	build/venv-train/bin/python -I train/src/picovox_train/corpora.py cmudict
 
-# The corpora - CMU ARCTIC, LibriTTS-R and its alignments, CREMA-D - and the pinned files (downloads, once; after the
-# dictionary's own download, so the two never fetch it at once)
-$(TRAIN_DIR)/corpora.done: | build/venv-train.build downloads/cmudict/cmudict.dict
+# The listener panel's Whisper model - pinned (picovox_train/corpora.py - its revision and SHA-256; downloaded once)
+downloads/whisper/ggml-base.en.bin: | build/venv-train.build
+	build/venv-train/bin/python -I train/src/picovox_train/corpora.py whisper
+
+# The training speech (picovox_train/tts.py - the recipe's tts section): the corpus the local TTS model speaks (Ollama -
+# under the GPU lock, its model on the GPU) and its CTC alignment, in downloads/tts/<model>-<digest>/ (once - with the
+# corpus there, nothing is generated or aligned again); the readings of its heteronym tokens (picovox_train/measure.py
+# - the G2P's evidence), and the clips whose measured readings change their tokens aligned again; then the voices'
+# training data
+$(TRAIN_DIR)/tts-corpus.done: train/data/train.json train/data/books.json lib/models/g2pModel.js \
+		| build/venv-train.build downloads/cmudict/cmudict.dict
 	@$(STAGE) start
-	$(STAGE) -- build/venv-train/bin/python -I train/src/picovox_train/corpora.py
-	$(STAGE) -- $(TRAIN_PYTHON) -m picovox_train.cremad fetch
+	$(STAGE) -- $(GPU) $(TRAIN_PYTHON) -m picovox_train.tts generate
+	$(STAGE) -- $(GPU) $(TRAIN_PYTHON) -m picovox_train.tts align
 	@$(STAGE) end
 	@mkdir -p $(@D) && touch $@
 
+$(TRAIN_DIR)/tts-readings.done: $(TRAIN_DIR)/tts-corpus.done
+	@$(STAGE) start
+	$(STAGE) -- $(GPU) $(TRAIN_PYTHON) -m picovox_train.measure
+	$(STAGE) -- $(GPU) $(TRAIN_PYTHON) -m picovox_train.tts align
+	@$(STAGE) end
+	touch $@
+
+$(TRAIN_DIR)/data-tts.done: $(TRAIN_DIR)/tts-readings.done
+	@$(STAGE) start
+	$(STAGE) -- $(TRAIN_ENV) $(TRAIN_PYTHON) -m picovox_train.tts build --out $(TRAIN_DIR)/data/tts
+	@$(STAGE) end
+	touch $@
+
 # The G2P (CPU): the network's four stages (one core, deterministic), the heteronym context labels (the books - pinned
-# texts, train/data/books.json - and part-of-speech tags), the context network and its held-out accuracy
-# gate (cross-validated over the aligned speakers) beside the G2P network, then the reading stage (two threads), the
+# texts, train/data/books.json - the training speech's measured readings, and part-of-speech tags), the context network
+# and its held-out accuracy gate (cross-validated over the books) beside the G2P network, then the reading stage (two threads), the
 # export to $(TRAIN_DIR)/g2pModel.js, and picovox_train.context check against the committed module; and the heteronym
 # relabeling, which must reproduce train/data/g2p-relabel.json (the G2P network's input).
 #
-# In make train, the G2P's memory-bound stages (the context labels, the relabeling) are scheduled after the readers'
+# In make train, the G2P's memory-bound stages (the context labels, the relabeling) are scheduled after the voices'
 # data build (order-only prerequisites) - into the teacher's GPU-bound hours, when the cores are idle - not competing
 # with the data build on the critical path; the G2P network itself (one core) starts at once. G2P_JOBS is the context
-# labels' worker processes - the aligned and tag workers; the outputs are the same for any count. make train runs the
+# labels' worker processes - the tag workers; the outputs are the same for any count. make train runs the
 # chain beside the GPU stages, so its count is low (BESIDE) for the memory-bound context labels; the context network's
 # trainings (its four teachers, and each of cross-validate's ten folds' four teachers and network - one thread each,
 # small and compute-bound) take CONTEXT_JOBS (at 2, the folds outlasted the voice stages by 40 minutes); make train-g2p
@@ -254,12 +276,12 @@ $(TRAIN_DIR)/g2p-network.done: train/data/train.json train/data/g2p-words.json t
 	@$(STAGE) end
 	@mkdir -p $(@D) && touch $@
 
-$(TRAIN_DIR)/context-labels.done: $(TRAIN_DIR)/corpora.done train/data/train.json train/data/books.json train/data/context-labels.json \
-		train/data/g2p-fixes.json train/data/g2p-books.json \
-		train/data/heteronyms-test.json | build/venv-train.build $(if $(G2P_STANDALONE),,$(TRAIN_DIR)/data-multi.done)
+$(TRAIN_DIR)/context-labels.done: $(TRAIN_DIR)/tts-readings.done train/data/train.json train/data/books.json train/data/context-labels.json \
+		train/data/g2p-fixes.json train/data/g2p-books.json train/data/g2p-relabel.json \
+		train/data/heteronyms-test.json | build/venv-train.build $(if $(G2P_STANDALONE),,$(TRAIN_DIR)/data-tts.done)
 	@$(STAGE) start
 	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.contextlabels books
-	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.contextlabels aligned --out $(TRAIN_DIR)/context -j $(G2P_JOBS)
+	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.contextlabels aligned --out $(TRAIN_DIR)/context
 	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.contextlabels tag --out $(TRAIN_DIR)/context -j $(G2P_JOBS)
 	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.contextlabels labels --out $(TRAIN_DIR)/context
 	@$(STAGE) end
@@ -287,37 +309,18 @@ $(TRAIN_DIR)/g2p.done: $(TRAIN_DIR)/g2p-network.done $(TRAIN_DIR)/context-labels
 	touch $@
 
 
-# The heteronym relabeling (CPU) - it must reproduce train/data/g2p-relabel.json's words
-$(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/corpora.done downloads/cmudict/cmudict.dict train/data/g2p-relabel.json \
-		| $(if $(G2P_STANDALONE),,$(TRAIN_DIR)/data-multi.done)
+# The heteronym relabeling (CPU) - from the training speech's readings, the committed words it can't judge kept; it must
+# reproduce train/data/g2p-relabel.json's words
+$(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/tts-readings.done downloads/cmudict/cmudict.dict train/data/g2p-relabel.json \
+		| $(if $(G2P_STANDALONE),,$(TRAIN_DIR)/data-tts.done)
 	@$(STAGE) start
-	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.heteronyms --out $(TRAIN_DIR)/heteronyms -j 4 --check train/data/g2p-relabel.json
-	@$(STAGE) end
-	touch $@
-
-# The training data - the readers (CPU, every core; the pool and its analysis settings are train/data/speakers.json's) and
-# the emotional speech (its alignment on the GPU - at the default QoS: at the utility QoS it took twice as long, and
-# teacher A, which needs its speakers, waited 3 minutes for it)
-$(TRAIN_DIR)/data-multi.done: $(TRAIN_DIR)/corpora.done lib/models/g2pModel.js train/data/speakers.json
-	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(TRAIN_PYTHON) -m picovox_train.multi build --out $(TRAIN_DIR)/data/multi --pool train/data/speakers.json
-	@$(STAGE) end
-	touch $@
-
-$(TRAIN_DIR)/cremad-align.done: $(TRAIN_DIR)/corpora.done | build/venv-train.build
-	@$(STAGE) start
-	$(STAGE) -- $(GPU) $(TRAIN_PYTHON) -m picovox_train.cremad align
-	@$(STAGE) end
-	touch $@
-
-$(TRAIN_DIR)/data-cremad.done: $(TRAIN_DIR)/cremad-align.done lib/models/g2pModel.js
-	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(TRAIN_PYTHON) -m picovox_train.cremad build --out $(TRAIN_DIR)/data/cremad
+	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.heteronyms --out $(TRAIN_DIR)/heteronyms --keep train/data/g2p-relabel.json \
+		--check train/data/g2p-relabel.json
 	@$(STAGE) end
 	touch $@
 
 # The teacher - stage A, then stage B with the critic (GPU; resumable), and its evaluation (CPU)
-$(TRAIN_DIR)/teacher-a.done: $(TRAIN_DIR)/data-multi.done $(TRAIN_DIR)/data-cremad.done train/data/train.json
+$(TRAIN_DIR)/teacher-a.done: $(TRAIN_DIR)/data-tts.done train/data/train.json
 	@$(STAGE) start
 	$(STAGE) --log $(TRAIN_RUNS)/teacher-a/train.log -- \
 		$(TRAIN_ENV) $(GPU) $(TRAIN_PYTHON) -m picovox_train.trainmulti --name teacher-a --recipe teacher.a --resume
@@ -331,7 +334,7 @@ $(TRAIN_DIR)/teacher-b.done: $(TRAIN_DIR)/teacher-a.done
 	@$(STAGE) end
 	touch $@
 
-$(TRAIN_DIR)/teacher-eval.done: $(TRAIN_DIR)/teacher-b.done
+$(TRAIN_DIR)/teacher-eval.done: $(TRAIN_DIR)/teacher-b.done downloads/whisper/ggml-base.en.bin
 	@$(STAGE) start
 	$(STAGE) -- $(TRAIN_ENV) $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.distill eval teacher=$(TRAIN_RUNS)/teacher-b/best.pt --whisper-workers 3
 	@$(STAGE) end
@@ -379,7 +382,7 @@ $(TRAIN_DIR)/package.done: $(TRAIN_DIR)/student-eval.done
 	@$(STAGE) start
 	$(STAGE) -- $(TRAIN_ENV) $(TRAIN_PYTHON) -m picovox_train.export $(TRAIN_RUNS)/distill-student-polish/best.pt --voice multi --out $(TRAIN_DIR)/export
 	$(STAGE) -- $(TRAIN_ENV) $(TRAIN_PYTHON) -m picovox_train.package $(TRAIN_DIR)/export/multi -o $(TRAIN_DIR)/voiceModel.js --provenance --recipe train/data/train.json \
-		--data $(TRAIN_DIR)/data/multi $(TRAIN_DIR)/data/cremad --scores $(TRAIN_DIR)/distill/eval/student/result.json
+		--data $(TRAIN_DIR)/data/tts --scores $(TRAIN_DIR)/distill/eval/student/result.json
 	@$(STAGE) end
 	touch $@
 
@@ -388,10 +391,10 @@ $(TRAIN_DIR)/package.done: $(TRAIN_DIR)/student-eval.done
 # (the checkpoint the next stage starts from, exported as the package stage exports it) speaking train/data/train.json's
 # samples texts in its speakers' voices as the package speaks them, scored with UTMOS, in $(TRAIN_DIR)/samples/ (index.json)
 # for the training dashboard's Listen tab - and the reference, the shipped lib/models/voiceModel.js (in the teacher's
-# GPU-bound hours, after the readers' data build; again when the shipped model changes)
+# GPU-bound hours, after the voices' data build; again when the shipped model changes)
 SAMPLES := OMP_NUM_THREADS=2 $(BESIDE) node tools/trainsamples.js --out $(TRAIN_DIR)/samples
 
-$(TRAIN_DIR)/samples-reference.done: lib/models/voiceModel.js | build/venv-train.build $(TRAIN_DIR)/data-multi.done
+$(TRAIN_DIR)/samples-reference.done: lib/models/voiceModel.js | build/venv-train.build $(TRAIN_DIR)/data-tts.done
 	@$(STAGE) start
 	$(STAGE) -- $(SAMPLES) --stage reference --model lib/models/voiceModel.js
 	@$(STAGE) end
@@ -427,7 +430,7 @@ clean:
 	$(MAKE) -C train clean
 
 
-# superclean also removes the downloads (downloads/ - the corpora, the listener models, and Whisper; about 14 GB)
+# superclean also removes the downloads (downloads/ - the training speech, the listener models, and Whisper; about 10 GB)
 .PHONY: superclean-local
 superclean: superclean-local
 superclean-local:

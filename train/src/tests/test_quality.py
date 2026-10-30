@@ -15,8 +15,8 @@ import warnings
 
 import numpy
 
-from picovox_train import multi, quality
-from tests import data_fixtures, helpers
+from picovox_train import quality
+from tests import ctc_fixtures, data_fixtures, helpers
 from tests.helpers import write_wav
 
 
@@ -95,30 +95,21 @@ class TestAnalyze(unittest.TestCase):
 
 class TestPlan(unittest.TestCase):
 
-    def test_voice_table(self):
-        voices = quality.voice_table()
-        self.assertEqual(len(voices), 12)
-        self.assertEqual(voices[0], ('male', 'male', {'arctic-bdl': 1.0}))
-        sarah = dict((key, blend) for key, _, blend in voices)['sarah']
-        self.assertAlmostEqual(sum(sarah.values()), 1.0)
-
     def test_plan(self):
-        speakers = {'r1': {'pitchFloor': 70, 'pitchCeiling': 250, 'bandwidth': 12000},
-                    'r2': {'pitchFloor': 100, 'pitchCeiling': 400, 'bandwidth': 8000}}
-        utterances = {'r1': {f's{n}': {'text': f'text {n}', 'wav': f'/r1/s{n}.wav'} for n in range(6)},
-                      'r2': {'t0': {'text': 'other', 'wav': '/r2/t0.wav'}}}
-        split = {'r1': ['s4', 'gone']}
-        voices = [('v1', 'male', {'r1': 0.5, 'r2': 0.5})]
+        speakers = {'v1': {'pitchFloor': 70, 'pitchCeiling': 250, 'bandwidth': 12000},
+                    'v2': {'pitchFloor': 100, 'pitchCeiling': 400, 'bandwidth': 12000}}
+        clips = {'v1': [{'id': f'c{n}', 'text': f'text {n}', 'wav': f'/v1/c{n}.wav'} for n in range(4)]}
         panel = [{'id': 'p1', 'text': 'Panel.'}]
-        jobs, tasks = quality.plan('/out', 3, {'add': {'shelf': -5}}, speakers, split, utterances, panel, voices)
+        jobs, tasks = quality.plan('/out', 3, {'add': {'shelf': -5}}, speakers, clips, panel)
         self.assertEqual(jobs[0], {'text': 'Panel.', 'voice': 'v1', 'wav': '/out/voices/v1-p1.wav', 'edits': {'add': {'shelf': -5}}})
-        self.assertEqual(tasks[0], ('voice', 'v1', ('/out/voices/v1-p1.wav', 70, 400, quality.VOICE_BANDWIDTH)))
-        # (the held-out utterance first, then the others spread; each synthesized and recorded)
-        self.assertEqual([job.get('speaker') for job in jobs[1:]], ['r1', 'r1', 'r1', 'r2'])
-        self.assertEqual(jobs[1]['text'], 'text 4')
-        self.assertEqual(tasks[1:3], [('synth', 'r1', ('/out/readers/r1-s4.wav', 70, 250, 12000)),
-                                      ('human', 'r1', ('/r1/s4.wav', 70, 250, 12000))])
-        jobs, _ = quality.plan('/out', 1, None, speakers, split, utterances, panel, voices)
+        self.assertEqual(tasks[0], ('voice', 'v1', ('/out/voices/v1-p1.wav', 70, 250, quality.VOICE_BANDWIDTH)))
+        # (per_voice of the voice's held-out clips, each synthesized and its source measured; a voice without clips, the
+        # panel only)
+        self.assertEqual([job['voice'] for job in jobs], ['v1'] * 4 + ['v2'])
+        self.assertEqual(jobs[1]['text'], 'text 0')
+        self.assertEqual(tasks[1:3], [('synth', 'v1', ('/out/synth/v1-c0.wav', 70, 250, 12000)),
+                                      ('source', 'v1', ('/v1/c0.wav', 70, 250, 12000))])
+        jobs, _ = quality.plan('/out', 1, None, speakers, clips, panel)
         self.assertNotIn('edits', jobs[0])
 
     def test_render(self):
@@ -151,62 +142,55 @@ class TestMeasure(unittest.TestCase):
         cls.enterClassContext(data_fixtures.fake_modules(parselmouth=data_fixtures.ANALYSIS))
 
     def test_measure_and_report(self):
-        # One voice of one real reader (its speakers.json settings), its held-out utterances recorded (synthetic), every
-        # rendering a synthetic WAV
-        with tempfile.TemporaryDirectory() as directory:
-            recordings = []
-            for number in range(2):
-                path = os.path.join(directory, f'rec{number}.wav')
-                write_wav(path, bright(0.6, 16000, f0=180), 16000)
-                recordings.append(path)
-            with open(os.path.join(quality.ROOT, 'train', 'data', 'multi-split.json'), encoding='utf-8') as file:
-                held_out = json.load(file)['test']['arctic-slt'][:2]
-            candidates = {'arctic-slt': {'utterances': [{'sentence': sentence, 'text': 'Hello.', 'wav': wav}
-                                                        for sentence, wav in zip(held_out, recordings)]}}
+        # The corpus's voices (two clips each - a test and a val clip, and a training clip left out), every rendering a
+        # synthetic WAV
+        texts = [('male', 'Hello there.', 'test'), ('male', 'Good night.', 'val'), ('male', 'Not this one.', 'train'),
+                 ('female', 'Call me Ishmael.', 'test')]
+        with ctc_fixtures.tts_corpus(texts) as (directory, _, _), tempfile.TemporaryDirectory() as data_dir:
+            helpers.write_corpus(os.path.join(data_dir, 'tts'))
 
             def render(jobs, _processes):
                 for job in jobs:
                     write_wav(job['wav'], bright(0.6, 24000, f0=190), 24000)
             out = os.path.join(directory, 'quality')
-            args = argparse.Namespace(out=out, per_reader=2, edits='{"add": {"shelf": -5}}', jobs=2)
-            with unittest.mock.patch.object(quality, 'voice_table', return_value=[('female', 'female', {'arctic-slt': 1.0})]), \
-                    unittest.mock.patch.object(multi, 'candidate_speakers', return_value=candidates), \
+            args = argparse.Namespace(out=out, per_voice=2, edits='{"add": {"shelf": -5}}', jobs=2)
+            with unittest.mock.patch('picovox_train.data.DATA_DIR', data_dir), \
                     unittest.mock.patch.object(quality, 'render', side_effect=render), \
                     unittest.mock.patch('multiprocessing.Pool', data_fixtures.FakePool), helpers.captured() as (stdout, _):
                 self.assertEqual(quality.measure_command(args), 0)
             with open(os.path.join(out, 'results.json'), encoding='utf-8') as file:
                 results = json.load(file)
         self.assertEqual(results['edits'], {'add': {'shelf': -5}})
-        self.assertEqual(results['blends'], {'female': {'arctic-slt': 1.0}})
-        self.assertEqual([row['kind'] for row in results['rows']].count('voice'), 16)
-        self.assertEqual([row['kind'] for row in results['rows']].count('human'), 2)
+        kinds = [(row['kind'], row['who']) for row in results['rows']]
+        self.assertEqual(kinds.count(('voice', 'male')), 16)
+        self.assertEqual(kinds.count(('source', 'male')), 2)
+        self.assertEqual(kinds.count(('synth', 'female')), 1)
         output = stdout.getvalue()
-        self.assertIn('quality: 20 measured', output)
-        self.assertIn('Readers synthesized, less their recordings', output)
-        self.assertRegex(output, r'arctic-slt\s+[+-]\d')
-        self.assertRegex(output, r'female\s+[+-]\d')
+        self.assertIn('quality: 38 measured', output)
+        self.assertIn('Voices synthesized (their held-out texts), less their source clips', output)
+        self.assertRegex(output, r'male\s+[+-]\d')
 
     def test_report_missing(self):
-        # A measure missing (None) in a reader's recordings or a voice's own rows, and a voice's reader unmeasured
-        rows = [{'kind': 'human', 'who': 'r1', **{name: 1.0 for name in quality.MEASURES}, 'tilt': None},
-                {'kind': 'synth', 'who': 'r1', **{name: 2.0 for name in quality.MEASURES}, 'alpha': None},
+        # A measure missing (None) in a voice's source or its own rows, and a voice without a source
+        rows = [{'kind': 'source', 'who': 'v1', **{name: 1.0 for name in quality.MEASURES}, 'tilt': None},
+                {'kind': 'synth', 'who': 'v1', **{name: 2.0 for name in quality.MEASURES}, 'alpha': None},
                 {'kind': 'voice', 'who': 'v1', **{name: 3.0 for name in quality.MEASURES}, 'air': None},
                 {'kind': 'voice', 'who': 'v2', **{name: 3.0 for name in quality.MEASURES}}]
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, 'results.json')
             with open(path, 'w', encoding='utf-8') as file:
-                json.dump({'blends': {'v1': {'r1': 1.0}, 'v2': {'r9': 1.0}}, 'rows': rows}, file)
+                json.dump({'rows': rows}, file)
             with helpers.captured() as (stdout, _):
                 self.assertEqual(quality.main(['report', path]), 0)
-        lines = {line.split()[0]: line.split()[1:] for line in stdout.getvalue().splitlines() if line.startswith(('r1 ', 'v1 ', 'v2 '))}
-        self.assertEqual(lines['r1'][:3], ['n/a', 'n/a', '+1.00'])
-        self.assertEqual(lines['v1'][:5], ['n/a', '+2.00', '+2.00', '+2.00', 'n/a'])
-        self.assertEqual(set(lines['v2']), {'n/a'})
+        lines = [line.split() for line in stdout.getvalue().splitlines() if line.startswith(('v1 ', 'v2 '))]
+        self.assertEqual(lines[0][1:4], ['n/a', 'n/a', '+1.00'])
+        self.assertEqual(lines[1][1:6], ['n/a', '+2.00', '+2.00', '+2.00', 'n/a'])
+        self.assertEqual(set(lines[2][1:]), {'n/a'})
 
     def test_main(self):
         with unittest.mock.patch.object(quality, 'measure_command', return_value=0) as measure:
-            self.assertEqual(quality.main(['measure', '--out', 'x', '--per-reader', '4', '--edits', '{}', '-j', '3']), 0)
-        self.assertEqual(measure.call_args.args[0], argparse.Namespace(command='measure', out='x', per_reader=4, edits='{}', jobs=3))
+            self.assertEqual(quality.main(['measure', '--out', 'x', '--per-voice', '4', '--edits', '{}', '-j', '3']), 0)
+        self.assertEqual(measure.call_args.args[0], argparse.Namespace(command='measure', out='x', per_voice=4, edits='{}', jobs=3))
         with unittest.mock.patch.object(sys, 'argv', ['quality']), self.assertRaises(SystemExit), helpers.captured(), \
                 warnings.catch_warnings():
             warnings.filterwarnings('ignore', message='.*found in sys.modules', category=RuntimeWarning)

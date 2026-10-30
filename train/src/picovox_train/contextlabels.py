@@ -8,27 +8,35 @@ examples of each reading in context. Training-time only: the app has no word lis
 to ask the context network. The commands (each with PYTHONPATH=train/src):
 
     build/venv-train/bin/python -B -m picovox_train.contextlabels books                  # 0. the recipe's books (pinned - books.py)
-    build/venv-train/bin/python -B -m picovox_train.contextlabels aligned --out DIR [-j] # 1. the aligned readings (LibriTTS-R MFA)
+    build/venv-train/bin/python -B -m picovox_train.contextlabels aligned --out DIR      # 1. the measured readings (the training speech)
     build/venv-train/bin/python -B -m picovox_train.contextlabels tag --out DIR [-j]     # 2. part-of-speech tags
     build/venv-train/bin/python -B -m picovox_train.contextlabels labels --out DIR       # 3. the labels -> labels.json
 
-(-j: the worker processes - aligned's utterances and tag's books are independent; the outputs are the same for any -j.)
+(-j: tag's worker processes - its batches and books are independent; the outputs are the same for any -j.)
 
 The label sources (train/data/context-labels.json is the curated part):
 
-1. Aligned readings - every LibriTTS-R utterance with MFA labels: each token of a candidate word the aligner matched to a
-   dictionary variant (readings.py), in its sentence. The speaker's reading, heard in the audio.
+1. Aligned readings - the training speech's measured readings (measure.py - each candidate word's token in a clip whose
+   reading the CTC vote or the formants measured), in its sentence: the voice's reading, heard in the audio - of the
+   inventory's family words and the context gate's words only (the curated words' readings in context are the engine's
+   weakest: theirs are the seeds, collocations, and their own hand-written mappings). A token a collocation decides is
+   the collocation's example, not an aligned one (the corpus's disagreements with the collocations are reported - the
+   engine's own reading errors).
 2. Silver readings - Project Gutenberg books (pinned texts - books.py, train/data/books.json) tagged for part of speech
    (training time only), each candidate token's tag mapped to a reading (the word's own mapping, else its family's -
-   the noun/verb stress pairs, the -ate words, the S/Z words), only for the words whose mapping agrees with their
-   aligned readings (the audio) on at least MIN_AGREEMENT of at least MIN_VALIDATE tokens.
+   the noun/verb stress pairs, the -ate words, the S/Z words), for the curated words (their mappings hand-written) and
+   the words whose mapping agrees with their aligned readings (the audio) on at least MIN_AGREEMENT of at least
+   MIN_VALIDATE tokens - or, for a family word of fewer, whose readings the corpus can't measure (stress alone, or a
+   class whose method isn't used), its family's mapping as it is, else when its family's agrees on MIN_AGREEMENT of
+   at least MIN_FAMILY_VALIDATE.
 3. Seeds - hand-labeled sentences (train/data/context-labels.json "seeds") for the sense heteronyms (lead the metal, tear, bow,
    bass), the readings the dictionary lacks (does the deer, row the quarrel, house the verb), and the pairs whose tag
    mapping the audio doesn't validate (use, close, separate, increase, ...), and collocations
    ("collocations": a neighboring word that fixes the reading, reviewed by hand) over the books.
 
-Held out: the regression set's sentences (train/data/heteronyms-test.json), 10% of the aligned speakers (by a hash), and
-two books. The settings are train/data/train.json's context.labels.
+Held out: the regression set's sentences (train/data/heteronyms-test.json) and two books (every source's examples of
+them - the voices share one front end, so the book is the independent unit). The settings are train/data/train.json's
+context.labels.
 
 The transfer windows - unlabeled: the ambiguous words' other windows in the books (not the held-out books), up to
 "maxTransfer" a word - are where the context network's teachers' mean probabilities are distilled into it (context.py).
@@ -44,21 +52,19 @@ import re
 import sys
 
 from .frontend import context_sequence, text_items
-from . import RECIPE_PATH, ROOT, books, heteronyms, read_json
+from . import RECIPE_PATH, ROOT, books, read_json
 from . import readings as readings_module
+from .readings import candidate_words, load_spec, primary_vowel, variant_vowels
 
 
-SPEC_PATH = os.path.join(ROOT, 'train', 'data', 'context-labels.json')
 TEST_PATH = os.path.join(ROOT, 'train', 'data', 'heteronyms-test.json')
-LIBRITTS_DIR = os.path.join(ROOT, 'downloads', 'corpora', 'libritts_r', 'LibriTTS_R')
-LABEL_DIR = os.path.join(ROOT, 'downloads', 'corpora', 'libritts_label', 'lab', 'phone')
 
 
 # The recipe's label settings - train/data/train.json's context.labels (and the context network's window)
 def load_settings(path=RECIPE_PATH):
     with open(path, encoding='utf-8') as file:
         context = json.load(file)['context']
-    return {**context['labels'], 'window': context['network']['window']}
+    return {**context['labels'], 'window': context['network']['window'], 'gateWords': context['gate']['words']}
 
 
 SETTINGS = load_settings()
@@ -66,21 +72,28 @@ SETTINGS = load_settings()
 # The context window - WINDOW items each side of the word (words, and phrase ends as marks)
 WINDOW = SETTINGS['window']
 
-# The mapping validation - the least agreement with the aligned readings, and the least aligned tokens for a word's own check
+# The context gate's words (context.py) - their aligned readings are examples though they're curated (the gate's
+# held-out accuracy is theirs)
+GATE_WORDS = set(SETTINGS['gateWords'])
+
+# The mapping validation - the least agreement with the aligned readings, and the least aligned tokens for a word's own
+# check, and for its family's (a family word of too few)
 MIN_AGREEMENT = SETTINGS['minAgreement']
 MIN_VALIDATE = SETTINGS['minValidate']
+MIN_FAMILY_VALIDATE = SETTINGS['minFamilyValidate']
 
 # A candidate word is ambiguous (trained with readings) when its alternate readings have at least MIN_ALTERNATE examples
-# and MIN_ALTERNATE_SHARE of its examples
+# and MIN_ALTERNATE_SHARE of its examples (a seeded reading always counts - the seeds say it occurs); a word whose
+# mapping only its family's rule gives (readings the corpus can't measure) needs MIN_UNMEASURED_ALTERNATE examples of
+# readings other than its most common - the book texts' noun/verb pairs common enough to learn, not every family word
 MIN_ALTERNATE = SETTINGS['minAlternate']
 MIN_ALTERNATE_SHARE = SETTINGS['minAlternateShare']
+MIN_UNMEASURED_ALTERNATE = SETTINGS['minUnmeasuredAlternate']
 
-# The books (pinned Project Gutenberg texts - books.py - fetched to the books directory), the held-out books, and the
-# held-out share of the aligned speakers (percent)
+# The books (pinned Project Gutenberg texts - books.py - fetched to the books directory), and the held-out books
 BOOKS_DIR = os.path.join(ROOT, SETTINGS['books'])
 PINS_PATH = os.path.join(ROOT, SETTINGS['pins'])
 HELD_OUT_BOOKS = set(SETTINGS['heldOutBooks'])
-HELD_OUT_PERCENT = SETTINGS['heldOutPercent']
 
 # The most silver examples of a word kept (the most frequent words have thousands)
 MAX_SILVER = SETTINGS['maxSilver']
@@ -94,36 +107,6 @@ NOUN_TAGS = {'NN', 'NNS'}
 VERB_TAGS = {'VB', 'VBP', 'VBZ', 'VBD', 'VBN', 'VBG'}
 
 
-# The curated spec - train/data/context-labels.json
-def load_spec(path=SPEC_PATH):
-    with open(path, encoding='utf-8') as file:
-        return json.load(file)
-
-
-# A variant's vowels
-def variant_vowels(variant):
-    return [phone for phone in variant.split() if phone[-1].isdigit()]
-
-
-# The index of a variant's primary-stressed vowel (None if none)
-def primary_vowel(variant):
-    return next((index for index, phone in enumerate(variant_vowels(variant)) if phone.endswith('1')), None)
-
-
-# A word's family by its first two readings - 'stress' (the primary stress moves: noun/verb pairs), 'ate' (a final -ate
-# full vowel against a reduced one), 'consonant' (S/Z), or 'vowel'
-def word_family(word, readings):
-    first, second = readings[0][0], readings[1][0]
-    first_vowels, second_vowels = variant_vowels(first), variant_vowels(second)
-    if len(first_vowels) == len(second_vowels) >= 2 and primary_vowel(first) != primary_vowel(second):
-        return 'stress'
-    if re.search(r'ates?$', word) and (first_vowels[-1:] + second_vowels[-1:]).count('EY2') == 1:
-        return 'ate'
-    if heteronyms.kind(first.split(), second.split()) == 'consonant':
-        return 'consonant'
-    return 'vowel'
-
-
 # The voiced and voiceless consonants of the S/Z words' pairs
 VOICED = {'Z', 'ZH', 'V', 'DH', 'D', 'G', 'B', 'JH'}
 VOICELESS = {'S', 'SH', 'F', 'TH', 'T', 'K', 'P', 'CH'}
@@ -132,7 +115,10 @@ VOICELESS = {'S', 'SH', 'F', 'TH', 'T', 'K', 'P', 'CH'}
 # The reading (dictionary order) a family's mapping gives a tag - None if the tag isn't mapped
 def family_reading(family, tag, readings):
     if family == 'stress':
+        # (a reading without a primary stress - the rule can't place it, so the tag isn't mapped)
         stresses = [primary_vowel(reading[0]) for reading in readings]
+        if None in stresses:
+            return None
         if tag in NOUN_TAGS:
             return stresses.index(min(stresses))
         if tag in VERB_TAGS:
@@ -145,7 +131,7 @@ def family_reading(family, tag, readings):
         if tag in NOUN_TAGS | {'JJ'} and reduced:
             return reduced[0]
     elif family == 'consonant':
-        ops = [(left, right) for left, right in heteronyms.edit_ops(readings[0][0].split(), readings[1][0].split())
+        ops = [(left, right) for left, right in readings_module.edit_ops(readings[0][0].split(), readings[1][0].split())
                if left and right]
         voiced = 1 if ops and ops[0][0] in VOICELESS and ops[0][1] in VOICED else 0
         if tag in {'VB', 'VBP'}:
@@ -153,43 +139,6 @@ def family_reading(family, tag, readings):
         if tag in {'NN', 'NNS'}:
             return 1 - voiced
     return None
-
-
-# Whether a family word's readings are a stem-final voicing pair (use, close, excuse, uses - not an accent's S/Z or CH/SH)
-def voicing_pair(readings):
-    first, second = readings[0][0].split(), readings[1][0].split()
-    ops = heteronyms.edit_ops(first, second)
-    if len(ops) != 1 or None in ops[0] or {ops[0][0], ops[0][1]} != {'S', 'Z'}:
-        return False
-    position = next(index for index, (left, right) in enumerate(zip(first, second)) if left != right)
-    return position >= len(first) - 3
-
-
-# The candidate words and their readings (dictionary order) - the inventory's family words (the noun/verb stress pairs,
-# the -ate words, the S/Z words) and the spec's words (with the readings the dictionary lacks) - {word: {readings, family,
-# tags, curated}}; tags maps a tag ("Cap" + tag for a capitalized token) to a reading for a word's own mapping,
-# before its family's
-def candidate_words(spec, inventory=None):
-    inventory = readings_module.inventory() if inventory is None else inventory
-    variants = readings_module.read_variants()
-    words = {}
-    for word, readings in inventory.items():
-        family = word_family(word, readings)
-        if family == 'consonant' and not voicing_pair(readings):
-            family = 'vowel'
-        if family != 'vowel' and word not in spec['exclude']:
-            words[word] = {'readings': readings, 'family': family, 'tags': {}, 'curated': False}
-    for word, entry in spec['words'].items():
-        readings = [list(reading) for reading in inventory.get(word) or readings_module.readings_of(variants[word])]
-        readings.extend([variant] for variant in entry.get('missing', []))
-        tags = {}
-        for variant, tag_list in entry.get('tags', {}).items():
-            reading = readings_module.reading_of(variant, readings)
-            for tag in tag_list:
-                tags[tag] = reading
-        words[word] = {'readings': readings, 'family': entry.get('family', 'own'), 'tags': tags,
-                       'curated': True}
-    return words
 
 
 # The marks of a phrase's start (and the text's) in a context sequence
@@ -239,57 +188,27 @@ def context_window(sequence, index):
 # 1. The aligned readings
 #
 
-# The LibriTTS-R utterances with MFA labels - [(id, subset, speaker, text path, phone label path)]
-def libritts_utterances():
-    utterances = []
-    for subset in sorted(os.listdir(LABEL_DIR)):
-        for speaker in sorted(os.listdir(os.path.join(LABEL_DIR, subset))):
-            for chapter in sorted(os.listdir(os.path.join(LABEL_DIR, subset, speaker))):
-                for name in sorted(os.listdir(os.path.join(LABEL_DIR, subset, speaker, chapter))):
-                    utterance = name[:-len('.lab')]
-                    text_path = os.path.join(LIBRITTS_DIR, subset, speaker, chapter, utterance + '.normalized.txt')
-                    if name.endswith('.lab') and os.path.exists(text_path):
-                        utterances.append((utterance, subset, speaker, text_path, os.path.join(LABEL_DIR, subset, speaker, chapter, name)))
-    return utterances
-
-
-_WORDS = None
-
-
-# The aligned candidate tokens of an utterance (a worker task) - a record or None
-def aligned_task(utterance):
-    utterance_id, subset, speaker, text_path, phone_lab = utterance
-    with open(text_path, encoding='utf-8') as file:
-        text = file.read().strip()
-    inventory = {word: entry['readings'] for word, entry in _WORDS.items()}
-    _, tokens = readings_module.utterance_readings(text, phone_lab, inventory, lambda word: [])
-    if not tokens:
-        return None
-    offsets = [offset for item, offset in text_items(text) if isinstance(item, str)]
-    return {'id': utterance_id, 'subset': subset, 'speaker': speaker, 'text': text,
-            'tokens': [{'position': token['position'], 'offset': offsets[token['position']], 'word': token['word'],
-                        'reading': token['reading']} for token in tokens]}
-
-
-# Set a worker's candidate words
-def set_words(words):
-    global _WORDS  # pylint: disable=global-statement
-    _WORDS = words
-
-
 def aligned_command(args):
-    """The aligned readings of the candidate words - <out>/aligned.jsonl"""
+    """The measured readings of the candidate words in the training speech - <out>/aligned.jsonl"""
+    from . import tts  # pylint: disable=import-outside-toplevel
     words = candidate_words(load_spec())
-    utterances = libritts_utterances()
+    records = readings_module.read_readings(tts.corpus_dir(tts.load_settings()))
+    if records is None:
+        print('aligned: the corpus\'s readings aren\'t measured - python -m picovox_train.measure', file=sys.stderr)
+        return 1
     os.makedirs(args.out, exist_ok=True)
     count = 0
-    with multiprocessing.Pool(args.jobs, initializer=set_words, initargs=(words,)) as pool, \
-            open(os.path.join(args.out, 'aligned.jsonl'), 'w', encoding='utf-8') as file:
-        for record in pool.imap(aligned_task, utterances, chunksize=64):
-            if record is not None:
-                file.write(json.dumps(record) + '\n')
-                count += len(record['tokens'])
-    print(f'aligned: {len(utterances)} utterances, {count} candidate tokens with an aligned reading ({len(words)} candidate words)')
+    with open(os.path.join(args.out, 'aligned.jsonl'), 'w', encoding='utf-8') as file:
+        for record in records:
+            tokens = [token for token in record['tokens'] if token['word'] in words and token['reading'] is not None]
+            if tokens:
+                offsets = [offset for item, offset in text_items(record['text']) if isinstance(item, str)]
+                file.write(json.dumps({'id': record['id'], 'book': os.path.splitext(record['book'])[0], 'voice': record['key'],
+                                       'text': record['text'],
+                                       'tokens': [{'position': token['position'], 'offset': offsets[token['position']],
+                                                   'word': token['word'], 'reading': token['reading']} for token in tokens]}) + '\n')
+                count += len(tokens)
+    print(f'aligned: {len(records)} measured clips, {count} candidate tokens with a measured reading ({len(words)} candidate words)')
     return 0
 
 
@@ -364,7 +283,7 @@ def tag_book(task):
 
 
 def tag_command(args):
-    """Tag the aligned utterances and the books' paragraphs with the candidate words - <out>/aligned-tags.jsonl,
+    """Tag the aligned clips and the books' paragraphs with the candidate words - <out>/aligned-tags.jsonl,
     <out>/books.jsonl (-j worker processes, each tagging whole batches of utterances and whole books)"""
     words = candidate_words(load_spec())
     books_dir = args.books or BOOKS_DIR
@@ -384,7 +303,7 @@ def tag_command(args):
         with open(os.path.join(args.out, 'aligned-tags.jsonl'), 'w', encoding='utf-8') as file:
             for record, record_tags in zip(records, tags):
                 file.write(json.dumps({'id': record['id'], 'tags': record_tags}) + '\n')
-        print(f'tag: {len(records)} aligned utterances', flush=True)
+        print(f'tag: {len(records)} aligned clips', flush=True)
         count = 0
         with open(os.path.join(args.out, 'books.jsonl'), 'w', encoding='utf-8') as file:
             for name, tagged in pool.imap(tag_book, [(books_dir, name, pins) for name in book_names()]):
@@ -410,11 +329,6 @@ def regression_windows():
     return windows
 
 
-# Whether an aligned speaker is held out
-def held_out_speaker(speaker):
-    return int(hashlib.sha1(speaker.encode('utf-8')).hexdigest(), 16) % 100 < HELD_OUT_PERCENT
-
-
 # The examples of texts' words - (text, [(offset, reading in dictionary order)]) - [{window, word, reading}]
 def text_examples(text, labeled):
     items = text_items(text)
@@ -426,6 +340,15 @@ def text_examples(text, labeled):
         if index is not None and sequence[index] == word:
             examples.append({'window': context_window(sequence, index), 'word': word, 'reading': reading})
     return examples
+
+
+# The reading a collocation gives a word's token at a text's offset (dictionary order), or None
+def collocation_reading(collocations, words, text, offset, word):
+    context = text[max(0, offset - 40):offset + len(word) + 40].lower()
+    for pattern, variant in collocations.get(word, []):
+        if pattern.search(context):
+            return readings_module.reading_of(variant, words[word]['readings'])
+    return None
 
 
 # The validation of the tag mappings against the aligned readings - {word: {agree, total}} and {family: {agree, total}}
@@ -453,10 +376,25 @@ def validate_mappings(words, aligned, aligned_tags):
 
 
 # Whether a word's tag mapping is validated - it agrees with the word's aligned readings (the audio) on at least
-# MIN_AGREEMENT of at least MIN_VALIDATE tokens
-def mapping_valid(word, by_word):
+# MIN_AGREEMENT of at least MIN_VALIDATE tokens; a family word of fewer whose readings the corpus can't measure (stress
+# alone, or a class whose method its controls didn't pass - measurable False) takes its family's mapping as it is (the
+# noun/verb stress pairs, the -ate words); another family word of fewer, its family's on MIN_AGREEMENT of at least
+# MIN_FAMILY_VALIDATE (0: none)
+def mapping_valid(word, by_word, family=None, by_family=None, measurable=True):
     own = by_word.get(word, {'agree': 0, 'total': 0})
-    return own['total'] >= MIN_VALIDATE and own['agree'] / own['total'] >= MIN_AGREEMENT
+    if own['total'] >= MIN_VALIDATE:
+        return own['agree'] / own['total'] >= MIN_AGREEMENT
+    if family not in (None, 'own') and not measurable:
+        return True
+    group = (by_family or {}).get(family, {'agree': 0, 'total': 0})
+    return MIN_FAMILY_VALIDATE > 0 and group['total'] >= MIN_FAMILY_VALIDATE and group['agree'] / group['total'] >= MIN_AGREEMENT
+
+
+# The classes of readings the corpus measures - {class: used} (measure.py's summary; none when it isn't measured)
+def measured_classes():
+    from . import tts  # pylint: disable=import-outside-toplevel
+    path = os.path.join(tts.corpus_dir(tts.load_settings()), 'readings', 'summary.json')
+    return read_json(path)['classes'] if os.path.exists(path) else {}
 
 
 # The G2P's default reading of each word (dictionary order) - the reading of its G2P training target (g2p.py's data
@@ -478,19 +416,34 @@ def labels_command(args):
     with open(os.path.join(args.out, 'aligned-tags.jsonl'), encoding='utf-8') as file:
         aligned_tags = {record['id']: record['tags'] for record in map(json.loads, file)}
     by_word, by_family = validate_mappings(words, aligned, aligned_tags)
-    valid = {word for word in words if mapping_valid(word, by_word)}
-    eligible = valid | {word for word, entry in words.items() if entry['curated']} | {seed['word'] for seed in spec['seeds']}
+    classes = measured_classes()
+    valid = {word for word, entry in words.items()
+             if entry['curated'] or mapping_valid(word, by_word, entry['family'], by_family,
+                                                  classes.get(readings_module.word_class(entry['readings']), False))}
+    seeded = collections.defaultdict(set)
+    for seed in spec['seeds']:
+        seeded[seed['word']].add(readings_module.reading_of(seed['phones'], words[seed['word']]['readings']))
+    unmeasured = {word for word in valid if not words[word]['curated'] and word not in seeded and
+                  not mapping_valid(word, by_word, words[word]['family'], by_family)}
+    eligible = valid | {word for word, entry in words.items() if entry['curated']} | set(seeded)
 
-    # The examples (readings in dictionary order) - aligned, silver, seeds, and collocations
-    examples = []
-    for record in aligned:
-        split = 'heldout' if held_out_speaker(record['speaker']) else 'train'
-        labeled = [(token['offset'], token['word'], token['reading']) for token in record['tokens'] if token['word'] in eligible]
-        for example in text_examples(record['text'], labeled):
-            examples.append({**example, 'source': 'aligned', 'split': split, 'group': record['speaker']})
-    silver = collections.Counter()
+    # The examples (readings in dictionary order) - aligned (a collocation's token aside), silver, seeds, and collocations
     collocations = {word: [(re.compile(pattern), variant) for pattern, variant in entries]
                     for word, entries in spec['collocations'].items()}
+    examples = []
+    disagree = collections.Counter()
+    for record in aligned:
+        split = 'heldout' if record['book'] in HELD_OUT_BOOKS else 'train'
+        labeled = []
+        for token in record['tokens']:
+            reading = collocation_reading(collocations, words, record['text'], token['offset'], token['word'])
+            if reading is not None:
+                disagree[reading != token['reading']] += 1
+            elif token['word'] in eligible and (not words[token['word']]['curated'] or token['word'] in GATE_WORDS):
+                labeled.append((token['offset'], token['word'], token['reading']))
+        for example in text_examples(record['text'], labeled):
+            examples.append({**example, 'source': 'aligned', 'split': split, 'group': record['book']})
+    silver = collections.Counter()
     transfer = collections.defaultdict(dict)
     with open(os.path.join(args.out, 'books.jsonl'), encoding='utf-8') as file:
         for record in map(json.loads, file):
@@ -509,15 +462,14 @@ def labels_command(args):
                 entry = words[item]
                 tag = record['tags'].get(str(offset))
                 surface = record['text'][offset:offset + len(item)]
+                # (a collocation decides its token - no silver example of it, which may disagree)
+                reading = collocation_reading(collocations, words, record['text'], offset, item)
+                if reading is not None:
+                    colloc.append((offset, item, reading))
+                    continue
                 reading = tag_reading(entry, tag, surface, previous.get(offset, '')) if tag and item in valid else None
                 if reading is not None:
                     labeled.append((offset, item, reading))
-                if item in collocations:
-                    context = record['text'][max(0, offset - 40):offset + len(item) + 40].lower()
-                    for pattern, variant in collocations[item]:
-                        if pattern.search(context):
-                            colloc.append((offset, item, readings_module.reading_of(variant, entry['readings'])))
-                            break
             for source, labeled_items in (('silver', labeled), ('collocation', colloc)):
                 for example in text_examples(record['text'], labeled_items):
                     if source == 'silver':
@@ -550,8 +502,10 @@ def labels_command(args):
         if default is None or word in spec['exclude']:
             continue
         total = sum(counts[word].values())
-        common = [reading for reading, count in counts[word].items() if count >= max(MIN_ALTERNATE, MIN_ALTERNATE_SHARE * total)]
-        if word not in eligible or len(common) < 2:
+        common = {reading for reading, count in counts[word].items() if count >= max(MIN_ALTERNATE, MIN_ALTERNATE_SHARE * total)}
+        if word not in eligible or len(common | seeded[word]) < 2:
+            continue
+        if word in unmeasured and total - max(counts[word].values()) < MIN_UNMEASURED_ALTERNATE:
             continue
         others = sorted((reading for reading in range(len(entry['readings'])) if reading != default),
                         key=lambda reading, word=word: (-aligned_counts[word][reading], reading))
@@ -579,6 +533,7 @@ def labels_command(args):
     print(f'labels: {len(ambiguous)} ambiguous words ({len(words)} candidates, {len(valid)} with a validated mapping), '
           f'{len(labeled)} examples: ' + ', '.join(f'{source} {split} {count}' for (source, split), count in sorted(sources.items())) +
           f'; {len(transfer_windows)} transfer windows')
+    print(f'collocations: the corpus\'s readings disagree on {disagree[True]} of {disagree[True] + disagree[False]} of their tokens')
     print('families (aligned agreement): ' +
           ', '.join(f'{family} {counts["agree"]}/{counts["total"]}' for family, counts in sorted(by_family.items())))
     return 0
@@ -587,9 +542,8 @@ def labels_command(args):
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='python -m picovox_train.contextlabels', description='The heteronym labels')
     commands = parser.add_subparsers(dest='command', required=True)
-    aligned_parser = commands.add_parser('aligned', help='the aligned readings (LibriTTS-R MFA labels)')
+    aligned_parser = commands.add_parser('aligned', help='the measured readings (the training speech - readings.py)')
     aligned_parser.add_argument('--out', required=True)
-    aligned_parser.add_argument('-j', '--jobs', type=int, default=6)
     aligned_parser.set_defaults(func=aligned_command)
     books_parser = commands.add_parser('books', help='fetch the recipe\'s books (pinned Project Gutenberg texts)')
     books_parser.add_argument('--books', help='the books directory (default: the recipe\'s)')

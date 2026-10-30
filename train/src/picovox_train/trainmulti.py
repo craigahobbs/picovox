@@ -2,8 +2,8 @@
 # https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
-Training the multi-speaker, multi-style model (model.py's MultiModel) - end-to-end training through the
-differentiable synthesizer (dsynth.py), over many speakers and the emotional styles:
+Training the multi-speaker model (model.py's MultiModel) - end-to-end training through the differentiable synthesizer
+(dsynth.py), over the voices of the training speech:
 
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.trainmulti --name multi-a --recipe teacher.a
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.trainmulti --name multi-b --recipe teacher.b \
@@ -12,32 +12,25 @@ differentiable synthesizer (dsynth.py), over many speakers and the emotional sty
 --recipe takes the settings of a section of make train's recipe (train/data/train.json - its keys are the flags), and
 flags given override them.
 
-The corpora (data.py's format, memory-mapped - the audio is read a crop at a time):
-
-- the American reader pool, build/nn/data/multi/ (multi.py) - LibriTTS-R readers and CMU ARCTIC slt, bdl, clb,
-  rms; each speaker's row in the speaker table is its train/data/speakers.json id (index.json's speaker 'index')
-- the emotional speech, build/nn/data/cremad/ (cremad.py) - CREMA-D's 91 actors, rows READERS + their index, and
-  their six intended emotions: neutral is the zero style; the others are rows of the style table, scaled by the
-  intensity (INTENSITY - low, medium, high; unspecified is medium)
-
-Each batch is from one corpus (--cremad is the share of emotional batches). Training renders at --rate (24 kHz, the
-corpora's rate) and compares below each utterance's own band: the recordings' bandwidths differ (ARCTIC and CREMA-D
-stop at 8 kHz, LibriTTS-R at 12 kHz), so the rendering and the recording are both low-passed at 0.95 of the
-recording's bandwidth before the losses, and the spectral losses stop at --max-hz (the synthesizer's harmonic taper).
+The corpus (data.py's format, memory-mapped - the audio is read a crop at a time) is the training speech,
+build/nn/data/tts/ (tts.py) - a local TTS model's voices, each speaker's row in the speaker table its index.json
+'index' (the recipe's voices, in order). Training renders at --rate (24 kHz, the corpus's rate) and compares below each
+utterance's own band - the rendering and the recording are both low-passed at 0.95 of the recording's bandwidth before
+the losses - and the spectral losses stop at --max-hz (the synthesizer's harmonic taper).
 
 The losses are losses.py's (the multi-resolution STFT and log-mel loss, durations, log F0, the fading formant guide,
 formant order, smoothness, frication band) plus:
 
-- the adversarial critic (discriminator.py, --adversarial and --feature-matching) on the reader batches only - the
-  fix for the over-smoothing of a deterministic network trained by spectral regression (wide formant bandwidths, and
-  noise filling the harmonics' valleys); the emotional recordings are noisy and echoey, so the critic never sees them
+- the adversarial critic (discriminator.py, --adversarial and --feature-matching) - the fix for the over-smoothing of
+  a deterministic network trained by spectral regression (wide formant bandwidths, and noise filling the harmonics'
+  valleys)
 - the sonorant frication penalty (--sonorant-frication) - vowels, liquids, glides, and nasals have no frication source:
   in their frames the frication noise (af) above the voicing level less --sonorant-af-db is penalized, so the critic's
   push for aperiodic high-frequency energy goes to the aspiration (glottal-modulated, through the tract) rather than
   to flat static
-- a smoothness penalty on each speaker's channel equalizer (its second differences), so blended curves stay smooth
+- a smoothness penalty on each speaker's channel equalizer (its second differences)
 
-Checkpoints and the log go to build/nn/runs/<name>/ (last.pt every --save-every steps, best.pt - the lowest reader
+Checkpoints and the log go to build/nn/runs/<name>/ (last.pt every --save-every steps, best.pt - the lowest
 validation score, validated every --val-every steps from --val-from and at the end, step-<n>.pt every --keep-every steps,
 log.jsonl).
 
@@ -64,8 +57,8 @@ import soxr
 import torch
 
 from . import RECIPE_PATH, ROOT, discriminator, dsynth, optim, params
-from .data import DATA_DIR, ArcticData
-from .model import FIRST_PHONE, INTENSITY, STYLE_NAMES, MultiModel, core_parameter_count, parameter_count, save_checkpoint
+from .data import DATA_DIR, CorpusData
+from .model import FIRST_PHONE, MultiModel, core_parameter_count, parameter_count, save_checkpoint
 from .losses import F_INDEX, PRIORS, duration_loss, f0_track, render_values, spectral_loss
 
 
@@ -79,9 +72,9 @@ RUNS_DIR = os.environ.get('NN_RUNS_DIR', os.path.join(ROOT, 'build', 'nn', 'runs
 IN_FLIGHT = 2
 
 
-# The head's starting point - between the ARCTIC speakers' priors
-MULTI_PRIORS = {name: (PRIORS['slt'][name] * PRIORS['bdl'][name]) ** 0.5 if PRIORS['slt'][name] > 0 else
-                (PRIORS['slt'][name] + PRIORS['bdl'][name]) / 2 for name in PRIORS['slt']}
+# The head's starting point - between the female and the male priors
+MULTI_PRIORS = {name: (PRIORS['female'][name] * PRIORS['male'][name]) ** 0.5 if PRIORS['female'][name] > 0 else
+                (PRIORS['female'][name] + PRIORS['male'][name]) / 2 for name in PRIORS['female']}
 
 # The sonorant tokens - vowels, liquids, glides, nasals (vocab.json)
 SONORANTS = ('L', 'M', 'N', 'NG', 'R', 'W', 'Y')
@@ -99,9 +92,9 @@ def sonorant_mask(vocab):
 class Corpus:
     """A corpus's utterances of a split, ready for training - the audio stays memory-mapped"""
 
-    def __init__(self, name, split, speaker_offset=0, max_items=None, seed=0):
+    def __init__(self, name, split, max_items=None, seed=0):
         self.name = name
-        self.data = ArcticData(os.path.join(DATA_DIR, name))
+        self.data = CorpusData(os.path.join(DATA_DIR, name))
         speakers = self.data.index['speakers']
         channels = self.data.index['channels']
         entries = self.data.entries(split)
@@ -116,18 +109,13 @@ class Corpus:
             tracks = numpy.array(self.data.frames[frame_slice], dtype=numpy.float32)
             frame_count = entry['frameCount']
             floor, ceiling = settings['pitchFloor'], settings['pitchCeiling']
-            emotion = entry.get('emotion')
-            if emotion and emotion in settings.get('pitchRanges', {}):
-                floor, ceiling = settings['pitchRanges'][emotion]
             voiced = tracks[:, channels.index('voiced')] > 0.5
             self.items.append({
-                'id': entry['id'], 'speaker': speaker_offset + settings['index'],
-                'emotion': STYLE_NAMES.index(emotion) if emotion in STYLE_NAMES else -1,
-                'intensity': INTENSITY.get(entry.get('intensity'), 0.75) if emotion in STYLE_NAMES else 0.0,
+                'id': entry['id'], 'speaker': settings['index'],
                 'tokens': numpy.array(self.data.tokens[tokens], dtype=numpy.int64),
                 'durations': numpy.array(self.data.durations[tokens], dtype=numpy.int64),
                 'frameCount': frame_count, 'sampleOffset': entry['sampleOffset'], 'sampleCount': entry['sampleCount'],
-                'bandwidth': settings.get('bandwidth', 8000),
+                'bandwidth': settings['bandwidth'],
                 'f0': f0_track(tracks[:, channels.index('f0')], voiced, frame_count, floor, ceiling),
                 'voiced': numpy.repeat(voiced, 2),
                 'formants': numpy.stack([tracks[:, channels.index(f'f{number}')] for number in (1, 2, 3)], axis=-1),
@@ -209,8 +197,7 @@ def collate_host(corpus, indices, bucket_ratio=0):
     host = {
         'tokens': torch.from_numpy(tokens), 'durations': torch.from_numpy(durations), 'f0': torch.from_numpy(f0),
         'voiced': torch.from_numpy(voiced), 'formants': torch.from_numpy(formants), 'formantWeight': torch.from_numpy(formant_weight),
-        'speaker': torch.tensor([item['speaker'] for item in items]), 'emotion': torch.tensor([item['emotion'] for item in items]),
-        'intensity': torch.tensor([item['intensity'] for item in items], dtype=torch.float32),
+        'speaker': torch.tensor([item['speaker'] for item in items]),
         'renderCounts': torch.tensor([2 * item['frameCount'] for item in items])
     }
     # The model's frame count (model.py regulate - the longest utterance's total duration, at least 1; or the bucket)
@@ -316,10 +303,10 @@ class Prefetcher:
         except BaseException as error:  # pylint: disable=broad-except
             self.queue.put(error)
 
-    # One step's data (the training loop's draws from rng, in order: the corpus, the batch, the seed, the crops)
+    # One step's data (the training loop's draws from rng, in order: the batch, the seed, the crops)
     def _prepare(self):
         args = self.args
-        name = 'cremad' if 'cremad' in self.corpora and self.rng.random() < args.cremad else 'multi'
+        name = 'tts'
         batch = collate_host(self.corpora[name], next(self.streams[name]), getattr(args, 'bucket_ratio', 0))
         seed = int(self.rng.integers(1 << 30))
         total = 2 * batch['frameCount'] + 1
@@ -379,8 +366,8 @@ def quality_stats(values, frame_mask):
 # The loss terms of a batch - ({name: tensor}, the rendered crops, the recorded crops), both band-limited; prepared is
 # the step's data made ahead (Prefetcher) - the crops, the recordings', and the cycle plan - else they're made here
 def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, prepared=None, with_values=False):
-    outputs = model(batch['tokens'], batch['durations'], batch['speaker'], batch['emotion'], batch['intensity'],
-                    speaker_vector=batch.get('speakerVector'), frame_count=batch.get('frameCount'))
+    outputs = model(batch['tokens'], batch['durations'], batch['speaker'], speaker_vector=batch.get('speakerVector'),
+                    frame_count=batch.get('frameCount'))
     unit = outputs['unit']
     losses = {}
     losses['durPhone'], losses['durPause'], losses['durPaused'] = duration_loss(outputs['duration'], batch['tokens'], batch['durations'])
@@ -507,7 +494,7 @@ def recipe_defaults(section, path=RECIPE_PATH):
 
 # The command line's parser
 def argument_parser():
-    parser = argparse.ArgumentParser(prog='python -m picovox_train.trainmulti', description='Train the multi-speaker, multi-style model')
+    parser = argparse.ArgumentParser(prog='python -m picovox_train.trainmulti', description='Train the multi-speaker model')
     # (the training settings' defaults are the recipe's teacher.defaults)
     parser.add_argument('--name', required=True)
     parser.add_argument('--recipe', help='the settings of a section of the recipe (teacher.a), flags overriding them')
@@ -521,7 +508,6 @@ def argument_parser():
                         help='pad token and frame counts up to a geometric ladder of this ratio (0: no fixed shapes)')
     parser.add_argument('--rate', type=int)
     parser.add_argument('--max-hz', type=float)
-    parser.add_argument('--cremad', type=float, help='the share of batches from the emotional speech')
     parser.add_argument('--lr', type=float)
     parser.add_argument('--warmup', type=int)
     parser.add_argument('--duration-weight', type=float)
@@ -547,7 +533,7 @@ def argument_parser():
     parser.add_argument('--val-every', type=int, default=1000)
     parser.add_argument('--val-from', type=int, default=0, help='validate (every --val-every steps) from this step on')
     parser.add_argument('--save-every', type=int, default=1000, help='save last.pt every this many steps (and at validations)')
-    parser.add_argument('--val-count', type=int, help='reader validation utterances')
+    parser.add_argument('--val-count', type=int, help='validation utterances')
     parser.add_argument('--log-every', type=int, default=50)
     parser.add_argument('--keep-every', type=int, default=5000, help='keep step-<n>.pt every this many steps (0: none)')
     parser.add_argument('--device', default='mps' if torch.backends.mps.is_available() else 'cpu')
@@ -586,28 +572,19 @@ def main(argv=None):
     rng = numpy.random.default_rng(args.seed)
     device = torch.device(args.device)
 
-    # Data - the readers, and the emotional speech after them in the speaker table
+    # Data - the training speech, its voices the speaker table's rows
     start = time.time()
-    readers = Corpus('multi', 'train')
-    reader_count = 1 + max(settings['index'] for settings in readers.data.index['speakers'].values())
-    val_sets = {'multi': Corpus('multi', 'val', max_items=args.val_count)}
-    cremad = None
-    if args.cremad > 0:
-        cremad = Corpus('cremad', 'train', speaker_offset=reader_count)
-        val_sets['cremad'] = Corpus('cremad', 'val', speaker_offset=reader_count)
-    cremad_index = ArcticData(os.path.join(DATA_DIR, 'cremad')).index
-    speaker_keys = [None] * (reader_count + len(cremad_index['speakers']))
-    for key, settings in readers.data.index['speakers'].items():
+    corpus_set = Corpus('tts', 'train')
+    val_sets = {'tts': Corpus('tts', 'val', max_items=args.val_count)}
+    speakers = corpus_set.data.index['speakers']
+    speaker_keys = [None] * (1 + max(settings['index'] for settings in speakers.values()))
+    for key, settings in speakers.items():
         speaker_keys[settings['index']] = key
-    for key, settings in cremad_index['speakers'].items():
-        speaker_keys[reader_count + settings['index']] = key
-    print(f'data: {len(readers)} reader utterances, {len(cremad) if cremad else 0} emotional, val ' +
-          ', '.join(f'{name} {len(corpus)}' for name, corpus in val_sets.items()) + f' ({time.time() - start:.1f} s)',
-          file=sys.stderr, flush=True)
-    sonorants = torch.tensor(sonorant_mask(readers.data.index['vocab']), device=device)
+    print(f'data: {len(corpus_set)} utterances, val {len(val_sets["tts"])} ({time.time() - start:.1f} s)', file=sys.stderr, flush=True)
+    sonorants = torch.tensor(sonorant_mask(corpus_set.data.index['vocab']), device=device)
 
     # The model, the critic, and the optimizers
-    config = {'speakers': len(speaker_keys), 'vocab': len(readers.data.index['vocab']), **json.loads(args.config)}
+    config = {'speakers': len(speaker_keys), 'vocab': len(corpus_set.data.index['vocab']), **json.loads(args.config)}
     model = MultiModel(config, priors=MULTI_PRIORS, dropout=args.dropout).to(device)
     if args.init:
         state = torch.load(args.init, map_location=device, weights_only=False)
@@ -667,19 +644,15 @@ def main(argv=None):
             extra = {**(extra or {}), 'critic': critic.state_dict(), 'criticOptimizer': critic_optimizer.state_dict()}
         save_checkpoint({'model': model.state_dict(), 'optimizer': optimizer.state_dict(),
                          'scheduler': scheduler.state_dict(), 'step': step, 'best': best, 'config': model.config,
-                         'priors': MULTI_PRIORS, 'speakers': speaker_keys, 'readerCount': reader_count,
-                         'styles': list(STYLE_NAMES), 'args': vars(args), **(extra or {})}, path)
+                         'priors': MULTI_PRIORS, 'speakers': speaker_keys, 'args': vars(args), **(extra or {})}, path)
 
-    streams = {'multi': batch_stream(readers, args.batch, args.max_frames, rng)}
-    corpora = {'multi': readers}
-    if cremad is not None:
-        streams['cremad'] = batch_stream(cremad, args.batch, args.max_frames, rng)
-        corpora['cremad'] = cremad
+    streams = {'tts': batch_stream(corpus_set, args.batch, args.max_frames, rng)}
+    corpora = {'tts': corpus_set}
     log = open(os.path.join(directory, 'log.jsonl'), 'a', encoding='utf-8')  # pylint: disable=consider-using-with
     sums = {}
     sum_counts = {}
     # The steps' loss and statistics tensors since the last log row - read only when it's written (each read
-    # synchronizes): (key prefix, loss keys, statistics keys, the values [losses + statistics])
+    # synchronizes): (loss keys, statistics keys, the values [losses + statistics])
     pending = []
     last_time = time.time()
     model.train()
@@ -692,15 +665,14 @@ def main(argv=None):
     in_flight = collections.deque()
     while step < stop:
         prepared = prefetcher.next()
-        corpus = prepared['corpusName']
         batch = upload(prepared['batch'], device)
         if args.speaker_noise > 0:
-            vectors = model.speaker_vector(batch['speaker'])
+            vectors = model.speaker(batch['speaker'])
             batch['speakerVector'] = vectors + args.speaker_noise * torch.randn_like(vectors)
         progress = step / args.steps
         guide = max(args.guide_floor, 1 - (1 - args.guide_floor) * progress / args.guide_steps)
         losses, audio, target, stats = batch_losses(model, synth, batch, args, None, prepared['seed'], guide, sonorants, prepared)
-        if critic is not None and corpus == 'multi':
+        if critic is not None:
             # The critic's step (on the rendering, detached), then the generator's adversarial and feature-matching
             # losses (after --adversarial-start steps of the critic alone). The discriminators' input spectrograms don't
             # depend on their weights, so each signal's are computed once for both passes.
@@ -747,22 +719,21 @@ def main(argv=None):
             in_flight.append((event, prepared))
             while len(in_flight) > IN_FLIGHT:
                 in_flight.popleft()[0].synchronize()
-        prefix = '' if corpus == 'multi' else 'cremad.'
-        pending.append((prefix, list(losses), list(stats),
+        pending.append((list(losses), list(stats),
                         torch.stack([value.detach().float() for value in losses.values()] + list(stats.values()))))
         if step % args.log_every == 0 or len(pending) >= 1000:
             # The pending steps' values, read at once, summed in step order (as floats, as they were read each step)
-            read = torch.cat([values for _, _, _, values in pending]).cpu().tolist()
+            read = torch.cat([values for _, _, values in pending]).cpu().tolist()
             offset = 0
-            for prefix_keys, loss_keys, stat_keys, _ in pending:
+            for loss_keys, stat_keys, _ in pending:
                 step_values = read[offset:offset + len(loss_keys) + len(stat_keys)]
                 offset += len(step_values)
                 for key, value in zip(loss_keys + stat_keys, step_values):
                     # (statistics are NaN without strong frames - left out)
                     if key in stat_keys and math.isnan(value):
                         continue
-                    sums[prefix_keys + key] = sums.get(prefix_keys + key, 0) + value
-                    sum_counts[prefix_keys + key] = sum_counts.get(prefix_keys + key, 0) + 1
+                    sums[key] = sums.get(key, 0) + value
+                    sum_counts[key] = sum_counts.get(key, 0) + 1
             pending = []
             # (a plan made ahead that didn't match its frames - one finished on the device can't be made again)
             if synth.deferred_plan_mismatches():  # pragma: no cover - plans are finished on the device only on the Apple GPU
@@ -778,17 +749,14 @@ def main(argv=None):
             log.flush()
             sums, sum_counts = {}, {}
         # Validation (every --val-every steps from --val-from, and the last step) - the best checkpoint is the lowest
-        # reader score; last.pt every --save-every steps and at each validation; step-<n>.pt every --keep-every steps.
+        # score; last.pt every --save-every steps and at each validation; step-<n>.pt every --keep-every steps.
         # (Validation draws from no training random state - its own rng, eval mode, the synthesizer's seeded noise - so
         # the schedule doesn't change the training.)
         validating = step == stop or (step % args.val_every == 0 and step >= args.val_from)
         extra = None
         if validating:
             results = {name: validate(model, synth, corpus_set, args, device, sonorants) for name, corpus_set in val_sets.items()}
-            result = dict(results['multi'])
-            for name, other in results.items():
-                if name != 'multi':
-                    result.update({f'{name}.{key}': value for key, value in other.items()})
+            result = dict(results['tts'])
             print('  VAL ' + ' '.join(f'{key} {value:.4g}' for key, value in result.items()), file=sys.stderr, flush=True)
             log.write(json.dumps({'val': {'step': step, **result}}) + '\n')
             log.flush()

@@ -86,39 +86,29 @@ class TestModel(unittest.TestCase):
         self.assertEqual(outputs['frameMask'].shape, (2, 13, 1))
         self.assertEqual(outputs['frameMask'][1, :, 0].sum().item(), 5)
         self.assertTrue(((outputs['unit'] > 0) & (outputs['unit'] < 1)).all())
-        # A known frame count, the speaker and style, and a speaker vector
-        speaker = torch.tensor([1, 2])
-        styled = network(tokens, durations, speaker=speaker, emotion=torch.tensor([0, -1]), intensity=torch.tensor([1.0, 0.5]),
-                         frame_count=16)
-        self.assertEqual(styled['unit'].shape, (2, 32, params.COUNT))
-        vector = network(tokens, durations, speaker_vector=network.speaker_vector(speaker), emotion=torch.tensor([0, -1]),
-                         intensity=torch.tensor([1.0, 0.5]), frame_count=16)
-        self.assertTrue(torch.allclose(vector['unit'], styled['unit']))
+        # A known frame count, the speaker, and a speaker vector
+        speaker = torch.tensor([1, 0])
+        spoken = network(tokens, durations, speaker=speaker, frame_count=16)
+        self.assertEqual(spoken['unit'].shape, (2, 32, params.COUNT))
+        vector = network(tokens, durations, speaker_vector=network.speaker(speaker), frame_count=16)
+        self.assertTrue(torch.allclose(vector['unit'], spoken['unit']))
         # Speaker 0 by default
         self.assertTrue(torch.allclose(network(tokens, durations, speaker=torch.tensor([0, 0]))['unit'], outputs['unit']))
 
     def test_condition(self):
         network = model.MultiModel(tiny_config())
-        speaker = torch.tensor([1, 3])
-        # Neutral (-1) is the zero style; no emotion is the zero style; intensity defaults to 1
-        neutral = network.condition(speaker, torch.tensor([-1, -1]), torch.tensor([1.0, 1.0]))
-        self.assertEqual(neutral.shape, (2, 1, 8))
-        self.assertTrue(torch.equal(neutral, network.condition(speaker)))
-        full = network.condition(speaker, torch.tensor([2, 2]))
-        self.assertTrue(torch.allclose(full[:, 0, 4:], network.style[2].expand(2, -1)))
-        half = network.condition(speaker, torch.tensor([2, 2]), torch.tensor([0.5, 0.5]))
-        self.assertTrue(torch.allclose(half[:, 0, 4:], 0.5 * network.style[2].expand(2, -1)))
-        # Blends - speaker weights and style weights
-        weights = torch.tensor([[0.0, 0.5, 0.0, 0.5]])
-        self.assertTrue(torch.allclose(network.speaker_vector(weights), (network.speaker.weight[1] + network.speaker.weight[3])[None] / 2))
-        style_weights = torch.tensor([[0.0, 1.0, 0.0, 0.0, 0.25]])
-        self.assertTrue(torch.allclose(network.style_vector(style_weights, None), (network.style[1] + 0.25 * network.style[4])[None]))
-        # The equalizer of ids and blends
+        speaker = torch.tensor([1, 0])
+        # The speaker's row, or a given vector
+        condition = network.condition(speaker)
+        self.assertEqual(condition.shape, (2, 1, 4))
+        self.assertTrue(torch.equal(condition[:, 0], network.speaker.weight[speaker]))
+        vector = torch.ones(2, 4)
+        self.assertTrue(torch.equal(network.condition(speaker, vector)[:, 0], vector))
+        # The equalizer of ids
         with torch.no_grad():
             network.eq_free.normal_()
         table = params.EQ_RANGE_DB * torch.tanh(network.eq_free)
         self.assertTrue(torch.allclose(network.eq(speaker), table[speaker]))
-        self.assertTrue(torch.allclose(network.eq(weights), (table[1] + table[3])[None] / 2))
 
     def test_predicted_durations(self):
         tokens = torch.tensor([[model.BOS, 20, model.WORD, 21, 5, model.PAD]])
@@ -158,5 +148,5 @@ class TestModel(unittest.TestCase):
         self.assertEqual(result['frames'].tolist(), (result['durations'].sum(dim=1) * 2 + 1).tolist())
         self.assertTrue(torch.equal(result['values'][:, -1], result['values'][:, -2]))
         self.assertFalse(result['values'].requires_grad)
-        styled = network.infer(tokens, speaker=torch.tensor([1, 1]), emotion=torch.tensor([3, 3]), intensity=torch.tensor([1.0, 1.0]))
-        self.assertEqual(styled['values'].shape[-1], params.COUNT)
+        spoken = network.infer(tokens, speaker=torch.tensor([1, 1]))
+        self.assertEqual(spoken['values'].shape[-1], params.COUNT)

@@ -7,6 +7,7 @@
 const rootUrl = new URL('../../', import.meta.url);
 const refreshMs = 1000;
 const stalledMs = 3 * 60 * 1000;
+const sessionGapMs = 60 * 60 * 1000;
 const stoppedMs = 30 * 60 * 1000;
 
 
@@ -239,8 +240,8 @@ function runCard(run, onSelect, selected) {
 
 
 // What the training measurements mean - each chart's (?) explanation. Losses are lower-is-better. "val" is measured on
-// held-out recordings every 1,000 steps; "train (smoothed)" is the training batches' running value. A "cremad." prefix
-// is the same measurement on the emotional speech (the CREMA-D actors).
+// held-out recordings (the training speech's validation clips) every 1,000 steps; "train (smoothed)" is the training
+// batches' running value.
 const chartHelp = {
     'total': 'The weighted sum of every training loss below - what the optimizer minimizes. It mixes units, so compare it ' +
         'only within one run; the spectral loss is the cleaner yardstick.',
@@ -256,9 +257,9 @@ const chartHelp = {
     'lr': 'The learning rate - how big each update is. It warms up, then decays on a cosine schedule.',
     'durPhone': 'Phone-duration error (log units) - how far the predicted length of each speech sound is from the ' +
         'recording\'s.',
-    'durPause': 'Pause-placement error - whether the model puts a pause at each word or phrase boundary where the reader ' +
+    'durPause': 'Pause-placement error - whether the model puts a pause at each word or phrase boundary where the voice ' +
         'did (a classification loss).',
-    'durPaused': 'Pause-length error (log units), at the boundaries where the reader paused.',
+    'durPaused': 'Pause-length error (log units), at the boundaries where the voice paused.',
     'f0': 'Pitch (F0) error in log units on voiced frames - the training loss behind the cents chart.',
     'formant': 'The formant guide - how far the first three formants (F1-F3, the vocal-tract resonances that make vowels) ' +
         'are from Praat\'s measurements of the recording. Weighted heavily early, then faded (guide), so the spectral loss ' +
@@ -289,13 +290,9 @@ const chartHelp = {
 };
 
 
-// The explanation of a measurement - its own, or an emotional-speech variant of one
+// The explanation of a measurement, or null
 function measureHelp(key) {
-    if (key in chartHelp) {
-        return chartHelp[key];
-    }
-    const base = key.startsWith('cremad.') ? key.slice('cremad.'.length) : null;
-    return base !== null && base in chartHelp ? `On the emotional speech (CREMA-D): ${chartHelp[base]}` : null;
+    return chartHelp[key] ?? null;
 }
 
 
@@ -508,24 +505,69 @@ async function loadLogs(files) {
 }
 
 
-// Render the activity logs - make train's 12 most recently updated (all of them with "Show older logs"), each one's
-// tail - rebuilt only when they change
+// Render the activity logs - make train's 12 most recently updated (all of them with "Show older logs", only those
+// updated in the last 3 minutes with "Active only"), each one's tail - its last 14 lines, or 500 in a tall pane, the
+// full width, when expanded - rebuilt only when they change, each keeping its scroll position unless at its end
 let logsKey = null;
 let logHeads = [];
+let logPres = new Map();
 const recentCount = 12;
+const tailLines = 14;
+const expandedLines = 500;
 const olderKey = 'training-dashboard-older-logs-v1';
+const activeKey = 'training-dashboard-active-logs-v1';
+const expandedKey = 'training-dashboard-expanded-logs-v1';
 const olderToggle = document.getElementById('olderLogs');
+const activeToggle = document.getElementById('activeLogs');
 olderToggle.checked = storageGet(olderKey) === 'true';
+activeToggle.checked = storageGet(activeKey) === 'true';
+const expandedLogs = new Set(parseStoredList(storageGet(expandedKey)));
 olderToggle.addEventListener('change', () => {
     storageSet(olderKey, String(olderToggle.checked));
     renderLogs(lastLogs);
 });
+activeToggle.addEventListener('change', () => {
+    storageSet(activeKey, String(activeToggle.checked));
+    renderLogs(lastLogs);
+});
+
+// A stored JSON list - [] if missing or invalid
+function parseStoredList(text) {
+    try {
+        const value = JSON.parse(text ?? '[]');
+        return Array.isArray(value) ? value : [];
+    } catch {
+        return [];
+    }
+}
+
+// Expand or collapse a log
+function toggleLog(path) {
+    if (expandedLogs.has(path)) {
+        expandedLogs.delete(path);
+    } else {
+        expandedLogs.add(path);
+    }
+    storageSet(expandedKey, JSON.stringify([...expandedLogs]));
+    renderLogs(lastLogs);
+}
+
 function renderLogs(allLogs) {
-    const activeLogs = allLogs.filter(({result}) => Date.now() - result.modified < stalledMs).length;
-    setTabFact('tabFactLogs', activeLogs === 0 ? '' : `${activeLogs} active`);
+    const activeLogs = allLogs.filter(({result}) => Date.now() - result.modified < stalledMs);
+    setTabFact('tabFactLogs', activeLogs.length === 0 ? '' : `${activeLogs.length} active`);
+    document.getElementById('activeCount').textContent = `(${activeLogs.length})`;
     document.getElementById('olderCount').textContent = `(${Math.max(0, allLogs.length - recentCount)} more)`;
-    const logs = olderToggle.checked ? allLogs : allLogs.slice(0, recentCount);
-    const key = logs.map(({file, result}) => `${file.path} ${result.modified} ${result.text.length}`).join('\n');
+    olderToggle.disabled = activeToggle.checked;
+    let logs;
+    if (activeToggle.checked) {
+        logs = activeLogs;
+    } else if (olderToggle.checked) {
+        logs = allLogs;
+    } else {
+        logs = allLogs.slice(0, recentCount);
+    }
+    const key = logs.map(({file, result}) => `${file.path} ${result.modified} ${result.text.length} ${expandedLogs.has(file.path)}`).
+        join('\n');
     if (key === logsKey && logs.length !== 0) {
         logs.forEach(({file, result}, index) => {
             logHeads[index].textContent = logHeading(file, result);
@@ -533,20 +575,39 @@ function renderLogs(allLogs) {
         return;
     }
     logsKey = key;
+
+    // Each shown log's scroll position - kept unless it was at its end (then it follows the new lines)
+    const scrolls = new Map([...logPres].map(([path, pre]) => [path,
+        pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 4 ? null : pre.scrollTop]));
     logHeads = [];
+    logPres = new Map();
     if (logs.length === 0) {
-        logsElement.replaceChildren(make('p', 'empty', 'No logs yet.'));
+        let empty = 'No logs yet.';
+        if (allLogs.length !== 0) {
+            empty = 'No active logs - none updated in the last 3 minutes.';
+        }
+        logsElement.replaceChildren(make('p', 'empty', empty));
         return;
     }
     logsElement.replaceChildren(...logs.map(({file, result, lines}) => {
-        const wrap = make('div', 'log');
-        const head = make('h3', '', logHeading(file, result));
-        logHeads.push(head);
+        const expanded = expandedLogs.has(file.path);
+        const wrap = make('div', expanded ? 'log expanded' : 'log');
+        const head = make('h3');
+        const title = make('span', '', logHeading(file, result));
+        logHeads.push(title);
+        const button = make('button', 'log-expand', expanded ? 'Collapse' : 'Expand');
+        button.type = 'button';
+        button.setAttribute('aria-expanded', String(expanded));
+        button.title = expanded ? `Show the last ${tailLines} lines` : `Show the last ${expandedLines} lines, the full width`;
+        button.addEventListener('click', () => toggleLog(file.path));
+        head.append(title, button);
         wrap.append(head);
-        const pre = make('pre', '', lines.slice(-14).join('\n'));
+        const pre = make('pre', '', lines.slice(expanded ? -expandedLines : -tailLines).join('\n'));
+        logPres.set(file.path, pre);
         wrap.append(pre);
+        const scroll = scrolls.get(file.path) ?? null;
         requestAnimationFrame(() => {
-            pre.scrollTop = pre.scrollHeight;
+            pre.scrollTop = scroll === null ? pre.scrollHeight : scroll;
         });
         return wrap;
     }));
@@ -574,7 +635,7 @@ const trainSamplesHelp = 'make train renders listening samples of each training 
     '(its own CPU stage, beside the next GPU stage): teacher A (its last checkpoint, which teacher B starts from), teacher B ' +
     '(its best - the distillation\'s teacher), the student (its best, before the polish), and the polished student (its ' +
     'best - the model the package stage packages, if it passes the gate). Each speaks the recipe\'s texts ' +
-    '(train/data/train.json samples) in six of the training speakers\' voices, three female and three male, exactly as the ' +
+    '(train/data/train.json samples) in six of the voices, three female and three male, exactly as the ' +
     'package speaks (exported and quantized as the package stage exports it, its G2P network, 24 kHz, its gain). Beside each ' +
     'is the shipped model, ' +
     'lib/models/voiceModel.js, rendered the same way - so the new model can be judged by ear (make train installs ' +
@@ -640,7 +701,7 @@ async function renderTrainSamples() {
         if (model.samples.length === 0) {
             const stageName = model.stage;
             const status = {
-                'waiting': `waiting - rendered when the ${model.key === 'reference' ? 'readers\' data' : model.key} stage finishes`,
+                'waiting': `waiting - rendered when the ${model.key === 'reference' ? 'voices\' data' : model.key} stage finishes`,
                 'queued': 'rendering...', 'running': 'rendering...', 'stopped': 'stopped - make train isn\'t running',
                 'failed': `failed - see logs/${stageName}.log`, 'skipped': 'not in this run\'s make target'
             }[model.status] ?? model.status;
@@ -768,6 +829,13 @@ async function loadTrain() {
         fetchText(new URL('util.log', dirUrl))
     ]);
     const events = eventsResult === null ? new Map() : trainModel.parseStageEvents(eventsResult.text);
+    // (a stage with its stamp but no events - marked up to date, make -o or touch - is done as of its stamp)
+    await Promise.all(manifest.stages.filter((stage) => !events.has(stage.stage)).map(async (stage) => {
+        const stamp = await fetchText(new URL(`${encodeURIComponent(stage.stage)}.done`, dirUrl));
+        if (stamp !== null) {
+            events.set(stage.stage, {'start': stamp.modified, 'end': stamp.modified, 'fail': null, 'failure': null});
+        }
+    }));
     const stageLogs = new Map();
     await Promise.all(manifest.stages.filter((stage) => events.has(stage.stage)).map(async (stage) => {
         const result = await fetchText(new URL(`logs/${encodeURIComponent(stage.stage)}.log`, dirUrl));
@@ -787,11 +855,20 @@ async function loadTrain() {
     const queued = new Set([...stageLogs].filter(([, result]) => (
         /^gpulock: waiting/.test(lastMatch([result.text], /^gpulock: /) || '')
     )).map(([name]) => name));
-    // (make runs while its utilization sampler writes)
-    const alive = utilResult !== null && Date.now() - utilResult.modified < 90000;
-    // (the run's target and start - make train and its targets record them in stages.jsonl)
+    // (make runs while its utilization sampler writes, or while a started stage writes its log - a stage target run alone
+    // has no sampler)
+    const writing = [...stageLogs].some(([name, result]) => {
+        const event = events.get(name);
+        return event.end === null && event.fail === null && Date.now() - result.modified < stalledMs;
+    });
+    const alive = (utilResult !== null && Date.now() - utilResult.modified < 90000) || writing;
+    // (the run's target and start - make train and its targets record them in stages.jsonl; the run starts no earlier
+    // than the latest session of stage activity - an hour with nothing running ends a session)
     const runTarget = eventsResult === null ? null : trainModel.parseRunTarget(eventsResult.text);
-    const states = trainModel.stageStates(manifest, {events, alive, queued, 'target': runTarget?.target, 'started': runTarget?.time});
+    const session = trainModel.sessionStart(events, Date.now(), sessionGapMs);
+    const latest = Math.max(runTarget?.time ?? -Infinity, session ?? -Infinity);
+    const runStart = Number.isFinite(latest) ? latest : null;
+    const states = trainModel.stageStates(manifest, {events, alive, queued, 'target': runTarget?.target, 'started': runStart});
     document.getElementById('trainTitle').firstChild.nodeValue = `make ${runTarget?.target ?? manifest.target}`;
 
     // The training runs (TRAIN_DIR/runs/<run>/), each stopped at its recipe's stop
@@ -832,9 +909,9 @@ async function loadTrain() {
         return stage.minutes;
     };
     const plan = trainModel.forecast(manifest, states, remaining, now);
+    // (the run's start - its session's, else its first stage's)
     const starts = [...states.values()].map((state) => state.start).filter((time) => time !== null);
-    const firstEvent = Math.min(...[...events.values()].map((event) => event.start ?? Infinity));
-    const start = Math.min(firstEvent, ...starts);
+    const start = runStart ?? Math.min(...starts);
     const counted = [...states.values()].filter((state) => state.status !== 'skipped');
     let status = 'waiting';
     // (no record at all in TRAIN_DIR - not a run waiting to start, but the wrong directory or no make train yet)
@@ -842,15 +919,17 @@ async function loadTrain() {
         status = `no make train record in ${dir}/ - start make train, or open the dashboard with ?train=DIR`;
     } else if (counted.length !== 0 && counted.every((state) => state.status === 'done')) {
         status = 'finished';
-    } else if (counted.some((state) => state.status === 'failed')) {
-        status = 'failed';
     } else if (alive && Number.isFinite(start)) {
         status = 'running';
+    } else if (counted.some((state) => state.status === 'failed')) {
+        status = 'failed';
     } else if (Number.isFinite(start)) {
         status = 'stopped';
     }
     const end = status === 'finished' ? Math.max(...counted.map((state) => state.end)) : null;
-    const samples = utilResult === null ? [] : trainModel.parseUtilLog(utilResult.text, Number.isFinite(start) ? start : now);
+    // (the run's samples - from its start)
+    const samples = utilResult === null ? [] : trainModel.parseUtilLog(utilResult.text, Number.isFinite(start) ? start : now).
+        filter((sample) => !Number.isFinite(start) || sample.time >= start);
 
     // The gates' results - the evaluations (picovox_train.distill eval and pick) and the checks in the logs
     const [teacherResult, baselineResult, studentResult, summaryResult] = await Promise.all(['distill/eval/teacher/result.json',
@@ -896,7 +975,7 @@ const trainHelp = {
     'util': 'How busy the machine is over the run: the CPU busy % (all cores, from top) and the GPU utilization % ' +
         '(ioreg\'s "Device Utilization %"), sampled every 20 seconds into TRAIN_DIR/util.log by make train. Shaded: ' +
         'the GPU idle (under 10%) - time the GPU-bound critical path isn\'t moving, unless a CPU stage on it is running. ' +
-        'Below, each stage as a band over its time (blue: GPU stage, green: CPU stage, gray: network); the faded bands ' +
+        'Below, each stage as a band over its time (blue: GPU stage, green: CPU stage); the faded bands ' +
         'after now are the forecast. The goal is both near 100% for the shortest time.',
     'stages': 'Every stage of make train, grouped, in the order they can run: waiting (its inputs aren\'t done), queued ' +
         '(waiting for the GPU lock), running, done, failed, stopped (started, but make isn\'t running - resumable), or ' +
@@ -1265,7 +1344,7 @@ function renderUtilization(data, force) {
         facts.push(`run mean CPU ${Math.round(mean.cpu)}% · GPU ${Math.round(mean.gpu)}% · GPU idle ${formatDuration(idle / 1000)} of ` +
             `${formatDuration(sampled / 1000)} sampled${limitedText}`);
     } else {
-        facts.push('no samples yet - make train writes TRAIN_DIR/util.log');
+        facts.push('no samples yet - make\'s utilization sampler (tools/trainutil.sh) writes TRAIN_DIR/util.log');
     }
     document.getElementById('utilFacts').textContent = facts.join(' · ');
     if (force || Date.now() - utilDrawn > 10000) {
@@ -1292,7 +1371,7 @@ function drawUtilization(canvas, data) {
     context.scale(ratio, ratio);
     const styles = getComputedStyle(document.documentElement);
     const color = (name) => styles.getPropertyValue(name).trim();
-    const classColor = {'gpu': color('--accent'), 'cpu': color('--series-3'), 'network': color('--muted')};
+    const classColor = {'gpu': color('--accent'), 'cpu': color('--series-3')};
     const start = Number.isFinite(data.start) ? data.start : data.now;
     const end = Math.max(data.end ?? data.now, data.status === 'finished' ? 0 : plan.eta, start + 60000);
     const plotX = (time) => pad.left + (time - start) / (end - start) * (width - pad.left - pad.right);
@@ -1340,9 +1419,11 @@ function drawUtilization(canvas, data) {
         context.fillStyle = state.status === 'skipped' ? color('--rule') : color('--muted');
         context.fillText(stage.stage, 4, top + 9);
         const band = (from, to, fill) => {
-            if (Number.isFinite(from) && Number.isFinite(to) && to > from) {
+            // (clipped to the run - a stage done in an earlier session isn't drawn)
+            if (Number.isFinite(from) && Number.isFinite(to) && to > Math.max(from, start)) {
                 context.fillStyle = fill;
-                context.fillRect(plotX(from), top + 2, Math.max(1.5, plotX(to) - plotX(from)), laneHeight - 4);
+                const left = Math.max(from, start);
+                context.fillRect(plotX(left), top + 2, Math.max(1.5, plotX(to) - plotX(left)), laneHeight - 4);
             }
         };
         const solid = state.status === 'failed' ? color('--bad') : classColor[stage.on];
@@ -1383,7 +1464,7 @@ function drawUtilization(canvas, data) {
 // The utilization chart's legend
 document.getElementById('utilLegend').append(...[
     ['CPU busy %', '--series-3'], ['GPU utilization %', '--accent'], ['GPU idle (shaded)', '--warn'], ['GPU stage', '--accent'],
-    ['CPU stage', '--series-3'], ['network stage', '--muted']
+    ['CPU stage', '--series-3']
 ].map(([label, name]) => {
     const swatch = make('span', '', label);
     swatch.style.setProperty('--swatch', `var(${name})`);

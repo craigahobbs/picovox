@@ -208,6 +208,15 @@ class TestG2p(unittest.TestCase):
         self.assertEqual(data['weightCounts']['mat\'s'], 1)
         self.assertNotIn(monitored, data['monitor'])
 
+    def test_load_data_books_relabeled(self):
+        # A possessive the books added (add_books - no longer a label) follows its stem's relabel
+        books_path = os.path.join(self.directory.name, 'g2p-books.json')
+        self.files[books_path] = {'labels': {}, 'books': {'one': {'counts': {'cat\'s': 1}}}}
+        self.files[g2p.WORDS_PATH] = dict(WORDS, labels=dict(WORDS['labels'], **{'cat\'s': 'K AE1 T S'}),
+                                          stems=dict(WORDS['stems'], **{'cat\'s': ['cat', 'derived']}))
+        self.assertEqual(g2p.load_data(books=books_path)['first']['cat\'s'], ['K', 'AE1', 'T', 'S'])
+        self.assertEqual(g2p.load_data(self.relabel_path, books=books_path)['first']['cat\'s'], ['K', 'AA1', 'T', 'S'])
+
     def test_command_book(self):
         books_path = os.path.join(self.directory.name, 'g2p-books.json')
         with open(books_path, 'w', encoding='utf-8') as file:
@@ -323,13 +332,24 @@ class TestG2p(unittest.TestCase):
         self.assertIn('base: step 3/3 loss', log)
         self.assertIn(f'2 steps from {os.path.join(out, "base.pt")}', log)
 
-        # Resumed - the stages done before are kept; --steps for each stage
+        # Resumed - a stage of the same inputs kept (its checkpoint and digest there), one of other inputs (its relabels,
+        # its steps - --steps for each stage) trained again
+        def train_log(*arguments):
+            with captured():
+                self.assertEqual(g2p.main(['train', '--out', out, '--config', self.config_path, *arguments]), 0)
+            with open(os.path.join(out, 'train.log'), encoding='utf-8') as file:
+                return file.read()
         os.remove(os.path.join(out, 'focus.pt'))
-        with captured():
-            self.assertEqual(g2p.main(['train', '--out', out, '--config', self.config_path, '--steps', '1']), 0)
-        with open(os.path.join(out, 'train.log'), encoding='utf-8') as file:
-            log = file.read()
+        log = train_log()
         self.assertIn(f'base: done before ({os.path.join(out, "base.pt")})', log)
+        self.assertEqual(log.count(f'2 steps from {os.path.join(out, "base.pt")}'), 2)
+        self.assertIn(f'focus: done before ({os.path.join(out, "focus.pt")})', train_log())
+        self.files[self.relabel_path] = {'relabel': {'lead': 'L EH1 D'}}
+        log = train_log()
+        self.assertEqual(log.count(f'base: done before ({os.path.join(out, "base.pt")})'), 3)
+        self.assertEqual(log.count(f'2 steps from {os.path.join(out, "base.pt")}'), 3)
+        log = train_log('--steps', '1')
+        self.assertIn('base: step 1/1 loss', log)
         self.assertIn(f'1 steps from {os.path.join(out, "base.pt")}', log)
 
         # The measures of a module (the committed one) and of a checkpoint

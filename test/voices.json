@@ -1,246 +1,101 @@
 {
- "description": "The designed audiobook voices and styles of the multi-speaker, multi-style model (lib/models/voiceModel.js) - the design record (each voice's archetype and genres) of lib/synthesis.js's voice and style tables, which speak them (test/testSynthesis.js checks that the tables match it). A voice is a blend of the speaker table's American readers (blend - speaker keys of the manifest's speakers and weights summing to 1), with mild interpretable adjustments of the parameter frames (adjust - pitchScale, tractScale, effort in dB; lib/transforms.js) and a default speaking rate (rate - the speed, 1 is the model's own). A style applies the model's style embedding (model - an emotion and intensity), parameter transforms (transform - applied after the voice's), and a rate (multiplying the voice's); neutral applies none.",
+ "description": "The voices and styles of the multi-speaker model (lib/models/voiceModel.js) - the design record (each voice's archetype) of lib/synthesis.js's voice and style tables, which speak them (test/testSynthesis.js checks that the tables match it). A voice is one speaker of the model's speaker table (its key - one voice of the local TTS model the voice model was trained from, train/data/train.json's tts voices). A style applies parameter transforms (transform - lib/transforms.js, applied after the voice's) and a rate (the speed, 1 is the voice's own); neutral applies none.",
  "model": "multi",
  "voices": [
   {
-   "id": "narrator-f",
-   "name": "Sarah",
-   "sex": "female",
-   "archetype": "warm literary narrator",
-   "description": "A warm, unhurried storyteller with a mid-low, rounded tone - an easy companion for a long novel.",
-   "genres": [
-    "literary fiction",
-    "classics",
-    "historical fiction",
-    "romance",
-    "memoir"
-   ],
-   "blend": {
-    "libritts-1462": 0.53,
-    "libritts-5789": 0.47
-   },
-   "adjust": {
-    "tractScale": 0.97
-   },
-   "rate": 0.97
-  },
-  {
-   "id": "mature-f",
-   "name": "Helen",
-   "sex": "female",
-   "archetype": "mature, authoritative",
-   "description": "A mature, composed voice, lower and slower, with quiet authority for weighty books.",
-   "genres": [
-    "biography",
-    "history",
-    "classics",
-    "mystery",
-    "drama"
-   ],
-   "blend": {
-    "libritts-8324": 0.41,
-    "libritts-4481": 0.3,
-    "libritts-2182": 0.29
-   },
-   "adjust": {
-    "pitchScale": 0.95,
-    "tractScale": 0.98
-   },
-   "rate": 0.9
-  },
-  {
-   "id": "bright-f",
-   "name": "Amy",
-   "sex": "female",
-   "archetype": "young and bright",
-   "description": "A young, bright, lively voice, higher and quicker, for younger readers and light-hearted stories.",
-   "genres": [
-    "children's",
-    "young adult",
-    "fantasy",
-    "adventure",
-    "humor"
-   ],
-   "blend": {
-    "libritts-2836": 0.5,
-    "libritts-226": 0.5
-   },
-   "adjust": {
-    "pitchScale": 1.04
-   },
-   "rate": 1.03
-  },
-  {
-   "id": "brisk-f",
-   "name": "Kate",
-   "sex": "female",
-   "archetype": "brisk and clear",
-   "description": "A brisk, clear, articulate voice with a crisp tone that keeps facts and arguments moving.",
-   "genres": [
-    "nonfiction",
-    "science",
-    "essays",
-    "business",
-    "self-help"
-   ],
-   "blend": {
-    "libritts-5895": 0.43,
-    "libritts-6078": 0.4,
-    "libritts-7635": 0.17
-   },
-   "adjust": {
-    "tractScale": 0.97
-   },
-   "rate": 1.06
-  },
-  {
-   "id": "gentle-f",
-   "name": "Grace",
-   "sex": "female",
-   "archetype": "gentle and soft",
-   "description": "A gentle, soft, slow voice with a dark, quiet tone for winding down.",
-   "genres": [
-    "poetry",
-    "bedtime stories",
-    "picture books",
-    "meditation",
-    "fairy tales"
-   ],
-   "blend": {
-    "libritts-84": 0.31,
-    "libritts-6272": 0.24,
-    "libritts-2910": 0.23,
-    "libritts-1088": 0.22
-   },
-   "adjust": {
-    "effort": -2
-   },
-   "rate": 0.9
-  },
-  {
-   "id": "narrator-m",
-   "name": "James",
+   "key": "male",
+   "label": "Male",
    "sex": "male",
-   "archetype": "warm literary narrator",
-   "description": "A warm, relaxed storyteller with a mid-low, rounded tone for long-form fiction.",
-   "genres": [
-    "literary fiction",
-    "classics",
-    "historical fiction",
-    "westerns",
-    "memoir"
-   ],
-   "blend": {
-    "libritts-2518": 0.35,
-    "libritts-1624": 0.25,
-    "libritts-2911": 0.21,
-    "libritts-6529": 0.19
-   },
-   "adjust": {},
-   "rate": 0.96
+   "archetype": "warm and buoyant - the default",
+   "description": "A warm, buoyant male voice over a resonant mid-low core - the default."
   },
   {
-   "id": "mature-m",
-   "name": "Robert",
-   "sex": "male",
-   "archetype": "mature, authoritative",
-   "description": "A mature, deep, deliberate voice with a grave authority for serious and older books.",
-   "genres": [
-    "history",
-    "biography",
-    "classics",
-    "philosophy",
-    "thrillers"
-   ],
-   "blend": {
-    "libritts-4397": 0.44,
-    "libritts-2803": 0.42,
-    "libritts-2514": 0.14
-   },
-   "adjust": {
-    "pitchScale": 0.95,
-    "tractScale": 0.96
-   },
-   "rate": 0.93
+   "key": "female",
+   "label": "Female",
+   "sex": "female",
+   "archetype": "modern and confident",
+   "description": "A modern, confident, and friendly female voice."
   },
   {
-   "id": "bright-m",
-   "name": "Michael",
-   "sex": "male",
-   "archetype": "young and bright",
-   "description": "A young, bright, energetic voice, higher and quicker, for younger readers and adventure.",
-   "genres": [
-    "children's",
-    "young adult",
-    "adventure",
-    "fantasy",
-    "humor"
-   ],
-   "blend": {
-    "libritts-2893": 0.55,
-    "libritts-2428": 0.45
-   },
-   "adjust": {
-    "pitchScale": 1.04,
-    "tractScale": 1.04
-   },
-   "rate": 0.98
+   "key": "sarah",
+   "label": "Sarah",
+   "sex": "female",
+   "archetype": "cheerful and resonant",
+   "description": "A cheerful female voice with real resonance under it, personable and decisive."
   },
   {
-   "id": "brisk-m",
-   "name": "David",
-   "sex": "male",
-   "archetype": "brisk and clear",
-   "description": "A brisk, clear, matter-of-fact voice with a crisp tone for explanation and reportage.",
-   "genres": [
-    "nonfiction",
-    "science",
-    "journalism",
-    "technology",
-    "business"
-   ],
-   "blend": {
-    "arctic-bdl": 0.37,
-    "libritts-4441": 0.34,
-    "libritts-6241": 0.29
-   },
-   "adjust": {},
-   "rate": 0.99
+   "key": "helen",
+   "label": "Helen",
+   "sex": "female",
+   "archetype": "low and grounded",
+   "description": "A low, grounded female voice, quick to the point, with a sincere tone."
   },
   {
-   "id": "gentle-m",
-   "name": "Thomas",
+   "key": "amy",
+   "label": "Amy",
+   "sex": "female",
+   "archetype": "young and playful",
+   "description": "A young, playful, and upbeat female voice."
+  },
+  {
+   "key": "kate",
+   "label": "Kate",
+   "sex": "female",
+   "archetype": "settled and kind",
+   "description": "A settled, even-toned, and kind female voice with crisp consonants."
+  },
+  {
+   "key": "grace",
+   "label": "Grace",
+   "sex": "female",
+   "archetype": "soft and relaxed",
+   "description": "A rounded, soft-edged female voice with an easy, relaxed delivery."
+  },
+  {
+   "key": "james",
+   "label": "James",
    "sex": "male",
-   "archetype": "gentle and soft",
-   "description": "A gentle, soft, slow voice with a dark, calm tone for poetry and quiet evenings.",
-   "genres": [
-    "poetry",
-    "bedtime stories",
-    "meditation",
-    "fairy tales",
-    "nature writing"
-   ],
-   "blend": {
-    "libritts-4018": 0.45,
-    "libritts-4898": 0.33,
-    "libritts-3436": 0.22
-   },
-   "adjust": {
-    "effort": -2,
-    "tractScale": 1.03
-   },
-   "rate": 0.91
+   "archetype": "resonant and decisive",
+   "description": "A resonant, decisive male voice with a wide dynamic range."
+  },
+  {
+   "key": "robert",
+   "label": "Robert",
+   "sex": "male",
+   "archetype": "trim and steady",
+   "description": "A trim, focused male voice with a steady, low-set core."
+  },
+  {
+   "key": "michael",
+   "label": "Michael",
+   "sex": "male",
+   "archetype": "buoyant and energetic",
+   "description": "A buoyant, energetic male voice with a playful lift at the ends of phrases."
+  },
+  {
+   "key": "david",
+   "label": "David",
+   "sex": "male",
+   "archetype": "punchy and crisp",
+   "description": "A punchy, close male voice with crisp consonants and a pitch that lifts across each line."
+  },
+  {
+   "key": "thomas",
+   "label": "Thomas",
+   "sex": "male",
+   "archetype": "high-energy and encouraging",
+   "description": "A high-energy, encouraging male voice."
   }
  ],
  "styles": [
   {
-   "id": "neutral",
+   "key": "neutral",
    "label": "Neutral",
    "kind": "emotion",
    "description": "The voice as designed - plain narration."
   },
   {
-   "id": "angry",
+   "key": "angry",
    "label": "Angry",
    "kind": "emotion",
    "transform": [
@@ -257,102 +112,93 @@
      "frication": 3
     }
    ],
-   "description": "A pressed, raised, louder voice - angry without the angry embedding, which sounded muffled."
+   "description": "A pressed, raised, louder voice."
   },
   {
-   "id": "happy",
+   "key": "happy",
    "label": "Happy",
    "kind": "emotion",
-   "model": {
-    "emotion": "happy",
-    "intensity": 0.7
-   },
    "transform": [
+    {
+     "press": 5
+    },
+    {
+     "pitchScale": 1.23
+    },
+    {
+     "level": -0.8
+    }
+   ],
+   "description": "A brighter, much higher voice."
+  },
+  {
+   "key": "sad",
+   "label": "Sad",
+   "kind": "emotion",
+   "transform": [
+    {
+     "pitchRange": 0.93
+    },
     {
      "press": 2
     },
     {
-     "pitchScale": 1.04
+     "pitchScale": 0.97
     },
     {
-     "level": 2
+     "level": -3.3
     },
     {
-     "frication": 2
+     "frication": 2.9
     }
    ],
-   "description": "The happy style embedding, a little brighter, higher, and louder."
+   "rate": 0.97,
+   "description": "A quieter, lower, flatter, and slower voice."
   },
   {
-   "id": "sad",
-   "label": "Sad",
-   "kind": "emotion",
-   "model": {
-    "emotion": "sad",
-    "intensity": 0.6
-   },
-   "transform": [
-    {
-     "level": 2.5
-    },
-    {
-     "frication": 2.5
-    }
-   ],
-   "description": "The sad style embedding (lower, slower, and darker)."
-  },
-  {
-   "id": "fearful",
+   "key": "fearful",
    "label": "Fearful",
    "kind": "emotion",
-   "model": {
-    "emotion": "fearful",
-    "intensity": 0.6
-   },
    "transform": [
     {
      "whisper": 0.15
     },
     {
-     "pitchScale": 1.1
+     "pitchScale": 1.23
     },
     {
-     "level": 2
+     "level": -2.4
     },
     {
-     "frication": 2
+     "frication": 2.9
     }
    ],
-   "rate": 1.08,
-   "description": "The fearful style embedding, a little breathy, higher, and quicker."
+   "rate": 1.1,
+   "description": "A breathy, quieter, much higher, and quicker voice."
   },
   {
-   "id": "disgusted",
+   "key": "disgusted",
    "label": "Disgusted / contemptuous",
    "kind": "emotion",
-   "model": {
-    "emotion": "disgusted",
-    "intensity": 0.5
-   },
    "transform": [
     {
-     "press": 2
+     "press": 4.8
     },
     {
      "pitchScale": 0.95
     },
     {
-     "level": 1
+     "level": -2.4
     },
     {
-     "frication": 1
+     "frication": 1.9
     }
    ],
-   "rate": 0.9,
-   "description": "The disgusted style embedding, a little pressed, lower, and slower."
+   "rate": 0.83,
+   "description": "A pressed, quieter, lower, and much slower voice."
   },
   {
-   "id": "whisper",
+   "key": "whisper",
    "label": "Whisper",
    "kind": "mode",
    "transform": [
@@ -369,7 +215,7 @@
    "description": "No voicing - the breath (aspiration) only."
   },
   {
-   "id": "soft",
+   "key": "soft",
    "label": "Soft",
    "kind": "mode",
    "transform": [
@@ -384,7 +230,7 @@
    "description": "A quieter voice, a little slower."
   },
   {
-   "id": "shouting",
+   "key": "shouting",
    "label": "Shouting",
    "kind": "mode",
    "transform": [
@@ -404,7 +250,7 @@
    "description": "A pressed, bright, raised voice, a little louder - its consonants with it."
   },
   {
-   "id": "dialogue",
+   "key": "dialogue",
    "label": "Dialogue",
    "kind": "mode",
    "transform": [
@@ -425,7 +271,7 @@
    "description": "Neutral dialogue - a little higher, brighter, and quicker than the narration (style auto's quotations)."
   },
   {
-   "id": "exclaim",
+   "key": "exclaim",
    "label": "Exclaim",
    "kind": "mode",
    "transform": [

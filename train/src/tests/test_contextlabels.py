@@ -15,10 +15,10 @@ import types
 import unittest
 import unittest.mock
 
-from picovox_train import contextlabels, corpora, g2p
+from picovox_train import contextlabels, corpora, g2p, readings, tts
 from picovox_train.books import load_pins
 
-from . import data_fixtures, helpers
+from . import ctc_fixtures, data_fixtures, helpers
 from .helpers import captured
 
 
@@ -52,11 +52,6 @@ class FakeNlp:
         return tokens
 
 
-# Speakers held out (by the hash) and not
-def speaker(held_out):
-    return next(f'{number}' for number in range(1000) if contextlabels.held_out_speaker(f'{number}') == held_out)
-
-
 # The tiny candidate words
 def tiny_words():
     return {
@@ -78,7 +73,6 @@ class TestContextLabels(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.directory)
-        contextlabels.set_words(None)
 
     def path(self, *parts):
         return os.path.join(self.directory, *parts)
@@ -95,24 +89,26 @@ class TestContextLabels(unittest.TestCase):
         self.assertIn('words', contextlabels.load_spec())
 
     def test_vowels(self):
-        self.assertEqual(contextlabels.variant_vowels('R IH0 K AO1 R D'), ['IH0', 'AO1'])
-        self.assertEqual(contextlabels.primary_vowel('R IH0 K AO1 R D'), 1)
-        self.assertIsNone(contextlabels.primary_vowel('S T'))
+        self.assertEqual(readings.variant_vowels('R IH0 K AO1 R D'), ['IH0', 'AO1'])
+        self.assertEqual(readings.primary_vowel('R IH0 K AO1 R D'), 1)
+        self.assertIsNone(readings.primary_vowel('S T'))
 
     def test_word_family(self):
-        self.assertEqual(contextlabels.word_family('record', [['R EH1 K ER0 D'], ['R IH0 K AO1 R D']]), 'stress')
-        self.assertEqual(contextlabels.word_family('estimate', [['EH1 S T AH0 M AH0 T'], ['EH1 S T AH0 M EY2 T']]), 'ate')
-        self.assertEqual(contextlabels.word_family('estimates', [['EH1 S T AH0 M AH0 T S'], ['EH1 S T AH0 M EY2 T S']]), 'ate')
-        self.assertEqual(contextlabels.word_family('use', [['Y UW1 S'], ['Y UW1 Z']]), 'consonant')
-        self.assertEqual(contextlabels.word_family('lead', [['L IY1 D'], ['L EH1 D']]), 'vowel')
+        self.assertEqual(readings.word_family('record', [['R EH1 K ER0 D'], ['R IH0 K AO1 R D']]), 'stress')
+        self.assertEqual(readings.word_family('estimate', [['EH1 S T AH0 M AH0 T'], ['EH1 S T AH0 M EY2 T']]), 'ate')
+        self.assertEqual(readings.word_family('estimates', [['EH1 S T AH0 M AH0 T S'], ['EH1 S T AH0 M EY2 T S']]), 'ate')
+        self.assertEqual(readings.word_family('use', [['Y UW1 S'], ['Y UW1 Z']]), 'consonant')
+        self.assertEqual(readings.word_family('lead', [['L IY1 D'], ['L EH1 D']]), 'vowel')
         # (-ate with both readings' full -ate vowels is no -ate pair)
-        self.assertEqual(contextlabels.word_family('abate', [['AH0 B EY2 T'], ['IH0 B EY2 T']]), 'vowel')
+        self.assertEqual(readings.word_family('abate', [['AH0 B EY2 T'], ['IH0 B EY2 T']]), 'vowel')
 
     def test_family_reading(self):
         stress = [['R EH1 K ER0 D'], ['R IH0 K AO1 R D']]
         self.assertEqual(contextlabels.family_reading('stress', 'NN', stress), 0)
         self.assertEqual(contextlabels.family_reading('stress', 'VBD', stress), 1)
         self.assertIsNone(contextlabels.family_reading('stress', 'JJ', stress))
+        # (a reading without a primary stress - unmapped)
+        self.assertIsNone(contextlabels.family_reading('stress', 'NN', [['R EH2 K ER0 D'], ['R IH0 K AO1 R D']]))
         ate = [['EH1 S T AH0 M AH0 T'], ['EH1 S T AH0 M EY2 T']]
         self.assertEqual(contextlabels.family_reading('ate', 'VB', ate), 1)
         self.assertEqual(contextlabels.family_reading('ate', 'JJ', ate), 0)
@@ -127,10 +123,10 @@ class TestContextLabels(unittest.TestCase):
         self.assertIsNone(contextlabels.family_reading('vowel', 'NN', use))
 
     def test_voicing_pair(self):
-        self.assertTrue(contextlabels.voicing_pair([['Y UW1 S'], ['Y UW1 Z']]))
-        self.assertFalse(contextlabels.voicing_pair([['S AH0 L EH1 K T'], ['Z AH0 L EH1 K T']]))
-        self.assertFalse(contextlabels.voicing_pair([['K L OW1 S'], ['K L OW1 Z IH0']]))
-        self.assertFalse(contextlabels.voicing_pair([['K L OW1 S'], ['K L OW1 T']]))
+        self.assertTrue(readings.voicing_pair([['Y UW1 S'], ['Y UW1 Z']]))
+        self.assertFalse(readings.voicing_pair([['S AH0 L EH1 K T'], ['Z AH0 L EH1 K T']]))
+        self.assertFalse(readings.voicing_pair([['K L OW1 S'], ['K L OW1 Z IH0']]))
+        self.assertFalse(readings.voicing_pair([['K L OW1 S'], ['K L OW1 T']]))
 
     @unittest.mock.patch.object(corpora, 'read_dictionary', lambda: helpers.DICTIONARY)
     def test_candidate_words(self):
@@ -181,51 +177,49 @@ class TestContextLabels(unittest.TestCase):
         self.assertEqual(contextlabels.context_window(sequence, 1), ['', '', 'i', 'read', 'it', '.', ''])
         self.assertEqual(contextlabels.paragraphs('One\ntwo.\n\n\n  Three  four.\n\n'), ['One two.', 'Three four.'])
 
-    def write_corpus(self):
-        labels = self.path('lab', 'phone')
-        audio = self.path('LibriTTS_R')
-        utterances = [
-            (speaker(False), 'I had read it.', [('I', [('AY1', 0.0, 0.1)]),
-                                                ('had', [('HH', 0.1, 0.15), ('AE1', 0.15, 0.2), ('D', 0.2, 0.25)]),
-                                                ('read', [('R', 0.25, 0.3), ('EH1', 0.3, 0.4), ('D', 0.4, 0.45)]),
-                                                ('it', [('IH1', 0.45, 0.5), ('T', 0.5, 0.55)])]),
-            (speaker(True), 'Who lives here?', [('who', [('HH', 0.0, 0.05), ('UW1', 0.05, 0.1)]),
-                                                 ('lives', [('L', 0.1, 0.15), ('IH1', 0.15, 0.2), ('V', 0.2, 0.25), ('Z', 0.25, 0.3)]),
-                                                 ('here', [('HH', 0.3, 0.35), ('IY1', 0.35, 0.4), ('R', 0.4, 0.45)])]),
-            (speaker(False), 'Nothing to see.', [('nothing', [('N', 0.0, 0.1)]), ('to', [('T', 0.1, 0.2)]), ('see', [('S', 0.2, 0.3)])])
+    # The measured clips (readings.py's readings.jsonl) - a candidate token, a token without a measured reading, and a word
+    # that isn't a candidate
+    def write_readings(self, directory):
+        def token(position, word, reading):
+            return {'position': position, 'word': word, 'class': 'strong', 'frontEnd': 0, 'vote': reading, 'reading': reading}
+        records = [
+            {'id': 'c1', 'key': 'male', 'voice': 'Trevor', 'sex': 'male', 'book': 'pg1.txt', 'text': 'I had read it.', 'split': 'train',
+             'tokens': [token(2, 'read', 1)]},
+            {'id': 'c2', 'key': 'female', 'voice': 'Harper', 'sex': 'female', 'book': 'pg2.txt', 'text': 'Who lives here?',
+             'split': 'val', 'tokens': [token(0, 'who', 0), token(1, 'lives', 0)]},
+            {'id': 'c3', 'key': 'male', 'voice': 'Trevor', 'sex': 'male', 'book': 'pg1.txt', 'text': 'Nothing to read.', 'split': 'train',
+             'tokens': [token(2, 'read', None)]}
         ]
-        for number, (speaker_id, text, words) in enumerate(utterances):
-            utterance = f'{speaker_id}_1_{number:06d}'
-            parts = ('train-clean-100', speaker_id, '1')
-            word_lines = [f'{phones[0][1]}\t{phones[-1][2]}\t{word}' for word, phones in words] + ['0.9\t1.0\t']
-            phone_lines = [f'{start}\t{end}\t{phone}' for _, phones in words for phone, start, end in phones] + ['0.9\t1.0\tsil']
-            self.write(os.path.join(labels, *parts, utterance + '.lab'), '\n'.join(phone_lines) + '\n')
-            self.write(self.path('lab', 'word', *parts, utterance + '.lab'), '\n'.join(word_lines) + '\n')
-            self.write(os.path.join(audio, *parts, utterance + '.normalized.txt'), text + '\n')
-        # (a label without its text, and another file)
-        self.write(os.path.join(labels, *parts, 'missing.lab'), '0\t1\tsil\n')
-        self.write(os.path.join(labels, *parts, 'notes.txt'), 'x\n')
-        return labels, audio
+        self.write(os.path.join(directory, 'readings', 'readings.jsonl'), ''.join(json.dumps(record) + '\n' for record in records))
+        self.write(os.path.join(directory, 'readings', 'words.json'), json.dumps({'words': {}}))
 
     def test_aligned(self):
-        labels, audio = self.write_corpus()
+        settings = ctc_fixtures.tts_settings()
         out = self.path('out')
-        with unittest.mock.patch.object(contextlabels, 'LABEL_DIR', labels), \
-                unittest.mock.patch.object(contextlabels, 'LIBRITTS_DIR', audio), \
-                unittest.mock.patch.object(contextlabels, 'candidate_words', lambda spec: tiny_words()), \
-                unittest.mock.patch.object(contextlabels.multiprocessing, 'Pool', data_fixtures.FakePool), captured() as (stdout, _):
-            self.assertEqual(len(contextlabels.libritts_utterances()), 3)
-            self.assertEqual(contextlabels.main(['aligned', '--out', out, '-j', '1']), 0)
-        self.assertEqual(stdout.getvalue(), f'aligned: 3 utterances, 2 candidate tokens with an aligned reading ({len(tiny_words())} '
+        with unittest.mock.patch.object(tts, 'TTS_DIR', self.path('tts')), \
+                unittest.mock.patch.object(tts, 'load_settings', return_value=settings), \
+                unittest.mock.patch.object(contextlabels, 'candidate_words', lambda spec: tiny_words()):
+            # The corpus's readings not measured
+            with captured() as (stdout, stderr):
+                self.assertEqual(contextlabels.main(['aligned', '--out', out]), 1)
+            self.assertEqual(stdout.getvalue(), '')
+            self.assertIn('the corpus\'s readings aren\'t measured', stderr.getvalue())
+            self.assertFalse(os.path.exists(out))
+
+            # The measured readings of the candidate words
+            self.write_readings(tts.corpus_dir(settings))
+            with captured() as (stdout, _):
+                self.assertEqual(contextlabels.main(['aligned', '--out', out]), 0)
+        self.assertEqual(stdout.getvalue(), f'aligned: 3 measured clips, 2 candidate tokens with a measured reading ({len(tiny_words())} '
                                             'candidate words)\n')
         with open(os.path.join(out, 'aligned.jsonl'), encoding='utf-8') as file:
             records = [json.loads(line) for line in file]
-        self.assertEqual([record['tokens'] for record in records], [
-            [{'position': 2, 'offset': 6, 'word': 'read', 'reading': 1}],
-            [{'position': 1, 'offset': 4, 'word': 'lives', 'reading': 0}]
+        self.assertEqual(records, [
+            {'id': 'c1', 'book': 'pg1', 'voice': 'male', 'text': 'I had read it.',
+             'tokens': [{'position': 2, 'offset': 6, 'word': 'read', 'reading': 1}]},
+            {'id': 'c2', 'book': 'pg2', 'voice': 'female', 'text': 'Who lives here?',
+             'tokens': [{'position': 1, 'offset': 4, 'word': 'lives', 'reading': 0}]}
         ])
-        self.assertEqual(records[0]['speaker'], speaker(False))
-        self.assertEqual(records[0]['text'], 'I had read it.')
 
     # The test books (pg1, pg2) and their pins (a pins file, patched in with the recipe's texts)
     def write_books(self):
@@ -285,7 +279,7 @@ class TestContextLabels(unittest.TestCase):
                 unittest.mock.patch.object(contextlabels, 'candidate_words', lambda spec: tiny_words()), captured() as (stdout, _):
             self.assertEqual(contextlabels.main(['tag', '--out', out, '--books', books_dir, '-j', '2']), 0)
         self.assertEqual(stdout.getvalue(),
-                         'tag: 2 aligned utterances\ntag: pg1 2 paragraphs (2 in all)\ntag: pg2 1 paragraphs (3 in all)\n')
+                         'tag: 2 aligned clips\ntag: pg1 2 paragraphs (2 in all)\ntag: pg2 1 paragraphs (3 in all)\n')
         # (the utterances in chunks, each tagged in batches of TAG_BATCH in one process)
         self.assertEqual(nlp.calls, [(['I had read it.'], 64), (['Who lives here?'], 64),
                                      (['I had read the record.', 'They will read it. The lead pipes.'], 64),
@@ -316,13 +310,20 @@ class TestContextLabels(unittest.TestCase):
         self.assertEqual(windows, {('read', 'what', 'i', 'read', '.', '', ''), ('', '', 'their', 'lives', 'were', 'long', '.')})
         self.assertTrue(contextlabels.regression_windows())
 
-    def test_held_out_speaker(self):
-        number = int(hashlib.sha1(b'19').hexdigest(), 16) % 100
-        self.assertEqual(contextlabels.held_out_speaker('19'), number < contextlabels.HELD_OUT_PERCENT)
-
     def test_text_examples(self):
         examples = contextlabels.text_examples('I read it. Mr. Read.', [(2, 'read', 1), (99, 'read', 0), (0, 'read', 0)])
         self.assertEqual(examples, [{'window': ['', '', 'i', 'read', 'it', '.', 'mister'], 'word': 'read', 'reading': 1}])
+
+    def test_measured_classes(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                unittest.mock.patch.object(tts, 'load_settings', return_value=ctc_fixtures.tts_settings()), \
+                unittest.mock.patch.object(tts, 'TTS_DIR', directory):
+            self.assertEqual(contextlabels.measured_classes(), {})
+            readings_dir = os.path.join(tts.corpus_dir(ctc_fixtures.tts_settings()), 'readings')
+            os.makedirs(readings_dir)
+            with open(os.path.join(readings_dir, 'summary.json'), 'w', encoding='utf-8') as file:
+                json.dump({'classes': {'strong': True}}, file)
+            self.assertEqual(contextlabels.measured_classes(), {'strong': True})
 
     def test_validate_mappings(self):
         words = tiny_words()
@@ -338,6 +339,21 @@ class TestContextLabels(unittest.TestCase):
         self.assertFalse(contextlabels.mapping_valid('lives', by_word))
         self.assertTrue(contextlabels.mapping_valid('read', {'read': {'agree': 19, 'total': 20}}))
         self.assertFalse(contextlabels.mapping_valid('read', {'read': {'agree': 18, 'total': 20}}))
+
+        # A family word of too few aligned tokens - its family's mapping (MIN_FAMILY_VALIDATE tokens at MIN_AGREEMENT); none
+        # when MIN_FAMILY_VALIDATE is 0, and a word of enough tokens by its own alone
+        families = {'stress': {'agree': 199, 'total': 200}}
+        self.assertTrue(contextlabels.mapping_valid('record', by_word, 'stress', families))
+        self.assertFalse(contextlabels.mapping_valid('record', by_word, 'stress', {'stress': {'agree': 189, 'total': 200}}))
+        self.assertFalse(contextlabels.mapping_valid('record', by_word, 'stress', {'stress': {'agree': 199, 'total': 199}}))
+        self.assertFalse(contextlabels.mapping_valid('record', by_word, 'ate', families))
+        # A family word the corpus can't measure takes its family's mapping as it is; an own word doesn't
+        self.assertTrue(contextlabels.mapping_valid('record', by_word, 'stress', {}, measurable=False))
+        self.assertFalse(contextlabels.mapping_valid('record', by_word, 'own', {}, measurable=False))
+        self.assertFalse(contextlabels.mapping_valid('read', {'read': {'agree': 18, 'total': 20}}, 'stress', {}, measurable=False))
+        self.assertFalse(contextlabels.mapping_valid('record', {'record': {'agree': 0, 'total': 20}}, 'stress', families))
+        with unittest.mock.patch.object(contextlabels, 'MIN_FAMILY_VALIDATE', 0):
+            self.assertFalse(contextlabels.mapping_valid('record', by_word, 'stress', families))
 
     def test_default_readings(self):
         words = tiny_words()
@@ -359,20 +375,77 @@ class TestContextLabels(unittest.TestCase):
         self.assertTrue(calls[0].endswith(os.path.join('train', 'data', 'g2p-relabel.json')))
         self.assertIsNone(calls[1])
 
+    def test_labels_unmeasured(self):
+        # Words whose readings the corpus can't measure: a family word (only its family's rule maps it) needs
+        # MIN_UNMEASURED_ALTERNATE examples of its less common readings; a seeded reading always counts as common
+        out = self.path('out')
+        self.write(os.path.join(out, 'aligned.jsonl'), '')
+        self.write(os.path.join(out, 'aligned-tags.jsonl'), '')
+        stress = {'family': 'stress', 'curated': False, 'tags': {}}
+        words = {'record': {**stress, 'readings': [['R EH1 K ER0 D'], ['R IH0 K AO1 R D']]},
+                 'conduct': {**stress, 'readings': [['K AA1 N D AH0 K T'], ['K AA0 N D AH1 K T']]},
+                 'object': {**stress, 'readings': [['AA1 B JH EH0 K T'], ['AH0 B JH EH1 K T']]}}
+        books = []
+        for word, nouns, verbs in (('record', 3, 3), ('conduct', 3, 2), ('object', 4, 0)):
+            books.extend({'book': 'pg1', 'text': f'The {word}.', 'tags': {'4': 'NN'}} for _ in range(nouns))
+            books.extend({'book': 'pg1', 'text': f'They {word} it.', 'tags': {'5': 'VB'}} for _ in range(verbs))
+        self.write(os.path.join(out, 'books.jsonl'), ''.join(json.dumps(record) + '\n' for record in books))
+        spec = {'exclude': [], 'collocations': {}, 'seeds': [{'word': 'object', 'phones': 'AH0 B JH EH1 K T', 'texts': ['I object.']}]}
+        with unittest.mock.patch.object(contextlabels, 'load_spec', lambda: spec), \
+                unittest.mock.patch.object(contextlabels, 'candidate_words', lambda spec: words), \
+                unittest.mock.patch.object(contextlabels, 'default_readings', lambda words: {word: 0 for word in words}), \
+                unittest.mock.patch.object(contextlabels, 'measured_classes', lambda: {}), \
+                unittest.mock.patch.object(contextlabels, 'regression_windows', set), \
+                unittest.mock.patch.object(contextlabels, 'MIN_FAMILY_VALIDATE', 0), \
+                unittest.mock.patch.object(contextlabels, 'MIN_ALTERNATE', 2), \
+                unittest.mock.patch.object(contextlabels, 'MIN_ALTERNATE_SHARE', 0), \
+                unittest.mock.patch.object(contextlabels, 'MIN_UNMEASURED_ALTERNATE', 3), \
+                unittest.mock.patch.object(contextlabels, 'MAX_SILVER', 10), \
+                captured():
+            self.assertEqual(contextlabels.main(['labels', '--out', out]), 0)
+        with open(os.path.join(out, 'labels.json'), encoding='utf-8') as file:
+            labels = json.load(file)
+        # (record - three verbs, kept; conduct - two, common but too few; object - one seeded verb, fewer than MIN_ALTERNATE)
+        self.assertEqual(sorted(labels['words']), ['object', 'record'])
+        self.assertEqual(labels['words']['record']['counts'], [3, 3])
+        self.assertEqual(labels['words']['object']['counts'], [4, 1])
+
     def test_labels(self):
         out = self.path('out')
-        trained, held = speaker(False), speaker(True)
         aligned = []
         tags = []
         for number in range(12):
             reading = number % 2
             text = 'I had read it.' if reading else 'I will read it.'
-            aligned.append({'id': f'a{number}', 'speaker': held if number == 0 else trained, 'text': text,
+            aligned.append({'id': f'a{number}', 'book': 'pg2' if number == 0 else 'pg1', 'voice': 'male', 'text': text,
                             'tokens': [{'offset': 6 if reading else 7, 'word': 'read', 'reading': reading}]})
             tags.append({'id': f'a{number}', 'tags': {'6': 'VBD'} if reading else {'7': 'VB'}})
-        aligned.append({'id': 'b', 'speaker': trained, 'text': 'The lives.', 'tokens': [{'offset': 4, 'word': 'lives', 'reading': 1},
-                                                                                       {'offset': 0, 'word': 'nodefault', 'reading': 0}]})
+        aligned.append({'id': 'b', 'book': 'pg1', 'voice': 'female', 'text': 'The lives.',
+                        'tokens': [{'offset': 4, 'word': 'lives', 'reading': 1}, {'offset': 0, 'word': 'nodefault', 'reading': 0}]})
         tags.append({'id': 'b', 'tags': {}})
+        # (a family word of too few tokens, validated by its family's mapping)
+        aligned.append({'id': 'r', 'book': 'pg1', 'voice': 'female', 'text': 'They record it.',
+                        'tokens': [{'offset': 5, 'word': 'record', 'reading': 1}]})
+        tags.append({'id': 'r', 'tags': {'5': 'VB'}})
+        # (a family word without a validated mapping - its family's has no tokens - not an aligned example)
+        words = {**tiny_words(), 'estimate': {'readings': [['EH1 S T AH0 M AH0 T'], ['EH1 S T AH0 M EY2 T']], 'family': 'ate',
+                                              'curated': False, 'tags': {}}}
+        # (read - an inventory word here, its aligned tokens examples; lead - curated, its aligned token not an example)
+        words['read'] = {**words['read'], 'curated': False}
+        # (lead's noun tag maps to L IY1 D - "the lead pipes" is tagged a noun, but its collocation decides it: no silver)
+        words['lead'] = {**words['lead'], 'tags': {'NN': 0}}
+        aligned.append({'id': 'l', 'book': 'pg1', 'voice': 'male', 'text': 'They lead us.',
+                        'tokens': [{'offset': 5, 'word': 'lead', 'reading': 0}]})
+        tags.append({'id': 'l', 'tags': {}})
+        aligned.append({'id': 'e', 'book': 'pg1', 'voice': 'male', 'text': 'An estimate.',
+                        'tokens': [{'offset': 3, 'word': 'estimate', 'reading': 0}]})
+        tags.append({'id': 'e', 'tags': {}})
+        # (tokens a collocation decides - not aligned examples: one the corpus reads as the collocation does, one not)
+        aligned.append({'id': 'c1', 'book': 'pg1', 'voice': 'male', 'text': 'The lead pipes.',
+                        'tokens': [{'offset': 4, 'word': 'lead', 'reading': 1}]})
+        aligned.append({'id': 'c2', 'book': 'pg1', 'voice': 'female', 'text': 'A lead pipe burst.',
+                        'tokens': [{'offset': 2, 'word': 'lead', 'reading': 0}]})
+        tags.extend([{'id': 'c1', 'tags': {}}, {'id': 'c2', 'tags': {}}])
         self.write(os.path.join(out, 'aligned.jsonl'), ''.join(json.dumps(record) + '\n' for record in aligned))
         self.write(os.path.join(out, 'aligned-tags.jsonl'), ''.join(json.dumps(record) + '\n' for record in tags))
         books = [
@@ -387,14 +460,16 @@ class TestContextLabels(unittest.TestCase):
         spec = {'exclude': ['excluded'], 'collocations': {'lead': [['\\blead pipes?\\b', 'L EH1 D'], ['\\bwhite lead\\b', 'L EH1 D']]},
                 'seeds': [{'word': 'lead', 'phones': 'L IY1 D', 'texts': ['They lead the way.', 'Lead on.']},
                           {'word': 'bass', 'phones': 'B EY1 S', 'texts': ['The bass singer.']}]}
-        defaults = {word: 0 for word in tiny_words()}
+        defaults = {word: 0 for word in words}
         defaults['nodefault'] = None
         held_out = {('', '', 'they', 'lead', 'the', 'way', '.')}
         with unittest.mock.patch.object(contextlabels, 'load_spec', lambda: spec), \
-                unittest.mock.patch.object(contextlabels, 'candidate_words', lambda spec: tiny_words()), \
+                unittest.mock.patch.object(contextlabels, 'candidate_words', lambda spec: words), \
                 unittest.mock.patch.object(contextlabels, 'default_readings', lambda words: defaults), \
+                unittest.mock.patch.object(contextlabels, 'measured_classes', lambda: {'strong': True, 'weak': True}), \
                 unittest.mock.patch.object(contextlabels, 'regression_windows', lambda: held_out), \
                 unittest.mock.patch.object(contextlabels, 'MIN_VALIDATE', 3), \
+                unittest.mock.patch.object(contextlabels, 'MIN_FAMILY_VALIDATE', 1), \
                 unittest.mock.patch.object(contextlabels, 'MIN_ALTERNATE', 1), \
                 unittest.mock.patch.object(contextlabels, 'MAX_SILVER', 1), \
                 unittest.mock.patch.object(contextlabels, 'MAX_TRANSFER', 2), \
@@ -407,24 +482,30 @@ class TestContextLabels(unittest.TestCase):
         self.assertEqual(labels['words']['read'], {'readings': [['R IY1 D'], ['R EH1 D']], 'order': [0, 1], 'family': 'own',
                                                    'counts': [6, 7]})
         self.assertEqual(labels['words']['lead']['counts'], [1, 1])
-        self.assertEqual(labels['valid'], ['read'])
-        self.assertEqual(labels['validation']['words'], {'read': {'agree': 12, 'total': 12}})
+        # (the curated words' mappings are hand-written - valid; estimate - its readings measured, too few - isn't)
+        self.assertEqual(labels['valid'], ['bass', 'excluded', 'lead', 'lives', 'nodefault', 'read', 'record'])
+        self.assertEqual(labels['validation'], {'words': {'read': {'agree': 12, 'total': 12}, 'record': {'agree': 1, 'total': 1}},
+                                                'families': {'stress': {'agree': 1, 'total': 1}}})
         sources = sorted((example['word'], example['source'], example['split'], example['slot']) for example in labels['examples'])
+        # (the aligned examples' split by their book - pg2 held out)
         self.assertEqual(sources.count(('read', 'aligned', 'heldout', 0)), 1)
         self.assertEqual(sources.count(('read', 'aligned', 'train', 1)), 6)
         self.assertEqual(sources.count(('read', 'silver', 'train', 1)), 1)
         self.assertIn(('lead', 'collocation', 'train', 1), sources)
         self.assertIn(('lead', 'seed', 'train', 0), sources)
         self.assertNotIn(('lead', 'collocation', 'heldout', 1), sources)
+        self.assertFalse(any(word in ('lead', 'estimate') and source == 'aligned' for word, source, _, _ in sources))
+        self.assertEqual({example['group'] for example in labels['examples'] if example['source'] == 'aligned'}, {'pg1', 'pg2'})
         self.assertEqual(sum(1 for example in labels['examples'] if example['word'] == 'lead' and example['source'] == 'seed'), 1)
         # The transfer windows - the ambiguous words' book windows that aren't examples or the regression set's (they lead
         # the way), not the held-out books', MAX_TRANSFER a word
         self.assertEqual(labels['transfer'], [['read', '.', 'they', 'lead', 'the', 'way', '.'], ['', '', 'we', 'read', '.', 'they', 'lead'],
                                               ['', '', 'they', 'read', '.', '', '']])
         lines = stdout.getvalue().split('\n')
-        self.assertTrue(lines[0].startswith('labels: 2 ambiguous words (7 candidates, 1 with a validated mapping), '))
+        self.assertTrue(lines[0].startswith('labels: 2 ambiguous words (8 candidates, 7 with a validated mapping), '))
         self.assertTrue(lines[0].endswith('; 3 transfer windows'))
-        self.assertEqual(lines[1], 'families (aligned agreement): ')
+        self.assertEqual(lines[1], 'collocations: the corpus\'s readings disagree on 1 of 2 of their tokens')
+        self.assertEqual(lines[2], 'families (aligned agreement): stress 1/1')
 
     def test_main_module(self):
         with unittest.mock.patch.dict(sys.modules), unittest.mock.patch.object(sys, 'argv', ['contextlabels', '--help']), \

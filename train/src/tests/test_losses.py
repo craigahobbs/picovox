@@ -17,7 +17,7 @@ from .helpers import tiny_config
 class TestLosses(unittest.TestCase):
 
     def test_priors(self):
-        self.assertEqual(set(losses.PRIORS['slt']), set(losses.PRIORS['bdl']))
+        self.assertEqual(set(losses.PRIORS['female']), set(losses.PRIORS['male']))
         self.assertEqual(losses.F_INDEX, [params.INDEX[f'f{number}'] for number in range(1, 7)])
 
     def test_f0_track(self):
