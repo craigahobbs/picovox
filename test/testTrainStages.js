@@ -40,7 +40,7 @@ test('trainStages', () => {
 
     // A stage's progress counts its log's finished parts - the context network's trainings: its teachers and itself,
     // and each fold's - in a log the stage starts anew
-    for (const stage of manifest.stages.filter((item) => item.progress)) {
+    for (const stage of manifest.stages.filter((item) => item.progress && !item.progress.phases)) {
         assert.equal(typeof stage.progress.log, 'string', stage.stage);
         assert.equal(stages[stage.stage].recipe[1], `$(STAGE) -- rm -f $(TRAIN_DIR)/${stage.progress.log}`, stage.stage);
         assert(new RegExp(stage.progress.pattern).test('train-context: step 10000/10000 (quantized) loss 0.0180'), stage.stage);
@@ -49,6 +49,49 @@ test('trainStages', () => {
     const trainRecipe = JSON.parse(readFileSync(new URL('../train/data/train.json', import.meta.url), 'utf8'));
     const contextStage = manifest.stages.find((stage) => stage.stage === 'context-network');
     assert.equal(contextStage.progress.total, (trainRecipe.context.network.teachers + 1) * (trainRecipe.context.gate.folds + 1));
+
+    // The training speech's stages - their progress the phases of their commands' log lines (the Python sources' log
+    // lines, rendered), their first run's time longer, and the first run known by the corpus stage's generate line
+    const source = (name) => readFileSync(new URL(`../train/src/picovox_train/${name}`, import.meta.url), 'utf8');
+    const ttsSource = source('tts.py');
+    const measureSource = source('measure.py');
+    const logLines = {
+        'generate': [ttsSource, 'f\'tts generate: {len(clips)} clips in {directory}, {len(missing)} to generate\'',
+            'tts generate: 29475 clips in /downloads/tts/phonon, 120 to generate'],
+        'generateStep': [ttsSource,
+            'f\'  {number}/{len(missing)} clips, {total / 24000 / 3600:.2f} hours, {time.time() - start:.0f} s\'',
+            '  500/29475 clips, 1.07 hours, 52 s'],
+        'align': [ttsSource, 'f\'tts align: {len(clips)} clips, {len(todo)} to align\'', 'tts align: 29475 clips, 120 to align'],
+        'alignStep': [ttsSource, 'f\'  {offset + len(group)}/{len(todo)} clips, {time.time() - start:.0f} s\'', '  256/29475 clips, 15 s'],
+        'measure': [measureSource, 'f\'measure: {len(clips)} clips, {sum(not task.get("control") for _, task in plan)} measured tokens, \'',
+            'measure: 28000 clips, 120 measured tokens, 900 control tokens'],
+        'measureCurrent': [measureSource, 'f\'measure: {out} is current\'', 'measure: /downloads/tts/phonon/readings is current'],
+        'measureStep': [measureSource,
+            'f\'  ctc {min(len(voted), offset + args.batch)}/{len(voted)} tokens, {time.time() - start_time:.0f} s\'',
+            '  ctc 64/120 tokens, 9 s']
+    };
+    for (const [name, [text, format]] of Object.entries(logLines)) {
+        assert(text.includes(format), name);
+    }
+    const phased = (name, lines) => {
+        const stage = manifest.stages.find((item) => item.stage === name);
+        assert(stage.firstMinutes > stage.minutes, name);
+        return stage.progress.phases.map((phase, index) => {
+            const [header, step] = lines[index];
+            assert.equal(logLines[header][2].match(new RegExp(phase.header))[1], '120', `${name} ${phase.name}`);
+            assert.deepEqual(logLines[step][2].match(new RegExp(phase.step)).slice(1).length, 3, `${name} ${phase.name}`);
+            assert(phase.secondsEach > 0, `${name} ${phase.name}`);
+            return phase.name;
+        });
+    };
+    assert.deepEqual(phased('tts-corpus', [['generate', 'generateStep'], ['align', 'alignStep']]), ['generate', 'align']);
+    assert.deepEqual(phased('tts-readings', [['measure', 'measureStep'], ['align', 'alignStep']]), ['measure', 'align']);
+    const readings = manifest.stages.find((item) => item.stage === 'tts-readings');
+    assert.equal(logLines.measureCurrent[2].match(new RegExp(readings.progress.phases[0].header))[1], undefined);
+    assert.deepEqual(stages['tts-corpus'].recipe.filter((line) => line.includes('picovox_train.')).
+        map((line) => line.match(/picovox_train\.(\w+ \w+)/)[1]), ['tts generate', 'tts align']);
+    assert.equal(manifest.firstRun.stage, 'tts-corpus');
+    assert.equal(logLines.generate[2].match(new RegExp(manifest.firstRun.pattern))[1], '120');
 
     // The manifest's runs are the training runs its stages write
     assert.deepEqual(manifest.stages.filter((stage) => stage.run).map((stage) => stage.run),

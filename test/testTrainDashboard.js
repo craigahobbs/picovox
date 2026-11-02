@@ -150,6 +150,50 @@ test('train.logProgress', () => {
 });
 
 
+test('train.logProgress, phases', () => {
+    const progress = {'phases': [
+        {'name': 'make', 'header': '^make: \\d+ items, (\\d+) to make$', 'step': '^  (\\d+)/(\\d+) made, (\\d+) s$', 'secondsEach': 2},
+        {'name': 'check', 'header': '^check: (?:(\\d+) to check|current)$', 'step': '^  (\\d+)/(\\d+) checked, (\\d+) s$', 'secondsEach': 1,
+            'sameCount': true},
+        {'name': 'tidy', 'header': '^tidy: (\\d+)$', 'step': '^  (\\d+)/(\\d+) tidied, (\\d+) s$', 'secondsEach': 60}
+    ]};
+    // Before the first header - none
+    assert.equal(train.logProgress('gpulock: waiting\n', progress), null);
+    // The first phase, before its first step - its count at its secondsEach, and the later phases' (check's the same
+    // count, tidy's none - its count known when it starts)
+    assert.deepEqual(train.logProgress('make: 100 items, 30 to make\n', progress),
+        {'done': 0, 'total': 30, 'phase': 'make', 'minutesLeft': (30 * 2 + 30 * 1) / 60});
+    // At its pace - 10 of 30 in 40 s: 80 s to go, then check's 30 at a second each
+    assert.deepEqual(train.logProgress('make: 100 items, 30 to make\n  10/30 made, 40 s\n', progress),
+        {'done': 10, 'total': 30, 'phase': 'make', 'minutesLeft': (80 + 30) / 60});
+    // A later phase - its own count and pace; a header without a count (current) - none to do
+    const text = 'make: 100 items, 30 to make\n  30/30 made, 120 s\ncheck: 20 to check\n  5/20 checked, 10 s\n';
+    assert.deepEqual(train.logProgress(text, progress), {'done': 5, 'total': 20, 'phase': 'check', 'minutesLeft': 30 / 60});
+    assert.deepEqual(train.logProgress('make: 100 items, 0 to make\ncheck: current\n', progress),
+        {'done': 0, 'total': 0, 'phase': 'check', 'minutesLeft': 0});
+    assert.deepEqual(train.logProgress(`${text}tidy: 2\n  1/2 tidied, 50 s\n`, progress),
+        {'done': 1, 'total': 2, 'phase': 'tidy', 'minutesLeft': 50 / 60});
+    // The latest attempt's lines - from its first phase's last header
+    assert.deepEqual(train.logProgress(`${text}make: 100 items, 4 to make\n`, progress),
+        {'done': 0, 'total': 4, 'phase': 'make', 'minutesLeft': (4 * 2 + 4) / 60});
+});
+
+
+test('train.runManifest', () => {
+    const firstRun = {'firstRun': {'stage': 'corpus', 'pattern': '^make: \\d+ items, (\\d+) to make$'},
+        'stages': [{'stage': 'corpus', 'minutes': 1, 'firstMinutes': 60}, {'stage': 'train', 'minutes': 20}]};
+    // Making the training speech (the latest generate line's count) - the first run's minutes
+    const made = train.runManifest(firstRun, 'make: 10 items, 0 to make\nmake: 10 items, 4 to make\n');
+    assert.deepEqual(made.stages.map((stage) => stage.minutes), [60, 20]);
+    // Cached (none to make, in the latest line), not known yet, or no firstRun - the manifest as is
+    assert.equal(train.runManifest(firstRun, 'make: 10 items, 4 to make\nmake: 10 items, 0 to make\n'), firstRun);
+    assert.equal(train.runManifest(firstRun, 'gpulock: waiting\n'), firstRun);
+    assert.equal(train.runManifest(firstRun, undefined), firstRun);
+    const plain = {'stages': firstRun.stages};
+    assert.equal(train.runManifest(plain, 'make: 10 items, 4 to make\n'), plain);
+});
+
+
 test('train.stageMinutesLeft', () => {
     const stage = {'stage': 'context', 'minutes': 25};
     const state = {'status': 'running', 'start': 0, 'end': null};
@@ -162,6 +206,10 @@ test('train.stageMinutesLeft', () => {
     // No progress yet, or none to measure - its expected minutes less its time so far (at least a minute)
     assert.equal(train.stageMinutesLeft(stage, state, 10 * minutes, {'done': 0, 'total': 55, 'fraction': 0}), 15);
     assert.equal(train.stageMinutesLeft(stage, state, 60 * minutes, undefined), 1);
+    // By its phases' rest (at least a minute), and before its first phase's header (null) - its expected minutes
+    assert.equal(train.stageMinutesLeft(stage, state, 10 * minutes, {'done': 3, 'total': 9, 'phase': 'make', 'minutesLeft': 7.5}), 7.5);
+    assert.equal(train.stageMinutesLeft(stage, state, 10 * minutes, {'done': 9, 'total': 9, 'phase': 'make', 'minutesLeft': 0}), 1);
+    assert.equal(train.stageMinutesLeft(stage, state, 10 * minutes, null), 15);
 });
 
 

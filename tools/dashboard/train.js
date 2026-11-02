@@ -163,19 +163,86 @@ export function throttled(sample) {
 }
 
 
-// A stage's progress from its log (the manifest's progress: {log, pattern, total} - the log's lines matching the pattern
-// are its finished parts, of total) - {done, total, fraction}
+// A stage's progress from its log - the manifest's progress, either
+//
+// - {log, pattern, total}: the log's lines matching the pattern are its finished parts, of total - {done, total, fraction}
+// - {phases: [{name, header, step, secondsEach, sameCount}]}: the stage's own log, its commands' phases in order (each
+//   attempt's lines appended - the latest attempt's, from its first phase's last header). A phase's header line's first
+//   capture is its count of items to do (none captured: none to do), and its step lines' captures are its items done, of
+//   its total, in its seconds so far. The rest - the current phase's at its pace so far (before its first step, its count
+//   at secondsEach seconds an item), and each later phase's count (sameCount: the phase before's, else none - a later
+//   phase's own count is known when it starts) at its secondsEach - {done, total, phase, minutesLeft}; null before the
+//   first header
 export function logProgress(text, progress) {
+    if (progress.phases) {
+        return phaseProgress(text, progress.phases);
+    }
     const pattern = new RegExp(progress.pattern);
     const done = text.split('\n').filter((line) => pattern.test(line)).length;
     return {done, 'total': progress.total, 'fraction': Math.min(1, done / progress.total)};
 }
 
 
-// A started stage's remaining minutes without a training run's steps - from its progress (its log's finished parts, at
-// its pace so far), else its expected minutes less its time so far; at least a minute while it runs
+function phaseProgress(text, phases) {
+    const headers = phases.map((phase) => new RegExp(phase.header));
+    const steps = phases.map((phase) => new RegExp(phase.step));
+    const lines = text.split('\n');
+    const first = lines.findLastIndex((line) => headers[0].test(line));
+    if (first === -1) {
+        return null;
+    }
+    let current = -1;
+    const seen = [];
+    for (const line of lines.slice(first)) {
+        const after = current;
+        const next = headers.findIndex((header, index) => index > after && header.test(line));
+        if (next !== -1) {
+            const [, count] = line.match(headers[next]);
+            current = next;
+            seen[current] = {'count': count === undefined ? 0 : Number(count), 'step': null};
+        } else {
+            const match = line.match(steps[current]);
+            if (match !== null) {
+                const [done, total, seconds] = match.slice(1).map(Number);
+                seen[current].step = {done, total, seconds};
+            }
+        }
+    }
+    const {count, step} = seen[current];
+    let seconds = count * phases[current].secondsEach;
+    if (step !== null && step.done !== 0) {
+        seconds = step.seconds * (step.total - step.done) / step.done;
+    }
+    let laterCount = count;
+    for (const phase of phases.slice(current + 1)) {
+        laterCount = phase.sameCount ? laterCount : 0;
+        seconds += laterCount * phase.secondsEach;
+    }
+    return {'done': step?.done ?? 0, 'total': step?.total ?? count, 'phase': phases[current].name, 'minutesLeft': seconds / 60};
+}
+
+
+// The manifest with each stage's expected minutes for this run - a stage's firstMinutes (its time when the training
+// speech is new) when the run makes the training speech: the manifest's firstRun stage's log's latest firstRun pattern
+// match (its capture - the count of clips to make) is more than none
+export function runManifest(manifest, firstRunLog) {
+    const pattern = manifest.firstRun ? new RegExp(manifest.firstRun.pattern) : null;
+    const latest = pattern && firstRunLog ? firstRunLog.split('\n').findLast((line) => pattern.test(line)) : undefined;
+    if (latest === undefined || Number(latest.match(pattern)[1]) === 0) {
+        return manifest;
+    }
+    const stages = manifest.stages.map((stage) => (stage.firstMinutes ? {...stage, 'minutes': stage.firstMinutes} : stage));
+    return {...manifest, stages};
+}
+
+
+// A started stage's remaining minutes without a training run's steps - from its progress (its log's phases' rest, or
+// its finished parts at its pace so far), else its expected minutes less its time so far; at least a minute while it runs
 export function stageMinutesLeft(stage, state, now, progress) {
     const elapsed = (now - state.start) / 60000;
+    if (progress && progress.minutesLeft !== undefined) {
+        return Math.max(progress.minutesLeft, 1);
+    }
     if (progress && progress.done !== 0) {
         return Math.max(elapsed * (1 - progress.fraction) / progress.fraction, progress.fraction < 1 ? 1 : 0);
     }

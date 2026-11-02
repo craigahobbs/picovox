@@ -815,7 +815,8 @@ async function loadTrain() {
             return trainData;
         }
     }
-    const manifest = trainManifest;
+    // (the expected minutes are this run's - runManifest, below, once the stages' logs are read)
+    let manifest = trainManifest;
     let recipe;
     try {
         recipe = JSON.parse((await fetchText(new URL('train/data/train.json', rootUrl)))?.text);
@@ -843,12 +844,15 @@ async function loadTrain() {
             stageLogs.set(stage.stage, result);
         }
     }));
-    // (a running stage's progress from its log - the manifest's progress)
+    manifest = trainModel.runManifest(manifest, manifest.firstRun ? stageLogs.get(manifest.firstRun.stage)?.text : undefined);
+    // (a running stage's progress from its log - the manifest's progress: its phases from its own log, else another log's
+    // finished parts)
     const progress = new Map();
     await Promise.all(manifest.stages.filter((stage) => stage.progress && stageLogs.has(stage.stage)).map(async (stage) => {
-        const result = await fetchText(new URL(stage.progress.log, dirUrl));
-        if (result !== null) {
-            progress.set(stage.stage, trainModel.logProgress(result.text, stage.progress));
+        const result = stage.progress.phases ? stageLogs.get(stage.stage) : await fetchText(new URL(stage.progress.log, dirUrl));
+        const counted = result === null ? null : trainModel.logProgress(result.text, stage.progress);
+        if (counted !== null) {
+            progress.set(stage.stage, counted);
         }
     }));
     // (a GPU stage waiting for the GPU lock - its last gpulock line is "waiting")
@@ -1007,6 +1011,10 @@ function stageProgress(stage, state, data) {
         let over = false;
         if (entries.length !== 0 && run.info.targetSteps) {
             fraction = Math.min(1, entries[entries.length - 1].step / run.info.targetSteps);
+        } else if (counted && counted.minutesLeft !== undefined) {
+            // (its phases' rest - the share of its time so far in its time so far and to come)
+            const elapsed = (data.now - state.start) / 60000;
+            fraction = elapsed / (elapsed + Math.max(counted.minutesLeft, 1));
         } else if (counted && counted.done !== 0) {
             ({fraction} = counted);
         } else if (state.start !== null) {
@@ -1016,7 +1024,9 @@ function stageProgress(stage, state, data) {
         }
         const left = data.plan.finishes.get(stage.stage) - data.now;
         let percent = fraction === null ? '' : `${Math.round(100 * fraction)}%`;
-        if (counted) {
+        if (counted && counted.phase) {
+            percent = `${percent} (${counted.phase} ${counted.done} of ${counted.total})`;
+        } else if (counted) {
             percent = `${percent} (${counted.done} of ${counted.total})`;
         } else if (over) {
             percent = 'over its expected time';
