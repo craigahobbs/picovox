@@ -25,20 +25,26 @@ import {loadPackagedModel} from './picovox/lib/package.js';
 import {setPronouncer} from './picovox/lib/lexicon.js';
 
 
-// The settings - frame edits (scale, add, or smooth - a centered moving average, ms - named parameters), the
+// The settings - frame edits (scale, add, floor - a minimum, or smooth - a centered moving average, ms - named parameters), the
 // rendering's sample rate, and the playback's stereo room - each from its neutral value
 const SETTINGS = [
     {'key': 'jitter', 'label': 'Jitter', 'kind': 'scale', 'params': ['jitter'], 'min': 0, 'max': 5, 'step': 0.25, 'unit': '×'},
     {'key': 'shimmer', 'label': 'Shimmer', 'kind': 'scale', 'params': ['shimmer'], 'min': 0, 'max': 5, 'step': 0.25, 'unit': '×'},
     {'key': 'ah', 'label': 'Aspiration (breath)', 'kind': 'add', 'params': ['ah'], 'min': -12, 'max': 12, 'step': 1, 'unit': ' dB'},
-    {'key': 'af', 'label': 'Frication', 'kind': 'add', 'params': ['af'], 'min': -12, 'max': 12, 'step': 1, 'unit': ' dB'},
+    {'key': 'af', 'label': 'Frication', 'kind': 'add', 'params': ['af'], 'min': -24, 'max': 12, 'step': 1, 'unit': ' dB'},
     {'key': 'rd', 'label': 'Pulse softness (Rd)', 'kind': 'scale', 'params': ['rd'], 'min': 0.7, 'max': 1.5, 'step': 0.05, 'unit': '×'},
-    {'key': 'shelf', 'label': 'Source shelf', 'kind': 'add', 'params': ['shelf'], 'min': -10, 'max': 10, 'step': 1, 'unit': ' dB'},
+    {'key': 'shelf', 'label': 'Source shelf', 'kind': 'add', 'params': ['shelf'], 'min': -24, 'max': 10, 'step': 1, 'unit': ' dB'},
     {'key': 'bandwidth', 'label': 'Formant bandwidths', 'kind': 'scale', 'params': ['b1', 'b2', 'b3', 'b4', 'b5'], 'min': 0.5, 'max': 2,
+        'step': 0.05, 'unit': '×'},
+    {'key': 'b1Scale', 'label': 'F1 bandwidth', 'kind': 'scale', 'params': ['b1'], 'min': 0.5, 'max': 2, 'step': 0.05, 'unit': '×'},
+    {'key': 'upperBandwidth', 'label': 'F3-F5 bandwidths', 'kind': 'scale', 'params': ['b3', 'b4', 'b5'], 'min': 0.5, 'max': 2,
         'step': 0.05, 'unit': '×'},
     {'key': 'smoothFormants', 'label': 'Formant smoothing', 'kind': 'smooth', 'params': ['f1', 'f2', 'f3', 'b1', 'b2', 'b3'], 'min': 0,
         'max': 60, 'step': 5, 'unit': ' ms'},
     {'key': 'smoothF0', 'label': 'Pitch smoothing', 'kind': 'smooth', 'params': ['f0'], 'min': 0, 'max': 60, 'step': 5, 'unit': ' ms'},
+    {'key': 'b3Floor', 'label': 'F3 bandwidth floor', 'kind': 'floor', 'params': ['b3'], 'min': 0, 'max': 200, 'step': 10, 'unit': ' Hz'},
+    {'key': 'smoothShelf', 'label': 'Shelf smoothing', 'kind': 'smooth', 'params': ['shelf'], 'min': 0, 'max': 60, 'step': 5,
+        'unit': ' ms'},
     {'key': 'sampleRate', 'label': 'Sample rate', 'kind': 'render', 'neutral': 24000, 'min': 24000, 'max': 44100, 'step': 20100,
         'unit': ' Hz'},
     {'key': 'roomMix', 'label': 'Stereo room (mix)', 'kind': 'playback', 'neutral': 0, 'min': 0, 'max': 0.4, 'step': 0.05, 'unit': '',
@@ -109,6 +115,10 @@ function editFrames(frames, settings) {
             } else if (setting.kind === 'add') {
                 out.forEach((frame) => {
                     frame[index] += value;
+                });
+            } else if (setting.kind === 'floor') {
+                out.forEach((frame) => {
+                    frame[index] = Math.max(frame[index], value);
                 });
             } else {
                 const half = Math.round(value / 10);
@@ -209,7 +219,10 @@ function markRendering(button, label = null) {
 // voice centered, and a stereo room at its mix (the dry level lowered so the loudness stays the same)
 let audio = null;
 let current = null;
+let playRequest = 0;
 async function play(button, voice, modelName, text, settings) {
+    playRequest += 1;
+    const request = playRequest;
     audio ??= new AudioContext();
     if (audio.state === 'suspended') {
         await audio.resume();
@@ -225,6 +238,10 @@ async function play(button, voice, modelName, text, settings) {
         return;
     } finally {
         markRendering(button, label);
+    }
+    // (stopped, or another play asked for, while it rendered)
+    if (request !== playRequest) {
+        return;
     }
     const buffer = audio.createBuffer(1, rendered.samples.length, rendered.sampleRate);
     buffer.copyToChannel(rendered.samples, 0);
@@ -252,6 +269,13 @@ async function play(button, voice, modelName, text, settings) {
         }
     };
     source.start();
+}
+
+
+// Stop whatever plays (and any play still rendering)
+function stopPlaying() {
+    playRequest += 1;
+    current?.source.stop();
 }
 
 
@@ -444,6 +468,7 @@ function renderQuestion() {
             return;
         }
         submit.disabled = true;
+        stopPlaying();
         // (the answer in the versions' own terms - a version's letter maps back to the version)
         const position = letters.indexOf(chosen);
         const isVersion = next.type === 'ab' && chosen.length === 1 && position >= 0;
