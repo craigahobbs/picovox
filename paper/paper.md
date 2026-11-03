@@ -433,6 +433,10 @@ trial was heard as the same. A likely reason is the data: the TTS corpus's voice
 with little of the human recordings' variation for a teacher's targets to smooth. The distillation's three GPU stages
 (about 15 minutes of each run), `distill.py`, and the student's Muon optimizer were removed; make train trains the
 d64 model directly, and the gate's speaker similarity is now to the shipped model's voices (Section 10.2).
+The critic, though, still earns its stage: the same d64 model trained by stage A alone, its 15,000-step schedule
+decayed to the end, scored UTMOS 4.068 with WER 1.38% and similarity 0.861 - against the two stages' 4.284, 1.23%, and
+0.947 from the same data - though by ear stage A and stage B were the same in six of seven A/B trials (the seventh
+chose stage B).
 
 
 ## 9. Grapheme-to-phoneme conversion without a dictionary

@@ -452,9 +452,11 @@ time (`picovox_train/gpulock.py` - two at once each run at about half speed) whi
 | samples-reference, samples-voice-a, -voice-b - the listening samples | CPU, under a minute each | the shipped model (after data-tts); each stage's model |
 
 The critical path - the training speech (generated and aligned once - about an hour and a half the first time, a minute
-or two cached), the voices' data (9 minutes), stage A (24) and B (21), the gate, the package - takes about 65 minutes on
-an M3 Max on full power (94 W; the training speech cached), with the G2P chain beside it - 15 minutes less than with the
-distillation it replaced (see [Training the voice model](#training-the-voice-model)). (Before 2.0, on the human
+or two cached), the voices' data (9 minutes), stage A (30) and B (23), the gate, the package - took 69 minutes on
+an M3 Max on full power (94 W; the training speech cached; 2026-11-03), with the G2P chain beside it - the voice's
+stages 63 minutes from the data build to the gate, against the distillation's 71 the day before (see [Training the voice
+model](#training-the-voice-model); a GPU step's time varies with the machine's heat - stage A's steps took 0.112-0.120 s
+that day, the teacher A's 0.086 the day before). (Before 2.0, on the human
 corpora, it took 71 minutes.) The package's manifest records its provenance: the commit, the recipe's and the training
 data's hashes, and the gate's scores. `python -m picovox_train.smoke` runs every stage's entry point for a few steps on
 the CPU.
