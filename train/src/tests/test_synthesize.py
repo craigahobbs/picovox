@@ -9,7 +9,7 @@ import unittest.mock
 import numpy
 import torch
 
-from picovox_train import export, params
+from picovox_train import export, frontend, params
 
 from . import synthesize
 from .test_trainmulti import TrainData
@@ -35,6 +35,20 @@ class TestSynthesize(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.checkpoint = DATA.run_path('voice', 'last.pt')
+
+    def test_sentences(self):
+        vocab = frontend.vocabulary()
+        ids = frontend.tokenize('Hello there. Who are you? Fine')['ids']
+        parts = synthesize.sentences(ids, vocab)
+        self.assertEqual(len(parts), 3)
+        self.assertEqual(synthesize.sentences([2, 20, 21], vocab), [[2, 20, 21]])
+        self.assertTrue(all(part[0] == 2 for part in parts))
+        self.assertEqual([vocab[part[-1]] for part in parts[:2]], ['<period>', '<wh>'])
+        self.assertEqual(sum(len(part) - 1 for part in parts), len(ids) - 1)
+        # (without a leading <bos>; nothing after the last sentence's end)
+        self.assertEqual(synthesize.sentences(ids[1:5] + [vocab.index('<period>')], vocab),
+                         [[2] + ids[1:5] + [vocab.index('<period>')]])
+        self.assertEqual(synthesize.sentences([2], vocab), [])
 
     def test_speaker_id(self):
         state = {'speakers': ['male', 'female']}

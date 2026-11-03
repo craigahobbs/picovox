@@ -93,7 +93,7 @@ build/venv-train.build: train/requirements.txt
 
 # make train - both generated models from a clean checkout, by the recipe train/data/train.json, trained to their gates in
 # TRAIN_DIR (TRAIN_DIR/g2pModel.js and voiceModel.js - lib/models/ unchanged): make train-g2p (the G2P and the heteronym
-# relabeling, CPU) and make train-voice (the voice - its data, teacher, and student, GPU) at once, then the report (each
+# relabeling, CPU) and make train-voice (the voice - its data and its two training stages, GPU) at once, then the report (each
 # model's size and scores, and whether it differs from the committed module - picovox_train.trained report). The gates:
 # the G2P - identical to the committed module below its header, else within the recipe's tolerances; the voice - no
 # worse than the shipped model on the listener panel. Each stage is a stamp in TRAIN_DIR; make -j train runs the
@@ -109,11 +109,11 @@ build/venv-train.build: train/requirements.txt
 TRAIN_DIR ?= build/train
 TRAIN_SRC := $(CURDIR)/train/src
 TRAIN_PYTHON := env PYTHONPATH=$(TRAIN_SRC) build/venv-train/bin/python -B
-TRAIN_ENV := NN_DATA_DIR=$(TRAIN_DIR)/data NN_RUNS_DIR=$(TRAIN_DIR)/runs NN_DISTILL_DIR=$(TRAIN_DIR)/distill
+TRAIN_ENV := NN_DATA_DIR=$(TRAIN_DIR)/data NN_RUNS_DIR=$(TRAIN_DIR)/runs NN_EVAL_DIR=$(TRAIN_DIR)/eval
 
-# The CPU stages that run beside a GPU stage (the G2P chain, the heteronym check, the teacher's evaluation, the
+# The CPU stages that run beside a GPU stage (the G2P chain, the heteronym check, the baseline's evaluation, the
 # samples) at the utility QoS: CPU work beside a GPU stage shares the unified memory's bandwidth - three memory-bound
-# jobs at the default QoS slowed teacher B 53%, at utility 15%, at background 1% (but 4.6x slower themselves)
+# jobs at the default QoS slowed stage B 53%, at utility 15%, at background 1% (but 4.6x slower themselves)
 BESIDE := taskpolicy -c utility
 # (the GPU stages hold the GPU lock - the machine's, whatever the TRAIN_DIR - and use two CPU threads: more don't speed a
 # step, and the CPU stages beside them would oversubscribe the cores)
@@ -122,7 +122,7 @@ TRAIN_RUNS := $(TRAIN_DIR)/runs
 
 # The bookkeeping, for the training dashboard (tools/dashboard/): each stage's start, end, and failure in
 # $(TRAIN_DIR)/stages.jsonl and each command's output also in $(TRAIN_DIR)/logs/<stage>.log (tools/trainstage.sh - the
-# teacher's output also in its run's train.log), and the CPU, GPU, and memory use with the running stages every 20 seconds
+# training stages' output also in their runs' train.log), and the CPU, GPU, and memory use with the running stages every 20 seconds
 # in $(TRAIN_DIR)/util.log (tools/trainutil.sh, for the life of make - make train starts it, and a stage's start does if
 # none runs). The stages, their dependencies, and their expected times are train/data/train-stages.json's
 # (test/testTrainStages.js checks it against these targets).
@@ -130,15 +130,14 @@ STAGE = tools/trainstage.sh $(TRAIN_DIR) $(basename $(@F))
 
 # Record a make target's run in stages.jsonl (the training dashboard shows its stages), and keep the Mac awake while make
 # runs: macOS's caffeinate until make exits - finished, failed, or interrupted - on AC power with the lid closed too (-s;
-# idle sleep paused one run's teacher B for 28 minutes); elsewhere, nothing
+# idle sleep paused one run's stage B for 28 minutes); elsewhere, nothing
 TRAIN_TARGET = @mkdir -p $(TRAIN_DIR) && printf '{"event": "target", "target": "%s", "time": %s}\n' $(1) "$$(date +%s)" >> $(TRAIN_DIR)/stages.jsonl; \
 	if command -v caffeinate >/dev/null; then nohup caffeinate -i -s -w $$PPID >/dev/null 2>&1 & fi
 
 # The targets' final stages - the voice's (its package, gate, and listening samples) and the G2P's (its gate and the
 # heteronym relabeling's)
-TRAIN_VOICE := $(TRAIN_DIR)/package.done $(TRAIN_DIR)/student-eval.done $(TRAIN_DIR)/samples-reference.done \
-	$(TRAIN_DIR)/samples-teacher-a.done $(TRAIN_DIR)/samples-teacher-b.done $(TRAIN_DIR)/samples-student.done \
-	$(TRAIN_DIR)/samples-polish.done
+TRAIN_VOICE := $(TRAIN_DIR)/package.done $(TRAIN_DIR)/voice-eval.done $(TRAIN_DIR)/samples-reference.done \
+	$(TRAIN_DIR)/samples-voice-a.done $(TRAIN_DIR)/samples-voice-b.done
 TRAIN_G2P := $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.done
 TRAIN_REPORT := $(TRAIN_PYTHON) -m picovox_train.trained report $(TRAIN_DIR)
 
@@ -176,7 +175,7 @@ train-check:
 	$(call TRAINED,package.done g2p.done)
 	NODE_OPTIONS='--import=$(CURDIR)/tools/trainmodels.js' TRAIN_MODELS=$(TRAIN_DIR) node --test $(NODE_TEST_ARGS)
 	@$(MAKE) --no-print-directory voicelab VOICELAB_TRAINED=$(TRAIN_DIR)
-	node tools/trainab.js --lab build/voicelab --out $(TRAIN_DIR)/listen --summary $(TRAIN_DIR)/distill/summary.json
+	node tools/trainab.js --lab build/voicelab --out $(TRAIN_DIR)/listen --summary $(TRAIN_DIR)/eval/summary.json
 
 # make help - javascript-build's usage, and the train flow
 help:
@@ -257,7 +256,7 @@ $(TRAIN_DIR)/data-tts.done: $(TRAIN_DIR)/tts-readings.done
 # relabeling, which must reproduce train/data/g2p-relabel.json (the G2P network's input).
 #
 # In make train, the G2P's memory-bound stages (the context labels, the relabeling) are scheduled after the voices'
-# data build (order-only prerequisites) - into the teacher's GPU-bound hours, when the cores are idle - not competing
+# data build (order-only prerequisites) - into the voice's GPU-bound hours, when the cores are idle - not competing
 # with the data build on the critical path; the G2P network itself (one core) starts at once. G2P_JOBS is the context
 # labels' worker processes - the tag workers; the outputs are the same for any count. make train runs the
 # chain beside the GPU stages, so its count is low (BESIDE) for the memory-bound context labels; the context network's
@@ -319,70 +318,44 @@ $(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/tts-readings.done downloads/cmudict/c
 	@$(STAGE) end
 	touch $@
 
-# The teacher - stage A, then stage B with the critic (GPU; resumable), and its evaluation (CPU)
-$(TRAIN_DIR)/teacher-a.done: $(TRAIN_DIR)/data-tts.done train/data/train.json
+# The voice - stage A, then stage B with the critic (GPU; resumable) - B's best checkpoint is the voice
+$(TRAIN_DIR)/voice-a.done: $(TRAIN_DIR)/data-tts.done train/data/train.json
 	@$(STAGE) start
-	$(STAGE) --log $(TRAIN_RUNS)/teacher-a/train.log -- \
-		$(TRAIN_ENV) $(GPU) $(TRAIN_PYTHON) -m picovox_train.trainmulti --name teacher-a --recipe teacher.a --resume
+	$(STAGE) --log $(TRAIN_RUNS)/voice-a/train.log -- \
+		$(TRAIN_ENV) $(GPU) $(TRAIN_PYTHON) -m picovox_train.trainmulti --name voice-a --recipe voice.a --resume
 	@$(STAGE) end
 	touch $@
 
-$(TRAIN_DIR)/teacher-b.done: $(TRAIN_DIR)/teacher-a.done
+$(TRAIN_DIR)/voice-b.done: $(TRAIN_DIR)/voice-a.done
 	@$(STAGE) start
-	$(STAGE) --log $(TRAIN_RUNS)/teacher-b/train.log -- \
-		$(TRAIN_ENV) $(GPU) $(TRAIN_PYTHON) -m picovox_train.trainmulti --name teacher-b --recipe teacher.b --init $(TRAIN_RUNS)/teacher-a/last.pt --resume
+	$(STAGE) --log $(TRAIN_RUNS)/voice-b/train.log -- \
+		$(TRAIN_ENV) $(GPU) $(TRAIN_PYTHON) -m picovox_train.trainmulti --name voice-b --recipe voice.b --init $(TRAIN_RUNS)/voice-a/last.pt --resume
 	@$(STAGE) end
 	touch $@
 
-$(TRAIN_DIR)/teacher-eval.done: $(TRAIN_DIR)/teacher-b.done downloads/whisper/ggml-base.en.bin
+# The gate (CPU - picovox_train.panel): the shipped lib/models/voiceModel.js through the listener panel as packaged (the
+# baseline - beside stage A, after the voices' data build), then the voice, its similarity to the baseline's voices, and
+# the voice no worse than the baseline within the recipe's tolerance
+$(TRAIN_DIR)/baseline-eval.done: lib/models/voiceModel.js downloads/whisper/ggml-base.en.bin | $(TRAIN_DIR)/data-tts.done
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.distill eval teacher=$(TRAIN_RUNS)/teacher-b/best.pt --whisper-workers 3
+	$(STAGE) -- $(TRAIN_ENV) $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.panel eval baseline=lib/models/voiceModel.js --whisper-workers 3
 	@$(STAGE) end
 	touch $@
 
-# The student - the distillation targets, the student, its polish (GPU), and the gate (CPU: no worse than the shipped
-# lib/models/voiceModel.js - evaluated as packaged, the baseline - within the recipe's tolerance, and its voice similar
-# to the teacher's; a better teacher never fails it). The baseline is scored as soon as the teacher's evaluation is done
-# (its similarity is to the teacher's voice), beside the student's GPU stages - not on the critical path after the polish.
-$(TRAIN_DIR)/targets.done: $(TRAIN_DIR)/teacher-b.done
+$(TRAIN_DIR)/voice-eval.done: $(TRAIN_DIR)/voice-b.done $(TRAIN_DIR)/baseline-eval.done
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(TRAIN_PYTHON) -m picovox_train.distill targets --teacher $(TRAIN_RUNS)/teacher-b/best.pt
-	@$(STAGE) end
-	touch $@
-
-$(TRAIN_DIR)/student.done: $(TRAIN_DIR)/targets.done
-	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(TRAIN_PYTHON) -m picovox_train.distill train --name student
-	@$(STAGE) end
-	touch $@
-
-$(TRAIN_DIR)/polish.done: $(TRAIN_DIR)/student.done
-	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(TRAIN_PYTHON) -m picovox_train.distill polish --init $(TRAIN_RUNS)/distill-student/best.pt --name student-polish \
-		--teacher $(TRAIN_RUNS)/teacher-b/best.pt
-	@$(STAGE) end
-	touch $@
-
-$(TRAIN_DIR)/baseline-eval.done: $(TRAIN_DIR)/teacher-eval.done
-	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.distill eval baseline=lib/models/voiceModel.js --whisper-workers 3
-	@$(STAGE) end
-	touch $@
-
-$(TRAIN_DIR)/student-eval.done: $(TRAIN_DIR)/polish.done $(TRAIN_DIR)/baseline-eval.done
-	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(TRAIN_PYTHON) -m picovox_train.distill eval student=$(TRAIN_RUNS)/distill-student-polish/best.pt --whisper-workers 3
-	$(STAGE) -- $(TRAIN_ENV) $(TRAIN_PYTHON) -m picovox_train.distill pick --no-samples --against baseline
+	$(STAGE) -- $(TRAIN_ENV) $(TRAIN_PYTHON) -m picovox_train.panel eval voice=$(TRAIN_RUNS)/voice-b/best.pt --reference baseline --whisper-workers 3
+	$(STAGE) -- $(TRAIN_ENV) $(TRAIN_PYTHON) -m picovox_train.panel gate voice --against baseline
 	@$(STAGE) end
 	touch $@
 
 # The voice model module, TRAIN_DIR/voiceModel.js, with its provenance (the commit, the recipe's and the data's hashes,
 # the gate's scores)
-$(TRAIN_DIR)/package.done: $(TRAIN_DIR)/student-eval.done
+$(TRAIN_DIR)/package.done: $(TRAIN_DIR)/voice-eval.done
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(TRAIN_PYTHON) -m picovox_train.export $(TRAIN_RUNS)/distill-student-polish/best.pt --voice multi --out $(TRAIN_DIR)/export
+	$(STAGE) -- $(TRAIN_ENV) $(TRAIN_PYTHON) -m picovox_train.export $(TRAIN_RUNS)/voice-b/best.pt --voice multi --out $(TRAIN_DIR)/export
 	$(STAGE) -- $(TRAIN_ENV) $(TRAIN_PYTHON) -m picovox_train.package $(TRAIN_DIR)/export/multi -o $(TRAIN_DIR)/voiceModel.js --provenance --recipe train/data/train.json \
-		--data $(TRAIN_DIR)/data/tts --scores $(TRAIN_DIR)/distill/eval/student/result.json
+		--data $(TRAIN_DIR)/data/tts --scores $(TRAIN_DIR)/eval/voice/result.json
 	@$(STAGE) end
 	touch $@
 
@@ -390,7 +363,7 @@ $(TRAIN_DIR)/package.done: $(TRAIN_DIR)/student-eval.done
 # The listening samples (CPU, each beside the next GPU stage - tools/trainsamples.js): each training stage's final model
 # (the checkpoint the next stage starts from, exported as the package stage exports it) speaking train/data/train.json's
 # samples texts in its speakers' voices as the package speaks them, scored with UTMOS, in $(TRAIN_DIR)/samples/ (index.json)
-# for the training dashboard's Listen tab - and the reference, the shipped lib/models/voiceModel.js (in the teacher's
+# for the training dashboard's Listen tab - and the reference, the shipped lib/models/voiceModel.js (in the voice's
 # GPU-bound hours, after the voices' data build; again when the shipped model changes)
 SAMPLES := OMP_NUM_THREADS=2 $(BESIDE) node tools/trainsamples.js --out $(TRAIN_DIR)/samples
 
@@ -400,27 +373,15 @@ $(TRAIN_DIR)/samples-reference.done: lib/models/voiceModel.js | build/venv-train
 	@$(STAGE) end
 	touch $@
 
-$(TRAIN_DIR)/samples-teacher-a.done: $(TRAIN_DIR)/teacher-a.done | build/venv-train.build
+$(TRAIN_DIR)/samples-voice-a.done: $(TRAIN_DIR)/voice-a.done | build/venv-train.build
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(SAMPLES) --stage teacher-a --checkpoint $(TRAIN_RUNS)/teacher-a/last.pt
+	$(STAGE) -- $(TRAIN_ENV) $(SAMPLES) --stage voice-a --checkpoint $(TRAIN_RUNS)/voice-a/last.pt
 	@$(STAGE) end
 	touch $@
 
-$(TRAIN_DIR)/samples-teacher-b.done: $(TRAIN_DIR)/teacher-b.done | build/venv-train.build
+$(TRAIN_DIR)/samples-voice-b.done: $(TRAIN_DIR)/voice-b.done | build/venv-train.build
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(SAMPLES) --stage teacher-b --checkpoint $(TRAIN_RUNS)/teacher-b/best.pt
-	@$(STAGE) end
-	touch $@
-
-$(TRAIN_DIR)/samples-student.done: $(TRAIN_DIR)/student.done | build/venv-train.build
-	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(SAMPLES) --stage student --checkpoint $(TRAIN_RUNS)/distill-student/best.pt
-	@$(STAGE) end
-	touch $@
-
-$(TRAIN_DIR)/samples-polish.done: $(TRAIN_DIR)/polish.done | build/venv-train.build
-	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(SAMPLES) --stage polish --checkpoint $(TRAIN_RUNS)/distill-student-polish/best.pt
+	$(STAGE) -- $(TRAIN_ENV) $(SAMPLES) --stage voice-b --checkpoint $(TRAIN_RUNS)/voice-b/best.pt
 	@$(STAGE) end
 	touch $@
 

@@ -35,8 +35,8 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   `data.py`, `align.py`, `wav.py`, `books.py` - the pinned book texts, `corpora.py` - the pinned downloads: the
   dictionary and the Whisper model), the differentiable synthesizer (`params.py`, `dsynth.py`, `lf.py`,
   `rng.py`, `spectral.py`), the model and its training (`model.py`, `trainmulti.py`, `losses.py`, `discriminator.py`,
-  `quant.py`, `optim.py` - the training step's options), distillation (`distill.py`), export (`export.py`, `package.py`),
-  the listener panel (`panel.py`, and the listener models, `listeners.py` - `build/venv-train`),
+  `quant.py`, `optim.py` - the training step's options), export (`export.py`, `package.py`),
+  the listener panel and make train's gate (`panel.py`, and the listener models, `listeners.py` - `build/venv-train`),
   and the pipeline's tools (`gpulock.py`, `smoke.py`, `stepcheck.py`, `trained.py` - make train's report and make
   train-install - and `quality.py` - the voices' quality measures against their TTS source clips).
   `picovox_train/__init__.py` documents each module. `make train` runs it from its source (`PYTHONPATH=train/src`) in
@@ -134,7 +134,7 @@ the python-build skill before running its tests, lint, or coverage, or changing 
   imports nothing but its own modules (`test/testIndex.js` checks).
 - Voice changes are judged by measurement: blind A/B listening in the voice lab (`tools/voicelab/` - forced choices,
   with repeats; the measures in `picovox_train.quality` guide, they don't decide), and the listener panel as the
-  guardrail (`picovox_train/panel.py` - UTMOS, Whisper's WER, speaker similarity; `picovox_train.distill eval`) over the
+  guardrail (`picovox_train/panel.py` - UTMOS, Whisper's WER, speaker similarity; `picovox_train.panel eval`) over the
   panel texts; compare averages over several seeds.
 - Refactors must leave the audio bit-identical - compare a hash of the package's audio (`lib/synthesis.js`
   `sentenceBlocks` over `tools/panel-texts.json`, both voices, and `synthesize` over multi-paragraph texts) before and

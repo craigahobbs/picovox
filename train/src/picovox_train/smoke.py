@@ -6,24 +6,21 @@ The training pipeline's smoke test - every make-train entry point run for a few 
 directory, each checked to finish and write its outputs:
 
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.smoke [--out build/nn/smoke] \
-        [--only g2p,context,data,teacher,distill,package]
+        [--only g2p,context,data,voice,package]
 
 - g2p - picovox_train.g2p train (each stage 3 steps)
 - context - picovox_train.context train-g2p and train-context (3 steps) and export, from the g2p stage (when build/nn/context has the
   context labels - picovox_train.contextlabels)
 - data - picovox_train.tts build --out on a few clips of the training speech (when its corpus is generated and aligned -
   picovox_train.tts generate, align; the smoke test never runs the engine)
-- teacher - picovox_train.trainmulti stage A (3 steps), then stage B from it (the critic)
-- distill - picovox_train.distill targets (32 items, one short book) from the stage-B teacher, train (3 steps), and polish
-  (2 steps)
-- package - picovox_train.export and picovox_train.package of the polished student
+- voice - picovox_train.trainmulti stage A (3 steps), then stage B from it (the critic)
+- package - picovox_train.export and picovox_train.package of stage B
 
 The voice stages read the training data the data stage built (<out>/data/tts), else build/nn/data/tts; everything is
 written under --out (runs go to <out>/runs - NN_RUNS_DIR).
 """
 
 import argparse
-import json
 import os
 import shutil
 import subprocess
@@ -34,16 +31,7 @@ from . import ROOT, SOURCE_DIR, tts
 
 
 PYTHON = sys.executable
-STAGES = ('g2p', 'context', 'data', 'teacher', 'distill', 'package')
-
-# A short public-domain text for the distillation targets' book sentences
-BOOK_TEXT = '''Call me Ishmael. Some years ago, never mind how long precisely, having little or no money in my purse, and
-nothing particular to interest me on shore, I thought I would sail about a little and see the watery part of the world.
-It is a way I have of driving off the spleen and regulating the circulation. Whenever I find myself growing grim about
-the mouth; whenever it is a damp, drizzly November in my soul, then, I account it high time to get to sea as soon as I
-can.
-'''
-
+STAGES = ('g2p', 'context', 'data', 'voice', 'package')
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog='python -m picovox_train.smoke', description='Smoke-test the training pipeline on the CPU')
@@ -56,8 +44,7 @@ def main(argv=None):
         shutil.rmtree(out, ignore_errors=True)
     os.makedirs(out, exist_ok=True)
     runs = os.path.join(out, 'runs')
-    env = {**os.environ, 'NN_RUNS_DIR': runs, 'NN_DISTILL_DIR': os.path.join(out, 'distill'), 'OMP_NUM_THREADS': '2',
-           'PYTHONPATH': SOURCE_DIR}
+    env = {**os.environ, 'NN_RUNS_DIR': runs, 'OMP_NUM_THREADS': '2', 'PYTHONPATH': SOURCE_DIR}
     failures = []
 
     # Run an entry point; check its outputs
@@ -98,40 +85,17 @@ def main(argv=None):
             env['NN_DATA_DIR'] = os.path.join(out, 'data')
 
     common = ['--device', 'cpu', '--batch', '4', '--val-count', '4', '--keep-every', '0', '--log-every', '1']
-    teacher = os.path.join(runs, 'smoke-b', 'last.pt')
-    if 'teacher' in stages:
-        if run('teacher-a', ['picovox_train.trainmulti', '--name', 'smoke-a', '--recipe', 'teacher.a', '--steps', '3',
-                             '--val-every', '3'] + common, [os.path.join(runs, 'smoke-a', 'last.pt')]):
-            run('teacher-b', ['picovox_train.trainmulti', '--name', 'smoke-b', '--recipe', 'teacher.b', '--init',
-                              os.path.join(runs, 'smoke-a', 'last.pt'), '--steps', '3', '--val-every', '3', '--adversarial-start',
-                              '1'] + common, [teacher])
+    voice = os.path.join(runs, 'smoke-b', 'last.pt')
+    if 'voice' in stages:
+        if run('voice-a', ['picovox_train.trainmulti', '--name', 'smoke-a', '--recipe', 'voice.a', '--steps', '3',
+                           '--val-every', '3'] + common, [os.path.join(runs, 'smoke-a', 'last.pt')]):
+            run('voice-b', ['picovox_train.trainmulti', '--name', 'smoke-b', '--recipe', 'voice.b', '--init',
+                            os.path.join(runs, 'smoke-a', 'last.pt'), '--steps', '3', '--val-every', '3', '--adversarial-start',
+                            '1'] + common, [voice])
 
-    student = os.path.join(runs, 'distill-s32-polish', 'best.pt')
-    if 'distill' in stages and os.path.exists(teacher):
-        books = os.path.join(out, 'books')
-        os.makedirs(books, exist_ok=True)
-        with open(os.path.join(books, 'book.txt'), 'w', encoding='utf-8') as file:
-            file.write(BOOK_TEXT)
-        with open(os.path.join(ROOT, 'train', 'data', 'train.json'), encoding='utf-8') as file:
-            recipe = json.load(file)
-        recipe['distill']['targets'].update({'books': books, 'valItems': 4})
-        del recipe['distill']['targets']['texts']
-        recipe['distill']['train'].update({'batch': 8, 'valEvery': 3})
-        recipe['distill']['polish'].update({'val-every': 2})
-        config_path = os.path.join(out, 'train.json')
-        with open(config_path, 'w', encoding='utf-8') as file:
-            json.dump(recipe, file)
-        targets = os.path.join(out, 'targets')
-        distill = ['--config', config_path, '--device', 'cpu']
-        if run('distill-targets', ['picovox_train.distill', 'targets', '--teacher', teacher, '--out', targets, '--limit', '32'] + distill,
-               [os.path.join(targets, 'index.json')]):
-            if run('distill-train', ['picovox_train.distill', 'train', '--student', 's32', '--steps', '3', '--targets', targets] + distill,
-                   [os.path.join(runs, 'distill-s32', 'best.pt')]):
-                run('distill-polish', ['picovox_train.distill', 'polish', '--student', 's32', '--steps', '2'] + distill, [student])
-
-    if 'package' in stages and os.path.exists(student):
+    if 'package' in stages and os.path.exists(voice):
         export_dir = os.path.join(out, 'export')
-        if run('export', ['picovox_train.export', student, '--voice', 'smoke', '--out', export_dir],
+        if run('export', ['picovox_train.export', voice, '--voice', 'smoke', '--out', export_dir],
                [os.path.join(export_dir, 'smoke.json')]):
             run('package', ['picovox_train.package', os.path.join(export_dir, 'smoke'), '-o', os.path.join(out, 'voiceModel.js')],
                 [os.path.join(out, 'voiceModel.js')])

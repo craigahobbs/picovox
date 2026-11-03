@@ -284,9 +284,7 @@ const chartHelp = {
     'adversarial': 'The voice\'s adversarial loss (stage B) - how well it fools the critic. Pushes toward sharper, more ' +
         'natural-sounding detail than the spectral loss can.',
     'matching': 'Feature matching (stage B) - the voice matching the critic\'s internal features of real recordings; ' +
-        'steadies the adversarial training.',
-    'frames': 'Distillation: how far the student\'s synthesizer parameters are from the teacher\'s, per frame.',
-    'durationErrorFrames': 'Distillation: how far the student\'s phone durations are from the teacher\'s, in 10 ms frames.'
+        'steadies the adversarial training.'
 };
 
 
@@ -625,16 +623,12 @@ function meanScore(samples, sex) {
 // model first, every speaker's sample beside the shipped model's (the reference); a model not rendered yet is listed as
 // waiting, so nothing moves when it arrives. Rebuilt when the index or the models' states change, reusing each sample's
 // player so playback continues.
-const listenTitles = {'teacher-a': 'Teacher A', 'teacher-b': 'Teacher B', 'student': 'The student', 'polish': 'The polished student',
-    'reference': 'The shipped model'};
-const listenNotes = {'teacher-a': 'its final checkpoint, which teacher B starts from', 'teacher-b': 'the distillation\'s teacher',
-    'student': 'distilled from teacher B, before its polish',
-    'polish': 'the model make train packages, if it passes the gate',
-    'reference': 'lib/models/voiceModel.js'};
+const listenTitles = {'voice-a': 'Stage A', 'voice-b': 'Stage B', 'reference': 'The shipped model'};
+const listenNotes = {'voice-a': 'its final checkpoint, which stage B starts from',
+    'voice-b': 'the model make train packages, if it passes the gate', 'reference': 'lib/models/voiceModel.js'};
 const trainSamplesHelp = 'make train renders listening samples of each training stage\'s final model as the stage finishes ' +
-    '(its own CPU stage, beside the next GPU stage): teacher A (its last checkpoint, which teacher B starts from), teacher B ' +
-    '(its best - the distillation\'s teacher), the student (its best, before the polish), and the polished student (its ' +
-    'best - the model the package stage packages, if it passes the gate). Each speaks the recipe\'s texts ' +
+    '(its own CPU stage, beside the next GPU stage): stage A (its last checkpoint, which stage B starts from) and stage B ' +
+    '(its best - the model the package stage packages, if it passes the gate). Each speaks the recipe\'s texts ' +
     '(train/data/train.json samples) in six of the voices, three female and three male, exactly as the ' +
     'package speaks (exported and quantized as the package stage exports it, its G2P network, 24 kHz, its gain). Beside each ' +
     'is the shipped model, ' +
@@ -779,7 +773,7 @@ let trainSelectedRun = storageGet(trainRunKey);
 let trainData;
 
 
-// A run's planned stop - its train/data/train.json section's (a dotted path, e.g. teacher.a) stop, else its steps
+// A run's planned stop - its train/data/train.json section's (a dotted path, e.g. voice.a) stop, else its steps
 function recipeStop(recipe, path) {
     const section = path.split('.').reduce((value, key) => value?.[key], recipe);
     return section?.stop ?? section?.steps ?? null;
@@ -930,9 +924,9 @@ async function loadTrain() {
     const samples = utilResult === null ? [] : trainModel.parseUtilLog(utilResult.text, Number.isFinite(start) ? start : now).
         filter((sample) => !Number.isFinite(start) || sample.time >= start);
 
-    // The gates' results - the evaluations (picovox_train.distill eval and pick) and the checks in the logs
-    const [teacherResult, baselineResult, studentResult, summaryResult] = await Promise.all(['distill/eval/teacher/result.json',
-        'distill/eval/baseline/result.json', 'distill/eval/student/result.json', 'distill/summary.json'].
+    // The gates' results - the evaluations (picovox_train.panel eval and gate) and the checks in the logs
+    const [baselineResult, voiceResult, summaryResult] = await Promise.all(['eval/baseline/result.json', 'eval/voice/result.json',
+        'eval/summary.json'].
         map((path) => fetchText(new URL(path, dirUrl))));
     const parse = (result) => {
         try {
@@ -946,9 +940,8 @@ async function loadTrain() {
         'heteronyms': lastMatch(texts('heteronyms'), /^check: (?:the \d+ relabeled|the relabeled)/),
         'g2pCheck': lastMatch(texts('g2p'), /^check: .*g2pModel/),
         'g2pFolds': lastMatch(texts('context-network'), /^\d+ folds: /),
-        'teacher': parse(teacherResult),
         'baseline': parse(baselineResult),
-        'student': parse(studentResult),
+        'voice': parse(voiceResult),
         'summary': parse(summaryResult)
     };
 
@@ -980,13 +973,13 @@ const trainHelp = {
         '(waiting for the GPU lock), running, done, failed, stopped (started, but make isn\'t running - resumable), or ' +
         'skipped (not in this run\'s make target). Each shows its start and end, its time against the expected time, and ' +
         'the mean CPU and GPU use while it ran. Stage events come from TRAIN_DIR/stages.jsonl.',
-    'runs': 'The make train stages that train a network, each a run in TRAIN_DIR/runs/ - the teacher\'s stages A and B, ' +
-        'the distilled student, and its polish. Select one for its curves (the Runs tab has every measurement\'s).',
+    'runs': 'The make train stages that train a network, each a run in TRAIN_DIR/runs/ - the voice\'s stages A and B. ' +
+        'Select one for its curves (the Runs tab has every measurement\'s).',
     'gates': 'The checks make train must pass: the heteronym relabeling reproduces train/data/g2p-relabel.json; the ' +
         'retrained G2P is identical to the committed lib/models/g2pModel.js (else within the recipe\'s tolerances) with ' +
-        'its held-out context accuracy; the teacher and the student through the listener panel (UTMOS - naturalness, ' +
-        '1-5; Whisper\'s word error rate; the speaker similarity to the teacher); and the gate, picovox_train.distill pick - the ' +
-        'student within the tolerance of the teacher.'
+        'its held-out context accuracy; the shipped model and the voice through the listener panel (UTMOS - naturalness, ' +
+        '1-5; Whisper\'s word error rate; the voice\'s speaker similarity to the shipped voices); and the gate, ' +
+        'picovox_train.panel gate - the voice within the tolerance of the shipped model.'
 };
 for (const [id, key] of [['trainTitle', 'summary'], ['utilTitle', 'util'], ['stagesTitle', 'stages'], ['trainRunsTitle', 'runs'],
     ['gatesTitle', 'gates']]) {
@@ -1126,11 +1119,10 @@ function buildTrain(manifest) {
     const gateSpecs = [
         {'key': 'heteronyms', 'title': 'Heteronym relabeling reproduces train/data/g2p-relabel.json', 'stage': 'heteronyms'},
         {'key': 'g2p', 'title': 'G2P check - the retrained context G2P against lib/models/g2pModel.js', 'stage': 'g2p'},
-        {'key': 'teacher', 'title': 'The teacher on the listener panel', 'stage': 'teacher-eval'},
         {'key': 'baseline', 'title': 'The shipped model on the listener panel (the gate\'s baseline)', 'stage': 'baseline-eval'},
-        {'key': 'student', 'title': 'The student on the listener panel', 'stage': 'student-eval'},
-        {'key': 'pick', 'title': 'The gate - picovox_train.distill pick: the student within the tolerance of the shipped model',
-            'stage': 'student-eval'}
+        {'key': 'voice', 'title': 'The voice on the listener panel', 'stage': 'voice-eval'},
+        {'key': 'gate', 'title': 'The gate - picovox_train.panel gate: the voice within the tolerance of the shipped model',
+            'stage': 'voice-eval'}
     ];
     const gates = new Map();
     document.getElementById('trainGates').replaceChildren(...gateSpecs.map((spec) => {
@@ -1153,8 +1145,9 @@ function gateState(gate, data) {
         'not in this run' : 'waiting', 'line': `when the ${gate.stage} stage is done (${stageState.status})`};
     const panel = (result) => {
         const measures = result.panel || {};
+        const similarity = Number.isFinite(measures.similarity) ? `similarity ${fixed3(measures.similarity)} · ` : '';
         return `UTMOS ${fixed3(measures.mos)} · WER ${Number.isFinite(measures.wer) ? measures.wer.toFixed(2) : '-'}% · ` +
-            `similarity ${fixed3(measures.similarity ?? 1)} · ${result.parameters?.toLocaleString()} parameters · module ` +
+            `${similarity}${result.parameters?.toLocaleString()} parameters · module ` +
             `${Math.round((result.size?.moduleBytes ?? 0) / 1024)} KB (${Math.round((result.size?.moduleGzipBytes ?? 0) / 1024)} KB gzip)`;
     };
     const {gates} = data;
@@ -1167,7 +1160,7 @@ function gateState(gate, data) {
         const folds = gate.key === 'g2p' && gates.g2pFolds ? ` · held-out context: ${gates.g2pFolds}` : '';
         return {'status': failed ? 'failed' : 'done', 'label': failed ? 'failed' : 'passed', 'line': `${line}${folds}`};
     }
-    if (gate.key === 'teacher' || gate.key === 'baseline' || gate.key === 'student') {
+    if (gate.key === 'baseline' || gate.key === 'voice') {
         const result = gates[gate.key];
         return result === null ? waitingFor : {'status': 'done', 'label': 'scored', 'line': panel(result)};
     }
@@ -1175,13 +1168,12 @@ function gateState(gate, data) {
     if (summary === null) {
         return waitingFor;
     }
-    const row = (summary.rows || []).find((item) => item.name === 'student');
+    const row = (summary.rows || []).find((item) => item.name === summary.name);
     const within = row?.within ? Object.entries(row.within).map(([key, value]) => `${key} ${value ? '✓' : '✕'}`).join(' · ') : '';
     const tolerance = summary.tolerance ? `tolerance: UTMOS -${summary.tolerance.mos}, WER +${summary.tolerance.wer}, similarity ` +
         `≥ ${summary.tolerance.similarity}` : '';
-    const passed = summary.chosen !== null && summary.chosen !== undefined;
-    return {'status': passed ? 'done' : 'failed', 'label': passed ? 'passed' : 'failed',
-        'line': `chosen: ${summary.chosen ?? 'none'} · ${within} · ${tolerance}`};
+    return {'status': summary.passed ? 'done' : 'failed', 'label': summary.passed ? 'passed' : 'failed',
+        'line': `${within} · ${tolerance}`};
 }
 
 

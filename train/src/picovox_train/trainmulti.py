@@ -5,9 +5,9 @@
 Training the multi-speaker model (model.py's MultiModel) - end-to-end training through the differentiable synthesizer
 (dsynth.py), over the voices of the training speech:
 
-    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.trainmulti --name multi-a --recipe teacher.a
-    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.trainmulti --name multi-b --recipe teacher.b \
-        --init build/nn/runs/multi-a/last.pt
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.trainmulti --name voice-a --recipe voice.a
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.trainmulti --name voice-b --recipe voice.b \
+        --init build/nn/runs/voice-a/last.pt
 
 --recipe takes the settings of a section of make train's recipe (train/data/train.json - its keys are the flags), and
 flags given override them.
@@ -483,7 +483,7 @@ def validate(model, synth, corpus, args, device, sonorants):
     return result
 
 
-# The settings of a section of the recipe (train/data/train.json; "teacher.a" - a dotted path) as argparse defaults
+# The settings of a section of the recipe (train/data/train.json; "voice.a" - a dotted path) as argparse defaults
 def recipe_defaults(section, path=RECIPE_PATH):
     with open(path, encoding='utf-8') as file:
         settings = json.load(file)
@@ -495,9 +495,9 @@ def recipe_defaults(section, path=RECIPE_PATH):
 # The command line's parser
 def argument_parser():
     parser = argparse.ArgumentParser(prog='python -m picovox_train.trainmulti', description='Train the multi-speaker model')
-    # (the training settings' defaults are the recipe's teacher.defaults)
+    # (the training settings' defaults are the recipe's voice.defaults)
     parser.add_argument('--name', required=True)
-    parser.add_argument('--recipe', help='the settings of a section of the recipe (teacher.a), flags overriding them')
+    parser.add_argument('--recipe', help='the settings of a section of the recipe (voice.a), flags overriding them')
     parser.add_argument('--recipe-file', default=RECIPE_PATH, help='the recipe (default train/data/train.json)')
     parser.add_argument('--steps', type=int, help='the learning rate schedule\'s steps')
     parser.add_argument('--stop', type=int, default=None, help='stop after this many steps (default: --steps)')
@@ -539,12 +539,11 @@ def argument_parser():
     parser.add_argument('--device', default='mps' if torch.backends.mps.is_available() else 'cpu')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--init', default=None, help='initialize the weights from a checkpoint')
-    parser.add_argument('--init-critic', default=None, help='initialize the critic from a checkpoint\'s (with --adversarial)')
     parser.add_argument('--seed', type=int)
     parser.add_argument('--lean-clip', action='store_true', help='the lean clip and AdamW step (optim.py)')
     parser.add_argument('--schedule', choices=['cosine', 'wsd'], default='cosine', help='the learning rate schedule')
     parser.add_argument('--cooldown', type=float, default=0.0, help="wsd: the cooldown's share of --steps")
-    parser.set_defaults(**recipe_defaults('teacher.defaults'))
+    parser.set_defaults(**recipe_defaults('voice.defaults'))
     return parser
 
 
@@ -560,7 +559,7 @@ def default_settings(**overrides):
 def main(argv=None):
     parser = argument_parser()
     known = parser.parse_known_args(argv)[0]
-    parser.set_defaults(**recipe_defaults('teacher.defaults', known.recipe_file))
+    parser.set_defaults(**recipe_defaults('voice.defaults', known.recipe_file))
     if known.recipe:
         parser.set_defaults(**recipe_defaults(known.recipe, known.recipe_file))
     args = parser.parse_args(argv)
@@ -595,9 +594,6 @@ def main(argv=None):
     if args.adversarial > 0:
         critic_dtype = None if args.critic_precision == 'float32' else getattr(torch, args.critic_precision)
         critic = discriminator.Critic(args.rate, args.max_hz, eps=1e-9, dtype=critic_dtype, channels=args.critic_channels).to(device)
-        if args.init_critic:
-            critic.load_state_dict(torch.load(args.init_critic, map_location=device, weights_only=False)['critic'])
-            print(f'critic init from {args.init_critic}', file=sys.stderr)
     # (on the GPU the fused AdamW - one kernel, not a loop over the parameters - which also skips a step with a
     # non-finite gradient norm on the device, so the step needn't read the norm)
     fused = device.type in ('mps', 'cuda')
@@ -606,7 +602,8 @@ def main(argv=None):
     # (the lean step - optim.py)
     lean = args.lean_clip
     if lean:
-        optimizer = optim.LeanOptimizer(optim.param_groups(model), lr=args.lr, weight_decay=args.weight_decay, betas=(0.9, 0.98))
+        optimizer = optim.LeanOptimizer([{'params': list(model.parameters())}], lr=args.lr, weight_decay=args.weight_decay,
+                                        betas=(0.9, 0.98))
     else:
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, betas=(0.9, 0.98),
                                       fused=fused or None)

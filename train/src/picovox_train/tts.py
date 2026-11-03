@@ -22,7 +22,7 @@ The selection - book sentences through our front end (each sentence's text is it
 so the engine speaks exactly the words our tokens spell; a sentence that doesn't tokenize back to its tokens is
 skipped), the panel's and the samples' texts excluded: first the heteronym coverage (readings.coverage_quotas - the
 gate's words, the context words, and the other measured words, each in up to its quota of sentences from the
-context labels' books, the rarest word first), then sentences at random from the distillation's books to the
+context labels' books, the rarest word first), then sentences at random from the fill's books (the recipe's tts fill) to the
 recipe's hours; each clip's voice and split are by a hash of its text (another selection keeps the clips of the texts
 it shares).
 
@@ -140,7 +140,7 @@ def engine_text(tokens, words):
 # The candidate sentences of a book - [(paragraph index, sentence)] (paragraphs with a Roman numeral or all capitals
 # skipped)
 def book_candidates(path):
-    from .distill import book_paragraphs  # pylint: disable=import-outside-toplevel
+    from .books import book_paragraphs  # pylint: disable=import-outside-toplevel
     candidates = []
     for index, paragraph in enumerate(book_paragraphs(path)):
         if ROMAN.search(paragraph) or paragraph.isupper():
@@ -202,7 +202,7 @@ def selection_key(settings, recipe):
     with open(os.path.join(ROOT, settings['texts']['pins']), 'rb') as file:
         pins = hashlib.sha256(file.read()).hexdigest()
     basis = {'tts': {key: settings[key] for key in keys}, 'coverage': recipe['context']['labels']['texts'],
-             'fill': recipe['distill']['targets']['texts'], 'gate': recipe['context']['gate']['words'],
+             'fill': settings['fill'], 'gate': recipe['context']['gate']['words'],
              'pins': pins, 'rules': [SENTENCE_ENDS, MARKS, ROMAN.pattern, SENTENCE.pattern, WORD.pattern]}
     return hashlib.sha256(json.dumps(basis, sort_keys=True).encode('utf-8')).hexdigest()[:12]
 
@@ -215,7 +215,7 @@ def select_sentences(settings, recipe, jobs):
     quotas = readings.coverage_quotas(settings['coverage'], recipe['context']['gate']['words'])
     texts = settings['texts']
     coverage_section = {'books': texts['books'], 'pins': texts['pins'], 'texts': recipe['context']['labels']['texts']}
-    fill_section = {'books': texts['books'], 'pins': texts['pins'], 'texts': recipe['distill']['targets']['texts']}
+    fill_section = {'books': texts['books'], 'pins': texts['pins'], 'texts': settings['fill']}
 
     # The coverage's candidates - each quota word's sentences (in hash order), checked by the front end
     with concurrent.futures.ProcessPoolExecutor(jobs) as pool:
@@ -256,7 +256,7 @@ def select_sentences(settings, recipe, jobs):
                 choose(book, text, True)
     coverage_words = sum(len(item['text'].split()) for item in chosen)
 
-    # The fill - the distillation books' sentences at random (in order of a seeded shuffle) to the recipe's hours
+    # The fill - the fill books' sentences at random (in order of a seeded shuffle) to the recipe's hours
     target_words = settings['hoursPerVoice'] * 3600 * settings['wordsPerSecond'] * len(settings['voices'])
     with concurrent.futures.ProcessPoolExecutor(jobs) as pool:
         fill_paths = book_paths(fill_section)

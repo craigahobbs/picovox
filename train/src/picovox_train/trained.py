@@ -67,23 +67,23 @@ def module_size(path):
     return f'{len(data):,} bytes ({len(gzip.compress(data, compresslevel=9, mtime=0)) / 1000:.0f} KB gzipped)'
 
 
-# The voice's lines - its size and the gate's panel scores against the shipped model (TRAIN_DIR/distill/summary.json)
+# The voice's lines - its size and the gate's panel scores against the shipped model (TRAIN_DIR/eval/summary.json)
 def voice_lines(train_dir, path):
     with open(path, encoding='utf-8') as file:
         parameters = re.search(r'"parameterCount":(\d+)', file.read())
     lines = [f'{int(parameters.group(1)):,} parameters, {module_size(path)}' if parameters else module_size(path)]
-    summary_path = os.path.join(train_dir, 'distill', 'summary.json')
+    summary_path = os.path.join(train_dir, 'eval', 'summary.json')
     if os.path.exists(summary_path):
         with open(summary_path, encoding='utf-8') as file:
             summary = json.load(file)
         rows = {row['name']: row for row in summary['rows']}
-        student, shipped = rows.get('student'), rows.get(summary['against'])
-        if student and shipped:
-            lines.append(f'the listener panel: UTMOS {student["mos"]:.3f} (shipped {shipped["mos"]:.3f}, '
-                         f'{student["mos"] - shipped["mos"]:+.3f}), WER {student["wer"]:.2f}% (shipped {shipped["wer"]:.2f}%, '
-                         f'{student["wer"] - shipped["wer"]:+.2f}), similarity {student["similarity"]:.3f}')
+        voice, shipped = rows.get(summary['name']), rows.get(summary['against'])
+        if voice and shipped:
+            lines.append(f'the listener panel: UTMOS {voice["mos"]:.3f} (shipped {shipped["mos"]:.3f}, '
+                         f'{voice["mos"] - shipped["mos"]:+.3f}), WER {voice["wer"]:.2f}% (shipped {shipped["wer"]:.2f}%, '
+                         f'{voice["wer"] - shipped["wer"]:+.2f}), similarity to the shipped voice {voice["similarity"]:.3f}')
             tolerance = summary['tolerance']
-            lines.append(f'the gate: {"passed" if student.get("withinTolerance") else "FAILED"} (UTMOS at most {tolerance["mos"]} '
+            lines.append(f'the gate: {"passed" if summary["passed"] else "FAILED"} (UTMOS at most {tolerance["mos"]} '
                          f'below the shipped model\'s, WER at most {tolerance["wer"]} points above, similarity at least '
                          f'{tolerance["similarity"]})')
     return lines

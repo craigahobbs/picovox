@@ -2,7 +2,7 @@
 # https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
-The training losses and targets of the trainer (trainmulti.py; distill.py's polish): the parameter priors, the F0
+The training losses and targets of the trainer (trainmulti.py): the parameter priors, the F0
 target track, the multi-resolution STFT and log-mel loss, the duration loss, and the parameter frames made ready to
 render (the end frame, silence past each utterance, the recorded F0).
 """

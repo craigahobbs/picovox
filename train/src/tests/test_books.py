@@ -86,21 +86,22 @@ class TestPins(BooksCase):
         with open(os.path.join(ROOT, 'train', 'data', 'train.json'), encoding='utf-8') as file:
             recipe = json.load(file)
         pins = books.load_pins()
-        labels, targets = recipe['context']['labels'], recipe['distill']['targets']
-        for settings in (labels, targets):
+        labels, texts, fill = recipe['context']['labels'], recipe['tts']['texts'], recipe['tts']['fill']
+        for settings in (labels, texts):
             self.assertEqual(settings['pins'], 'train/data/books.json')
-            self.assertTrue(set(settings['texts']) <= set(pins))
+        self.assertTrue(set(labels['texts']) <= set(pins))
+        self.assertTrue(set(fill) <= set(pins))
         self.assertEqual(len(labels['texts']), 132)
-        self.assertEqual(len(targets['texts']), 22)
+        self.assertEqual(len(fill), 22)
         self.assertTrue(set(labels['heldOutBooks']) <= set(labels['texts']))
         self.assertTrue(all(pins[name]['id'] == int(name[2:]) for name in labels['texts']))
-        self.assertEqual(set(pins), set(labels['texts']) | set(targets['texts']))
+        self.assertEqual(set(pins), set(labels['texts']) | set(fill))
         for name, pin in pins.items():
             self.assertEqual(pin['url'], f'https://www.gutenberg.org/cache/epub/{pin["id"]}/pg{pin["id"]}.txt', name)
             self.assertRegex(pin['sha256'], r'^[0-9a-f]{64}$', name)
             self.assertRegex(pin['pinned'], r'^\d{4}-\d\d-\d\d$', name)
             self.assertTrue(pin['archive'] is None or pin['archive'].startswith('https://web.archive.org/web/'), name)
-        # (the distillation's pg2554 is a later revision than the labels')
+        # (the fill's pg2554 is a later revision than the labels')
         self.assertNotEqual(pins['pg2554']['sha256'], pins['pg2554-2026-10-16']['sha256'])
 
         # The file is as write_pins writes it
@@ -427,3 +428,40 @@ class TestBundle(BooksCase):
         self.assertEqual(sorted(os.listdir(self.books)), ['pg7.txt', 'pg8.txt'])
         self.assertEqual(self.read_book('pg7'), PINNED)
         self.assertEqual(self.read_book('pg8'), b'kept')
+
+
+# A short public-domain text, as a Gutenberg book (its license header and footer)
+BOOK = '''The Project Gutenberg eBook of a test
+
+*** START OF THE PROJECT GUTENBERG EBOOK A TEST ***
+
+Call me Ishmael. Some years ago, never mind how long precisely, having little or no money in
+my purse, I thought I would sail about a little and see the watery part of the world.
+
+It is a way I have of driving off the spleen. Whenever I find myself growing grim about the mouth, I account it high
+time to get to sea as soon as I can. _There_ is nothing surprising in this.
+
+1 2 3
+
+Is it cold? Wait here! The cat sat on the mat.
+
+*** END OF THE PROJECT GUTENBERG EBOOK A TEST ***
+
+The license.
+'''
+
+
+class TestBookParagraphs(BooksCase):
+
+    def test_book_paragraphs(self):
+        self.write_book('book', BOOK.encode('utf-8'))
+        paragraphs = books.book_paragraphs(os.path.join(self.books, 'book.txt'))
+        self.assertEqual(len(paragraphs), 3)
+        self.assertTrue(paragraphs[0].startswith('Call me Ishmael. Some years ago, never mind how long precisely, having little or '
+                                                 'no money in my'))
+        self.assertIn('There is nothing', paragraphs[1])
+        self.assertEqual(paragraphs[2], 'Is it cold? Wait here! The cat sat on the mat.')
+        # (a plain text - no license header or footer; Windows line ends)
+        self.write_book('plain', b'We went home. A dark night fell\r\non the town. Oh. Call me Ishmael.\r\n')
+        self.assertEqual(books.book_paragraphs(os.path.join(self.books, 'plain.txt')),
+                         ['We went home. A dark night fell on the town. Oh. Call me Ishmael.'])

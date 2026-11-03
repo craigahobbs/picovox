@@ -9,7 +9,7 @@
 // recommendation (printed, and OUT/report.json), and the server exits. A rerun after a finished round starts the next
 // round (a round not yet started is chosen again); the report counts every round. Ctrl-C prints the report so far.
 //
-//     node tools/trainab.js --lab build/voicelab --out build/train/listen [--summary build/train/distill/summary.json]
+//     node tools/trainab.js --lab build/voicelab --out build/train/listen [--summary build/train/eval/summary.json]
 //         [--port 8770] [--open false - the browser not opened]
 
 import {abReport, alignedDistance, chooseTrials, formatReport, frameFeatures, makeQuestions} from './trainabreport.js';
@@ -111,7 +111,7 @@ function report() {
     const summary = args.summary === null ? null : readJSON(args.summary, null);
     if (summary !== null) {
         const rows = Object.fromEntries(summary.rows.map((row) => [row.name, row]));
-        panel = rows.student && rows[summary.against] ? {'student': rows.student, 'shipped': rows[summary.against]} : null;
+        panel = rows[summary.name] && rows[summary.against] ? {'trained': rows[summary.name], 'shipped': rows[summary.against]} : null;
     }
     writeJSON(reportPath, result);
     print(formatReport(result, panel).join('\n'));

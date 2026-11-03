@@ -10,12 +10,9 @@ import unittest
 import torch
 
 from picovox_train import optim
-from picovox_train.model import MultiModel
-
-from . import helpers
 
 
-# A small model of Linear layers (a hidden matrix taller than wide, one wider than tall) and a bias-only parameter
+# A small model of two Linear layers and a bias-only parameter
 class Small(torch.nn.Module):
 
     def __init__(self):
@@ -65,60 +62,13 @@ class TestSchedule(unittest.TestCase):
             optim.lr_factor(50, 100, 10, 'step')
 
 
-class TestModelParameters(unittest.TestCase):
-
-    def test_hidden_matrices(self):
-        model = MultiModel(helpers.tiny_config())
-        model.decoder_in.weight.requires_grad_(False)
-        matrices = optim.hidden_matrices(model)
-        identities = {id(matrix) for matrix in matrices}
-        for excluded in (model.head.weight, model.duration_out.weight, model.position_in.weight, model.decoder_in.weight):
-            self.assertNotIn(id(excluded), identities)
-        self.assertTrue(all(matrix.dim() == 2 for matrix in matrices))
-        self.assertIn(id(model.condition_decoder.weight), identities)
-
-    def test_param_groups(self):
-        model = MultiModel(helpers.tiny_config())
-        groups = optim.param_groups(model)
-        self.assertEqual(len(groups), 1)
-        self.assertEqual(len(groups[0]['params']), len(list(model.parameters())))
-        groups = optim.param_groups(model, muon=True)
-        self.assertEqual(len(groups), 2)
-        self.assertTrue(groups[1]['muon'])
-        self.assertEqual({id(parameter) for parameter in groups[1]['params']},
-                         {id(matrix) for matrix in optim.hidden_matrices(model)})
-        self.assertEqual(len(groups[0]['params']) + len(groups[1]['params']), len(list(model.parameters())))
-
-
-class TestNewtonSchulz(unittest.TestCase):
-
-    def test_orthogonalized(self):
-        # The singular values pushed toward 1 (the quintic's band, about 0.7-1.2)
-        generator = torch.Generator().manual_seed(0)
-        matrix = torch.randn(1, 4, 6, generator=generator)
-        singular = torch.linalg.svdvals(optim.newton_schulz(matrix)[0])
-        self.assertTrue(torch.all(singular > 0.5) and torch.all(singular < 1.3))
-
-    def test_zero_padding(self):
-        # A matrix zero-padded into a larger batch gets the same update in its block, and zeros outside it
-        generator = torch.Generator().manual_seed(1)
-        matrix = torch.randn(3, 5, generator=generator)
-        padded = torch.zeros(2, 4, 7)
-        padded[0, :3, :5] = matrix
-        padded[1] = torch.randn(4, 7, generator=generator)
-        result = optim.newton_schulz(padded)
-        self.assertTrue(torch.allclose(result[0, :3, :5], optim.newton_schulz(matrix[None])[0], atol=1e-6))
-        self.assertEqual(result[0, 3:].abs().sum().item(), 0.0)
-        self.assertEqual(result[0, :, 5:].abs().sum().item(), 0.0)
-
-
 class TestLeanOptimizer(unittest.TestCase):
 
     def test_matches_adamw(self):
         # The lean step and the default (clip_grad_norm_, then AdamW) agree up to rounding - the clip binding or not
         for scale in (100.0, 0.001):
             lean_model, default_model = Small(), Small()
-            lean = optim.LeanOptimizer(optim.param_groups(lean_model), lr=0.01, weight_decay=0.1)
+            lean = optim.LeanOptimizer([{'params': list(lean_model.parameters())}], lr=0.01, weight_decay=0.1)
             default = torch.optim.AdamW(default_model.parameters(), lr=0.01, weight_decay=0.1, betas=(0.9, 0.98))
             for seed in range(3):
                 backward(lean_model, scale, seed)
@@ -151,65 +101,30 @@ class TestLeanOptimizer(unittest.TestCase):
 
     def test_nonfinite_skipped(self):
         # A non-finite gradient norm skips the step on the device - parameters, moments, and the step count unchanged
-        for muon in (False, True):
-            model = Small()
-            lean = optim.LeanOptimizer([{'params': [model.scale, model.tall.bias, model.wide.bias]},
-                                        {'params': [model.tall.weight, model.wide.weight], 'muon': muon}], lr=0.01)
-            backward(model)
-            lean.step()
-            before = [parameter.detach().clone() for parameter in model.parameters()]
-            backward(model)
-            model.wide.weight.grad[0, 0] = math.inf
-            lean.step()
-            for parameter, previous in zip(model.parameters(), before):
-                self.assertTrue(torch.equal(parameter, previous))
-            self.assertEqual(lean.state[model.scale]['step'].item(), 1.0)
-
-    def test_muon(self):
-        # Muon's update - orthogonalized, scaled to AdamW's RMS - of the matrices in either orientation, one without a
-        # gradient; the momentum warmed up
         model = Small()
-        groups = [{'params': [model.scale, model.tall.bias, model.wide.bias]},
-                  {'params': [model.tall.weight, model.wide.weight], 'muon': True}]
-        lean = optim.LeanOptimizer(groups, lr=0.01, weight_decay=0.0)
-        backward(model)
-        before = model.tall.weight.detach().clone()
-        wide_before = model.wide.weight.detach().clone()
-        model.wide.weight.grad = None
-        lean.step()
-        update = (model.tall.weight - before) / (-0.01 * 0.2 * math.sqrt(5))
-        singular = torch.linalg.svdvals(update)
-        self.assertTrue(torch.all(singular > 0.5) and torch.all(singular < 1.3))
-        self.assertTrue(torch.equal(model.wide.weight, wide_before))
-        layout = lean.layouts[1]
-        self.assertEqual(layout['transposed'], [True, False])
-        self.assertEqual(layout['shape'], (2, 3, 5))
-        self.assertEqual(lean.state[model.tall.weight]['muonStep'], 1)
-        # (the second step reuses the layout and the momentum buffer)
+        lean = optim.LeanOptimizer([{'params': [model.scale, model.tall.bias, model.wide.bias]},
+                                    {'params': [model.tall.weight, model.wide.weight]}], lr=0.01)
         backward(model)
         lean.step()
-        self.assertEqual(lean.state[model.tall.weight]['muonStep'], 2)
-        self.assertEqual(lean.state[model.tall.weight]['momentum_buffer'].shape, (2, 3, 5))
-
-    def test_weight_decay(self):
-        # Muon's decoupled weight decay - a zero gradient's update is the decay alone
-        weight = torch.nn.Parameter(torch.ones(2, 3))
-        lean = optim.LeanOptimizer([{'params': [weight], 'muon': True}], lr=0.1, weight_decay=0.5)
-        weight.grad = torch.zeros_like(weight)
+        before = [parameter.detach().clone() for parameter in model.parameters()]
+        backward(model)
+        model.wide.weight.grad[0, 0] = math.inf
         lean.step()
-        self.assertTrue(torch.allclose(weight, torch.full_like(weight, 0.95)))
+        for parameter, previous in zip(model.parameters(), before):
+            self.assertTrue(torch.equal(parameter, previous))
+        self.assertEqual(lean.state[model.scale]['step'].item(), 1.0)
 
     def test_load_state_dict(self):
         # A saved and loaded optimizer shares its step counters again, and continues identically
         model, twin = Small(), Small()
         groups = [{'params': [model.scale, model.tall.bias, model.wide.bias]},
-                  {'params': [model.tall.weight, model.wide.weight], 'muon': True}]
+                  {'params': [model.tall.weight, model.wide.weight]}]
         lean = optim.LeanOptimizer(groups, lr=0.01)
         backward(model)
         lean.step()
         twin.load_state_dict(model.state_dict())
         loaded = optim.LeanOptimizer([{'params': [twin.scale, twin.tall.bias, twin.wide.bias]},
-                                      {'params': [twin.tall.weight, twin.wide.weight], 'muon': True}], lr=0.01)
+                                      {'params': [twin.tall.weight, twin.wide.weight]}], lr=0.01)
         # (a copy, as a checkpoint's - loading keeps the tensors it's given)
         loaded.load_state_dict(copy.deepcopy(lean.state_dict()))
         self.assertIs(loaded.state[twin.wide.bias]['step'], loaded.state[twin.scale]['step'])

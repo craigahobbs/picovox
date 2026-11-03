@@ -197,7 +197,7 @@ class TestSelection(unittest.TestCase):
         self.assertEqual(pinned.call_args_list[1].args, ('/books', ['b'], '/pins.json'))
 
     def test_selection_key(self):
-        recipe = {'context': {'labels': {'texts': ['a']}, 'gate': {'words': ['lead']}}, 'distill': {'targets': {'texts': ['b']}}}
+        recipe = {'context': {'labels': {'texts': ['a']}, 'gate': {'words': ['lead']}}}
         with tempfile.TemporaryDirectory() as directory:
             pins = os.path.join(directory, 'books.json')
             with open(pins, 'w', encoding='utf-8') as file:
@@ -208,7 +208,7 @@ class TestSelection(unittest.TestCase):
             # The engine and the workers aren't the selection's
             self.assertEqual(tts.selection_key(dict(settings, workers=7, engine={}), recipe), key)
             self.assertNotEqual(tts.selection_key(dict(settings, seed=2), recipe), key)
-            self.assertNotEqual(tts.selection_key(settings, dict(recipe, distill={'targets': {'texts': ['c']}})), key)
+            self.assertNotEqual(tts.selection_key(dict(settings, fill=['c']), recipe), key)
             with open(pins, 'w', encoding='utf-8') as file:
                 file.write('{"a": 1}')
             self.assertNotEqual(tts.selection_key(settings, recipe), key)
@@ -233,7 +233,7 @@ FILL_BOOK = [
 
 class TestSelectSentences(unittest.TestCase):
 
-    RECIPE = {'context': {'labels': {'texts': ['cov.txt']}, 'gate': {'words': ['lead']}}, 'distill': {'targets': {'texts': ['fill.txt']}}}
+    RECIPE = {'context': {'labels': {'texts': ['cov.txt']}, 'gate': {'words': ['lead']}}}
     QUOTAS = {'lead': 4, 'record': 1, 'cat': 1, 'st': 1, 'tear': 1}
 
     # The books (pinned_paths patched to them), the quotas, the excluded texts, and the workers in this process

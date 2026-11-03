@@ -3,7 +3,7 @@
 
 """
 The pinned book texts - the Project Gutenberg books make train reads (the heteronym labels' books - contextlabels.py -
-and the distillation's - distill.py), each pinned in train/data/books.json to the exact text the shipped models were
+and the training speech's fill - tts.py), each pinned in train/data/books.json to the exact text the shipped models were
 trained on: its SHA-256, its size, its source URL, the date it was pinned, and an archived copy of the same bytes (a
 Wayback Machine capture of the source URL, by its raw "id_" URL) where one exists.
 
@@ -13,7 +13,7 @@ and moved the context labels by one example. A pinned text is fetched once into 
 else its archived copy - the first whose bytes have the pinned hash) and verified there on every use - the hash is of
 the bytes as fetched and stored, which every reader decodes the same way. A text that isn't the pinned one is never
 used: the fetch fails with the book, the expected and actual hashes, and how to proceed - restore the pinned copy, or
-re-pin deliberately (pin, then retrain: the labels or the distillation set change with the text).
+re-pin deliberately (pin, then retrain: the labels or the training speech change with the text).
 
 The pins' bundle is our own copy of every pinned text: one xz-compressed tar (deterministic - the texts in name order,
 no times or owners) published with the picovox site (make gh-pages - https://craigahobbs.github.io/picovox/books/),
@@ -27,7 +27,7 @@ copy are the fallbacks. A re-pinned text needs a new bundle (bundle with a new t
     PYTHONPATH=train/src python3 -B -m picovox_train.books publish DIR                          # the bundle into the site (DIR/books/)
 
 A text's name is its file's in the books directory (<name>.txt): pg<id> for a book's revision the labels read, and
-pg<id>-<date> for another revision of the same book (the distillation's pg2554 is a later revision than the labels').
+pg<id>-<date> for another revision of the same book (the fill's pg2554 is a later revision than the labels').
 """
 
 import argparse
@@ -118,7 +118,7 @@ def remedy(name, pin, path):
     return (f'To proceed, either restore the pinned text - put a copy with sha256 {pin["sha256"]} (an earlier run\'s '
             f'{os.path.basename(path)}, kept in its books directory) at {display_path(path)} - or re-pin deliberately: put the new '
             f'text at {display_path(path)} and run "python -m picovox_train.books pin {name}", then retrain - the text is '
-            'training data (the heteronym labels or the distillation set), so make train will no longer reproduce the '
+            'training data (the heteronym labels or the training speech), so make train will no longer reproduce the '
             'committed models byte for byte.')
 
 
@@ -320,6 +320,26 @@ def publish_command(args):
         file.write(data)
     print(f'books: published {os.path.basename(source)} in {display_path(directory)}')
     return 0
+
+
+# A Gutenberg book's license header and footer
+GUTENBERG_START = re.compile(r'^\*\*\* ?START OF (THE|THIS) PROJECT GUTENBERG.*$', re.MULTILINE)
+GUTENBERG_END = re.compile(r'^\*\*\* ?END OF (THE|THIS) PROJECT GUTENBERG.*$', re.MULTILINE)
+
+
+# A Gutenberg book's paragraphs (the text between the license header and footer, line-wrapped paragraphs joined)
+def book_paragraphs(path):
+    with open(path, encoding='utf-8', errors='replace') as file:
+        text = file.read().replace('\r\n', '\n')
+    start = GUTENBERG_START.search(text)
+    end = GUTENBERG_END.search(text)
+    text = text[start.end() if start else 0:end.start() if end else len(text)]
+    paragraphs = []
+    for block in re.split(r'\n\s*\n', text):
+        paragraph = ' '.join(line.strip() for line in block.split('\n')).strip()
+        if paragraph and re.search('[a-zA-Z]', paragraph):
+            paragraphs.append(paragraph.replace('_', ''))
+    return paragraphs
 
 
 # The book counts of words' capitalizations mid-sentence - {word: [capitalized, lowercase]} (a word after the start of a

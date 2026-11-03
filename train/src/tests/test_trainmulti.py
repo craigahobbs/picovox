@@ -37,9 +37,9 @@ class TrainData:
         helpers.write_corpus(os.path.join(self.data_dir, 'tts'))
         with open(trainmulti.RECIPE_PATH, encoding='utf-8') as file:
             recipe = json.load(file)
-        recipe['teacher']['defaults'].update({'steps': 3, 'batch': 2, 'max-frames': 400, 'crop': 0.1, 'val-count': 4,
-                                              'warmup': 1})
-        recipe['teacher']['b'] = {'description': 'stage B', 'adversarial': 0.1, 'adversarial-start': 1}
+        recipe['voice']['defaults'].update({'steps': 3, 'batch': 2, 'max-frames': 400, 'crop': 0.1, 'val-count': 4,
+                                            'warmup': 1})
+        recipe['voice']['b'] = {'description': 'stage B', 'adversarial': 0.1, 'adversarial-start': 1}
         self.recipe = os.path.join(self.root, 'train.json')
         with open(self.recipe, 'w', encoding='utf-8') as file:
             json.dump(recipe, file)
@@ -219,8 +219,8 @@ class TestHelpers(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, 'recipe.json')
             with open(path, 'w', encoding='utf-8') as file:
-                json.dump({'teacher': {'a': {'description': 'x', 'max-frames': 10, 'lr': 0.5}}}, file)
-            self.assertEqual(trainmulti.recipe_defaults('teacher.a', path), {'max_frames': 10, 'lr': 0.5})
+                json.dump({'voice': {'a': {'description': 'x', 'max-frames': 10, 'lr': 0.5}}}, file)
+            self.assertEqual(trainmulti.recipe_defaults('voice.a', path), {'max_frames': 10, 'lr': 0.5})
 
     def test_default_settings(self):
         settings = trainmulti.default_settings(crop=0.5, batch=3)
@@ -357,7 +357,7 @@ class TestMain(unittest.TestCase):
     def test_recipe_stage_b(self):
         # Stage B (the recipe's section): the critic, from stage A's weights
         init = tiny_checkpoint()
-        self.assertEqual(DATA.train('b', '--recipe', 'teacher.b', '--init', init, '--log-every', '1'), 0)
+        self.assertEqual(DATA.train('b', '--recipe', 'voice.b', '--init', init, '--log-every', '1'), 0)
         self.assertIn(f'init from {init}: missing [], unexpected []', DATA.last_log)
         state = torch.load(DATA.run_path('b', 'last.pt'), weights_only=False)
         self.assertIn('critic', state)
@@ -366,14 +366,11 @@ class TestMain(unittest.TestCase):
         self.assertIn('critic', DATA.last_log)
 
     def test_critic(self):
-        # The critic alone, then with the generator's adversarial and feature-matching losses; the critic's initial
-        # weights from another run's; float32 convolutions
+        # The critic alone, then with the generator's adversarial and feature-matching losses; float32 convolutions
         self.assertEqual(DATA.train('critic', '--adversarial', '0.1', '--adversarial-start', '1', '--log-every', '1'), 0)
         self.assertIn('adversarial', DATA.last_log)
         self.assertIn('matching', DATA.last_log)
-        self.assertEqual(DATA.train('critic-init', '--adversarial', '0.1', '--critic-precision', 'float32', '--init-critic',
-                                    DATA.run_path('critic', 'last.pt'), '--steps', '1'), 0)
-        self.assertIn('critic init from', DATA.last_log)
+        self.assertEqual(DATA.train('critic-float32', '--adversarial', '0.1', '--critic-precision', 'float32', '--steps', '1'), 0)
 
     def test_resume(self):
         # Stopped at step 2, then resumed to the end - the critic's state restored too
@@ -441,7 +438,7 @@ class TestStepOptions(unittest.TestCase):
     def test_options(self):
         # Stage B (the critic) with every training step option, stopped and resumed
         init = tiny_checkpoint()
-        options = ['--recipe', 'teacher.b', '--init', init, '--lean-clip', '--schedule', 'wsd', '--cooldown', '0.5', '--val-every', '1']
+        options = ['--recipe', 'voice.b', '--init', init, '--lean-clip', '--schedule', 'wsd', '--cooldown', '0.5', '--val-every', '1']
         self.assertEqual(DATA.train('options', *options, '--stop', '2', '--resume'), 0)
         self.assertEqual(DATA.train('options', *options, '--resume'), 0)
         self.assertIn('options: 3 steps from 2', DATA.last_log)

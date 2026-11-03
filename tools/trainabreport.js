@@ -196,7 +196,7 @@ export function abReport(questions, answers) {
 }
 
 
-// The report as text lines - with the listener panel's scores (distill pick's summary rows: {student, shipped}) if given
+// The report as text lines - with the listener panel's scores (the gate's summary rows: {trained, shipped}) if given
 export function formatReport(report, panel = null) {
     const percent = (value) => `${Math.round(value * 100)}%`;
     const lines = [`The blind A/B - ${report.answered} of ${report.trials} trials answered`];
@@ -217,8 +217,8 @@ export function formatReport(report, panel = null) {
         lines.push(`  by voice (trained-shipped): ${voices.join(', ')}`);
     }
     if (panel !== null) {
-        lines.push(`  the listener panel: UTMOS ${panel.student.mos.toFixed(3)} (shipped ${panel.shipped.mos.toFixed(3)}), ` +
-            `WER ${panel.student.wer.toFixed(2)}% (shipped ${panel.shipped.wer.toFixed(2)}%)`);
+        lines.push(`  the listener panel: UTMOS ${panel.trained.mos.toFixed(3)} (shipped ${panel.shipped.mos.toFixed(3)}), ` +
+            `WER ${panel.trained.wer.toFixed(2)}% (shipped ${panel.shipped.wer.toFixed(2)}%)`);
     }
     lines.push(`Recommendation: ${report.recommendation.text}`);
     return lines;

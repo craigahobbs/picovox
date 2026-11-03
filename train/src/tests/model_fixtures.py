@@ -2,7 +2,7 @@
 # https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
-The export, packaging, panel, and distillation tests' fixtures - a tiny teacher checkpoint (trainmulti.py's format) and
+The export, packaging, and panel tests' fixtures - a tiny checkpoint (trainmulti.py's format) and
 its training data (the training speech, helpers.write_corpus), with the modules' directories patched
 """
 
@@ -12,7 +12,7 @@ import unittest.mock
 
 import torch
 
-from picovox_train import distill, export, trainmulti
+from picovox_train import export, panel, trainmulti
 from picovox_train.model import MultiModel
 from tests import helpers
 
@@ -41,16 +41,14 @@ def write_checkpoint(path, seed=1, args=None, **config):
     return path
 
 
-# The modules' directories patched under a temporary root (data, runs, the distillation's outputs and samples)
+# The modules' directories patched under a temporary root (data, runs, the panel's evaluations)
 @contextlib.contextmanager
 def patched_dirs(root):
     data_dir = os.path.join(root, 'data')
     runs_dir = os.path.join(root, 'runs')
     with contextlib.ExitStack() as stack:
-        for module in (export, distill, trainmulti):
+        for module in (export, trainmulti):
             stack.enter_context(unittest.mock.patch.object(module, 'DATA_DIR', data_dir))
-        for module in (distill, trainmulti):
-            stack.enter_context(unittest.mock.patch.object(module, 'RUNS_DIR', runs_dir))
-        stack.enter_context(unittest.mock.patch.object(distill, 'DISTILL_DIR', os.path.join(root, 'distill')))
-        stack.enter_context(unittest.mock.patch.object(distill, 'SAMPLES_DIR', os.path.join(root, 'samples')))
+        stack.enter_context(unittest.mock.patch.object(trainmulti, 'RUNS_DIR', runs_dir))
+        stack.enter_context(unittest.mock.patch.object(panel, 'EVAL_DIR', os.path.join(root, 'eval')))
         yield data_dir

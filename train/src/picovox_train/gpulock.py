@@ -2,8 +2,8 @@
 # https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
-Run a command holding the GPU lock - make train's GPU stages (teacher A and B, the distillation targets, the student,
-its polish) one at a time, while its CPU stages run beside them (two GPU jobs at once each run at about half speed):
+Run a command holding the GPU lock - make train's GPU stages (the training speech, its readings, and
+the voice's stages A and B) one at a time, while its CPU stages run beside them (two GPU jobs at once each run at about half speed):
 
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.gpulock build/gpu.lock -- python -m picovox_train.trainmulti ...
 

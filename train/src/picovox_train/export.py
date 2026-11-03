@@ -2,7 +2,7 @@
 # https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
-Export - a trained model (an trainmulti.py or distill.py checkpoint) to the browser's format, <out>/<voice>.bin
+Export - a trained model (a trainmulti.py checkpoint) to the browser's format, <out>/<voice>.bin
 and <out>/<voice>.json (default train/data/), which lib/model.js loads (and package.py packages as a module):
 
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.export build/nn/runs/multi-b/best.pt --voice multi

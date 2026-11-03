@@ -3,7 +3,6 @@
 
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
-import json
 import os
 import runpy
 import shutil
@@ -21,9 +20,8 @@ from . import helpers
 # Each stage's outputs (relative to the smoke run's directory)
 OUTPUTS = {
     'g2p-train': 'g2p/done.json', 'context-g2p': 'context-g2p.pt', 'context-train': 'context.pt', 'context-export': 'g2pModel.js',
-    'data-build': 'data/tts/index.json', 'teacher-a': 'runs/smoke-a/last.pt', 'teacher-b': 'runs/smoke-b/last.pt',
-    'distill-targets': 'targets/index.json', 'distill-train': 'runs/distill-s32/best.pt',
-    'distill-polish': 'runs/distill-s32-polish/best.pt', 'export': 'export/smoke.json', 'package': 'voiceModel.js'
+    'data-build': 'data/tts/index.json', 'voice-a': 'runs/smoke-a/last.pt', 'voice-b': 'runs/smoke-b/last.pt',
+    'export': 'export/smoke.json', 'package': 'voiceModel.js'
 }
 
 
@@ -113,68 +111,56 @@ class TestSmoke(unittest.TestCase):
         self.assertEqual(run.command('g2p-train')[3:], ['picovox_train.g2p', 'train', '--out', os.path.join(run.out, 'g2p'),
                                                         '--steps', '3'])
         self.assertEqual(run.command('context-g2p')[6], os.path.join(run.root, 'build', 'nn', 'context', 'labels.json'))
-        self.assertIn('--adversarial-start', run.command('teacher-b'))
+        self.assertIn('--adversarial-start', run.command('voice-b'))
         # The data stage's clips, and the voice stages on its data
         self.assertEqual(run.command('data-build')[3:], ['picovox_train.tts', 'build', '--out', os.path.join(run.out, 'data', 'tts'),
                                                          '--limit', '48', '-j', '2'])
-        self.assertEqual(run.data_dirs['teacher-a'], os.path.join(run.out, 'data'))
-        # The distillation's recipe - a short book, few validation items
-        with open(os.path.join(run.out, 'train.json'), encoding='utf-8') as file:
-            recipe = json.load(file)
-        self.assertEqual(recipe['distill']['targets']['books'], os.path.join(run.out, 'books'))
-        self.assertEqual(recipe['distill']['targets']['valItems'], 4)
-        self.assertNotIn('texts', recipe['distill']['targets'])
-        self.assertEqual(recipe['distill']['train']['batch'], 8)
-        self.assertEqual(recipe['distill']['polish']['val-every'], 2)
-        with open(os.path.join(run.out, 'books', 'book.txt'), encoding='utf-8') as file:
-            self.assertEqual(file.read(), smoke.BOOK_TEXT)
+        self.assertEqual(run.data_dirs['voice-a'], os.path.join(run.out, 'data'))
+        # (the package of stage B's last checkpoint)
+        self.assertEqual(run.command('export')[4], os.path.join(run.out, 'runs', 'smoke-b', 'last.pt'))
 
     def test_failures(self):
         # A failed stage stops the stages that need it; the others run
-        run = self.smoke_run(failing=['g2p-train', 'teacher-a'])
+        run = self.smoke_run(failing=['g2p-train', 'voice-a'])
         status, output = run.main()
         self.assertEqual(status, 1)
-        self.assertEqual(run.names(), ['g2p-train', 'data-build', 'teacher-a'])
-        self.assertEqual(output.splitlines()[-1], 'smoke: FAILED - g2p-train, teacher-a')
+        self.assertEqual(run.names(), ['g2p-train', 'data-build', 'voice-a'])
+        self.assertEqual(output.splitlines()[-1], 'smoke: FAILED - g2p-train, voice-a')
         self.assertIn(f'FAILED g2p-train (0 s) - exit 1, missing [{os.path.join(run.out, "g2p", "done.json")!r}], see '
                       f'{os.path.join(run.out, "g2p-train.log")}', output)
 
     def test_missing_outputs(self):
         # A stage that exits 0 without its outputs failed
-        run = self.smoke_run(missing=['context-g2p', 'distill-train', 'export'])
+        run = self.smoke_run(missing=['context-g2p', 'voice-b'])
         status, output = run.main()
         self.assertEqual(status, 1)
-        self.assertEqual(run.names(), ['g2p-train', 'context-g2p', 'data-build', 'teacher-a', 'teacher-b', 'distill-targets',
-                                       'distill-train'])
+        self.assertEqual(run.names(), ['g2p-train', 'context-g2p', 'data-build', 'voice-a', 'voice-b'])
         self.assertIn('FAILED context-g2p (0 s) - exit 0, missing', output)
 
     def test_later_failures(self):
-        run = self.smoke_run(failing=['context-train', 'teacher-b', 'distill-targets'])
+        run = self.smoke_run(failing=['context-train', 'voice-b'])
         self.assertEqual(run.main()[0], 1)
-        self.assertEqual(run.names(), ['g2p-train', 'context-g2p', 'context-train', 'data-build', 'teacher-a', 'teacher-b'])
-        run = self.smoke_run(failing=['distill-targets', 'export'])
-        self.assertEqual(run.main()[0], 1)
-        self.assertEqual(run.names()[-1], 'distill-targets')
+        self.assertEqual(run.names(), ['g2p-train', 'context-g2p', 'context-train', 'data-build', 'voice-a', 'voice-b'])
 
     def test_package_failure(self):
         run = self.smoke_run(failing=['export'])
         self.assertEqual(run.main()[0], 1)
-        self.assertEqual(run.names()[-3:], ['distill-train', 'distill-polish', 'export'])
+        self.assertEqual(run.names()[-3:], ['voice-a', 'voice-b', 'export'])
 
     def test_data_failure(self):
         # A failed data build - the voice stages read build/nn/data
         run = self.smoke_run(failing=['data-build'])
-        self.assertEqual(run.main('--only', 'data,teacher')[0], 1)
-        self.assertEqual(run.names(), ['data-build', 'teacher-a', 'teacher-b'])
-        self.assertIsNone(run.data_dirs['teacher-a'])
+        self.assertEqual(run.main('--only', 'data,voice')[0], 1)
+        self.assertEqual(run.names(), ['data-build', 'voice-a', 'voice-b'])
+        self.assertIsNone(run.data_dirs['voice-a'])
 
     def test_no_corpus(self):
         # No aligned corpus (picovox_train.tts generate and align not run) - the data stage is skipped, the voice stages
         # read build/nn/data
         run = self.smoke_run(corpus=False)
-        self.assertEqual(run.main('--only', 'data,teacher')[0], 0)
-        self.assertEqual(run.names(), ['teacher-a', 'teacher-b'])
-        self.assertIsNone(run.data_dirs['teacher-a'])
+        self.assertEqual(run.main('--only', 'data,voice')[0], 0)
+        self.assertEqual(run.names(), ['voice-a', 'voice-b'])
+        self.assertIsNone(run.data_dirs['voice-a'])
 
     def test_no_labels(self):
         # No context labels (nn.contextlabels not run) - the context stage is skipped
@@ -183,16 +169,16 @@ class TestSmoke(unittest.TestCase):
         self.assertEqual(run.names(), ['g2p-train'])
 
     def test_only(self):
-        # The stages chosen; the distillation and package stages need the teacher and the student; --keep keeps the output
+        # The stages chosen; the package stage needs the voice's stage B; --keep keeps the output
         run = self.smoke_run()
         os.makedirs(os.path.join(run.out, 'old'))
-        self.assertEqual(run.main('--only', 'g2p,distill,package', '--keep')[0], 0)
+        self.assertEqual(run.main('--only', 'g2p,package', '--keep')[0], 0)
         self.assertEqual(run.names(), ['g2p-train'])
         self.assertTrue(os.path.exists(os.path.join(run.out, 'old')))
-        self.assertEqual(run.main('--only', 'teacher,package', '--keep')[0], 0)
-        self.assertEqual(run.names()[1:], ['teacher-a', 'teacher-b'])
-        self.assertEqual(run.main('--only', 'distill,package', '--keep')[0], 0)
-        self.assertEqual(run.names()[3:], ['distill-targets', 'distill-train', 'distill-polish', 'export', 'package'])
+        self.assertEqual(run.main('--only', 'voice', '--keep')[0], 0)
+        self.assertEqual(run.names()[1:], ['voice-a', 'voice-b'])
+        self.assertEqual(run.main('--only', 'package', '--keep')[0], 0)
+        self.assertEqual(run.names()[3:], ['export', 'package'])
 
     def test_default_out(self):
         parser_default = os.path.join(ROOT, 'build', 'nn', 'smoke')

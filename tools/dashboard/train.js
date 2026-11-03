@@ -340,7 +340,7 @@ export function forecast(manifest, states, remaining, now) {
 
 
 // The listening samples by model - [{key, stage, status, samples}] for each model with a samples stage in the manifest
-// (train/data/train-stages.json's samples - teacher-a, teacher-b, student, polish), in the order of the training stages they
+// (train/data/train-stages.json's samples - voice-a, voice-b), in the order of the training stages they
 // follow (the samples key is the training stage's name), the reference (the shipped model - key reference) first. stage is
 // the samples stage, status its state (done when its samples are in the index - $(TRAIN_DIR)/samples/index.json,
 // tools/trainsamples.js), and samples its index entries ([] until rendered). A model whose samples stage isn't in the

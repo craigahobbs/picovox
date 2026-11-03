@@ -209,7 +209,7 @@ test('trainabreport.formatReport', () => {
             'female': {'trained': 1, 'shipped': 1, 'same': 0}},
         'recommendation': {'action': 'install', 'text': 'Install it'}
     };
-    const panel = {'student': {'mos': 4.131, 'wer': 1.36}, 'shipped': {'mos': 4.146, 'wer': 1.01}};
+    const panel = {'trained': {'mos': 4.131, 'wer': 1.36}, 'shipped': {'mos': 4.146, 'wer': 1.01}};
     assert.deepEqual(formatReport(report, panel), [
         'The blind A/B - 30 of 30 trials answered',
         '  preferred: the trained voice 15, the shipped voice 5, Same 10',

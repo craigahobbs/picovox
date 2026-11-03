@@ -22,7 +22,7 @@ The front end and the G2P:
 
 The data:
 
-- tts.py - the training speech: book sentences (the heteronym coverage, then the distillation's books) spoken by a
+- tts.py - the training speech: book sentences (the heteronym coverage, then the fill's books) spoken by a
   local TTS model through Ollama (the recipe's tts section - its model pinned by digest, a voice for each of the
   package's voices), cached in downloads/tts/<model>-<digest>/, CTC-aligned, checked, and built in data.py's format
   (build/nn/data/tts/)
@@ -32,8 +32,8 @@ The data:
 - data.py - the training data's featurization and format (tokens, durations from the alignment - align.py - 24 kHz
   audio, and Praat's auxiliary tracks), and its loader (CorpusData)
 - wav.py - WAV files (16-bit PCM) read with the standard library, exactly as libsndfile reads them
-- books.py - the pinned book texts (train/data/books.json): the Project Gutenberg books the training speech, the
-  heteronym labels, and the distillation read, each fetched once and verified by its SHA-256 - a revised text is never
+- books.py - the pinned book texts (train/data/books.json): the Project Gutenberg books the training speech and the
+  heteronym labels read, each fetched once and verified by its SHA-256 - a revised text is never
   used
 - corpora.py - the pinned downloads: the CMU Pronouncing Dictionary and the listener panel's Whisper model
 
@@ -54,10 +54,9 @@ The network:
 - model.py's MultiModel and trainmulti.py - the multi-speaker model: a speaker table (a row per voice) conditioning
   the network (FiLM), trained on the training speech with an adversarial spectrogram critic (discriminator.py)
   against the over-smoothing; the losses are losses.py's
-- optim.py - the training step's options for trainmulti.py and distill.py: the lean gradient clip and AdamW step,
-  Muon for the hidden matrices (batched Newton-Schulz - the student's optimizer), and the warmup-stable-decay schedule
+- optim.py - the training step's options for trainmulti.py: the lean gradient clip and AdamW step, and the
+  warmup-stable-decay schedule
 - quant.py - the export's 8-bit weight quantization (per row), shared by export.py and lib/model.js
-- distill.py - knowledge distillation of the multi-speaker model into small students (train/data/train.json's distill)
 - export.py - export to <voice>.bin and .json (8-bit weights - quant.py); package.py - an export
   as a generated JavaScript module (lib/models/voiceModel.js), loaded by lib/package.js (tools/packagecheck.js checks
   it); lib/model.js - the forward pass in JavaScript; lib/transforms.js - the voice and style transforms;
@@ -65,8 +64,8 @@ The network:
 
 The pipeline's tools:
 
-- panel.py - the listener panel's scoring (UTMOS, Whisper's WER, speaker similarity) of an exported model, shared by
-  every evaluation
+- panel.py - the listener panel's scoring (UTMOS, Whisper's WER, speaker similarity) of an exported model or a packaged
+  module, and make train's gate (the trained voice within the recipe's tolerance of the shipped one)
 - smoke.py - every training entry point for a few steps on the CPU (the pipeline's smoke test)
 - quality.py - voice quality measures (spectral balance, band harmonicity, upper-band crest, pitch flutter and wobble)
   of the package's voices synthesized, against their source clips (the training speech) - guides for listening

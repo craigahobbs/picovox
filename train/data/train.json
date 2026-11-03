@@ -1,7 +1,7 @@
 {
-    "description": "make train's recipe - every stage's settings and seeds: the G2P network (nn/g2p.py) and its heteronym models (nn/context.py), the teacher (nn/trainmulti.py --recipe), and the distilled student with its evaluation and gate (nn/distill.py, nn/panel.py)",
+    "description": "make train's recipe - every stage's settings and seeds: the G2P network (nn/g2p.py) and its heteronym models (nn/context.py), the voice model (nn/trainmulti.py --recipe), and its evaluation and gate (nn/panel.py)",
     "tts": {
-        "description": "The training speech (picovox_train/tts.py): book sentences spoken by a local TTS model through Ollama's speech endpoint (engine - its model pinned by digest: a new model is a new corpus, downloads/tts/<model>-<digest>/), one engine voice for each of the package's voices (voices - the model's speaker rows in this order; male, the first, the default), the heteronym coverage first (coverage - sentences a word: the context gate's words, the context labels' candidate words, the other measured words - readings.py) from the context labels' books, then the distillation's books at random, to hoursPerVoice hours of speech a voice (wordsPerSecond - the engine's speaking rate, for the estimate); split by a hash of the text (split - test and val percents); a clip excluded by the checks (the recognizer's greedy phone error above maxPhoneError; cut short - truncatedTail final phones missing with under truncatedSilence seconds of trailing silence, or truncatedAlways at any; maxClipped of its samples at full scale); analysed with the formant ceilings by sex, at the engine's bandwidth (Hz)",
+        "description": "The training speech (picovox_train/tts.py): book sentences spoken by a local TTS model through Ollama's speech endpoint (engine - its model pinned by digest: a new model is a new corpus, downloads/tts/<model>-<digest>/), one engine voice for each of the package's voices (voices - the model's speaker rows in this order; male, the first, the default), the heteronym coverage first (coverage - sentences a word: the context gate's words, the context labels' candidate words, the other measured words - readings.py) from the context labels' books, then the fill's books (fill) at random, to hoursPerVoice hours of speech a voice (wordsPerSecond - the engine's speaking rate, for the estimate); split by a hash of the text (split - test and val percents); a clip excluded by the checks (the recognizer's greedy phone error above maxPhoneError; cut short - truncatedTail final phones missing with under truncatedSilence seconds of trailing silence, or truncatedAlways at any; maxClipped of its samples at full scale); analysed with the formant ceilings by sex, at the engine's bandwidth (Hz)",
         "engine": {"url": "http://localhost:11434", "model": "phonon", "digest": "58f58601e4e8",
                    "license": "Phonon (Gradium) - its English checkpoint and voices under the Apache License 2.0 (ollama.com/library/phonon, huggingface.co/gradium/phonon-voices); its training data is undocumented"},
         "voices": {
@@ -14,6 +14,8 @@
         },
         "hoursPerVoice": 4, "wordsPerSecond": 3.18, "workers": 8, "seed": 1,
         "texts": {"books": "build/nn/books", "pins": "train/data/books.json", "minWords": 6, "maxWords": 40},
+        "fill": ["pg2701", "pg1342", "pg84", "pg64317", "pg11", "pg98", "pg1661", "pg345", "pg1400", "pg174", "pg76", "pg74",
+                 "pg768", "pg1260", "pg158", "pg161", "pg120", "pg43", "pg219", "pg2554-2026-10-16", "pg36", "pg35"],
         "coverage": {"gate": 200, "context": 24, "other": 12},
         "split": {"test": 5, "val": 5},
         "checks": {"maxPhoneError": 0.35, "truncatedTail": 3, "truncatedAlways": 5, "truncatedSilence": 0.05, "maxClipped": 0.005},
@@ -74,9 +76,10 @@
             "heteronymKindDrop": 2, "bookError": 0.0001, "bookDistinct": 25, "top10kWrong": 2, "monitorWer": 0.005
         }
     },
-    "teacher": {
-        "description": "The teacher (nn/trainmulti.py --recipe teacher.a, then teacher.b): stage A on the training speech (the 30,000-step schedule, stopped at 15,000), then stage B from A's weights with the adversarial critic, 10,000 steps of the warmup-stable-decay schedule (constant, then the last 25% cooled down by 1 - sqrt - picovox_train/optim.py) - B's best validation checkpoint (validated every 1,000 steps through the cooldown, from step 7,500) is the teacher; A, whose last checkpoint B starts from, validates every 5,000; the keys are nn/trainmulti.py's flags, defaults every training setting's default",
+    "voice": {
+        "description": "The voice model (picovox_train/trainmulti.py --recipe voice.a, then voice.b): stage A on the training speech (the 30,000-step schedule, stopped at 15,000), then stage B from A's weights with the adversarial critic, 10,000 steps of the warmup-stable-decay schedule (constant, then the last 25% cooled down by 1 - sqrt - picovox_train/optim.py) - B's best validation checkpoint (validated every 1,000 steps through the cooldown, from step 7,500) is the voice make train packages; A, whose last checkpoint B starts from, validates every 5,000; the keys are trainmulti.py's flags, defaults every training setting's default (config - the shipped model's size)",
         "defaults": {
+            "config": "{\"dim\": 80, \"decoderDim\": 64, \"encoderLayers\": 3, \"decoderLayers\": 4}",
             "steps": 30000, "batch": 16, "max-frames": 16000, "crop": 2.0, "bucket-ratio": 1.125, "rate": 24000, "max-hz": 10500,
             "lr": 0.001, "warmup": 1000, "duration-weight": 1.0, "f0-weight": 2.0, "formant-weight": 1.0,
             "guide-floor": 0.1, "guide-steps": 0.3, "smooth-weight": 0.05, "frication-max-hz": 11000, "sonorant-frication": 1.0,
@@ -89,64 +92,21 @@
               "adversarial": 0.1, "adversarial-start": 1000, "guide-steps": 0.001, "val-from": 7500, "lean-clip": true,
               "critic-channels": 16, "seed": 1}
     },
-    "distill": {
-        "description": "Knowledge distillation of the teacher (nn/distill.py) - its distillation set (the targets: the training utterances, and the sentences of the Project Gutenberg books texts - pinned texts, pins (nn/books.py), fetched to books), the student's training (Muon for the hidden matrices with the warmup-stable-decay schedule - constant, then the last 25% cooled down by 1 - sqrt; picovox_train/optim.py), the student ladder, the polish fine-tune, the evaluation (nn/panel.py), and the tolerance (fixed before any student is measured)",
-        "teacher": "build/nn/runs/multi-b/best.pt",
-        "targets": {
-            "books": "build/nn/books",
-            "pins": "train/data/books.json",
-            "texts": ["pg2701", "pg1342", "pg84", "pg64317", "pg11", "pg98", "pg1661", "pg345", "pg1400", "pg174", "pg76", "pg74",
-                "pg768", "pg1260", "pg158", "pg161", "pg120", "pg43", "pg219", "pg2554-2026-10-16", "pg36", "pg35"],
-            "bookCopies": 2,
-            "minTokens": 4,
-            "maxTokens": 256,
-            "valItems": 1500,
-            "seed": 1
-        },
-        "train": {
-            "steps": 12000,
-            "batch": 48,
-            "maxFrames": 24000,
-            "lr": 0.0015,
-            "warmup": 500,
-            "schedule": "wsd",
-            "cooldown": 0.25,
-            "durationWeight": 0.25,
-            "dropout": 0.05,
-            "weightDecay": 0.0001,
-            "valEvery": 1000
-        },
-        "student": "d64",
-        "students": [
-            {"name": "s96", "config": {"dim": 96, "decoderDim": 96, "encoderLayers": 3, "decoderLayers": 6}},
-            {"name": "s80", "config": {"dim": 80, "decoderDim": 80, "encoderLayers": 3, "decoderLayers": 4}},
-            {"name": "d64", "config": {"dim": 80, "decoderDim": 64, "encoderLayers": 3, "decoderLayers": 4}},
-            {"name": "s64", "config": {"dim": 64, "decoderDim": 64, "encoderLayers": 3, "decoderLayers": 4}},
-            {"name": "s48", "config": {"dim": 48, "decoderDim": 48, "encoderLayers": 2, "decoderLayers": 4}},
-            {"name": "s32", "config": {"dim": 32, "decoderDim": 32, "encoderLayers": 2, "decoderLayers": 3}}
-        ],
-        "polish": {"steps": 2000, "lr": 0.0002, "warmup": 200, "adversarial": 0.1, "feature-matching": 1.0,
-                   "adversarial-start": 200, "guide-steps": 0.001, "val-every": 500, "keep-every": 0, "critic-channels": 16},
-        "eval": {
-            "speakers": [["female", "female"], ["sarah", "female"], ["helen", "female"], ["amy", "female"], ["kate", "female"],
-                         ["grace", "female"], ["male", "male"], ["james", "male"], ["robert", "male"], ["michael", "male"],
-                         ["david", "male"], ["thomas", "male"]],
-            "rate": 16000
-        },
+    "panel": {
+        "description": "The listener panel (picovox_train/panel.py eval and gate): a voice model spoken through the browser path (tools/speak.js, at rate Hz) on the panel texts (tools/panel-texts.json) in the speakers' voices, scored with UTMOS, Whisper's WER, and the speaker similarity to a reference's renderings of the same speakers and texts (make train's: the shipped lib/models/voiceModel.js, evaluated as packaged - the baseline)",
+        "speakers": [["female", "female"], ["sarah", "female"], ["helen", "female"], ["amy", "female"], ["kate", "female"],
+                     ["grace", "female"], ["male", "male"], ["james", "male"], ["robert", "male"], ["michael", "male"],
+                     ["david", "male"], ["thomas", "male"]],
+        "rate": 16000,
         "tolerance": {
-            "description": "The smallest student whose mean UTMOS is within mos of the basis's (nn.distill pick --against: the teacher, or make train's baseline - the shipped lib/models/voiceModel.js, evaluated as packaged), whose Whisper WER is at most wer points worse, and whose speaker similarity to the teacher is at least similarity - the per-speaker cosine of the mean ECAPA embedding of the student's panel renderings with the mean of the teacher's renderings of the same texts, averaged over the voices",
+            "description": "The gate (panel.py gate --against: make train's baseline): the voice passes if its mean UTMOS is within mos of the basis's, its Whisper WER at most wer points worse, and its speaker similarity to the basis at least similarity - the per-speaker cosine of the mean ECAPA embedding of the voice's panel renderings with the mean of the basis's renderings of the same texts, averaged over the voices",
             "mos": 0.05,
             "wer": 1.0,
             "similarity": 0.85
-        },
-        "samples": {
-            "speakers": ["male", "female"],
-            "texts": ["melville-moby", "austen-pride"],
-            "rate": 44100
         }
     },
     "samples": {
-        "description": "The listening samples (tools/trainsamples.js): each training stage's final model - teacher A, teacher B, the student, and its polish - and the shipped model (lib/models/voiceModel.js) as a reference, each speaking the texts in the speakers' voices as the app speaks them (static/audiobook/worker.js), scored with UTMOS on the CPU, in $(TRAIN_DIR)/samples/ (index.json lists them) for the training dashboard's Listen tab",
+        "description": "The listening samples (tools/trainsamples.js): each training stage's final model - voice A and voice B - and the shipped model (lib/models/voiceModel.js) as a reference, each speaking the texts in the speakers' voices as the app speaks them (static/audiobook/worker.js), scored with UTMOS on the CPU, in $(TRAIN_DIR)/samples/ (index.json lists them) for the training dashboard's Listen tab",
         "texts": [
             {"key": "ishmael", "label": "Moby-Dick's opening", "text": "Call me Ishmael. Some years ago, never mind how long precisely, having little or no money in my purse, and nothing particular to interest me on shore, I thought I would sail about a little and see the watery part of the world."},
             {"key": "dialogue", "label": "Dialogue", "text": "\"Wait! Did you hear that?\" she whispered. \"Only the wind,\" he said, laughing. \"Go back to sleep.\""},

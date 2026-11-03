@@ -2,14 +2,14 @@
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 // make train's listening samples - a training stage's final model (a checkpoint, exported by picovox_train.export as the package
-// stage exports the student) or a packaged model (the shipped lib/models/voiceModel.js, the reference) speaking
+// stage exports the voice) or a packaged model (the shipped lib/models/voiceModel.js, the reference) speaking
 // train/data/train.json's samples texts in its speakers' voices exactly as the package speaks a sentence (lib/synthesis.js
 // sentenceBlocks, every word pronounced by the G2P network), each scored with UTMOS on the CPU
 // (picovox_train/listeners.py - the GPU is left to training). The WAV files are OUT/<stage>-<speaker>-<text>.wav, and
 // OUT/index.json lists every stage's samples - [{stage, run, checkpoint, step, label, sex, speaker, text, file, seconds,
 // mos}] - updated under a lock and replaced atomically, so sample stages finishing at once keep each other's entries.
 //
-//     node tools/trainsamples.js --stage teacher-a --checkpoint build/train/runs/teacher-a/last.pt --out build/train/samples
+//     node tools/trainsamples.js --stage voice-a --checkpoint build/train/runs/voice-a/last.pt --out build/train/samples
 //     node tools/trainsamples.js --stage reference --model lib/models/voiceModel.js --out build/train/samples
 //
 // --run names the checkpoint's training run (default: its directory's name); --settings another recipe (default

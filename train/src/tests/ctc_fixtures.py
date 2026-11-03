@@ -108,6 +108,7 @@ def tts_settings(**overrides):
         'voices': {'male': {'voice': 'Trevor', 'sex': 'male'}, 'female': {'voice': 'Harper', 'sex': 'female'}},
         'hoursPerVoice': 0.001, 'wordsPerSecond': 3.0, 'workers': 2, 'seed': 1,
         'texts': {'books': 'build/nn/books', 'pins': 'train/data/books.json', 'minWords': 3, 'maxWords': 40},
+        'fill': ['fill.txt'],
         'coverage': {'gate': 2, 'context': 1, 'other': 1},
         'split': {'test': 5, 'val': 5},
         'checks': {'maxPhoneError': 0.35, 'truncatedTail': 3, 'truncatedAlways': 5, 'truncatedSilence': 0.05, 'maxClipped': 0.005},
@@ -142,7 +143,7 @@ def tts_corpus(texts, settings=None, aligned=True):
                             'seconds': round(seconds, 4), 'labels': labels, 'confidences': [0.9] * (len(labels) - 2), 'score': -1.0,
                             'greedy': greedy_of(text)})
         os.makedirs(directory, exist_ok=True)
-        recipe = {'context': {'labels': {'texts': []}, 'gate': {'words': []}}, 'distill': {'targets': {'texts': []}}}
+        recipe = {'context': {'labels': {'texts': []}, 'gate': {'words': []}}}
         with open(os.path.join(directory, f'selection-{selection_key(settings, recipe)}.json'), 'w', encoding='utf-8') as file:
             json.dump({'engine': settings['engine'], 'clips': clips}, file)
         if aligned:

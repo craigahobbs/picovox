@@ -14,9 +14,27 @@ import numpy
 import torch
 
 from picovox_train import params
-from picovox_train.distill import sentences
 from picovox_train.export import load_model, quantized_model, token_remap, training_token_counts
 from picovox_train.frontend import tokenize
+from picovox_train.model import BOS
+
+
+# The sentence-ending tokens - inference speaks a text a sentence at a time
+SENTENCE_ENDS = {'<period>', '<question>', '<wh>', '<exclamation>'}
+
+
+# Split token ids into sentences, each starting with <bos> (as lib/model.js speaks them)
+def sentences(ids, vocab):
+    out = []
+    current = [BOS]
+    for token_id in ids[1:] if ids and ids[0] == BOS else ids:
+        current.append(token_id)
+        if vocab[token_id] in SENTENCE_ENDS:
+            out.append(current)
+            current = [BOS]
+    if len(current) > 1:
+        out.append(current)
+    return out
 
 
 class Voice:
