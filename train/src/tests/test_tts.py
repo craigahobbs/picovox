@@ -748,9 +748,20 @@ class TestBuild(unittest.TestCase):
             self.assertNotEqual(tts.build_key(dict(settings, checks={}), directory), key)
             with unittest.mock.patch.object(tts, 'file_sha256', side_effect=lambda path: 'x' if path.endswith('g2pModel.js') else 'y'):
                 changed = tts.build_key(settings, directory)
-                with unittest.mock.patch.object(tts, 'file_sha256', side_effect=lambda path: 'z' if path.endswith('tts.py') else 'y'):
-                    self.assertNotEqual(tts.build_key(settings, directory), changed)
             self.assertNotEqual(changed, key)
+            # (the build's code - its modules and the package's data files - but not the rest of the package)
+            with unittest.mock.patch.object(tts, 'file_sha256', return_value='y'):
+                base = tts.build_key(settings, directory)
+            for name, same in (('tts.py', False), ('data.py', False), ('vocab.json', False), ('__init__.py', False),
+                               ('trainmulti.py', True), ('losses.py', True)):
+                with unittest.mock.patch.object(tts, 'file_sha256', side_effect=lambda path, end=name: 'z' if path.endswith(end) else 'y'):
+                    self.assertEqual(tts.build_key(settings, directory) == base, same, name)
+
+    def test_module_closure(self):
+        package_dir = os.path.join(tts.SOURCE_DIR, 'picovox_train')
+        modules = tts.module_closure('tts', package_dir)
+        self.assertTrue({'tts', 'align', 'ctc', 'data', 'readings', 'frontend', 'g2pmodel', 'wav', 'books'} <= modules)
+        self.assertFalse({'trainmulti', 'losses', 'model', 'quality', 'panel'} & modules)
 
     def test_build_limit(self):
         with self.corpus() as (_, _, clips), tempfile.TemporaryDirectory() as out:
