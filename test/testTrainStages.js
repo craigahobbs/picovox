@@ -66,6 +66,11 @@ test('trainStages', () => {
         'measure': [measureSource, 'f\'measure: {len(clips)} clips, {sum(not task.get("control") for _, task in plan)} measured tokens, \'',
             'measure: 28000 clips, 120 measured tokens, 900 control tokens'],
         'measureCurrent': [measureSource, 'f\'measure: {out} is current\'', 'measure: /downloads/tts/phonon/readings is current'],
+        'build': [ttsSource, 'f\'tts build: {len(clips)} clips to build\'', 'tts build: 120 clips to build'],
+        'buildCurrent': [ttsSource, 'f\'tts build: {cached} is current\'', 'tts build: /downloads/tts/phonon/build-0123 is current'],
+        'buildStep': [ttsSource,
+            'f\'  {count}/{len(tasks)} clips, {frame_offset / 100 / 3600:.1f} h, {time.time() - start_time:.0f} s\'',
+            '  2000/29475 clips, 3.2 h, 61 s'],
         'measureStep': [measureSource,
             'f\'  ctc {min(len(voted), offset + args.batch)}/{len(voted)} tokens, {time.time() - start_time:.0f} s\'',
             '  ctc 64/120 tokens, 9 s']
@@ -86,6 +91,9 @@ test('trainStages', () => {
     };
     assert.deepEqual(phased('tts-corpus', [['generate', 'generateStep'], ['align', 'alignStep']]), ['generate', 'align']);
     assert.deepEqual(phased('tts-readings', [['measure', 'measureStep'], ['align', 'alignStep']]), ['measure', 'align']);
+    assert.deepEqual(phased('data-tts', [['build', 'buildStep']]), ['build']);
+    const build = manifest.stages.find((item) => item.stage === 'data-tts');
+    assert.equal(logLines.buildCurrent[2].match(new RegExp(build.progress.phases[0].header))[1], undefined);
     const readings = manifest.stages.find((item) => item.stage === 'tts-readings');
     assert.equal(logLines.measureCurrent[2].match(new RegExp(readings.progress.phases[0].header))[1], undefined);
     assert.deepEqual(stages['tts-corpus'].recipe.filter((line) => line.includes('picovox_train.')).

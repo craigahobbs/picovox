@@ -637,9 +637,10 @@ class TestBuild(unittest.TestCase):
             yield directory, settings, clips
 
     def test_build_command(self):
-        with self.corpus() as (_, settings, clips), tempfile.TemporaryDirectory() as out:
+        with self.corpus() as (directory, settings, clips), tempfile.TemporaryDirectory() as out:
             with unittest.mock.patch.object(tts, 'BUILD_PROGRESS', 3):
                 stdout, stderr = self.run_build(build_args(out))
+            cached = os.path.join(directory, f'build-{tts.build_key(settings, directory)}')
             corpus = data.CorpusData(out)
             arrays = [corpus.arrays(entry) for entry in corpus.index['utterances']]
             with open(os.path.join(out, 'alignment.jsonl'), encoding='utf-8') as file:
@@ -692,12 +693,64 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(index['vocab'], frontend.vocabulary())
         self.assertEqual(index['alignment']['aligner'], tts.aligner_key())
         self.assertEqual(index['checks'], settings['checks'])
-        self.assertIn(f'Built {out}: 6 clips (2 included), ', stdout)
+        self.assertIn(f'Built {cached}: 6 clips (2 included), ', stdout)
+        self.assertIn('tts build: 7 clips to build\n', stderr)
         self.assertIn('  male (Trevor): F0 ', stdout)
         self.assertIn('1 included, excluded {\'clipped\': 1, \'cut short\': 1, \'garbled\': 1}', stdout)
         self.assertIn('1 included, excluded {\'a phone with no frames\': 1, \'cut short\': 1}', stdout)
         self.assertIn('  3/6 clips, ', stderr)
         self.assertIn('  6/6 clips, ', stderr)
+
+    def test_build_cache(self):
+        # The build cached in the corpus (build-<key>/), hard-linked into --out; current, it's reused
+        with self.corpus() as (directory, settings, clips), tempfile.TemporaryDirectory() as out:
+            first, second = os.path.join(out, 'first'), os.path.join(out, 'second')
+            self.run_build(build_args(first))
+            key = tts.build_key(settings, directory)
+            cached = os.path.join(directory, f'build-{key}')
+            self.assertEqual(sorted(os.listdir(first)), sorted(os.listdir(cached)))
+            self.assertEqual(os.stat(os.path.join(first, 'audio.npy')).st_ino, os.stat(os.path.join(cached, 'audio.npy')).st_ino)
+            os.makedirs(os.path.join(second, 'stale'))
+            with unittest.mock.patch.object(tts, 'build_data') as build_data:
+                _, stderr = self.run_build(build_args(second))
+            build_data.assert_not_called()
+            self.assertEqual(stderr, f'tts build: {cached} is current\n')
+            self.assertEqual(sorted(os.listdir(second)), sorted(os.listdir(cached)))
+
+            # Another file system - copied
+            with unittest.mock.patch.object(tts.os, 'link', side_effect=OSError('cross-device link')):
+                tts.link_tree(cached, second)
+            self.assertNotEqual(os.stat(os.path.join(second, 'audio.npy')).st_ino, os.stat(os.path.join(cached, 'audio.npy')).st_ino)
+            self.assertEqual(sorted(os.listdir(second)), sorted(os.listdir(cached)))
+
+            # An unfinished build (no index.json) is built again
+            os.remove(os.path.join(cached, 'index.json'))
+            _, stderr = self.run_build(build_args(second))
+            self.assertIn('tts build: 7 clips to build\n', stderr)
+            self.assertTrue(os.path.exists(os.path.join(cached, 'index.json')))
+
+            # Other inputs (the readings measured) - another key, built, the old build removed
+            os.makedirs(os.path.join(directory, 'readings'))
+            with open(os.path.join(directory, 'readings', 'readings.jsonl'), 'w', encoding='utf-8') as file:
+                file.write('{}\n')
+            other = tts.build_key(settings, directory)
+            self.assertNotEqual(other, key)
+            self.run_build(build_args(second))
+            self.assertEqual(sorted(name for name in os.listdir(directory) if name.startswith('build')), [f'build-{other}', 'build.lock'])
+            # (the first --out's links outlive the build they came from)
+            self.assertEqual(data.CorpusData(first).index['utterances'][0]['sentence'], clips[0]['id'])
+
+    def test_build_key(self):
+        # The key - the recipe's tts section and every file the build reads
+        with self.corpus() as (directory, settings, _):
+            key = tts.build_key(settings, directory)
+            self.assertEqual(tts.build_key(settings, directory), key)
+            self.assertNotEqual(tts.build_key(dict(settings, checks={}), directory), key)
+            with unittest.mock.patch.object(tts, 'file_sha256', side_effect=lambda path: 'x' if path.endswith('g2pModel.js') else 'y'):
+                changed = tts.build_key(settings, directory)
+                with unittest.mock.patch.object(tts, 'file_sha256', side_effect=lambda path: 'z' if path.endswith('tts.py') else 'y'):
+                    self.assertNotEqual(tts.build_key(settings, directory), changed)
+            self.assertNotEqual(changed, key)
 
     def test_build_limit(self):
         with self.corpus() as (_, _, clips), tempfile.TemporaryDirectory() as out:

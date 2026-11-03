@@ -442,7 +442,7 @@ time (`picovox_train/gpulock.py` - two at once each run at about half speed) whi
 | --- | --- | --- |
 | tts-corpus - the training speech: the local TTS model's clips (`picovox_train.tts generate` - Ollama) and their CTC alignment (`tts align`), in `downloads/tts/` | GPU - about 45 and 15 minutes the first time, a minute cached | `lib/models/g2pModel.js`, the dictionary |
 | tts-readings - the heteronym tokens' readings measured (`picovox_train.measure`), and the clips whose tokens they change aligned again | GPU - a minute cached | tts-corpus |
-| data-tts - the voices' training data (`picovox_train.tts build`, `build/train/data/tts/` - the clips' checks) | CPU (every core), ~5 min | tts-readings |
+| data-tts - the voices' training data (`picovox_train.tts build`, `build/train/data/tts/` - the clips' checks): built once for its inputs and cached with the training speech (`downloads/tts/.../build-KEY/` - the key a hash of the selection, the alignments, the readings, the recipe's `tts`, the G2P module, and the training code), hard-linked into the run | CPU (every core) - ~9 min to build, seconds cached | tts-readings |
 | voice-a, voice-b - the voice's two training stages (`picovox_train.trainmulti --recipe voice.a`, `voice.b`) | GPU | data-tts |
 | baseline-eval - the shipped model through the listener panel, beside stage A | CPU | (after data-tts) |
 | voice-eval - the voice through the panel, and the gate (`picovox_train.panel gate voice --against baseline`: no worse than the shipped model) | CPU | voice-b, baseline-eval |
@@ -456,7 +456,8 @@ or two cached), the voices' data (9 minutes), stage A (30) and B (23), the gate,
 an M3 Max on full power (94 W; the training speech cached; 2026-11-03), with the G2P chain beside it - the voice's
 stages 63 minutes from the data build to the gate, against the distillation's 71 the day before (see [Training the voice
 model](#training-the-voice-model); a GPU step's time varies with the machine's heat - stage A's steps took 0.112-0.120 s
-that day, the teacher A's 0.086 the day before). (Before 2.0, on the human
+that day, the teacher A's 0.086 the day before); the voices' data is now cached - built only when its inputs change -
+which takes its 9 minutes off the next run. (Before 2.0, on the human
 corpora, it took 71 minutes.) The package's manifest records its provenance: the commit, the recipe's and the training
 data's hashes, and the gate's scores. `python -m picovox_train.smoke` runs every stage's entry point for a few steps on
 the CPU.

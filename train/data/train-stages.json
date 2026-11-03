@@ -18,7 +18,7 @@
                 {"name": "measure", "header": "^measure: (?:\\d+ clips, (\\d+) measured tokens|.* is current)", "step": "^  ctc (\\d+)/(\\d+) tokens, (\\d+) s$", "secondsEach": 0.014},
                 {"name": "align", "header": "^tts align: \\d+ clips, (\\d+) to align$", "step": "^  (\\d+)/(\\d+) clips, (\\d+) s$", "secondsEach": 0.047}
             ]}},
-        {"stage": "data-tts", "group": "Data", "title": "The voices' training data (picovox_train.tts build - every core)", "on": "cpu", "minutes": 9, "needs": ["tts-readings"]},
+        {"stage": "data-tts", "group": "Data", "title": "The voices' training data (picovox_train.tts build - every core; cached with the training speech, built when its inputs change)", "on": "cpu", "minutes": 1, "firstMinutes": 9, "needs": ["tts-readings"], "progress": {"phases": [{"name": "build", "header": "^tts build: (?:(\\d+) clips to build|.* is current)", "step": "^  (\\d+)/(\\d+) clips, [\\d.]+ h, (\\d+) s$", "secondsEach": 0.018}]}},
         {"stage": "heteronyms", "group": "G2P", "title": "The heteronym relabeling from the training speech's readings, checked to reproduce train/data/g2p-relabel.json (the G2P network's input)", "on": "cpu", "minutes": 1, "needs": ["tts-readings"], "after": ["data-tts"]},
         {"stage": "g2p-network", "group": "G2P", "title": "The G2P network's four stages (picovox_train.g2p train - one core, deterministic)", "on": "cpu", "minutes": 32, "needs": []},
         {"stage": "context-labels", "group": "G2P", "title": "The heteronym context labels (the pinned books, the training speech's measured readings, part-of-speech tags)", "on": "cpu", "minutes": 13, "needs": ["tts-readings"], "after": ["data-tts"]},

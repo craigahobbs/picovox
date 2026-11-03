@@ -10,13 +10,16 @@ PYTHONPATH=train/src build/venv-train/bin/python -B):
 
     python -m picovox_train.tts generate              # the selection and the clips (Ollama - resumable)
     python -m picovox_train.tts align                 # the clips' CTC alignment (GPU - the changed clips only)
-    python -m picovox_train.tts build --out DIR       # the voices' training data (data.py's format)
+    python -m picovox_train.tts build --out DIR       # the voices' training data (data.py's format - cached)
 
 The corpus (downloads/tts/<model>-<digest>/ - make clean keeps it, make superclean removes it): selection-<key>.json
 (the clips: id, voice key, engine voice, sex, book, text, split), wav/<voice>/<id>.wav, alignments.jsonl (the latest
 record of a clip wins), and readings/ (measure.py's measures of its heteronym tokens). A clip's id is a hash of its
 engine voice and text, so a bigger corpus or another selection only adds clips; the engine isn't deterministic, so a
-clip is generated once. A new model (or digest) is a new corpus.
+clip is generated once. A new model (or digest) is a new corpus. The voices' training data is built once for its inputs
+too: build-<key>/, keyed by a hash of everything the build reads (the selection, the alignments, the readings, the
+recipe's tts section, the G2P module, train/data's other inputs, and the training package's code), hard-linked into
+build's --out (the trainer only reads it - memory-mapped); a build for other inputs replaces it.
 
 The selection - book sentences through our front end (each sentence's text is its normalized words and phrase marks,
 so the engine speaks exactly the words our tokens spell; a sentence that doesn't tokenize back to its tokens is
@@ -34,17 +37,19 @@ one clipped at full scale or with a phone of no frames.
 import argparse
 import collections
 import concurrent.futures
+import fcntl
 import hashlib
 import json
 import os
 import random
 import re
+import shutil
 import sys
 import time
 import urllib.error
 import urllib.request
 
-from . import RECIPE_PATH, ROOT, read_json
+from . import RECIPE_PATH, ROOT, SOURCE_DIR, read_json
 
 
 TTS_DIR = os.path.join(ROOT, 'downloads', 'tts')
@@ -555,21 +560,84 @@ def pitch_range(values):
             round(float(np.median(values)), 1))
 
 
+# The SHA-256 of a file's bytes
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, 'rb') as file:
+        for block in iter(lambda: file.read(1 << 20), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+# The build's key - a hash of everything it reads: the corpus's selection, alignments, and readings, the recipe's tts
+# section, the G2P module (the front end's pronouncer), train/data's files but the recipe and the stage graph, and the
+# training package's code
+def build_key(settings, directory, recipe_path=RECIPE_PATH):
+    from .g2pmodel import MODULE_PATH  # pylint: disable=import-outside-toplevel
+    recipe = read_json(recipe_path)
+    files = [os.path.join(directory, f'selection-{selection_key(settings, recipe)}.json'), os.path.join(directory, 'alignments.jsonl'),
+             MODULE_PATH]
+    readings_dir = os.path.join(directory, 'readings')
+    if os.path.isdir(readings_dir):
+        files.extend(os.path.join(readings_dir, name) for name in sorted(os.listdir(readings_dir)))
+    data_dir = os.path.join(ROOT, 'train', 'data')
+    files.extend(os.path.join(data_dir, name) for name in sorted(os.listdir(data_dir)) if name not in ('train.json', 'train-stages.json'))
+    package_dir = os.path.join(SOURCE_DIR, 'picovox_train')
+    files.extend(os.path.join(package_dir, name) for name in sorted(os.listdir(package_dir))
+                 if os.path.isfile(os.path.join(package_dir, name)))
+    basis = {'tts': settings, 'files': {os.path.relpath(path, ROOT): file_sha256(path) for path in files if os.path.isfile(path)}}
+    return hashlib.sha256(json.dumps(basis, sort_keys=True).encode('utf-8')).hexdigest()[:12]
+
+
+# A directory's files hard-linked into another (copied across file systems), its previous contents removed
+def link_tree(source, target):
+    shutil.rmtree(target, ignore_errors=True)
+    os.makedirs(target)
+    for name in sorted(os.listdir(source)):
+        try:
+            os.link(os.path.join(source, name), os.path.join(target, name))
+        except OSError:
+            shutil.copy2(os.path.join(source, name), os.path.join(target, name))
+
+
 def build_command(args):
-    """The voices' training data - <out>/ in data.py's format (index.json, the arrays, alignment.jsonl)"""
+    """The voices' training data - <out>/ in data.py's format (index.json, the arrays, alignment.jsonl): the corpus's
+    build-<key>/ (built if missing or unfinished - one build at a time - and a build for other inputs removed),
+    hard-linked; with --limit, a sample built in <out> itself"""
+    settings = load_settings(args.recipe)
+    directory = corpus_dir(settings)
+    if args.limit:
+        return build_data(args, settings, directory, args.out)
+    with open(os.path.join(directory, 'build.lock'), 'w', encoding='utf-8') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        cached = os.path.join(directory, f'build-{build_key(settings, directory, args.recipe)}')
+        # (index.json, written last, marks a finished build)
+        if os.path.exists(os.path.join(cached, 'index.json')):
+            log(f'tts build: {cached} is current')
+        else:
+            shutil.rmtree(cached, ignore_errors=True)
+            build_data(args, settings, directory, cached)
+            for name in os.listdir(directory):
+                if name.startswith('build-') and name != os.path.basename(cached):
+                    shutil.rmtree(os.path.join(directory, name))
+        link_tree(cached, args.out)
+    return 0
+
+
+# Build the voices' training data into out
+def build_data(args, settings, directory, out):
     import multiprocessing  # pylint: disable=import-outside-toplevel
     import numpy as np  # pylint: disable=import-outside-toplevel
     from . import align, ctc, data, readings  # pylint: disable=import-outside-toplevel
     from .frontend import BOUNDARIES, TOKEN_IDS, vocabulary  # pylint: disable=import-outside-toplevel
     start_time = time.time()
-    settings = load_settings(args.recipe)
-    directory = corpus_dir(settings)
     clips = [clip for clip in selection(settings, args.jobs, args.recipe) if os.path.exists(wav_path(directory, clip))]
     if args.limit:
         clips = clips[::max(1, len(clips) // args.limit)][:args.limit]
+    log(f'tts build: {len(clips)} clips to build')
     records = read_alignments(directory)
     overrides = readings.overrides(directory)
-    os.makedirs(args.out, exist_ok=True)
+    os.makedirs(out, exist_ok=True)
 
     # The checks, and the clips' tokens against their alignments (the front end changed: align again)
     checks = {}
@@ -606,11 +674,11 @@ def build_command(args):
             kept.append(clip)
     names = ('tokens', 'durations', 'seconds', 'audio', 'frames')
     dtypes = {'tokens': np.int16, 'durations': np.int16, 'seconds': np.float32, 'audio': np.int16, 'frames': np.float32}
-    raw_files = {name: open(os.path.join(args.out, name + '.raw'), 'wb') for name in names}  # pylint: disable=consider-using-with
+    raw_files = {name: open(os.path.join(out, name + '.raw'), 'wb') for name in names}  # pylint: disable=consider-using-with
     lengths = dict.fromkeys(names, 0)
     entries = []
     token_offset = frame_offset = 0
-    with open(os.path.join(args.out, 'alignment.jsonl'), 'w', encoding='utf-8') as alignment_file, \
+    with open(os.path.join(out, 'alignment.jsonl'), 'w', encoding='utf-8') as alignment_file, \
             multiprocessing.Pool(args.jobs) as pool:
         for count, (clip, result) in enumerate(zip(kept, pool.imap(process_clip, tasks, chunksize=4)), 1):
             if count % BUILD_PROGRESS == 0:
@@ -645,7 +713,7 @@ def build_command(args):
     for name in names:
         raw_files[name].close()
         shape = (lengths[name], len(data.CHANNELS)) if name == 'frames' else (lengths[name],)
-        data.raw_to_npy(os.path.join(args.out, name + '.raw'), os.path.join(args.out, name + '.npy'), dtypes[name], shape)
+        data.raw_to_npy(os.path.join(out, name + '.raw'), os.path.join(out, name + '.npy'), dtypes[name], shape)
 
     # The index - the speakers keyed by voice key, their rows the recipe's order
     engine = settings['engine']
@@ -664,13 +732,13 @@ def build_command(args):
         'alignment': {'method': f'CTC forced alignment with {ctc.CTC_REPO} (picovox_train/ctc.py)', 'aligner': aligner_key()},
         'checks': settings['checks'], 'speakers': speakers, 'utterances': entries
     }
-    with open(os.path.join(args.out, 'index.json'), 'w', encoding='utf-8') as file:
+    with open(os.path.join(out, 'index.json'), 'w', encoding='utf-8') as file:
         json.dump(index, file, indent=1)
         file.write('\n')
     included = [entry for entry in entries if entry['include']]
     reasons = collections.Counter((entry['speaker'], reason.split(' (')[0]) for entry in entries
                                   for reason in entry['reason'].split('; ') if reason)
-    print(f'Built {args.out}: {len(entries)} clips ({len(included)} included), {frame_offset / 100 / 3600:.2f} hours '
+    print(f'Built {out}: {len(entries)} clips ({len(included)} included), {frame_offset / 100 / 3600:.2f} hours '
           f'({sum(entry["frameCount"] for entry in included) / 100 / 3600:.2f} included), {time.time() - start_time:.0f} s')
     for key, speaker in speakers.items():
         excluded = {reason: count for (voice, reason), count in sorted(reasons.items()) if voice == key}
