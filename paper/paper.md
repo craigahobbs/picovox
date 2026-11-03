@@ -1361,7 +1361,25 @@ lowest-pitched voice losing the most (robert, 103 Hz: 4.43 to 4.17). In a
 blind A/B (pre-rendered pairs of the shipped and the new voice, the same text, one trial per voice and three repeats,
 fifteen forced choices) the listener chose the new voices in all fifteen.
 
-### 13.6 What the switch costs
+### 13.6 How far the voices are from their source
+
+On the same held-out sentences, the shipped voices score UTMOS 4.337 against Phonon's own 4.423 - two voices level
+(helen, thomas), three 0.15-0.20 behind (robert, grace, james). By ear the gap is larger than UTMOS says. In blind A/B
+listening against Phonon's clips (level-matched, forced choices), the listener chose Phonon in 14 of 15 trials for the
+three weakest voices, and in 3 of 4 for helen and thomas, whom UTMOS rates level. The gap isn't prosody: the voice
+model given Phonon's own phone durations and measured pitch (rendered as training renders) still lost 9 of 11 trials
+to Phonon (2 Same), and against the voice's own prosody it was heard as the same in 4 of 5. It is in the sound itself.
+
+Whether the synthesizer or the network limits that sound remains open. Fitting each clip's synthesizer parameters
+directly to the recording (gradient descent through the differentiable synthesizer from the network's frames) halves
+the spectral loss, but the fit gets there by narrowing the formant bandwidths (F1 of the male voices from 55-106 Hz to
+37-73 Hz) and moving the formants frame to frame toward individual harmonics, and UTMOS scores it lower (3.93 against
+4.14). The pinned wav2vec2 phoneme recognizer's features, every layer, rank the fit closer to the recording - so either
+both measures reward the same artifact or UTMOS misses this too; the fit wasn't judged by ear. Measures that move
+without the ear's agreement recur here: a loss on the spectrum's movement (its bands' variance and frame-to-frame
+change, against the recording's) moved those measures halfway to the source, twice, and was heard as no better.
+
+### 13.7 What the switch costs
 
 - **A model's reading errors become the teacher's.** The TTS model's mistakes ("feet of lead") are measured as readings.
   Seeds and collocations outrank them, and relabels need three books, but a consistent error in the engine can still
@@ -1380,7 +1398,7 @@ fifteen forced choices) the listener chose the new voices in all fifteen.
 - One human listener has rated the voices; the human results are indicative only. The shipped voices' listening is
   blind A/B against the voices they replace (fifteen trials for 2.0), not an absolute rating.
 - **The training speech is one TTS model's.** The voices can be no better than Phonon's, and its reading errors and
-  habits are the networks' (Section 13.6); a better local model is a recipe change, untried.
+  habits are the networks' (Section 13.7); a better local model is a recipe change, untried.
 - UTMOS and the emotion model are imperfect proxies - UTMOS barely moved under rule calibration that a listener could
   hear, and the emotion model has likely seen CREMA-D. The gate's similarity is to each run's own teacher, so it does
   not compare across teachers.
