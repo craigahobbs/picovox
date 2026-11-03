@@ -77,7 +77,7 @@
         }
     },
     "voice": {
-        "description": "The voice model (picovox_train/trainmulti.py --recipe voice.a, then voice.b): stage A on the training speech (the 30,000-step schedule, stopped at 15,000), then stage B from A's weights with the adversarial critic, 10,000 steps of the warmup-stable-decay schedule (constant, then the last 25% cooled down by 1 - sqrt - picovox_train/optim.py) - B's best validation checkpoint (validated every 1,000 steps through the cooldown, from step 7,500) is the voice make train packages; A, whose last checkpoint B starts from, validates every 5,000; the keys are trainmulti.py's flags, defaults every training setting's default (config - the shipped model's size)",
+        "description": "The voice model (picovox_train/trainmulti.py --recipe voice.a, then voice.b): stage A on the training speech (the 30,000-step schedule, stopped at 10,000), then stage B from A's weights with the adversarial critic, 10,000 steps of the warmup-stable-decay schedule (constant, then the last 25% cooled down by 1 - sqrt - picovox_train/optim.py) - B's best validation checkpoint (validated every 1,000 steps through the cooldown, from step 7,500) is the voice make train packages; A, whose last checkpoint B starts from, validates every 5,000; the keys are trainmulti.py's flags, defaults every training setting's default (config - the shipped model's size)",
         "defaults": {
             "config": "{\"dim\": 80, \"decoderDim\": 64, \"encoderLayers\": 3, \"decoderLayers\": 4}",
             "steps": 30000, "batch": 16, "max-frames": 16000, "crop": 2.0, "bucket-ratio": 1.125, "rate": 24000, "max-hz": 10500,
@@ -87,7 +87,7 @@
             "feature-matching": 1.0, "adversarial-start": 500, "critic-lr": 0.0002, "critic-precision": "bfloat16", "val-count": 480,
             "seed": 1
         },
-        "a": {"steps": 30000, "stop": 15000, "lr": 0.001, "warmup": 1000, "val-every": 5000, "lean-clip": true, "seed": 1},
+        "a": {"steps": 30000, "stop": 10000, "lr": 0.001, "warmup": 1000, "val-every": 5000, "lean-clip": true, "seed": 1},
         "b": {"steps": 10000, "lr": 0.0005, "warmup": 500, "schedule": "wsd", "cooldown": 0.25,
               "adversarial": 0.1, "adversarial-start": 1000, "guide-steps": 0.001, "val-from": 7500, "lean-clip": true,
               "critic-channels": 16, "seed": 1}

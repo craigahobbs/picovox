@@ -436,7 +436,10 @@ d64 model directly, and the gate's speaker similarity is now to the shipped mode
 The critic, though, still earns its stage: the same d64 model trained by stage A alone, its 15,000-step schedule
 decayed to the end, scored UTMOS 4.068 with WER 1.38% and similarity 0.861 - against the two stages' 4.284, 1.23%, and
 0.947 from the same data - though by ear stage A and stage B were the same in six of seven A/B trials (the seventh
-chose stage B).
+chose stage B). Stage A's length, though, was more than B needs: stopped at 10,000 steps instead of 15,000, the two
+stages scored UTMOS 4.270 and 4.291 with WER 1.31% and 1.41% for two seeds, against the same seeds' 4.284 and 4.303
+with 1.23% and 1.38% - about 0.013 lower, under the seeds' spread - and against the shipped voice the A/B was 13
+Same of 15 (two chose the shipped voice), so stage A stops at 10,000, about 8 minutes off each run.
 
 
 ## 9. Grapheme-to-phoneme conversion without a dictionary
