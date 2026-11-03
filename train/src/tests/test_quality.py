@@ -60,6 +60,33 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(len(quality.envelope(passed[:-1])), rate - 1)
 
 
+class TestTemporal(unittest.TestCase):
+
+    def test_temporal(self):
+        # Tone bursts (200 ms on, 200 ms off) - with sharp onsets, and with 40 ms ramps: the ramps' onsets are slower, and
+        # the bursts vary more than a steady tone (no onsets)
+        rate = 24000
+        burst = tone(0.2, rate)
+        gap = numpy.zeros(int(0.2 * rate))
+        ramp = numpy.minimum(1, numpy.arange(len(burst)) / (0.04 * rate))
+        # (a faint burst - 20 dB down, not a sound's onset - is passed over)
+        sharp = quality.temporal(numpy.concatenate([gap, burst] * 4 + [gap, 0.1 * burst * ramp]), rate)
+        ramped = quality.temporal(numpy.concatenate([gap, burst * ramp] * 4), rate)
+        steady = quality.temporal(tone(1.6, rate), rate)
+        self.assertLessEqual(sharp['onset'], 10)
+        self.assertGreater(ramped['onset'], sharp['onset'] + 10)
+        self.assertGreater(sharp['variance'], steady['variance'])
+        # (a tone gliding an octave - its spectrum moves, the steady tone's doesn't)
+        times = numpy.arange(int(1.6 * rate)) / rate
+        phase = 2 * numpy.pi * (150 * times + 150 * times ** 2 / 3.2)
+        glide = quality.temporal(0.2 * sum(numpy.sin(harmonic * phase) / harmonic for harmonic in range(1, 11)), rate)
+        self.assertGreater(glide['flux'], steady['flux'] + 1)
+        self.assertIsNone(steady['onset'])
+        # Silence, or too short - nothing
+        self.assertEqual(quality.temporal(numpy.zeros(rate), rate), {'variance': None, 'flux': None, 'onset': None})
+        self.assertEqual(quality.temporal(burst[:600], rate), {'variance': None, 'flux': None, 'onset': None})
+
+
 class TestAnalyze(unittest.TestCase):
 
     # The fake acoustic analysis
@@ -77,7 +104,8 @@ class TestAnalyze(unittest.TestCase):
         result = self.analyze(bright(1.5, 24000))
         self.assertEqual(set(result), {'path', 'bands', *quality.MEASURES})
         self.assertEqual(len(result['bands']), 20)
-        self.assertTrue(all(result[name] is not None for name in quality.MEASURES))
+        self.assertTrue(all(result[name] is not None for name in quality.MEASURES if name != 'onset'))
+        self.assertIsNone(result['onset'])
         self.assertLess(result['tilt'], 0)
         self.assertGreater(result['hnr'], 0)
         self.assertLess(result['f0Flutter'], 1)
@@ -129,6 +157,10 @@ class TestPlan(unittest.TestCase):
             self.assertEqual(children[0][0], ['node', os.path.join('tools', 'renderLines.js')])
             self.assertEqual(children[0][1]['cwd'], quality.ROOT)
             self.assertEqual(children[0][2].stdin.write.call_args.args[0], json.dumps(jobs[0]) + '\n')
+            # (another voice model module - its absolute path)
+            quality.render(jobs[:1], 1, 'build/train/voiceModel.js')
+            self.assertEqual(children[2][0], ['node', os.path.join('tools', 'renderLines.js'),
+                                              os.path.abspath('build/train/voiceModel.js')])
             status['code'] = 1
             with self.assertRaisesRegex(RuntimeError, 'renderLines.js failed'):
                 quality.render(jobs, 1)
@@ -149,11 +181,11 @@ class TestMeasure(unittest.TestCase):
         with ctc_fixtures.tts_corpus(texts) as (directory, _, _), tempfile.TemporaryDirectory() as data_dir:
             helpers.write_corpus(os.path.join(data_dir, 'tts'))
 
-            def render(jobs, _processes):
+            def render(jobs, _processes, _model):
                 for job in jobs:
                     write_wav(job['wav'], bright(0.6, 24000, f0=190), 24000)
             out = os.path.join(directory, 'quality')
-            args = argparse.Namespace(out=out, per_voice=2, edits='{"add": {"shelf": -5}}', jobs=2)
+            args = argparse.Namespace(out=out, per_voice=2, edits='{"add": {"shelf": -5}}', model=None, jobs=2)
             with unittest.mock.patch('picovox_train.data.DATA_DIR', data_dir), \
                     unittest.mock.patch.object(quality, 'render', side_effect=render), \
                     unittest.mock.patch('multiprocessing.Pool', data_fixtures.FakePool), helpers.captured() as (stdout, _):
@@ -161,6 +193,7 @@ class TestMeasure(unittest.TestCase):
             with open(os.path.join(out, 'results.json'), encoding='utf-8') as file:
                 results = json.load(file)
         self.assertEqual(results['edits'], {'add': {'shelf': -5}})
+        self.assertIsNone(results['model'])
         kinds = [(row['kind'], row['who']) for row in results['rows']]
         self.assertEqual(kinds.count(('voice', 'male')), 16)
         self.assertEqual(kinds.count(('source', 'male')), 2)
@@ -189,8 +222,9 @@ class TestMeasure(unittest.TestCase):
 
     def test_main(self):
         with unittest.mock.patch.object(quality, 'measure_command', return_value=0) as measure:
-            self.assertEqual(quality.main(['measure', '--out', 'x', '--per-voice', '4', '--edits', '{}', '-j', '3']), 0)
-        self.assertEqual(measure.call_args.args[0], argparse.Namespace(command='measure', out='x', per_voice=4, edits='{}', jobs=3))
+            self.assertEqual(quality.main(['measure', '--out', 'x', '--per-voice', '4', '--edits', '{}', '--model', 'm.js', '-j', '3']), 0)
+        self.assertEqual(measure.call_args.args[0],
+                         argparse.Namespace(command='measure', out='x', per_voice=4, edits='{}', model='m.js', jobs=3))
         with unittest.mock.patch.object(sys, 'argv', ['quality']), self.assertRaises(SystemExit), helpers.captured(), \
                 warnings.catch_warnings():
             warnings.filterwarnings('ignore', message='.*found in sys.modules', category=RuntimeWarning)

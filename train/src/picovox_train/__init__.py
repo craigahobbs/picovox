@@ -67,8 +67,9 @@ The pipeline's tools:
 - panel.py - the listener panel's scoring (UTMOS, Whisper's WER, speaker similarity) of an exported model or a packaged
   module, and make train's gate (the trained voice within the recipe's tolerance of the shipped one)
 - smoke.py - every training entry point for a few steps on the CPU (the pipeline's smoke test)
-- quality.py - voice quality measures (spectral balance, band harmonicity, upper-band crest, pitch flutter and wobble)
-  of the package's voices synthesized, against their source clips (the training speech) - guides for listening
+- quality.py - voice quality measures (spectral balance, band harmonicity, upper-band crest, pitch flutter and wobble,
+  and the spectrum's movement - its bands' variance, flux, and onsets) of the package's voices synthesized - or any
+  voice model module's (--model) - against their source clips (the training speech) - guides for listening
   (tools/voicelab/)
 - stepcheck.py - the trainer's step-0 losses on fixed batches, exactly, to check a change leaves training unchanged
 - gpulock.py - a command run holding the GPU lock (make train's GPU stages one at a time)

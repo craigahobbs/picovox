@@ -6,12 +6,13 @@ Voice quality measures - each of the package's voices, synthesized, measured aga
 speech's clips of its engine voice (tts.py - the voices' tinniness and warble, 2026-10-23):
 
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.quality measure --out build/quality \\
-        [--per-voice 16] [--edits '{"add": {"shelf": -5}}'] [-j 8]
+        [--per-voice 16] [--edits '{"add": {"shelf": -5}}'] [--model build/train/voiceModel.js] [-j 8]
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.quality report build/quality/results.json
 
 measure renders each voice over the panel texts (tools/panel-texts.json) and over its held-out clips' texts (the
 corpus's test, then val clips, to --per-voice) with the package (tools/renderLines.js - --edits are frame edits, for
-an experiment), and measures them and those clips (downloads/tts) in voiced frames (Praat's pitch):
+an experiment; --model another voice model module, a trained one), and measures them and those clips (downloads/tts)
+in voiced frames (Praat's pitch):
 
 - bands - third-octave levels (dB re the voiced power from 90 Hz to 95% of the source's bandwidth), and their summaries:
   tilt (dB/octave, 300 Hz to 5 kHz), alpha (50 Hz-1 kHz less 1-5 kHz), hammarberg (the 0-2 kHz peak less the 2-5 kHz),
@@ -19,6 +20,12 @@ an experiment), and measures them and those clips (downloads/tts) in voiced fram
 - hnr - Praat's harmonics-to-noise ratio (cross-correlation), and hnr2k - of the 2-5 kHz band
 - crest2k - the 2-5 kHz band's envelope crest factor (30 ms windows) - how pulse-like the upper harmonics are
 - f0Flutter - the pitch's 4-20 Hz movement (cents RMS) and f0Wobble - its 1.5-6 Hz movement, in voiced runs of 250 ms+
+- variance, flux, and onset - how the spectrum moves (24 log bands, 100 Hz-10 kHz, every 5 ms, in the speech frames -
+  within 35 dB of the loud ones): each band's level's standard deviation over time (dB, the bands' mean), the median
+  RMS over bands of the level's change in 20 ms (dB), and the low band's (60 Hz-1 kHz) median rise from silence to
+  within 3 dB of its peak (ms) - the over-smoothing of a regression-trained voice shows as less variance and flux and
+  slower onsets (2.0's voices, against their Phonon source voices: variance -0.3 to -1.2 dB, flux -8 to -11%, onsets
+  about 5 ms slower)
 
 report prints each voice's synthesized measures (its held-out texts, and the panel texts) less its source clips'. The
 measures are guides, not verdicts: listeners heard the voices as tinny, and lowering the source
@@ -39,7 +46,8 @@ from . import ROOT
 
 
 # The measures' names (report's columns), and the third-octave band centers (Hz)
-MEASURES = ['tilt', 'alpha', 'hammarberg', 'presence', 'air', 'hnr', 'hnr2k', 'crest2k', 'f0Flutter', 'f0Wobble']
+MEASURES = ['tilt', 'alpha', 'hammarberg', 'presence', 'air', 'hnr', 'hnr2k', 'crest2k', 'f0Flutter', 'f0Wobble', 'variance',
+            'flux', 'onset']
 BAND_CENTERS = [100 * 2 ** (index / 3) for index in range(22)]
 
 # The package's audio bandwidth (Hz - its 24 kHz output)
@@ -49,6 +57,17 @@ VOICE_BANDWIDTH = 12000
 FFT_SIZE = 1024
 FFT_HOP = 256
 PITCH_STEP = 0.005
+
+# The temporal measures' frames (s), bands (log-spaced from 100 Hz to 10 kHz), speech floor (dB below the loud frames -
+# the 95th percentile), and onset rule (frames below the onset level before it, frames to its peak, dB of the peak)
+TEMPORAL_WINDOW = 0.02
+TEMPORAL_HOP = 0.005
+TEMPORAL_BANDS = 24
+SPEECH_FLOOR = 35
+ONSET_LEVEL = 30
+ONSET_QUIET = 6
+ONSET_PEAK = 20
+ONSET_REACH = 3
 
 
 # A centered moving average of a track (its length - the edges averaged over what's there)
@@ -133,6 +152,41 @@ def spectral_balance(samples, rate, times, voiced, bandwidth):
             'presence': level(2000, 5000), 'air': level(5000, min(8000, top))}
 
 
+# The spectrum's movement over time - {variance, flux, onset} (each None for silence or under 40 ms; onset None
+# without one)
+def temporal(samples, rate):
+    import numpy  # pylint: disable=import-outside-toplevel
+    size, hop = round(TEMPORAL_WINDOW * rate), round(TEMPORAL_HOP * rate)
+    if len(samples) < size + 4 * hop or not numpy.any(samples):
+        return {'variance': None, 'flux': None, 'onset': None}
+    frames = numpy.lib.stride_tricks.sliding_window_view(samples, size)[::hop] * numpy.hanning(size)
+    fft_size = 1 << (size - 1).bit_length()
+    power = numpy.abs(numpy.fft.rfft(frames, fft_size)) ** 2
+    frequencies = numpy.fft.rfftfreq(fft_size, 1 / rate)
+    band_index = numpy.digitize(frequencies, 100 * 100 ** (numpy.arange(TEMPORAL_BANDS + 1) / TEMPORAL_BANDS)) - 1
+    bands = [band for band in range(TEMPORAL_BANDS) if (band_index == band).any()]
+    band_power = numpy.stack([power[:, band_index == band].sum(axis=1) for band in bands], axis=1) + 1e-12
+    levels = 10 * numpy.log10(band_power)
+    total = 10 * numpy.log10(band_power.sum(axis=1))
+    speech = total > numpy.percentile(total, 95) - SPEECH_FLOOR
+    lag = round(0.02 / TEMPORAL_HOP)
+    moved = speech[lag:] & speech[:-lag]
+    variance = float(levels[speech].std(axis=0).mean())
+    flux = float(numpy.median(numpy.sqrt(((levels[lag:] - levels[:-lag]) ** 2).mean(axis=1))[moved]))
+
+    # Onsets - the low band's upward crossings of its onset level after ONSET_QUIET frames below it, whose next ONSET_PEAK
+    # frames' peak is a sound (within 15 dB of the loud frames): the frames to within ONSET_REACH dB of that peak
+    low = 10 * numpy.log10(power[:, (frequencies >= 60) & (frequencies < 1000)].sum(axis=1) + 1e-12)
+    loud = numpy.percentile(low, 95)
+    rises = []
+    for index in range(ONSET_QUIET, len(low) - ONSET_PEAK):
+        if low[index] >= loud - ONSET_LEVEL and (low[index - ONSET_QUIET:index] < loud - ONSET_LEVEL).all():
+            peak = low[index:index + ONSET_PEAK].max()
+            if peak >= loud - 15:
+                rises.append(int(numpy.argmax(low[index:index + ONSET_PEAK] >= peak - ONSET_REACH)) * TEMPORAL_HOP * 1000)
+    return {'variance': variance, 'flux': flux, 'onset': float(numpy.median(rises)) if rises else None}
+
+
 # Analyze a WAV file - (path, pitch floor, pitch ceiling, bandwidth) -> {path, the measures, bands}
 def analyze(task):
     import numpy  # pylint: disable=import-outside-toplevel
@@ -146,7 +200,7 @@ def analyze(task):
     f0 = pitch.selected_array['frequency']
     times = pitch.xs()
     voiced = f0 > 0
-    result = {'path': path, **spectral_balance(samples, rate, times, voiced, bandwidth)}
+    result = {'path': path, **spectral_balance(samples, rate, times, voiced, bandwidth), **temporal(samples, rate)}
 
     # The harmonics-to-noise ratios - the whole and the 2-5 kHz band (None without a periodic frame)
     for name, signal in (('hnr', samples), ('hnr2k', band_pass(samples, rate, 2000, 5000))):
@@ -191,10 +245,12 @@ def plan(out_dir, per_voice, edits, speakers, clips, panel_texts):
     return jobs, tasks
 
 
-# Render jobs with the package (tools/renderLines.js), in processes Node processes at once
-def render(jobs, processes):
+# Render jobs with the package (tools/renderLines.js - its voice model, or a voice model module's), in processes Node
+# processes at once
+def render(jobs, processes, model=None):
     groups = [jobs[index::processes] for index in range(processes)]
-    children = [subprocess.Popen(['node', os.path.join('tools', 'renderLines.js')], cwd=ROOT,  # pylint: disable=consider-using-with
+    command = ['node', os.path.join('tools', 'renderLines.js'), *([os.path.abspath(model)] if model else [])]
+    children = [subprocess.Popen(command, cwd=ROOT,  # pylint: disable=consider-using-with
                                  stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True) for group in groups if group]
     for child, group in zip(children, [group for group in groups if group]):
         child.stdin.write(''.join(json.dumps(job) + '\n' for job in group))
@@ -221,13 +277,13 @@ def measure_command(args):
     jobs, tasks = plan(args.out, args.per_voice, edits, speakers, clips, panel_texts)
     for name in ('voices', 'synth'):
         os.makedirs(os.path.join(args.out, name), exist_ok=True)
-    render(jobs, args.jobs)
+    render(jobs, args.jobs, args.model)
     with multiprocessing.Pool(args.jobs) as pool:
         results = pool.map(analyze, [task for _, _, task in tasks], chunksize=4)
     rows = [{'kind': kind, 'who': who, **result} for (kind, who, _), result in zip(tasks, results)]
     path = os.path.join(args.out, 'results.json')
     with open(path, 'w', encoding='utf-8') as file:
-        json.dump({'edits': edits, 'rows': rows}, file)
+        json.dump({'edits': edits, 'model': args.model, 'rows': rows}, file)
     print(f'quality: {len(rows)} measured - {path}')
     return report(path)
 
@@ -269,6 +325,7 @@ def main(argv=None):
     measure_parser.add_argument('--out', default=os.path.join(ROOT, 'build', 'quality'), help='the output directory')
     measure_parser.add_argument('--per-voice', type=int, default=16, help='held-out clips per voice')
     measure_parser.add_argument('--edits', help='frame edits for every rendering (tools/renderLines.js\'s, JSON)')
+    measure_parser.add_argument('--model', help='a voice model module to render with (default: the package\'s)')
     measure_parser.add_argument('-j', '--jobs', type=int, default=8, help='Node renderers and analysis workers')
     report_parser = commands.add_parser('report', help='print a measurement\'s results')
     report_parser.add_argument('results', help='a measurement\'s results.json')
