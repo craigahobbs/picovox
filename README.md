@@ -697,7 +697,10 @@ lives", "a lead pipe", the noun/verb stress pairs. The G2P module also holds two
 rule at runtime): the G2P takes a reading index (a learned vector added to its decoder's first state; reading 0 is the
 default) and has an ambiguity head (whether the word's reading depends on its context); for an ambiguous word, a context
 network (`picovox_train/context.py`: a character GRU over the three words and phrase-end marks each side, a
-bidirectional GRU, and a layer gated by the word itself - 47,779 parameters at 6 bits) chooses the reading.
+bidirectional GRU, and a layer gated by the word itself - 47,779 parameters at 6 bits) chooses the reading. The G2P
+learns the reading input and the ambiguity head in a last stage (`picovox_train.context train-g2p`, from the trained
+G2P), which ends with 1,000 steps of quantization-aware training at the export's 6 bits: without them the export's
+rounding cost the frequent words (3 of the top 10,000 wrong in float, 11-16 as exported; with them 5-9).
 
 The context network is distilled from an ensemble, for steadiness: one network's choices where its labels are thin
 depend on its seed (October 2026: five seeds of the same labels differed on 14% of unlabeled book windows and 9 of the

@@ -1303,6 +1303,16 @@ G2P release's: "invalid" before a noun ("her invalid mother", whose adjective ta
 the metal contract", "the bass swam away", and "every minute change". The cross-validated gate (read and lives, ten
 folds by book) holds 86.5% against the majority reading's 50.7%.
 
+**The corpus regenerated (November 2026).** The training speech was made again (the same model and digest, new audio -
+the engine isn't deterministic), and the G2P retrained on it fell below the committed module on four seeds: probes
+27-32 of 38 (mean 29.5), the context set 50-53, the top 10,000 words 11-16 wrong (7 committed). Two causes: the 6-bit
+export, and the thin words. The frequent words were the export's: the reading stage's G2P, in float, has 3 of the top
+10,000 wrong - as the G2P network before it - and rounding to 6 bits made 11-16. The reading stage now ends with 1,000
+steps of quantization-aware training (as the context network's does), and on the same four seeds the module has 5-9
+wrong (mean 7.0), book error 0.058% (0.064%), the context set 52.75 (51.25), the default set 52 of 52, and every name
+the committed module gets. The probes stay at 29.75 - the thin words (Polish, the adjective minute, the verb
+contract, the fish bass) are the labels', which the new speech's readings moved.
+
 ### 13.4 One speaker row per voice
 
 The model loses its style table and its blends. Each voice key is one row of a twelve-row speaker table, `male` (row 0)

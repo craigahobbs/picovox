@@ -248,11 +248,16 @@ def train_g2p(model, items, probabilities, labels, settings, log):
     ], lr=peak, weight_decay=0.0)
     log(f'train-g2p: {sum(parameter.numel() for parameter in trained)} parameters trained ({settings["train"]}), {len(items)} '
         f'items, {len(ambiguous)} ambiguous words, {len(targets)} reading targets, {steps} steps')
+    # (then quantSteps of quantization-aware training at the export's bits, the learning rate warmed up again and
+    # decayed - the G2P learns its weights' rounding: unrounded, the export's 6 bits cost the frequent words)
+    quant_steps = int(settings['quantSteps'])
+    quantizer = WeightQuantizer(model, EXPORT)
     window = collections.defaultdict(float)
     window_start = time.time()
     batches = []
     model.train()
-    for step in range(1, steps + 1):
+    for step in range(1, steps + quant_steps + 1):
+        quantizing = step > steps
         if not batches:
             # The next pool of samples - (word, phones, reading), sorted by length and shuffled as batches
             count = batch_size * 32
@@ -277,20 +282,26 @@ def train_g2p(model, items, probabilities, labels, settings, log):
         letters, phone_targets = make_batch([word for word, _, _ in batch], [phones for _, phones, _ in batch])
         readings = torch.tensor([reading for _, _, reading in batch], dtype=torch.long)
         labels_tensor = torch.tensor([1.0 if word in ambiguous else 0.0 for word, _, _ in batch])
+        rate = learning_rate(step - steps, quant_steps, peak, 0) if quantizing else learning_rate(step, steps, peak, warmup)
         for group in optimizer.param_groups:
-            group['lr'] = learning_rate(step, steps, peak, warmup) * group['scale']
+            group['lr'] = rate * group['scale']
+        if quantizing:
+            quantizer.quantize()
         loss, phone_loss, ambiguity_loss = reading_loss(model, letters, phone_targets, readings, labels_tensor,
                                                         float(settings['ambiguityWeight']))
         optimizer.zero_grad()
         loss.backward()
+        if quantizing:
+            quantizer.restore()
         torch.nn.utils.clip_grad_norm_(trained, 1.0)
         optimizer.step()
         window['phone'] += phone_loss.item()
         window['ambiguity'] += ambiguity_loss.item()
-        if step % 500 == 0 or step == steps:
+        if step % 500 == 0 or step == steps + quant_steps:
             count = step % 500 or 500
-            log(f'train-g2p: step {step}/{steps} phone loss {window["phone"] / count:.4f}, ambiguity loss '
-                f'{window["ambiguity"] / count:.5f} ({(time.time() - window_start) / count * 1000:.0f} ms/step)')
+            log(f'train-g2p: step {step}/{steps + quant_steps}{" (quantized)" if quantizing else ""} phone loss '
+                f'{window["phone"] / count:.4f}, ambiguity loss {window["ambiguity"] / count:.5f} '
+                f'({(time.time() - window_start) / count * 1000:.0f} ms/step)')
             window.clear()
             window_start = time.time()
     model.eval()

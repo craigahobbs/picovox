@@ -62,7 +62,7 @@
         },
         "g2p": {
             "readings": 3, "ambiguityHidden": 16, "steps": 3000, "batch": 512, "lr": 0.0003, "warmup": 100, "readingShare": 0.04,
-            "invariantShare": 0.02, "ambiguityWeight": 1.0, "seed": 7, "threads": 2, "train": "reading,ambiguity_layer,ambiguity,decoder",
+            "invariantShare": 0.02, "ambiguityWeight": 1.0, "quantSteps": 1000, "seed": 7, "threads": 2, "train": "reading,ambiguity_layer,ambiguity,decoder",
             "headRate": 15.0
         },
         "network": {

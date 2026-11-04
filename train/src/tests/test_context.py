@@ -28,7 +28,7 @@ from .helpers import captured
 # The tiny context network's and reading stage's settings
 CONTEXT_TINY = {'steps': 3, 'quantSteps': 2, 'batch': 8, 'embed': 4, 'hidden': 4, 'layer': 4, 'threads': 1, 'warmup': 1, 'teachers': 1,
                 'itemDropout': 0.0}
-G2P_TINY = {'steps': 3, 'batch': 8, 'threads': 1, 'warmup': 1, 'readingShare': 0.3, 'invariantShare': 0.3}
+G2P_TINY = {'steps': 3, 'batch': 8, 'threads': 1, 'warmup': 1, 'readingShare': 0.3, 'invariantShare': 0.3, 'quantSteps': 0}
 
 
 # A tiny G2P model (g2p.py's), seeded
@@ -192,6 +192,14 @@ class TestContext(unittest.TestCase):
         context.train_g2p(model, items, probabilities, tiny_labels(), G2P_TINY, lines.append)
         self.assertTrue(torch.equal(before['encoder.weight_ih_l0'], model.state_dict()['encoder.weight_ih_l0']))
         self.assertFalse(torch.equal(before['reading.weight'], model.state_dict()['reading.weight']))
+
+        # Then quantization-aware steps - the quantized forward, the float weights kept and trained
+        lines.clear()
+        model = context.train_g2p(model, items, probabilities, tiny_labels(), dict(G2P_TINY, quantSteps=2), lines.append)
+        self.assertIn('train-g2p: step 5/5 (quantized)', lines[-1])
+        rounded = {name: tensor.clone() for name, tensor in model.state_dict().items()}
+        context.WeightQuantizer(model, context.EXPORT).quantize()
+        self.assertFalse(torch.equal(rounded['decoder.weight_ih_l0'], model.state_dict()['decoder.weight_ih_l0']))
 
     def test_evaluate_g2p(self):
         model = context.add_reading_heads(tiny_g2p())
