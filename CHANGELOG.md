@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.1 (unreleased)
+
+- pronunciation: the G2P network is retrained (the regenerated training speech) and exported at 7 bits per weight, rounded by GPTQ (was 6 bits, nearest): book words mispronounced 0.048% (was 0.061%), 4 of the 10,000 most frequent words wrong (was 7); known misses: "Polish" and "polish", the verb "contract", and the adjective "minute" in fresh sentences. The G2P module is 360 KB gzipped (was 317 KB). The voice network's loader reads 7-bit packed weights too (the shipped voice is unchanged)
+
 ## 2.0.0 (2026-10-30)
 
 - [6cec8e3](https://github.com/craigahobbs/picovox/commit/6cec8e3) - new voices - every voice is new: the voice network is trained on speech a local TTS model (Gradium's Phonon, through Ollama) speaks at train time, one of its voices for each of the package's twelve, instead of human recordings (CMU ARCTIC, LibriTTS-R, CREMA-D). The voice keys (male - the default - female, sarah, helen, amy, kate, grace, james, robert, michael, david, and thomas), the style keys, and the API are unchanged; each voice is its own row of the model's speaker table, with new descriptions in voices() - no blends of readers, and no per-voice pitch, tract, effort, pulse, or rate adjustments (every voice's -5 dB source shelf kept). On the listener panel's texts the voices' mean UTMOS is 4.31 (was 4.13) and their Whisper word error rate 1.13% (was 1.36%), and a blind A/B preferred the new voices in all 15 trials; the voice network is 282,627 parameters, 334 KB gzipped (was 305,035, 385 KB)

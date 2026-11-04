@@ -9,7 +9,7 @@ Sections marked *in progress* report interim results.
 ## Abstract
 
 We build American English text-to-speech that runs entirely on the listener's device - in a web browser or in Node -
-from a package of 727 KB (npm's compressed tarball; 1.1 MB unpacked), with no server, no recorded speech, no
+from a package of 771 KB (npm's compressed tarball; 1.2 MB unpacked), with no server, no recorded speech, no
 WebAssembly, and no runtime dependencies. A small neural network predicts the 32 interpretable parameters of a classic
 source-filter synthesizer every 5 ms, trained end to end through a differentiable copy of the synthesizer; a
 rule-based version of the same synthesizer, calibrated against measurements of 43 human speakers, had been rated 1-2
@@ -1298,7 +1298,8 @@ A larger context network (79K parameters) and doubled training steps did not hel
 | G2P | Context set | Default set | Names | Book error | Top-10K wrong | Fresh probes |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1.6.8 (the human readers' evidence) | 53/54 | 52/52 | 80/86 | 0.093% | 21 | 26/38 |
-| **2.0 (the training speech's)** | **54/54** | 51/52 | 80/86 | **0.061%** | **7** | **34/38** |
+| **2.0 (the training speech's)** | **54/54** | 51/52 | 80/86 | 0.061% | 7 | **34/38** |
+| 2.0.x (7 bits, GPTQ - Section 13.8; the regenerated speech) | 53/54 | 51/52 | 80/86 | **0.048%** | **4** | 32/38 |
 
 The context set's 54 sentences are few, and its thin words flip between training seeds, so we also scored 38 fresh
 sentences - both readings of polish, contract, winds, bass, minute, and invalid, none in the seeds or the set. The
@@ -1462,7 +1463,12 @@ in the forward pass) was dropped: the fine-tune alone, unrounded, moved the voic
 recordings' MCD +0.16). Clipped scales, groups of 64 weights, and 8-bit biases and norms didn't help.
 
 Both networks now export 7-bit GPTQ weights: the G2P 43 KB larger than its 6-bit module, the voice about 33 KB smaller
-than its 8-bit one. The voice's loader (`lib/model.js`) unpacks bit-packed values, as the G2P's always has.
+than its 8-bit one. The voice's loader (`lib/model.js`) unpacks bit-packed values, as the G2P's always has. The G2P
+retrained with it (make train, November 4) was installed over its regression set's probe minimum - 32 of 38 against
+33, the thin words' labels, not the rounding (the study's float seeds scored 30 on average) - for its book error
+(0.048%, was 0.061%) and frequent words (4 of the top 10,000 wrong, was 7). The voice retrained with it was not: its
+7-bit export matched the 8-bit ones, but the recipe's two cuts of the week before - the distillation and the shorter
+stage A - had cost about 0.03 UTMOS together, and two blind A/B rounds chose the shipped voice 8 to 0 (22 Same).
 
 ## 14. Limitations and future work
 
