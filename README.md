@@ -529,8 +529,9 @@ decoder of 4 (282,627 parameters, 334 KB gzipped). make train trains it directly
 (`picovox_train/trainmulti.py`, the recipe's `voice` - its `defaults.config` the size), in two stages:
 
 1. **Stage A** - the spectral loss through the differentiable synthesizer on the clips (and the duration, F0, and
-   formant-guide losses), the first 10,000 steps of a 30,000-step cosine schedule (15,000 until November 2026 - the
-   shorter stage scored within the seeds' spread and was, by ear, the same voice).
+   formant-guide losses), the first 15,000 steps of a 30,000-step cosine schedule (10,000 for a week of November 2026 -
+   each seed scored within the seeds' spread, but with the distillation's removal the voices averaged 0.03 UTMOS below
+   the shipped voice, and the blind A/B leaned to it).
 2. **Stage B** - from A's last checkpoint, with the adversarial critic and feature matching against the over-smoothing,
    10,000 steps of a warmup-stable-decay schedule (constant, then the last 25% cooled down by 1 - sqrt -
    `picovox_train/optim.py`); its best validation checkpoint is the voice.

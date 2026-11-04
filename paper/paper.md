@@ -439,7 +439,11 @@ decayed to the end, scored UTMOS 4.068 with WER 1.38% and similarity 0.861 - aga
 chose stage B). Stage A's length, though, was more than B needs: stopped at 10,000 steps instead of 15,000, the two
 stages scored UTMOS 4.270 and 4.291 with WER 1.31% and 1.41% for two seeds, against the same seeds' 4.284 and 4.303
 with 1.23% and 1.38% - about 0.013 lower, under the seeds' spread - and against the shipped voice the A/B was 13
-Same of 15 (two chose the shipped voice), so stage A stops at 10,000, about 8 minutes off each run.
+Same of 15 (two chose the shipped voice), so stage A stopped at 10,000, about 8 minutes off each run. That was
+undone a week later: the two cuts - the distillation and the shorter stage A - each within the seeds' spread, added up.
+Four voices of the simplified recipe averaged UTMOS 4.278 against the shipped voice's 4.308 (the export's width no
+factor - Section 13.8), and the next blind A/B was 4 to 0 for the shipped voice (11 Same); stage A stops at 15,000
+again.
 
 
 ## 9. Grapheme-to-phoneme conversion without a dictionary
