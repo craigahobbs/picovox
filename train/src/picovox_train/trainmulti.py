@@ -44,10 +44,12 @@ The training step's options (optim.py):
 
 import argparse
 import collections
+import hashlib
 import json
 import math
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -556,6 +558,28 @@ def default_settings(**overrides):
     return settings
 
 
+# The run's checkpoint to resume (--resume) - its last.pt, when it was saved with these arguments (but --stop: a stopped
+# run continues) from the same --init checkpoint (its SHA-256); a run of other arguments or another start (the recipe
+# changed, or the stage before it retrained) starts over - its checkpoints and log removed. None - train from the start.
+def resume_state(directory, args, init_digest, device):
+    path = os.path.join(directory, 'last.pt')
+    if not args.resume or not os.path.exists(path):
+        return None
+    state = torch.load(path, map_location=device, weights_only=False)
+    saved = {key: value for key, value in state['args'].items() if key not in ('resume', 'stop')}
+    current = {key: value for key, value in vars(args).items() if key not in ('resume', 'stop')}
+    changed = sorted(key for key in saved.keys() | current.keys() if saved.get(key) != current.get(key))
+    if state.get('initDigest') != init_digest:
+        changed.append('the init checkpoint')
+    if not changed:
+        return state
+    print(f'resume: {path} is of other settings ({", ".join(changed)}) - training from the start', file=sys.stderr, flush=True)
+    for name in os.listdir(directory):
+        if name in ('last.pt', 'best.pt', 'log.jsonl') or re.fullmatch(r'step-\d+\.pt', name):
+            os.remove(os.path.join(directory, name))
+    return None
+
+
 def main(argv=None):
     parser = argument_parser()
     known = parser.parse_known_args(argv)[0]
@@ -585,7 +609,10 @@ def main(argv=None):
     # The model, the critic, and the optimizers
     config = {'speakers': len(speaker_keys), 'vocab': len(corpus_set.data.index['vocab']), **json.loads(args.config)}
     model = MultiModel(config, priors=MULTI_PRIORS, dropout=args.dropout).to(device)
+    init_digest = None
     if args.init:
+        with open(args.init, 'rb') as file:
+            init_digest = hashlib.sha256(file.read()).hexdigest()
         state = torch.load(args.init, map_location=device, weights_only=False)
         missing, unexpected = model.load_state_dict(state['model'], strict=False)
         print(f'init from {args.init}: missing {missing}, unexpected {unexpected}', file=sys.stderr)
@@ -614,8 +641,8 @@ def main(argv=None):
 
     step = 0
     best = math.inf
-    if args.resume and os.path.exists(os.path.join(directory, 'last.pt')):
-        state = torch.load(os.path.join(directory, 'last.pt'), map_location=device, weights_only=False)
+    state = resume_state(directory, args, init_digest, device)
+    if state is not None:
         model.load_state_dict(state['model'])
         # (a checkpoint saved by the unfused AdamW resumes fused: its param groups say fused, so loading moves the
         # step counts to the device as the fused step needs)
@@ -626,7 +653,7 @@ def main(argv=None):
         scheduler.load_state_dict(state['scheduler'])
         step = state['step']
         best = state.get('best', math.inf)
-        if critic is not None and 'critic' in state:
+        if critic is not None:
             critic.load_state_dict(state['critic'])
             for group in state['criticOptimizer']['param_groups']:
                 group['fused'] = fused or None
@@ -641,7 +668,8 @@ def main(argv=None):
             extra = {**(extra or {}), 'critic': critic.state_dict(), 'criticOptimizer': critic_optimizer.state_dict()}
         save_checkpoint({'model': model.state_dict(), 'optimizer': optimizer.state_dict(),
                          'scheduler': scheduler.state_dict(), 'step': step, 'best': best, 'config': model.config,
-                         'priors': MULTI_PRIORS, 'speakers': speaker_keys, 'args': vars(args), **(extra or {})}, path)
+                         'priors': MULTI_PRIORS, 'speakers': speaker_keys, 'args': vars(args), 'initDigest': init_digest,
+                         **(extra or {})}, path)
 
     streams = {'tts': batch_stream(corpus_set, args.batch, args.max_frames, rng)}
     corpora = {'tts': corpus_set}

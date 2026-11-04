@@ -9,6 +9,7 @@ import json
 import math
 import os
 import runpy
+import shutil
 import tempfile
 import threading
 import time
@@ -380,11 +381,36 @@ class TestMain(unittest.TestCase):
         self.assertIn('resume: 3 steps from 2', DATA.last_log)
         self.assertEqual(torch.load(DATA.run_path('resume', 'last.pt'), weights_only=False)['step'], 3)
 
-    def test_resume_without_critic_state(self):
-        # A stage A checkpoint resumed with the critic - the critic starts fresh
-        self.assertEqual(DATA.train('resume-critic', '--stop', '1'), 0)
-        self.assertEqual(DATA.train('resume-critic', '--adversarial', '0.1', '--resume', '--steps', '2'), 0)
-        self.assertIn('critic', torch.load(DATA.run_path('resume-critic', 'last.pt'), weights_only=False))
+    def test_resume_without_critic(self):
+        # Stage A (no critic) stopped, then resumed
+        self.assertEqual(DATA.train('resume-plain', '--stop', '1', '--resume'), 0)
+        self.assertEqual(DATA.train('resume-plain', '--resume'), 0)
+        self.assertIn('resume-plain: 3 steps from 1', DATA.last_log)
+        self.assertNotIn('critic', torch.load(DATA.run_path('resume-plain', 'last.pt'), weights_only=False))
+
+    def test_resume_other_settings(self):
+        # A run of other settings starts over - its checkpoints and log removed (other files kept)
+        self.assertEqual(DATA.train('resume-other', '--stop', '1', '--resume'), 0)
+        for name in ('best.pt', 'step-7.pt', 'notes.txt'):
+            with open(DATA.run_path('resume-other', name), 'w', encoding='utf-8') as file:
+                file.write('x')
+        self.assertEqual(DATA.train('resume-other', '--lr', '0.002', '--stop', '1', '--resume'), 0)
+        self.assertIn('is of other settings (lr) - training from the start', DATA.last_log)
+        self.assertIn('resume-other: 3 steps from 0', DATA.last_log)
+        self.assertEqual(sorted(name for name in os.listdir(DATA.run_path('resume-other')) if name != 'train.log'),
+                         ['best.pt', 'last.pt', 'log.jsonl', 'notes.txt'])
+        self.assertEqual(torch.load(DATA.run_path('resume-other', 'best.pt'), weights_only=False)['args']['lr'], 0.002)
+
+        # ... and so does a run from another init checkpoint (the stage before it retrained)
+        first = tiny_checkpoint()
+        self.assertEqual(DATA.train('other-init', '--steps', '1'), 0)
+        second = DATA.run_path('other-init', 'last.pt')
+        self.assertEqual(DATA.train('resume-init', '--init', first, '--stop', '1', '--resume'), 0)
+        self.assertEqual(DATA.train('resume-init', '--init', first, '--resume'), 0)
+        self.assertIn('resume-init: 3 steps from 1', DATA.last_log)
+        shutil.copyfile(second, first)
+        self.assertEqual(DATA.train('resume-init', '--init', first, '--resume'), 0)
+        self.assertIn('is of other settings (the init checkpoint) - training from the start', DATA.last_log)
 
     def test_validation_schedule(self):
         # Validated only from --val-from (and at the end); the best is kept only when the score improves
