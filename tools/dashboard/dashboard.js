@@ -919,10 +919,18 @@ async function loadTrain() {
     } else if (Number.isFinite(start)) {
         status = 'stopped';
     }
-    const end = status === 'finished' ? Math.max(...counted.map((state) => state.end)) : null;
     // (the run's samples - from its start)
     const samples = utilResult === null ? [] : trainModel.parseUtilLog(utilResult.text, Number.isFinite(start) ? start : now).
         filter((sample) => !Number.isFinite(start) || sample.time >= start);
+    // (the run's end - a finished run's last stage's, a stopped or failed run's last activity: its stages' last event or
+    // its last utilization sample; a running run has none)
+    let end = null;
+    if (status === 'finished') {
+        end = Math.max(...counted.map((state) => state.end));
+    } else if (status === 'stopped' || status === 'failed') {
+        const activity = [...states.values()].flatMap((state) => [state.start, state.end]).filter((time) => time !== null);
+        end = Math.max(start, ...activity, ...samples.slice(-1).map((sample) => sample.time));
+    }
 
     // The gates' results - the evaluations (picovox_train.panel eval and gate) and the checks in the logs
     const [baselineResult, voiceResult, summaryResult] = await Promise.all(['eval/baseline/result.json', 'eval/voice/result.json',
@@ -1043,9 +1051,9 @@ function stageLine(stage, state, data) {
     const parts = [stage.on.toUpperCase()];
     if (state.start !== null) {
         parts.push(`${clockTime(state.start)}-${state.end === null ? 'now' : clockTime(state.end)}`);
-        const seconds = ((state.end ?? data.now) - state.start) / 1000;
+        const seconds = ((state.end ?? data.end ?? data.now) - state.start) / 1000;
         parts.push(`${formatDuration(seconds)} (expected ~${formatDuration(stage.minutes * 60)})`);
-        const use = trainModel.meanUtilization(data.samples, state.start, state.end ?? data.now);
+        const use = trainModel.meanUtilization(data.samples, state.start, state.end ?? data.end ?? data.now);
         if (use.count !== 0) {
             parts.push(`CPU ${Math.round(use.cpu)}% · GPU ${Math.round(use.gpu)}%`);
         }
@@ -1210,11 +1218,14 @@ function renderTrain(force = false) {
     }
     if (data.status === 'finished') {
         facts.push(`finished ${clockTime(data.end)}`);
+    } else if (data.end !== null) {
+        facts.push(`last activity ${clockTime(data.end)} · ${formatDuration(left / 1000)} of work left`);
     } else {
         facts.push(`ETA ${clockTime(plan.eta)} (${formatDuration(left / 1000)} left)`);
     }
     facts.push(data.dir);
     document.getElementById('trainFacts').textContent = facts.join(' · ');
+    document.getElementById('subtitle').textContent = `PicoVox - make train (${data.dir}/)`;
     const fraction = Number.isFinite(elapsed) && elapsed + left > 0 ? elapsed / (elapsed + left) : 0;
     document.getElementById('trainBar').style.width = `${(100 * fraction).toFixed(1)}%`;
     const pathElement = document.getElementById('trainPath');
@@ -1370,7 +1381,9 @@ function drawUtilization(canvas, data) {
     const color = (name) => styles.getPropertyValue(name).trim();
     const classColor = {'gpu': color('--accent'), 'cpu': color('--series-3')};
     const start = Number.isFinite(data.start) ? data.start : data.now;
-    const end = Math.max(data.end ?? data.now, data.status === 'finished' ? 0 : plan.eta, start + 60000);
+    // (a running run's chart reaches its ETA; a finished, stopped, or failed run's ends at its end, without a forecast)
+    const forecasting = data.end === null;
+    const end = Math.max(data.end ?? data.now, forecasting ? plan.eta : 0, start + 60000);
     const plotX = (time) => pad.left + (time - start) / (end - start) * (width - pad.left - pad.right);
     const plotY = (percent) => pad.top + (1 - percent / 100) * linesHeight;
 
@@ -1425,10 +1438,10 @@ function drawUtilization(canvas, data) {
         };
         const solid = state.status === 'failed' ? color('--bad') : classColor[stage.on];
         if (state.start !== null) {
-            band(state.start, state.end ?? data.now, solid);
+            band(state.start, state.end ?? data.end ?? data.now, solid);
         }
         const finish = plan.finishes.get(stage.stage);
-        if (state.status !== 'done' && state.status !== 'failed' && finish !== undefined) {
+        if (forecasting && state.status !== 'done' && state.status !== 'failed' && finish !== undefined) {
             const from = state.start !== null ? data.now : finish - stage.minutes * 60000;
             band(Math.max(from, data.now), finish, `${classColor[stage.on]}44`);
         }
@@ -1437,10 +1450,12 @@ function drawUtilization(canvas, data) {
     // The time axis and now
     context.strokeStyle = color('--muted');
     context.setLineDash([3, 3]);
-    context.beginPath();
-    context.moveTo(plotX(data.now), pad.top);
-    context.lineTo(plotX(data.now), height - pad.bottom);
-    context.stroke();
+    if (data.now <= end) {
+        context.beginPath();
+        context.moveTo(plotX(data.now), pad.top);
+        context.lineTo(plotX(data.now), height - pad.bottom);
+        context.stroke();
+    }
     context.setLineDash([]);
     context.fillStyle = color('--muted');
     const span = end - start;
