@@ -18,7 +18,7 @@ record of a clip wins), and readings/ (measure.py's measures of its heteronym to
 engine voice and text, so a bigger corpus or another selection only adds clips; the engine isn't deterministic, so a
 clip is generated once. A new model (or digest) is a new corpus. The voices' training data is built once for its inputs
 too: build-<key>/, keyed by a hash of everything the build reads (the selection, the alignments, the readings, the
-recipe's tts section, the G2P module, train/data's other inputs, and the build's own code), hard-linked into
+recipe's tts section, and the build's own code and the repository files it names - the G2P module, ...), hard-linked into
 build's --out (the trainer only reads it - memory-mapped); a build for other inputs replaces it.
 
 The selection - book sentences through our front end (each sentence's text is its normalized words and phrase marks,
@@ -585,24 +585,31 @@ def module_closure(name, package_dir):
     return seen
 
 
+# The repository files a module names - its os.path.join(ROOT, ...) paths of string literals (relative to the root)
+def named_files(path):
+    with open(path, encoding='utf-8') as file:
+        source = file.read()
+    joins = re.findall(r"os\.path\.join\(ROOT, ((?:'[^']+'(?:, )?)+)\)", source)
+    return {os.path.join(*re.findall(r"'([^']+)'", parts)) for parts in joins}
+
+
 # The build's key - a hash of everything it reads: the corpus's selection, alignments, and readings, the recipe's tts
-# section, the G2P module (the front end's pronouncer), train/data's files but the recipe and the stage graph, and the
-# training package's code the build runs (this module's import closure, the package's __init__.py and data files) - a
-# change to the trainer, say, keeps the build
+# section, and the training package's code the build runs (this module's import closure, the package's __init__.py
+# and data files) with the repository files that code names (the G2P module - the front end's pronouncer - the book
+# pins, the context labels' spec, ...; the recipe aside - its tts section is the key's) - a change to the trainer, say,
+# or to the G2P's training data, keeps the build
 def build_key(settings, directory, recipe_path=RECIPE_PATH):
-    from .g2pmodel import MODULE_PATH  # pylint: disable=import-outside-toplevel
     recipe = read_json(recipe_path)
-    files = [os.path.join(directory, f'selection-{selection_key(settings, recipe)}.json'), os.path.join(directory, 'alignments.jsonl'),
-             MODULE_PATH]
+    files = [os.path.join(directory, f'selection-{selection_key(settings, recipe)}.json'), os.path.join(directory, 'alignments.jsonl')]
     readings_dir = os.path.join(directory, 'readings')
     if os.path.isdir(readings_dir):
         files.extend(os.path.join(readings_dir, name) for name in sorted(os.listdir(readings_dir)))
-    data_dir = os.path.join(ROOT, 'train', 'data')
-    files.extend(os.path.join(data_dir, name) for name in sorted(os.listdir(data_dir)) if name not in ('train.json', 'train-stages.json'))
     package_dir = os.path.join(SOURCE_DIR, 'picovox_train')
     modules = module_closure('tts', package_dir) | {'__init__'}
     files.extend(os.path.join(package_dir, name) for name in sorted(os.listdir(package_dir))
                  if os.path.isfile(os.path.join(package_dir, name)) and (not name.endswith('.py') or name[:-3] in modules))
+    named = set().union(*(named_files(os.path.join(package_dir, f'{module}.py')) for module in modules))
+    files.extend(os.path.join(ROOT, name) for name in sorted(named) if os.path.join(ROOT, name) != RECIPE_PATH)
     basis = {'tts': settings, 'files': {os.path.relpath(path, ROOT): file_sha256(path) for path in files if os.path.isfile(path)}}
     return hashlib.sha256(json.dumps(basis, sort_keys=True).encode('utf-8')).hexdigest()[:12]
 

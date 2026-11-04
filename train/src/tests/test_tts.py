@@ -753,9 +753,18 @@ class TestBuild(unittest.TestCase):
             with unittest.mock.patch.object(tts, 'file_sha256', return_value='y'):
                 base = tts.build_key(settings, directory)
             for name, same in (('tts.py', False), ('data.py', False), ('vocab.json', False), ('__init__.py', False),
-                               ('trainmulti.py', True), ('losses.py', True)):
+                               ('context-labels.json', False), ('books.json', False), ('trainmulti.py', True), ('losses.py', True),
+                               ('g2p-relabel.json', True), ('train.json', True)):
                 with unittest.mock.patch.object(tts, 'file_sha256', side_effect=lambda path, end=name: 'z' if path.endswith(end) else 'y'):
                     self.assertEqual(tts.build_key(settings, directory) == base, same, name)
+
+    def test_named_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'module.py')
+            with open(path, 'w', encoding='utf-8') as file:
+                file.write("A = os.path.join(ROOT, 'train', 'data', 'a.json')\nB = os.path.join(ROOT, 'lib')\n"
+                           "C = os.path.join(other, 'x')\n")
+            self.assertEqual(tts.named_files(path), {os.path.join('train', 'data', 'a.json'), 'lib'})
 
     def test_module_closure(self):
         package_dir = os.path.join(tts.SOURCE_DIR, 'picovox_train')
