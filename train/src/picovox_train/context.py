@@ -248,16 +248,11 @@ def train_g2p(model, items, probabilities, labels, settings, log):
     ], lr=peak, weight_decay=0.0)
     log(f'train-g2p: {sum(parameter.numel() for parameter in trained)} parameters trained ({settings["train"]}), {len(items)} '
         f'items, {len(ambiguous)} ambiguous words, {len(targets)} reading targets, {steps} steps')
-    # (then quantSteps of quantization-aware training at the export's bits, the learning rate warmed up again and
-    # decayed - the G2P learns its weights' rounding: unrounded, the export's 6 bits cost the frequent words)
-    quant_steps = int(settings['quantSteps'])
-    quantizer = WeightQuantizer(model, EXPORT)
     window = collections.defaultdict(float)
     window_start = time.time()
     batches = []
     model.train()
-    for step in range(1, steps + quant_steps + 1):
-        quantizing = step > steps
+    for step in range(1, steps + 1):
         if not batches:
             # The next pool of samples - (word, phones, reading), sorted by length and shuffled as batches
             count = batch_size * 32
@@ -282,26 +277,20 @@ def train_g2p(model, items, probabilities, labels, settings, log):
         letters, phone_targets = make_batch([word for word, _, _ in batch], [phones for _, phones, _ in batch])
         readings = torch.tensor([reading for _, _, reading in batch], dtype=torch.long)
         labels_tensor = torch.tensor([1.0 if word in ambiguous else 0.0 for word, _, _ in batch])
-        rate = learning_rate(step - steps, quant_steps, peak, 0) if quantizing else learning_rate(step, steps, peak, warmup)
         for group in optimizer.param_groups:
-            group['lr'] = rate * group['scale']
-        if quantizing:
-            quantizer.quantize()
+            group['lr'] = learning_rate(step, steps, peak, warmup) * group['scale']
         loss, phone_loss, ambiguity_loss = reading_loss(model, letters, phone_targets, readings, labels_tensor,
                                                         float(settings['ambiguityWeight']))
         optimizer.zero_grad()
         loss.backward()
-        if quantizing:
-            quantizer.restore()
         torch.nn.utils.clip_grad_norm_(trained, 1.0)
         optimizer.step()
         window['phone'] += phone_loss.item()
         window['ambiguity'] += ambiguity_loss.item()
-        if step % 500 == 0 or step == steps + quant_steps:
+        if step % 500 == 0 or step == steps:
             count = step % 500 or 500
-            log(f'train-g2p: step {step}/{steps + quant_steps}{" (quantized)" if quantizing else ""} phone loss '
-                f'{window["phone"] / count:.4f}, ambiguity loss {window["ambiguity"] / count:.5f} '
-                f'({(time.time() - window_start) / count * 1000:.0f} ms/step)')
+            log(f'train-g2p: step {step}/{steps} phone loss {window["phone"] / count:.4f}, ambiguity loss '
+                f'{window["ambiguity"] / count:.5f} ({(time.time() - window_start) / count * 1000:.0f} ms/step)')
             window.clear()
             window_start = time.time()
     model.eval()
@@ -616,6 +605,60 @@ def evaluate_context(slot_of, labels, split='heldout'):
 # The export - the G2P module with the reading heads and the context network
 #
 
+# The G2P's quantization calibration - {words, phones, readings}: EXPORT's "calibration" words drawn by the G2P's own
+# training probabilities (a fixed seed; reading 0) and every alternate reading target (the reading stage's checkpoint
+# keeps it, so the export is the checkpoint's alone)
+def g2p_calibration(items, probabilities, labels):
+    chosen = numpy.random.default_rng(0).choice(len(items), size=int(EXPORT['calibration']), p=probabilities)
+    samples = [(*items[index], 0) for index in chosen] + reading_targets(labels)
+    return {'words': [word for word, _, _ in samples], 'phones': [list(phones) for _, phones, _ in samples],
+            'readings': [reading for _, _, reading in samples]}
+
+
+# The G2P's matrices' input covariances (for GPTQ - quant.py) - {name: E[x x^T]} over the calibration words, teacher-
+# forced: each GRU's input and its previous state (the encoder's forward and reverse), the bridge's and the ambiguity
+# head's encoder ends, the decoder's attention, combine, and output inputs (the embedding tables - lookups - none)
+def g2p_covariances(model, calibration):
+    import torch  # pylint: disable=import-outside-toplevel
+    sums = collections.defaultdict(lambda: [0.0, 0])
+
+    def add(name, inputs):
+        inputs = inputs.reshape(-1, inputs.shape[-1]).double()
+        sums[name][0] = sums[name][0] + (inputs.T @ inputs).numpy()
+        sums[name][1] += inputs.shape[0]
+
+    words, phones, readings = calibration['words'], calibration['phones'], calibration['readings']
+    hidden = model.config['hidden']
+    with torch.no_grad():
+        for start in range(0, len(words), 1024):
+            letters, targets = make_batch(words[start:start + 1024], phones[start:start + 1024])
+            encoded, mask, state, ends = encode_reading(model, letters, torch.tensor(readings[start:start + 1024]))
+            embedded = model.letter_embed(letters)
+            forward, reverse = encoded[..., :hidden], encoded[..., hidden:]
+            previous_forward = torch.cat([torch.zeros_like(forward[:, :1]), forward[:, :-1]], 1)
+            next_valid = torch.cat([mask[:, 1:], torch.zeros_like(mask[:, :1])], 1)[..., None]
+            next_reverse = torch.cat([reverse[:, 1:], torch.zeros_like(reverse[:, :1])], 1) * next_valid
+            add('encoder.weight_ih_l0', embedded[mask])
+            add('encoder.weight_ih_l0_reverse', embedded[mask])
+            add('encoder.weight_hh_l0', previous_forward[mask])
+            add('encoder.weight_hh_l0_reverse', next_reverse[mask])
+            add('bridge.weight', ends)
+            add('ambiguity_layer.weight', ends)
+            add('ambiguity.weight', torch.tanh(model.ambiguity_layer(ends)))
+            previous = torch.cat([torch.full_like(targets[:, :1], EOS), targets[:, :-1]], 1)
+            steps = targets != 0
+            phone_inputs = model.phone_embed(previous)
+            decoded, _ = model.decoder(phone_inputs, state)
+            add('decoder.weight_ih_l0', phone_inputs[steps])
+            add('decoder.weight_hh_l0', torch.cat([state.transpose(0, 1), decoded[:, :-1]], 1)[steps])
+            add('attention.weight', decoded[steps])
+            scores = torch.einsum('bsh,bth->bst', model.attention(decoded), encoded).masked_fill(~mask.unsqueeze(1), float('-inf'))
+            combined = torch.cat([decoded, torch.einsum('bst,bth->bsh', torch.softmax(scores, -1), encoded)], -1)
+            add('combine.weight', combined[steps])
+            add('output.weight', torch.tanh(model.combine(combined))[steps])
+    return {name: total / count for name, (total, count) in sums.items()}
+
+
 # The smallest encoding of a quantized state - (manifest fields {layout, deflate}, base64 text)
 def encode_weights(quantized):
     import base64  # pylint: disable=import-outside-toplevel
@@ -707,11 +750,15 @@ def module_text(g2p_config, g2p_quantized, context_config, context_quantized, co
 
 
 def command_export(args):
-    """Write the generated module from the G2P and context checkpoints - the weights checked to round-trip exactly"""
+    """Write the generated module from the G2P and context checkpoints - the G2P's matrices rounded by GPTQ (its
+    checkpoint's calibration words), the context network's (trained at the export's rounding) to the nearest; the weights
+    checked to round-trip exactly"""
     import torch  # pylint: disable=import-outside-toplevel
+    torch.set_num_threads(1)
     g2p_checkpoint = torch.load(args.g2p, map_location='cpu', weights_only=False)
     context_checkpoint = torch.load(args.context, map_location='cpu', weights_only=False)
-    g2p_quantized = quantize_state(g2p_checkpoint['state'], EXPORT)
+    covariances = g2p_covariances(load_g2p(args.g2p).eval(), g2p_checkpoint['calibration'])
+    g2p_quantized = quantize_state(g2p_checkpoint['state'], EXPORT, covariances)
     context_quantized = quantize_state(context_checkpoint['state'], EXPORT)
     g2p_parameters = sum(item['integers'].size for item in g2p_quantized)
     context_parameters = sum(item['integers'].size for item in context_quantized)
@@ -893,7 +940,8 @@ def command_train_g2p(args):
     model = load_g2p(args.init)
     overrides = json.loads(args.settings) if args.settings else {}
     train_g2p(model, items, probabilities, labels, overrides, lambda text: log_line(args.log, text))
-    torch.save({'config': model.config, 'state': model.state_dict(), 'settings': {**G2P_SETTINGS, **overrides}}, args.out)
+    torch.save({'config': model.config, 'state': model.state_dict(), 'settings': {**G2P_SETTINGS, **overrides},
+                'calibration': g2p_calibration(items, probabilities, labels)}, args.out)
     result = evaluate_g2p(model, labels, list(data['first']))
     log_line(args.log, f'train-g2p: readings {result["readingsRight"]}/{result["readings"]}, ambiguity missed '
                        f'{len(result["ambiguousMissed"])}, false positives {result["falsePositives"]}')

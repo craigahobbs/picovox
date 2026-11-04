@@ -51,7 +51,7 @@ import time
 
 import numpy
 
-from . import RECIPE_PATH, ROOT, corpora, frontend, g2pmodel, read_json
+from . import RECIPE_PATH, ROOT, corpora, frontend, g2pmodel, quant, read_json
 from .frontend import vocabulary
 
 
@@ -509,8 +509,9 @@ def command_train(args):
 #
 # The export's quantization (context.py export) - each tensor's values are symmetric integers of its bits (matrices
 # "bits", vectors - biases - "biasBits") with a bfloat16 scale per row; each scale is the best of CLIP_RATIOS by squared
-# error. The bytes are every scale, then every tensor's values - bit-packed, or a byte each - deflated when that makes
-# the module smaller.
+# error, and the integers the nearest - or, for a matrix with its layer's input covariance (context.py
+# g2p_covariances), GPTQ's (quant.py) at that scale. The bytes are every scale, then every tensor's values - bit-packed,
+# or a byte each - deflated when that makes the module smaller.
 #
 
 # Round float32 values to bfloat16 (nearest, ties to even) - (uint16 codes, values as float64)
@@ -520,8 +521,9 @@ def bfloat16(values):
     return codes, (codes.astype(numpy.uint32) << 16).view(numpy.float32).astype(numpy.float64)
 
 
-# Quantize a 2-D array - (integers, scale codes [rows], dequantized values)
-def quantize_array(values, bits):
+# Quantize a 2-D array - (integers, scale codes [rows], dequantized values); with its layer's input covariance
+# [columns, columns], the integers GPTQ's at the scales chosen
+def quantize_array(values, bits, covariance=None):
     limit = (1 << (bits - 1)) - 1
     peak = numpy.abs(values).max(1)
     best_error, best_codes, best_scales = None, None, None
@@ -537,18 +539,23 @@ def quantize_array(values, bits):
             best_error = numpy.where(better, error, best_error)
             best_codes = numpy.where(better, codes, best_codes)
             best_scales = numpy.where(better, scales, best_scales)
-    safe = numpy.where(best_scales > 0, best_scales, 1.0)
-    integers = (numpy.clip(numpy.round(values / safe[:, None]), -limit, limit) * (best_scales > 0)[:, None]).astype(numpy.int64)
+    if covariance is not None:
+        integers = quant.gptq(values, best_scales, covariance, limit)
+    else:
+        safe = numpy.where(best_scales > 0, best_scales, 1.0)
+        integers = (numpy.clip(numpy.round(values / safe[:, None]), -limit, limit) * (best_scales > 0)[:, None]).astype(numpy.int64)
     return integers, best_codes, integers * best_scales[:, None]
 
 
-# Quantize a model's state - [{name, shape, bits, integers, codes, dequantized}] in state order
-def quantize_state(state, spec):
+# Quantize a model's state - [{name, shape, bits, integers, codes, dequantized}] in state order; covariances - {name:
+# its layer's input covariance} for GPTQ's integers (the matrices named)
+def quantize_state(state, spec, covariances=None):
     quantized = []
     for name, tensor in state.items():
         values = tensor.detach().double().cpu().numpy()
         bits = spec['bits'] if values.ndim == 2 else spec.get('biasBits', 8)
-        integers, codes, dequantized = quantize_array(values.reshape(1, -1) if values.ndim == 1 else values, bits)
+        integers, codes, dequantized = quantize_array(values.reshape(1, -1) if values.ndim == 1 else values, bits,
+                                                      (covariances or {}).get(name))
         quantized.append({'name': name, 'shape': list(values.shape), 'bits': bits, 'integers': integers, 'codes': codes,
                           'dequantized': dequantized.reshape(values.shape)})
     return quantized

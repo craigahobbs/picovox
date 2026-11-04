@@ -22,7 +22,7 @@
         "analysis": {"formantCeilings": {"female": 5500, "male": 5000}, "bandwidth": 12000}
     },
     "g2p": {
-        "description": "The G2P network (nn/g2p.py): the AR encoder-decoder trained on every dictionary word, frequency-weighted, with teacher-labeled unknown words, in four stages (base, two polishes over the most frequent words, then the training speech's pronunciations of the relabeled words - focus), exported at 6 bits",
+        "description": "The G2P network (nn/g2p.py): the AR encoder-decoder trained on every dictionary word, frequency-weighted, with teacher-labeled unknown words, in four stages (base, two polishes over the most frequent words, then the training speech's pronunciations of the relabeled words - focus), exported at 7 bits",
         "model": {"embed": 32, "hidden": 96},
         "batch": 512,
         "alpha": 0.5,
@@ -62,7 +62,7 @@
         },
         "g2p": {
             "readings": 3, "ambiguityHidden": 16, "steps": 3000, "batch": 512, "lr": 0.0003, "warmup": 100, "readingShare": 0.04,
-            "invariantShare": 0.02, "ambiguityWeight": 1.0, "quantSteps": 1000, "seed": 7, "threads": 2, "train": "reading,ambiguity_layer,ambiguity,decoder",
+            "invariantShare": 0.02, "ambiguityWeight": 1.0, "seed": 7, "threads": 2, "train": "reading,ambiguity_layer,ambiguity,decoder",
             "headRate": 15.0
         },
         "network": {
@@ -70,7 +70,7 @@
             "lr": 0.003, "warmup": 300, "weightDecay": 0.01, "quantSteps": 2000, "quantLr": 0.0005, "seed": 1, "threads": 2,
             "seedRepeat": 4, "balance": 0.3, "itemDropout": 0.15, "teachers": 4, "distill": 0.8, "transferShare": 0.5
         },
-        "export": {"bits": 6, "biasBits": 8},
+        "export": {"bits": 7, "biasBits": 8, "calibration": 8192},
         "gate": {
             "words": ["read", "use", "close", "lives"], "margin": 0.2, "folds": 10,
             "heteronymKindDrop": 2, "bookError": 0.0001, "bookDistinct": 25, "top10kWrong": 2, "monitorWer": 0.005

@@ -598,6 +598,15 @@ d64 is about 0.02 UTMOS below s80 on average (the seed spread) with a lower WER,
 iPhone without a JIT. The voice's training on the GPU isn't bit-reproducible - the recipe's d64, retrained, matched its losses but not
 its weights bitwise - though its export and packaging from a checkpoint are.
 
+The export (`picovox_train.export`) quantizes the voice's matrices, kernels, and embedding table to 7 bits with a
+float32 scale per row (the biases and norms stay float32), the matrices and kernels rounded by GPTQ - each layer's
+inputs measured on 256 training utterances (a fixed draw), each row rounded a weight at a time with the error carried
+into its later weights - and `lib/model.js` unpacks them. On three trained seeds the 7-bit voice was indistinguishable
+from the float network on every measure of the quantization study (UTMOS and Whisper's WER over three noise seeds, the
+recordings' spectra and pitch, and its own frames' drift against the spread between seeds); nearest rounding at 7 bits
+had drifted the pitch three times as far, and 6 bits, or the encoder at 5 or 4, changed the durations beyond the seeds'
+spread. Both networks share the method - see the paper's Section 13.8.
+
 
 ## Training the G2P model
 
@@ -622,8 +631,11 @@ large teacher ensemble or by the spelling and `-s` rules where they apply (`trai
 steps) teaches the spoken pronunciations of 56 words whose dictionary-first pronunciation isn't the usual reading
 (lead L IY1 D, live L IH1 V, wind W IH1 N D, ... - `train/data/g2p-relabel.json`; a stage's `relabel` replaces those
 words' targets, the rule-labeled words derived from them follow, and `focusBoost` gives them 2% of the samples). The
-export quantizes to 6 bits per weight. Training on the CPU with one thread is deterministic: the recipe reproduces the
-shipped model's weights bit for bit.
+export quantizes to 7 bits per weight, rounding each matrix by GPTQ - error-aware: a row is rounded a weight at a time,
+each weight's rounding error compensated in the row's later weights through the layer's input covariance (8,192
+training words, a fixed draw) - so the layers' outputs, not the weights, stay close: on four seeds the export reads 23
+more of 2.4 million book words wrong than the float network, and the seeds bracket zero. Training on the CPU with one
+thread is deterministic: the recipe reproduces the shipped model's weights bit for bit.
 
 `picovox_train/heteronyms.py` chooses the relabeled words from the training speech's measured readings
 (`picovox_train/measure.py` - below): for each word with several dictionary readings, the reading the voices used; a
@@ -697,10 +709,9 @@ lives", "a lead pipe", the noun/verb stress pairs. The G2P module also holds two
 rule at runtime): the G2P takes a reading index (a learned vector added to its decoder's first state; reading 0 is the
 default) and has an ambiguity head (whether the word's reading depends on its context); for an ambiguous word, a context
 network (`picovox_train/context.py`: a character GRU over the three words and phrase-end marks each side, a
-bidirectional GRU, and a layer gated by the word itself - 47,779 parameters at 6 bits) chooses the reading. The G2P
+bidirectional GRU, and a layer gated by the word itself - 47,779 parameters at 7 bits) chooses the reading. The G2P
 learns the reading input and the ambiguity head in a last stage (`picovox_train.context train-g2p`, from the trained
-G2P), which ends with 1,000 steps of quantization-aware training at the export's 6 bits: without them the export's
-rounding cost the frequent words (3 of the top 10,000 wrong in float, 11-16 as exported; with them 5-9).
+G2P).
 
 The context network is distilled from an ensemble, for steadiness: one network's choices where its labels are thin
 depend on its seed (October 2026: five seeds of the same labels differed on 14% of unlabeled book windows and 9 of the

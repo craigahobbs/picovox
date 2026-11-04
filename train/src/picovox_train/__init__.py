@@ -56,8 +56,9 @@ The network:
   against the over-smoothing; the losses are losses.py's
 - optim.py - the training step's options for trainmulti.py: the lean gradient clip and AdamW step, and the
   warmup-stable-decay schedule
-- quant.py - the export's 8-bit weight quantization (per row), shared by export.py and lib/model.js
-- export.py - export to <voice>.bin and .json (8-bit weights - quant.py); package.py - an export
+- quant.py - the export's 7-bit weight quantization (per row, GPTQ's error-aware rounding), shared by export.py,
+  lib/model.js, and the G2P's export
+- export.py - export to <voice>.bin and .json (7-bit packed weights - quant.py); package.py - an export
   as a generated JavaScript module (lib/models/voiceModel.js), loaded by lib/package.js (tools/packagecheck.js checks
   it); lib/model.js - the forward pass in JavaScript; lib/transforms.js - the voice and style transforms;
   tools/speak.js - text to WAV (Node)

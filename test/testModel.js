@@ -27,17 +27,21 @@ function plain(frames) {
 
 
 test('loadModel, encodings', () => {
-    // A float32 tensor and an int8 tensor with per-row scales - in one buffer
-    const buffer = new ArrayBuffer(32);
+    // A float32 tensor, an int8 tensor, and a packed 3-bit tensor with per-row scales - in one buffer (the packed values
+    // 1, -2, 3, -3, 0, 2 - unsigned 4, 1, 6, 0, 3, 5, little-endian bit by bit)
+    const buffer = new ArrayBuffer(44);
     new Float32Array(buffer, 0, 3).set([0.5, -1.25, 3]);
     new Int8Array(buffer, 16, 6).set([1, -2, 3, 127, -128, 0]);
     new Float32Array(buffer, 24, 2).set([0.5, 2]);
+    new Uint8Array(buffer, 32, 3).set([140, 177, 2]);
+    new Float32Array(buffer, 36, 2).set([0.5, 2]);
 
     const manifest = {
         'vocab': ['<pad>', '<unk>', '<bos>', '_'],
         'tensors': [
             {'name': 'float', 'shape': [3], 'offset': 0},
-            {'name': 'int8', 'shape': [2, 3], 'offset': 16, 'encoding': 'int8', 'scaleOffset': 24}
+            {'name': 'int8', 'shape': [2, 3], 'offset': 16, 'encoding': 'int8', 'scaleOffset': 24},
+            {'name': 'packed', 'shape': [2, 3], 'offset': 32, 'encoding': 'packed', 'bits': 3, 'scaleOffset': 36}
         ],
         'config': {}
     };
@@ -48,6 +52,7 @@ test('loadModel, encodings', () => {
     assert.deepEqual(Array.from(model.tensors.float.data), [0.5, -1.25, 3]);
     assert.deepEqual(model.tensors.float.shape, [3]);
     assert.deepEqual(Array.from(model.tensors.int8.data), [0.5, -1, 1.5, 254, -256, 0]);
+    assert.deepEqual(Array.from(model.tensors.packed.data), [0.5, -1, 1.5, -6, 0, 4]);
 });
 
 

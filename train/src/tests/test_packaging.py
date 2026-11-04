@@ -57,12 +57,12 @@ class TestPackageText(unittest.TestCase):
         text = package.module_text({'voice': 'multi', 'parameterCount': 123}, b'\x01\x02', 'raw', 2)
         lines = text.split('\n')
         self.assertEqual(lines[0], package.HEADER)
-        self.assertEqual(lines[1], '// The multi acoustic model (123 parameters, 8-bit weights) for')
+        self.assertEqual(lines[1], '// The multi acoustic model (123 parameters, 7-bit weights) for')
         self.assertEqual(lines[2], '// lib/package.js loadPackagedModel - the export\'s manifest, and its weights (2 bytes) as base64.')
         self.assertIn("export const encoding = 'raw';", lines)
         self.assertEqual(lines[-4:], ['export const weights = `', 'AQI=', '`;', ''])
         text = package.module_text({}, b'', 'deflate-raw', 7)
-        self.assertIn('// The model acoustic model (None parameters, 8-bit weights) for', text)
+        self.assertIn('// The model acoustic model (None parameters, 7-bit weights) for', text)
         self.assertIn('(7 bytes, deflated) as base64.', text)
 
     def test_file_sha256(self):

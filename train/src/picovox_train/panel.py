@@ -18,7 +18,7 @@ model is spoken by the browser path, tools/speak.js):
 - score_model - an export's scores: the recipe's speakers (train/data/train.json panel) by the panel's texts
   (tools/panel-texts.json), each speaker's mean UTMOS, WER, and mean embedding, and against a reference result, the
   speaker similarity
-- evaluate_model - a checkpoint (exported, 8-bit - export.py - and packaged, package.py: its module's bytes and gzip
+- evaluate_model - a checkpoint (exported, 7-bit - export.py - and packaged, package.py: its module's bytes and gzip
   bytes) or a packaged module (unpacked - tools/unpack.js) spoken and scored - NN_EVAL_DIR/<name>/result.json
 - eval and gate - make train's: the shipped model (the baseline) and the trained voice evaluated, the voice's
   similarity to the baseline's, and the gate - the voice within the recipe's tolerance of the baseline

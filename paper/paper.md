@@ -1132,7 +1132,7 @@ Node both provide) by one loader - so the same `import` works in Node, the page,
 file-system code. General-purpose compression barely helps quantized weights: deflate shrinks the 8-bit voices by
 only 3-5% (the shipped voice's payload by 3.3%), because quantized weights look random. Base64 adds 33% raw but about
 1% after the HTTP compression that static hosts apply to JavaScript. Size reductions must therefore come from fewer
-parameters and fewer bits per weight - distillation (Section 8) and, for the G2P, 6-bit weights.
+parameters and fewer bits per weight - distillation (Section 8) and fewer bits for both networks (Section 13.8).
 
 ### 12.7 Expressive reading: style `'auto'`, and a dead end
 
@@ -1311,7 +1311,8 @@ export, and the thin words. The frequent words were the export's: the reading st
 steps of quantization-aware training (as the context network's does), and on the same four seeds the module has 5-9
 wrong (mean 7.0), book error 0.058% (0.064%), the context set 52.75 (51.25), the default set 52 of 52, and every name
 the committed module gets. The probes stay at 29.75 - the thin words (Polish, the adjective minute, the verb
-contract, the fish bass) are the labels', which the new speech's readings moved.
+contract, the fish bass) are the labels', which the new speech's readings moved. (The QAT was replaced by the export's error-aware
+rounding at 7 bits - Section 13.8.)
 
 ### 13.4 One speaker row per voice
 
@@ -1402,6 +1403,62 @@ change, against the recording's) moved those measures halfway to the source, twi
 - **The style evidence is frozen.** The four emotion transforms are measurements of embeddings learned from CREMA-D,
   kept as numbers; a new emotional corpus would have to be synthetic too.
 
+
+### 13.8 Quantization: 7 bits, rounded by GPTQ
+
+Both networks' weights are integers with a scale per row - the voice's 8 bits (nearest rounding), the G2P's 6 (with
+quantization-aware training, QAT) - and the G2P's rounding had just cost its frequent words (Section 13.3). Since every
+retrain will meet the rounding again, the widths and the method were chosen by a study with its rules written first
+(November 2026). The voice was judged against its own float network - paired renderings with fixed noise seeds of the
+panel texts in the twelve voices, and 96 held-out recordings - on its frames' drift (pitch, formants, amplitudes,
+durations), the audio's distances (mel-cepstral, log-spectral, wav2vec2, speaker embeddings), UTMOS and Whisper's WER
+(over three noise seeds), and the recordings' spectra and pitch. A candidate passed when each drift was within the
+spread between independently trained seeds' networks (a quarter of their margin above plain 8-bit's) and each quality
+change's interval excluded more harm; a null control - the float network rendered with another noise seed - failed
+the first rule, so each tolerance became at least the noise floor's (both verdicts were kept). The G2P was judged on
+four seeds against each seed's float network, on the book error, the top 10,000 words, the regression sets, and the
+words it reads differently.
+
+The decisive change was the rounding, not the width. GPTQ (Frantar et al., 2023) rounds a row's weights one at a time
+and carries each rounding error into the row's later weights through the inverse of the layer's input covariance, so
+the layer's outputs on real inputs - not its weights - stay close; it runs once at export, from calibration inputs
+(the voice's 256 training utterances, the G2P's 8,192 training words and its reading targets), and changes neither the
+module format nor the runtime.
+
+| G2P, four seeds | Wrong of 2.4M book words | More than its float | Release-to-release words changed | Module (gzip) |
+| --- | --- | --- | --- | --- |
+| Float | 1,085 | - | 156 | - |
+| 6 bits, QAT (unreleased) | 1,370 | +228 | 231 | 316.5 KB |
+| 6 bits, GPTQ | 1,220 | +134 | 208 | 316.5 KB |
+| 7 bits, nearest | 1,157 | +72 | - | 359.8 KB |
+| 7 bits, QAT | 1,113 | +25 | 183 | 359.9 KB |
+| **7 bits, GPTQ - chosen** | **1,108** | **+23** (seeds +41, -4, -16, +71) | **175** | **359.8 KB** |
+| 7 bits, QAT and GPTQ | 1,089 | +0 | 181 | 359.8 KB |
+| 8 bits, nearest | 1,114 | +29 | 157 | 410.5 KB |
+| 8 bits, GPTQ | 1,086 | +1 | 159 | 410.6 KB |
+
+For the G2P the measure that matters most is the last but one: two float networks of different seeds already read
+about 160 book words differently, so a retrain changes that many whatever the rounding; 7-bit GPTQ adds a tenth, 6-bit
+QAT had added half again. QAT on top of 7-bit GPTQ bought about one book word in 100,000 for a training stage, and was
+removed (the reading stage's QAT, the context network's kept).
+
+| Voice, seed 1 against its float | Rule | UTMOS (3 noise seeds) | Pitch drift | Recordings' MCD | Payload |
+| --- | --- | --- | --- | --- | --- |
+| 8 bits, nearest (1.0-2.0) | pass | -0.001 | 2.7 cents | +0.04 | 326.5 KB |
+| 7 bits, nearest | pass (amended) | -0.004 | 8.8 cents | +0.01 | about 293 KB |
+| **7 bits, GPTQ - chosen** | **pass** | **-0.001** | **3.2 cents** | **+0.02** | **about 293 KB** |
+| 6 bits, nearest | fail | -0.016 | 13.8 cents | +0.72 | about 260 KB |
+| 6 bits, GPTQ | fail (durations) | -0.004 | 6.1 cents | +0.07 | about 260 KB |
+| Encoder 5 bits, the rest 7, GPTQ | fail (durations) | -0.000 | - | - | - |
+
+7-bit GPTQ passed on two more seeds (UTMOS +0.001 and +0.003, WER -0.03 and -0.04 points, the recordings' MCD -0.01
+and -0.02). The voice's encoder - 59% of its weights - was the least sensitive part, but narrower encoders moved the
+predicted durations beyond the seeds' spread, with or without GPTQ. QAT for the voice (a fine-tune with the rounding
+in the forward pass) was dropped: the fine-tune alone, unrounded, moved the voice further than 7-bit rounding (its
+recordings' MCD +0.16). Clipped scales, groups of 64 weights, and 8-bit biases and norms didn't help.
+
+Both networks now export 7-bit GPTQ weights: the G2P 43 KB larger than its 6-bit module, the voice about 33 KB smaller
+than its 8-bit one. The voice's loader (`lib/model.js`) unpacks bit-packed values, as the G2P's always has.
 
 ## 14. Limitations and future work
 
@@ -1594,3 +1651,5 @@ utilization, loss curves, logs, and listening samples of each stage's final mode
   models in the WFST framework," *Natural Language Engineering* 22(6), 2016.
   [doi:10.1017/S1351324915000315](https://doi.org/10.1017/S1351324915000315); software,
   [GitHub](https://github.com/AdolfVonKleist/Phonetisaurus)
+- E. Frantar, S. Ashkboos, T. Hoefler, D. Alistarh, "GPTQ: Accurate Post-Training Quantization for Generative
+  Pre-trained Transformers," ICLR 2023. [arXiv:2210.17323](https://arxiv.org/abs/2210.17323)

@@ -12,12 +12,15 @@ speech's voices, tts.py, in the recipe's order) and its channel equalizers (eq_t
 float32); the manifest lists the speakers (id, key - the package's voice key, sex, source - the engine's model and
 voice, median F0).
 
-The weights are quantized to 8 bits: every weight matrix, convolution kernel, and embedding table as int8 with one
-float32 scale per output channel (row) - symmetric, the scale the row's largest magnitude / 127; the biases and layer
-norm parameters, a small fraction of the model, stay float32. The .bin is the tensors' data back to back (each
-tensor's int8 data, then its float32 scales; or its float32 data), aligned to 4 bytes; the .json manifest lists each
-tensor's name, shape, encoding, and byte offsets, with the model config, the vocabulary remap, and the default speaker's
-channel equalizer (the first's, male - the package's default voice).
+The weights are quantized to 7 bits (quant.py): every weight matrix, convolution kernel, and embedding table as
+integers with one float32 scale per output channel (row) - symmetric, the scale the row's largest magnitude / 63; the
+matrices and kernels rounded by GPTQ (their layers' inputs - input_covariances: the float model run on CALIBRATION
+training utterances with their recorded durations, a fixed selection), the embedding table (a lookup) to the nearest;
+the biases and layer norm parameters, a small fraction of the model, stay float32. The .bin is the tensors' data back to
+back (each quantized tensor's packed values - "packed", BITS bits each - then its float32 scales; or its float32
+data), aligned to 4 bytes; the .json manifest lists each tensor's name, shape, encoding (with its bits), and byte
+offsets, with the model config, the vocabulary remap, and the default speaker's channel equalizer (the first's, male -
+the package's default voice).
 
 The quantization (quant.py) is the only lossy step - quantized_model() gives the PyTorch model with the exported
 weights (dequantized), which lib/model.js must match.
@@ -44,6 +47,10 @@ from .model import MultiModel, core_parameter_count, parameter_count
 OUT_DIR = os.path.join(ROOT, 'build', 'export')
 FORMAT_VERSION = 1
 
+# The quantization's calibration - this many training utterances (the training split's, a fixed seed's selection)
+CALIBRATION = 256
+CALIBRATION_SEED = 0
+
 
 # Load a checkpoint's model (on the CPU, in eval mode) - (model, checkpoint); the multi-speaker model only (config
 # 'kind': 'multi' - the single-speaker model and its trainer, nn/train.py, are in git history)
@@ -68,13 +75,70 @@ def exported_tensors(model):
     return tensors
 
 
+# The calibration utterances - [(tokens [1, N], durations [1, N], speaker [1])] - CALIBRATION of the training speech's
+# training split (a fixed seed's selection, in corpus order)
+def calibration_items():
+    data = CorpusData(os.path.join(DATA_DIR, 'tts'))
+    speakers = data.index['speakers']
+    entries = data.entries('train')
+    if len(entries) > CALIBRATION:
+        order = numpy.random.default_rng(CALIBRATION_SEED).permutation(len(entries))[:CALIBRATION]
+        entries = [entries[index] for index in sorted(order)]
+    items = []
+    for entry in entries:
+        tokens = slice(entry['tokenOffset'], entry['tokenOffset'] + entry['tokenCount'])
+        items.append((torch.tensor(numpy.array(data.tokens[tokens], dtype=numpy.int64))[None],
+                      torch.tensor(numpy.array(data.durations[tokens], dtype=numpy.int64))[None],
+                      torch.tensor([speakers[entry['speaker']]['index']])))
+    return items
+
+
+# The quantized layers' input covariances - {weight name: H [in, in]} (float64, the mean over the calibration inputs of
+# x x^T); a depthwise convolution's per channel, [channels, kernel, kernel] (each channel's windows); not the embedding
+# tables (lookups)
+def input_covariances(model):
+    modules = dict(model.named_modules())
+    sums = {}
+    hooks = []
+    for name, tensor in exported_tensors(model).items():
+        module = modules.get(name.rsplit('.', 1)[0])
+        if not quant.is_quantized(tensor, name) or isinstance(module, torch.nn.Embedding):
+            continue
+
+        def hook(_module, inputs, _output, name=name, module=module):
+            inputs = inputs[0].detach().double()
+            if isinstance(module, torch.nn.Conv1d):
+                padding = module.padding[0]
+                windows = torch.nn.functional.pad(inputs, (padding, padding)).unfold(2, module.kernel_size[0], 1)[0]
+                covariance, count = torch.einsum('ctk,ctj->ckj', windows, windows), windows.shape[1]
+            else:
+                rows = inputs.reshape(-1, inputs.shape[-1])
+                covariance, count = rows.T @ rows, rows.shape[0]
+            total, seen = sums.get(name, (0.0, 0))
+            sums[name] = (total + covariance, seen + count)
+        hooks.append(module.register_forward_hook(hook))
+    with torch.no_grad():
+        for tokens, durations, speaker in calibration_items():
+            model(tokens, durations, speaker)
+    for hook in hooks:
+        hook.remove()
+    return {name: (total / count).numpy() for name, (total, count) in sums.items()}
+
+
+# A model's exported quantized tensors - {name: (values, scales)} (quant.quantize's, GPTQ where the layer has a
+# covariance)
+def quantized_tensors(model):
+    covariances = input_covariances(model)
+    return {name: quant.quantize(tensor, covariances.get(name)) for name, tensor in exported_tensors(model).items()
+            if quant.is_quantized(tensor, name)}
+
+
 # A copy of a model with its weights quantized and dequantized - the exported model, in PyTorch
 def quantized_model(model):
     model = copy.deepcopy(model)
     state = model.state_dict()
-    for name, tensor in exported_tensors(model).items():
-        if quant.is_quantized(tensor, name):
-            state[name] = torch.tensor(quant.dequantize(*quant.quantize(tensor), tensor.shape))
+    for name, (values, scales) in quantized_tensors(model).items():
+        state[name] = torch.tensor(quant.dequantize(values, scales, state[name].shape))
     model.load_state_dict(state)
     return model
 
@@ -140,12 +204,13 @@ def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0):
     chunks = []
     offset = 0
     tensors = []
+    quantized = quantized_tensors(model)
     for name, tensor in exported_tensors(model).items():
         entry = {'name': name, 'shape': list(tensor.shape)}
-        if quant.is_quantized(tensor, name):
-            values, scales = quant.quantize(tensor)
-            data = values.tobytes()
-            entry.update({'encoding': 'int8', 'offset': offset, 'scaleOffset': offset + _aligned(len(data))})
+        if name in quantized:
+            values, scales = quantized[name]
+            data = quant.pack(values)
+            entry.update({'encoding': 'packed', 'bits': quant.BITS, 'offset': offset, 'scaleOffset': offset + _aligned(len(data))})
             chunks.append(data + b'\0' * (_aligned(len(data)) - len(data)))
             chunks.append(scales.tobytes())
             offset += _aligned(len(data)) + len(scales.tobytes())
@@ -193,7 +258,7 @@ def main(argv=None):
     manifest = export(model, state, args.voice, args.out)
     sizes = {suffix: os.path.getsize(os.path.join(args.out, f'{args.voice}.{suffix}')) for suffix in ('bin', 'json')}
     print(json.dumps({'voice': args.voice, 'parameters': manifest['parameterCount'], 'bytes': sizes,
-                      'quantized': sum(1 for tensor in manifest['tensors'] if tensor['encoding'] == 'int8'),
+                      'quantized': sum(1 for tensor in manifest['tensors'] if tensor['encoding'] == 'packed'),
                       'float32': sum(1 for tensor in manifest['tensors'] if tensor['encoding'] == 'float32'),
                       'remap': manifest['remap']}))
     return 0

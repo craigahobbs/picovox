@@ -15,7 +15,7 @@ import warnings
 import numpy
 import torch
 
-from picovox_train import ROOT, export, params
+from picovox_train import ROOT, export, params, quant
 from tests import helpers, model_fixtures, parity
 from tests.synthesize import Voice
 
@@ -67,9 +67,36 @@ class TestExport(unittest.TestCase):
         state, original = quantized.state_dict(), model.state_dict()
         name = 'embedding.weight'
         self.assertFalse(torch.equal(state[name], original[name]))
-        self.assertLess(float((state[name] - original[name]).abs().max()), float(original[name].abs().max()) / 64)
+        self.assertLess(float((state[name] - original[name]).abs().max()), float(original[name].abs().max()) / 2 / quant.LIMIT * 1.001)
+        # (the matrices and kernels - GPTQ's, on the grid of their scales; the tiny model's kernels quantized too)
+        with unittest.mock.patch.object(quant, 'MIN_QUANTIZED', 1):
+            state = export.quantized_model(model).state_dict()
+            tensors = export.quantized_tensors(model)
+        for name in ('head.weight', 'decoder.0.conv.conv.weight'):
+            values, scales = tensors[name]
+            self.assertTrue(torch.equal(state[name], torch.tensor(quant.dequantize(values, scales, original[name].shape))), name)
         self.assertTrue(torch.equal(state['head.bias'], original['head.bias']))
         self.assertTrue(torch.equal(state['eq_free'], original['eq_free']))
+
+    def test_calibration(self):
+        # The training split's utterances - a fixed selection of CALIBRATION when there are more
+        items = export.calibration_items()
+        self.assertTrue(items)
+        self.assertTrue(all(tokens.shape == durations.shape and tokens.shape[0] == 1 and speaker.shape == (1,)
+                            for tokens, durations, speaker in items))
+        with unittest.mock.patch.object(export, 'CALIBRATION', 2):
+            fewer = export.calibration_items()
+            self.assertEqual(len(fewer), 2)
+            self.assertEqual([item[0].tolist() for item in export.calibration_items()], [item[0].tolist() for item in fewer])
+
+        # The covariances - every quantized matrix and kernel, not the embedding table; a depthwise kernel's per channel
+        model, _ = export.load_model(self.checkpoint)
+        with unittest.mock.patch.object(quant, 'MIN_QUANTIZED', 1):
+            covariances = export.input_covariances(model)
+        self.assertNotIn('embedding.weight', covariances)
+        self.assertEqual(covariances['head.weight'].shape, (model.head.weight.shape[1],) * 2)
+        conv = model.decoder[0].conv.conv
+        self.assertEqual(covariances['decoder.0.conv.conv.weight'].shape, (conv.out_channels, conv.kernel_size[0], conv.kernel_size[0]))
 
     def test_token_remap(self):
         vocab = ['<pad>', '<unk>', '<question>', 'AA0', 'AA1', 'AA2', 'B', 'CH', 'EH0', 'EH1', 'EH2', '<period>']
@@ -116,7 +143,8 @@ class TestExport(unittest.TestCase):
         self.assertEqual(manifest['defaultSpeaker'], 1)
         self.assertEqual(len(manifest['eq']), params.EQ_BAND_COUNT)
         encodings = {tensor['name']: tensor['encoding'] for tensor in manifest['tensors']}
-        self.assertEqual(encodings['embedding.weight'], 'int8')
+        self.assertEqual(encodings['embedding.weight'], 'packed')
+        self.assertTrue(all(tensor['bits'] == quant.BITS for tensor in manifest['tensors'] if tensor['encoding'] == 'packed'))
         self.assertEqual(encodings['eq_table'], 'float32')
         self.assertEqual(encodings['head.bias'], 'float32')
         self.assertEqual(manifest['parameterCountCore'], manifest['parameterCount'] - 2 * 4 - 2 * params.EQ_BAND_COUNT)
