@@ -1470,6 +1470,40 @@ retrained with it (make train, November 4) was installed over its regression set
 7-bit export matched the 8-bit ones, but the recipe's two cuts of the week before - the distillation and the shorter
 stage A - had cost about 0.03 UTMOS together, and two blind A/B rounds chose the shipped voice 8 to 0 (22 Same).
 
+### 13.9 A measure of the gap
+
+The listener panel's UTMOS rated two voices level with their source that blind listening heard as behind (Section
+13.6), and the listener's own ear is one listener's. So the gap to the source needed a measure of its own, chosen by
+rules written first. Over 480 held-out clips (40 a voice), our voices were rendered with their own timing and pitch and
+with the recordings' (the sound alone), and twenty candidates - paired distances along a DTW alignment, per-voice
+Frechet distances, and a classifier test, on six layers of the pinned wav2vec2 phoneme recognizer, and the ECAPA
+speaker embedding and UTMOS - had to order four known cases: a second take of the engine's own clip closer to the
+recording than any of our voices (every voice), each step of 8-6-5-4-bit rounding farther, stage A alone (without the
+critic) farther, and the gap to the source at least three times the spread between three trained seeds.
+
+Fourteen passed. The classifier saw our voices as different every time (about 100% accuracy) and so could not grade
+them. The chosen measure, the Frechet distance on layer 12 (fd L12), had the largest gap relative to the seeds' spread:
+
+| (the sound alone, 10 clips a voice) | fd L12 |
+| --- | --- |
+| A second take of the engine's clip (the floor) | 1,542 |
+| Our voice, three seeds (stage A 10,000 steps) | 4,123, 4,135, 4,125 |
+| Our voice, stage A 15,000 steps | 4,015 |
+| Stage A alone | 5,275 |
+
+Then a check against human judgment: spoken by the package from the same 480 texts, the shipped 2.0 voice measured
+2,478 and the simpler recipe's retrained voice 2,672, the shipped voice closer in all twelve voices - as two blind A/B
+rounds (8 to 0) and the panel had judged them. `picovox_train.quality gap` measures any voice model this way (2,522 and
+2,731 for the two, from the engine's own files).
+
+The measure also re-judged the per-clip parameter fit of Section 13.6, which UTMOS had scored below the network
+(3.93 against 4.14). Against other recordings of the same voices (so that copying the fitted clip earns nothing), on
+layer 6 - layer 12 is dominated by what is said when the texts differ - the fit measured 2,585 against the network's
+3,133, with a second take at 2,388; its speaker embedding was 0.050 from the recording against the network's 0.246. Every
+wav2vec2 and speaker measure puts the fitted synthesizer parameters far closer to the source than the network's: the
+synthesizer can sound much closer to Phonon, and the gap is the network's training. UTMOS alone disagrees, and no human
+judgment has settled it.
+
 ## 14. Limitations and future work
 
 - One human listener has rated the voices; the human results are indicative only. The shipped voices' listening is

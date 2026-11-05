@@ -8,6 +8,8 @@ speech's clips of its engine voice (tts.py - the voices' tinniness and warble, 2
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.quality measure --out build/quality \\
         [--per-voice 16] [--edits '{"add": {"shelf": -5}}'] [--model build/train/voiceModel.js] [-j 8]
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.quality report build/quality/results.json
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.quality gap --out build/gap \
+        [--per-voice 40] [--model build/train/voiceModel.js] [-j 8]
 
 measure renders each voice over the panel texts (tools/panel-texts.json) and over its held-out clips' texts (the
 corpus's test, then val clips, to --per-voice) with the package (tools/renderLines.js - --edits are frame edits, for
@@ -26,6 +28,22 @@ in voiced frames (Praat's pitch):
   within 3 dB of its peak (ms) - the over-smoothing of a regression-trained voice shows as less variance and flux and
   slower onsets (2.0's voices, against their Phonon source voices: variance -0.3 to -1.2 dB, flux -8 to -11%, onsets
   about 5 ms slower)
+
+gap measures how far each voice is from its source in a pretrained speech model's features - the pinned wav2vec2
+phoneme recognizer's (ctc.py) - over per_voice held-out clips of 3-9 s (the test split's, by id), each synthesized by
+the package from its text (--model another voice model module) and its source clip, both trimmed of silence:
+
+- fdL12 and fdL6 - each voice's Frechet distance between its synthesized clips' frames and its source clips' (layers 12
+  and 6) - the gap's measure
+- pairedL3 and pairedL12 - each clip's mean cosine distance to its source clip's frames along their DTW alignment (on the
+  feature encoder's frames), averaged
+
+The measure was chosen and validated in November 2026 (paper Section 13.9): of 20 candidates over 480 held-out clips, fd
+on layer 12 had the largest gap to Phonon relative to the spread between trained seeds (about 400 to 1), with a second
+take of the engine's own clips far closer than any voice of ours (the floor - every voice), each step of 8-6-5-4-bit
+rounding farther, stage A alone (without the critic) farther, and the shipped 2.0 voice closer than the simpler recipe's
+retrained voice in all twelve voices - as two blind A/B rounds (8 to 0) and the listener panel judged them. It compares
+sets of clips of the same texts, so it suits evaluation, not a training loss; the paired distances are per clip.
 
 report prints each voice's synthesized measures (its held-out texts, and the panel texts) less its source clips'. The
 measures are guides, not verdicts: listeners heard the voices as tinny, and lowering the source
@@ -288,6 +306,132 @@ def measure_command(args):
     return report(path)
 
 
+# The gap measure's clips (seconds), its layers (the feature encoder's - the DTW alignment's - and the transformer's), and
+# the trim's silence (dB below the loudest 20 ms frame) and margin (s)
+GAP_SECONDS = (3.0, 9.0)
+GAP_LAYERS = {'conv': None, 'L3': 3, 'L6': 6, 'L12': 12}
+GAP_MEASURES = ['fdL12', 'fdL6', 'pairedL3', 'pairedL12']
+TRIM_DB = 40
+TRIM_MARGIN = 0.05
+
+
+# Samples trimmed of leading and trailing silence (20 ms frames TRIM_DB below the loudest), TRIM_MARGIN kept
+def trim(samples, rate):
+    import numpy  # pylint: disable=import-outside-toplevel
+    size = rate // 50
+    energy = numpy.array([numpy.mean(samples[index:index + size] ** 2) + 1e-12 for index in range(0, len(samples), size)])
+    loud = numpy.nonzero(10 * numpy.log10(energy / energy.max()) > -TRIM_DB)[0]
+    margin = int(TRIM_MARGIN * rate)
+    return samples[max(0, loud[0] * size - margin):min(len(samples), (loud[-1] + 1) * size + margin)]
+
+
+# A WAV file's features - {layer: [frames, dims] float64}: trimmed, at 16 kHz, normalized as the recognizer expects
+def gap_features(model, device, path):
+    import numpy  # pylint: disable=import-outside-toplevel
+    import soxr  # pylint: disable=import-outside-toplevel
+    import torch  # pylint: disable=import-outside-toplevel
+    from .wav import read_wav  # pylint: disable=import-outside-toplevel
+    samples, rate = read_wav(path, dtype='float32')
+    samples = soxr.resample(trim(samples.mean(axis=1), rate), rate, 16000).astype(numpy.float32)
+    samples = (samples - samples.mean()) / numpy.sqrt(samples.var() + 1e-7)
+    with torch.no_grad():
+        outputs = model.wav2vec2(torch.from_numpy(samples)[None].to(device), output_hidden_states=True)
+    return {name: (outputs.extract_features if index is None else outputs.hidden_states[index])[0].cpu().double().numpy()
+            for name, index in GAP_LAYERS.items()}
+
+
+# Rows scaled to unit length
+def unit_rows(rows):
+    import numpy  # pylint: disable=import-outside-toplevel
+    return rows / (numpy.linalg.norm(rows, axis=1, keepdims=True) + 1e-9)
+
+
+# The DTW alignment of two feature sequences by cosine distance - (first's frames, second's frames) along the path
+def dtw_path(first, second):
+    import numpy  # pylint: disable=import-outside-toplevel
+    cost = 1 - unit_rows(first) @ unit_rows(second).T
+    rows, columns = cost.shape
+    total = numpy.full((rows + 1, columns + 1), numpy.inf)
+    total[0, 0] = 0
+    # (an anti-diagonal at a time - a cell's predecessors are on the two before it)
+    for diagonal in range(2, rows + columns + 1):
+        row = numpy.arange(max(1, diagonal - columns), min(rows, diagonal - 1) + 1)
+        column = diagonal - row
+        total[row, column] = cost[row - 1, column - 1] + numpy.minimum(
+            numpy.minimum(total[row - 1, column], total[row, column - 1]), total[row - 1, column - 1])
+    path = []
+    row, column = rows, columns
+    while row > 0 and column > 0:
+        path.append((row - 1, column - 1))
+        step = int(numpy.argmin((total[row - 1, column - 1], total[row - 1, column], total[row, column - 1])))
+        row, column = (row - 1, column - 1) if step == 0 else (row - 1, column) if step == 1 else (row, column - 1)
+    first_frames, second_frames = zip(*path[::-1])
+    return numpy.array(first_frames), numpy.array(second_frames)
+
+
+# A clip's paired distance to its source clip in a layer - the mean cosine distance along their DTW alignment
+def paired_distance(features, source, layer):
+    import numpy  # pylint: disable=import-outside-toplevel
+    first, second = dtw_path(features['conv'], source['conv'])
+    return float(numpy.mean(1 - numpy.sum(unit_rows(features[layer][first]) * unit_rows(source[layer][second]), axis=1)))
+
+
+# The Frechet distance of two sets of frames [count, dims]
+def frechet(first, second):
+    import numpy  # pylint: disable=import-outside-toplevel
+    cov_first, cov_second = numpy.cov(first, rowvar=False), numpy.cov(second, rowvar=False)
+    values, vectors = numpy.linalg.eigh(cov_first)
+    root = (vectors * numpy.sqrt(numpy.clip(values, 0, None))) @ vectors.T
+    product = numpy.linalg.eigvalsh(root @ cov_second @ root)
+    return float(numpy.sum((first.mean(0) - second.mean(0)) ** 2) + numpy.trace(cov_first) + numpy.trace(cov_second)
+                 - 2 * numpy.sum(numpy.sqrt(numpy.clip(product, 0, None))))
+
+
+# A voice's gap measures - its synthesized clips' features against their source clips' ([(synth, source)])
+def gap_measures(pairs):
+    import numpy  # pylint: disable=import-outside-toplevel
+    result = {}
+    for layer in ('L12', 'L6'):
+        result[f'fd{layer}'] = frechet(numpy.concatenate([synth[layer] for synth, _ in pairs]),
+                                       numpy.concatenate([source[layer] for _, source in pairs]))
+    for layer in ('L3', 'L12'):
+        result[f'paired{layer}'] = sum(paired_distance(synth, source, layer) for synth, source in pairs) / len(pairs)
+    return result
+
+
+def gap_command(args):
+    from . import ctc, tts  # pylint: disable=import-outside-toplevel
+    from .wav import read_wav  # pylint: disable=import-outside-toplevel
+    settings = tts.load_settings()
+    directory = tts.corpus_dir(settings)
+    clips = {}
+    for clip in sorted(tts.selection(settings), key=lambda clip: clip['id']):
+        path = tts.wav_path(directory, clip)
+        if clip['split'] == 'test' and len(clips.get(clip['key'], [])) < args.per_voice and os.path.exists(path):
+            samples, rate = read_wav(path)
+            if GAP_SECONDS[0] <= len(samples) / rate <= GAP_SECONDS[1]:
+                clips.setdefault(clip['key'], []).append({**clip, 'wav': path})
+    os.makedirs(os.path.join(args.out, 'gap'), exist_ok=True)
+    jobs = [{'text': clip['text'], 'voice': key, 'wav': os.path.join(args.out, 'gap', f'{key}-{clip["id"]}.wav')}
+            for key, voice_clips in clips.items() for clip in voice_clips]
+    render(jobs, args.jobs, args.model)
+    model, _, device = ctc.load_ctc()
+    voices = {}
+    for key, voice_clips in clips.items():
+        pairs = [(gap_features(model, device, os.path.join(args.out, 'gap', f'{key}-{clip["id"]}.wav')),
+                  gap_features(model, device, clip['wav'])) for clip in voice_clips]
+        voices[key] = gap_measures(pairs)
+    path = os.path.join(args.out, 'gap.json')
+    with open(path, 'w', encoding='utf-8') as file:
+        json.dump({'model': args.model, 'perVoice': args.per_voice, 'voices': voices}, file, indent=1)
+    print(f'quality gap: {sum(len(voice_clips) for voice_clips in clips.values())} clips - {path}')
+    print(f'{"voice":16}' + ''.join(f'{name:>12}' for name in GAP_MEASURES))
+    for key, values in voices.items():
+        print(f'{key:16}' + ''.join(f'{values[name]:12.4g}' for name in GAP_MEASURES))
+    print(f'{"mean":16}' + ''.join(f'{sum(values[name] for values in voices.values()) / len(voices):12.4g}' for name in GAP_MEASURES))
+    return 0
+
+
 # A measure's mean over rows (None for none)
 def mean(rows, name):
     values = [row[name] for row in rows if row.get(name) is not None]
@@ -327,11 +471,18 @@ def main(argv=None):
     measure_parser.add_argument('--edits', help='frame edits for every rendering (tools/renderLines.js\'s, JSON)')
     measure_parser.add_argument('--model', help='a voice model module to render with (default: the package\'s)')
     measure_parser.add_argument('-j', '--jobs', type=int, default=8, help='Node renderers and analysis workers')
+    gap_parser = commands.add_parser('gap', help='the voices\' distance from their source in wav2vec2 features')
+    gap_parser.add_argument('--out', default=os.path.join(ROOT, 'build', 'quality'), help='the output directory')
+    gap_parser.add_argument('--per-voice', type=int, default=40, help='held-out clips per voice')
+    gap_parser.add_argument('--model', help='a voice model module to render with (default: the package\'s)')
+    gap_parser.add_argument('-j', '--jobs', type=int, default=8, help='Node renderers')
     report_parser = commands.add_parser('report', help='print a measurement\'s results')
     report_parser.add_argument('results', help='a measurement\'s results.json')
     args = parser.parse_args(argv)
     if args.command == 'measure':
         return measure_command(args)
+    if args.command == 'gap':
+        return gap_command(args)
     return report(args.results)
 
 

@@ -9,18 +9,34 @@ import os
 import runpy
 import sys
 import tempfile
+import types
 import unittest
 import unittest.mock
 import warnings
 
 import numpy
+import torch
 
-from picovox_train import quality
+from picovox_train import quality, tts
+from picovox_train.wav import read_wav
 from tests import ctc_fixtures, data_fixtures, helpers
 from tests.helpers import write_wav
 
 
 # A clean harmonic tone (harmonics below 2 kHz, no noise)
+class FakeFeatures:
+    """A fake wav2vec2 recognizer's features - each 20 ms frame's level statistics, a layer's a different mix of them"""
+
+    def __init__(self):
+        self.wav2vec2 = self
+
+    def __call__(self, inputs, output_hidden_states):
+        assert output_hidden_states
+        frames = inputs[0, :inputs.shape[1] // 320 * 320].reshape(-1, 320)
+        base = torch.stack([frames.mean(1), frames.std(1), frames.abs().max(1).values, (frames ** 2).mean(1)], dim=1)[None]
+        return types.SimpleNamespace(extract_features=base, hidden_states=tuple(base * (index + 1) + index for index in range(25)))
+
+
 def tone(seconds, rate, f0=150.0):
     times = numpy.arange(int(seconds * rate)) / rate
     return 0.2 * sum(numpy.sin(2 * numpy.pi * f0 * harmonic * times) / harmonic for harmonic in range(1, 11))
@@ -203,6 +219,63 @@ class TestMeasure(unittest.TestCase):
         self.assertIn('Voices synthesized (their held-out texts), less their source clips', output)
         self.assertRegex(output, r'male\s+[+-]\d')
 
+    def test_gap(self):
+        # The test split's clips (a training clip left out, the longest outside the clips' durations, per_voice a voice),
+        # synthesized (a copy of the source - its distances 0 - but one voice's, a louder tone), against their sources
+        texts = [('male', 'Hello there.', 'test'), ('male', 'Good night to you all.', 'test'), ('male', 'Not this one.', 'train'),
+                 ('male', 'Call me Ishmael, said the stranger at the door of the inn.', 'test'),
+                 ('female', 'Call me Ishmael.', 'test'), ('female', 'It was the best of times.', 'test')]
+        with ctc_fixtures.tts_corpus(texts) as (directory, _, clips):
+            seconds = {clip['text']: len(read_wav(tts.wav_path(directory, clip))[0]) / 24000 for clip in clips}
+            limit = (seconds['Good night to you all.'] + seconds['Call me Ishmael, said the stranger at the door of the inn.']) / 2
+
+            def render(jobs, _processes, _model):
+                for job in jobs:
+                    source = next(clip for clip in clips if clip['text'] == job['text'] and clip['key'] == job['voice'])
+                    samples = read_wav(tts.wav_path(directory, source))[0][:, 0]
+                    write_wav(job['wav'], samples if job['voice'] == 'male' else bright(len(samples) / 24000, 24000), 24000)
+            out = os.path.join(directory, 'quality')
+            args = argparse.Namespace(out=out, per_voice=3, model='m.js', jobs=2)
+            with unittest.mock.patch.object(quality, 'render', side_effect=render), \
+                    unittest.mock.patch.object(quality, 'GAP_SECONDS', (0.0, limit)), \
+                    unittest.mock.patch('picovox_train.ctc.load_ctc', return_value=(FakeFeatures(), {}, 'cpu')), \
+                    helpers.captured() as (stdout, _):
+                self.assertEqual(quality.gap_command(args), 0)
+            with open(os.path.join(out, 'gap.json'), encoding='utf-8') as file:
+                result = json.load(file)
+        self.assertEqual((result['model'], result['perVoice']), ('m.js', 3))
+        self.assertEqual(sorted(result['voices']), ['female', 'male'])
+        for name in quality.GAP_MEASURES:
+            self.assertAlmostEqual(result['voices']['male'][name], 0.0, places=6)
+            self.assertGreater(result['voices']['female'][name], 1e-6)
+        output = stdout.getvalue()
+        self.assertIn('quality gap: 4 clips', output)
+        self.assertRegex(output, r'mean\s+[\d.e+-]+')
+
+    def test_trim(self):
+        # Leading and trailing silence trimmed (50 ms kept), the loud middle whole
+        samples = numpy.concatenate([numpy.zeros(4800), numpy.full(4800, 0.5), numpy.zeros(4800)])
+        trimmed = quality.trim(samples, 24000)
+        self.assertEqual(len(trimmed), 4800 + 2 * 1200)
+        self.assertEqual(float(trimmed.max()), 0.5)
+
+    def test_dtw_path(self):
+        # A sequence against itself stretched - each of its frames matched to its copies
+        first = numpy.eye(3) + 0.01
+        second = numpy.repeat(first, 2, axis=0)
+        rows, columns = quality.dtw_path(first, second)
+        self.assertEqual(rows.tolist(), [0, 0, 1, 1, 2, 2])
+        self.assertEqual(columns.tolist(), [0, 1, 2, 3, 4, 5])
+        long_rows, short_columns = quality.dtw_path(numpy.repeat(first, 2, axis=0), first)
+        self.assertEqual((long_rows.tolist(), short_columns.tolist()), ([0, 1, 2, 3, 4, 5], [0, 0, 1, 1, 2, 2]))
+
+    def test_frechet(self):
+        # Two sets of one distribution - near 0; a shifted set - the shift's square
+        rng = numpy.random.default_rng(1)
+        frames = rng.normal(size=(4000, 3))
+        self.assertAlmostEqual(quality.frechet(frames, frames), 0.0, places=6)
+        self.assertAlmostEqual(quality.frechet(frames + 2.0, frames), 12.0, places=6)
+
     def test_report_missing(self):
         # A measure missing (None) in a voice's source or its own rows, and a voice without a source
         rows = [{'kind': 'source', 'who': 'v1', **{name: 1.0 for name in quality.MEASURES}, 'tilt': None},
@@ -225,6 +298,9 @@ class TestMeasure(unittest.TestCase):
             self.assertEqual(quality.main(['measure', '--out', 'x', '--per-voice', '4', '--edits', '{}', '--model', 'm.js', '-j', '3']), 0)
         self.assertEqual(measure.call_args.args[0],
                          argparse.Namespace(command='measure', out='x', per_voice=4, edits='{}', model='m.js', jobs=3))
+        with unittest.mock.patch.object(quality, 'gap_command', return_value=0) as gap:
+            self.assertEqual(quality.main(['gap', '--out', 'x', '--per-voice', '5', '--model', 'm.js', '-j', '2']), 0)
+        self.assertEqual(gap.call_args.args[0], argparse.Namespace(command='gap', out='x', per_voice=5, model='m.js', jobs=2))
         with unittest.mock.patch.object(sys, 'argv', ['quality']), self.assertRaises(SystemExit), helpers.captured(), \
                 warnings.catch_warnings():
             warnings.filterwarnings('ignore', message='.*found in sys.modules', category=RuntimeWarning)

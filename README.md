@@ -388,6 +388,14 @@ corpora the voice model trained on before 2.0):
 Speaker similarity: every human pair 0.0-0.48; halves of one human speaker's recordings about 0.9.
 
 
+**The gap to the source.** UTMOS can rate a voice level with its source when listeners hear it behind, so a second
+measure scores how far each voice sounds from its Phonon voice: `picovox_train.quality gap [--model MODULE]` speaks
+40 held-out clips a voice with the package and gives each voice's Frechet distance to its source clips in the pinned
+wav2vec2 recognizer's features (layer 12 - fdL12; and layer 6, and the clips' paired distances). Lower is closer: a
+second take of the engine's own clips measures about 1,500, the shipped voices about 2,500. It was chosen from twenty
+candidates by checks written first - and it ranks the shipped voice closer than the simpler recipe's retrained voice in
+all twelve voices, as blind listening did (the paper's Section 13.9).
+
 ## make train
 
 `make train` recreates the generated models - `lib/models/g2pModel.js` and `lib/models/voiceModel.js` - from a clean
