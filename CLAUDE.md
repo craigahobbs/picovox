@@ -34,8 +34,8 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   measurement, a wav2vec2 phoneme recognizer: the forced alignment, the greedy phone checks, and the candidate vote;
   `data.py`, `align.py`, `wav.py`, `books.py` - the pinned book texts, `corpora.py` - the pinned downloads: the
   dictionary and the Whisper model), the differentiable synthesizer (`params.py`, `dsynth.py`, `lf.py`,
-  `rng.py`, `spectral.py`), the model and its training (`model.py`, `trainmulti.py`, `losses.py`, `discriminator.py`,
-  `quant.py`, `optim.py` - the training step's options), export (`export.py`, `package.py`),
+  `rng.py`, `spectral.py`), the model and its training (`model.py`, `trainmulti.py`, `losses.py`, `perceptual.py`,
+  `discriminator.py`, `quant.py`, `optim.py` - the training step's options), export (`export.py`, `package.py`),
   the listener panel and make train's gate (`panel.py`, and the listener models, `listeners.py` - `build/venv-train`),
   and the pipeline's tools (`gpulock.py`, `smoke.py`, `stepcheck.py`, `trained.py` - make train's report and make
   train-install - and `quality.py` - the voices' quality measures against their TTS source clips).

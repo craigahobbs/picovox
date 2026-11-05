@@ -58,7 +58,7 @@ import numpy
 import soxr
 import torch
 
-from . import RECIPE_PATH, ROOT, discriminator, dsynth, optim, params
+from . import RECIPE_PATH, ROOT, discriminator, dsynth, optim, params, perceptual
 from .data import DATA_DIR, CorpusData
 from .model import FIRST_PHONE, MultiModel, core_parameter_count, parameter_count, save_checkpoint
 from .losses import F_INDEX, PRIORS, duration_loss, f0_track, render_values, spectral_loss
@@ -365,6 +365,16 @@ def quality_stats(values, frame_mask):
     return dict(zip(names, medians.unbind()))
 
 
+# The perceptual loss of a device (loaded once - perceptual.py)
+PERCEPTUAL = {}
+
+
+def perceptual_loss(device):
+    if device not in PERCEPTUAL:
+        PERCEPTUAL[device] = perceptual.PerceptualLoss(device)
+    return PERCEPTUAL[device]
+
+
 # The loss terms of a batch - ({name: tensor}, the rendered crops, the recorded crops), both band-limited; prepared is
 # the step's data made ahead (Prefetcher) - the crops, the recordings', and the cycle plan - else they're made here
 def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, prepared=None, with_values=False):
@@ -435,10 +445,15 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
     else:
         losses['spectral'] = spectral_loss(audio, target, args.rate, args.max_hz, mel_eps=1e-9)
 
+    # (the perceptual loss - the crops in the speech recognizer's features, perceptual.py)
+    # (on the first --perceptual-crops crops - the recognizer costs several times the step)
+    if args.perceptual_weight:
+        crops = args.perceptual_crops or len(audio)
+        losses['perceptual'] = perceptual_loss(audio.device)(audio[:crops], target[:crops])
     total = (losses['spectral'] + args.duration_weight * (losses['durPhone'] + losses['durPause'] + losses['durPaused']) +
              args.f0_weight * losses['f0'] + guide_weight * args.formant_weight * losses['formant'] + losses['order'] +
              args.smooth_weight * losses['smooth'] + losses['band'] + args.sonorant_frication * losses['sonorantAf'] +
-             losses['eqSmooth'])
+             losses['eqSmooth'] + (args.perceptual_weight * losses['perceptual'] if args.perceptual_weight else 0))
     losses['total'] = total
     if with_values:
         return losses, audio, target, quality_stats(values.detach(), frame_mask), values
@@ -518,6 +533,8 @@ def argument_parser():
     parser.add_argument('--guide-floor', type=float)
     parser.add_argument('--guide-steps', type=float)
     parser.add_argument('--smooth-weight', type=float)
+    parser.add_argument('--perceptual-weight', type=float, help='the perceptual loss\'s weight (perceptual.py - 0, off)')
+    parser.add_argument('--perceptual-crops', type=int, help='the perceptual loss\'s crops a step (default all)')
     parser.add_argument('--frication-max-hz', type=float)
     parser.add_argument('--sonorant-frication', type=float, help='the sonorant frication penalty weight')
     parser.add_argument('--sonorant-af-db', type=float, help='frication allowed this far below the voicing')

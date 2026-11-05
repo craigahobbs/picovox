@@ -26,6 +26,11 @@ from picovox_train.model import MultiModel
 from . import helpers
 
 
+# A fake perceptual loss (perceptual.PerceptualLoss's call) - the crops' mean absolute difference
+def fake_perceptual_loss(audio, target):
+    return (audio - target).abs().mean()
+
+
 # The tests' training data - a temporary directory with the training speech (data/tts), a tiny recipe (train.json),
 # and the runs' directory (runs/)
 class TrainData:
@@ -44,6 +49,11 @@ class TrainData:
         self.recipe = os.path.join(self.root, 'train.json')
         with open(self.recipe, 'w', encoding='utf-8') as file:
             json.dump(recipe, file)
+        # (the recipe's perceptual loss a fake's while the data lives - its recognizer is a download)
+        self.fake_perceptual = unittest.mock.patch.object(trainmulti.perceptual, 'PerceptualLoss', return_value=fake_perceptual_loss)
+        self.fake_perceptual.start()
+        self.perceptual_cache = unittest.mock.patch.dict(trainmulti.PERCEPTUAL, clear=True)
+        self.perceptual_cache.start()
 
     # Patch the corpora's and runs' directories (a context manager)
     def patched(self):
@@ -73,6 +83,8 @@ class TrainData:
         return os.path.join(self.runs_dir, name, *parts)
 
     def cleanup(self):
+        self.perceptual_cache.stop()
+        self.fake_perceptual.stop()
         self.temp.cleanup()
 
 
@@ -245,7 +257,7 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(set(stats), {'b1', 'b2', 'b3', 'ahRel', 'afRel'})
         expected = (losses['spectral'] + losses['durPhone'] + losses['durPause'] + losses['durPaused'] + 2 * losses['f0'] +
                     losses['formant'] + losses['order'] + 0.05 * losses['smooth'] + losses['band'] + losses['sonorantAf'] +
-                    losses['eqSmooth'])
+                    losses['eqSmooth'] + 5 * losses['perceptual'])
         self.assertAlmostEqual(float(losses['total'].detach()), float(expected.detach()), places=4)
         self.assertTrue(all(torch.isfinite(value) for value in losses.values()))
         # (the same again - dropout's draws reseeded)
@@ -354,6 +366,29 @@ class TestMain(unittest.TestCase):
         self.assertEqual(rows[0]['train']['step'], 2)
         self.assertEqual(rows[2]['val']['step'], 3)
         self.assertIn('data: 4 utterances, val 2', DATA.last_log)
+
+    def test_perceptual_weight(self):
+        # The perceptual loss (perceptual.py - a fake's) on the first --perceptual-crops crops, in the total; loaded once a device; off at 0
+        calls = []
+
+        def fake_loss(audio, target):
+            calls.append(len(audio))
+            return (audio - target).abs().mean()
+        with unittest.mock.patch.object(trainmulti.perceptual, 'PerceptualLoss', return_value=fake_loss) as loader, \
+                unittest.mock.patch.dict(trainmulti.PERCEPTUAL, clear=True):
+            self.assertEqual(DATA.train('perceptual', '--perceptual-weight', '2.0', '--perceptual-crops', '1', '--steps', '2',
+                                        '--log-every', '1'), 0)
+            self.assertEqual(loader.call_count, 1)
+            self.assertEqual(set(calls), {1})
+            self.assertIn('perceptual', DATA.last_log)
+            calls.clear()
+            self.assertEqual(DATA.train('perceptual-all', '--perceptual-weight', '2.0', '--steps', '1'), 0)
+            self.assertGreater(max(calls), 1)
+            # (off - weight 0)
+            calls.clear()
+            self.assertEqual(DATA.train('perceptual-off', '--perceptual-weight', '0', '--steps', '1', '--log-every', '1'), 0)
+            self.assertEqual(calls, [])
+            self.assertNotIn(' perceptual ', DATA.last_log)
 
     def test_recipe_stage_b(self):
         # Stage B (the recipe's section): the critic, from stage A's weights

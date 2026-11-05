@@ -116,8 +116,8 @@ make train's training speech (`train/data/train.json`'s `tts` voices - see [the 
 pitch, tract, or rate adjustments of their own - except that every voice's source is 5 dB darker than the network
 predicts it (`lib/synthesis.js` `sourceShelf`): in blind A/B listening (1.6.6) the network's source sounded tinny, and
 darker it was less tinny and never less natural. On the listener panel's texts the voices score a mean UTMOS of
-4.18-4.41 (4.31 over the twelve) and a Whisper word error rate of 0.6-1.5% (1.13%) - the voices before 2.0 scored 4.13
-and 1.36%, and a blind A/B preferred the new voices in all 15 trials.
+4.38-4.47 (4.42 over the twelve) and a Whisper word error rate of 0.6-1.2% (0.98%) - 2.0.0's scored 4.31 and 1.13%, and
+the voices before 2.0 4.13 and 1.36% (a blind A/B preferred 2.0's voices in all 15 trials).
 
 ### `styles()`
 
@@ -221,15 +221,15 @@ that runs its own synthesis loop (PicoShelf's worker does):
 
 | | |
 | --- | --- |
-| The package (`npm pack`) | 771 KB packed, 1.2 MB unpacked - the G2P network 477 KB and the voice network 451 KB of it, as base64 |
-| The voice network | 282,627 parameters, 8-bit weights - 334 KB gzipped |
+| The package (`npm pack`) | 748 KB packed, 1.1 MB unpacked - the G2P network 477 KB and the voice network 421 KB of it, as base64 |
+| The voice network | 282,627 parameters, 7-bit weights (GPTQ) - 311 KB gzipped |
 | The G2P network | 373,256 parameters (and the heteronym context network's 47,779), 7-bit weights (GPTQ) - 360 KB gzipped |
 | Speed, Apple M3 Max (Node) | The voice network about 127x real time, the renderer about 97x; synthesis end to end (24 kHz) about 55x |
 | Speed, iPhone without a JIT (Safari over plain http, or in Lockdown Mode) | About 2.6x real time in one worker; about 3.1-3.4x with the network and the renderer in two workers (`sentenceFrames` and `createSentenceRenderer`) |
 | Startup | About 0.1 s to load both networks (Node, M3 Max) |
 
-The voices score a mean UTMOS (a neural predictor of listeners' naturalness ratings, 1-5) of 4.31 on the
-listener panel's texts, with a Whisper word error rate of 1.13% - see [the listener panel](#the-listener-panel).
+The voices score a mean UTMOS (a neural predictor of listeners' naturalness ratings, 1-5) of 4.42 on the
+listener panel's texts, with a Whisper word error rate of 0.98% - see [the listener panel](#the-listener-panel).
 
 
 ## How the models are trained
@@ -465,7 +465,8 @@ an M3 Max on full power (94 W; the training speech cached; 2026-11-03), with the
 stages 63 minutes from the data build to the gate, against the distillation's 71 the day before (see [Training the voice
 model](#training-the-voice-model); a GPU step's time varies with the machine's heat - stage A's steps took 0.112-0.120 s
 that day, the teacher A's 0.086 the day before); the voices' data is now cached - built only when its inputs change -
-which takes its 9 minutes off the next run. (Before 2.0, on the human
+which takes its 9 minutes off the next run. With the perceptual loss (2.0.1), stage A takes about 46 minutes and B 37
+(2026-11-05). (Before 2.0, on the human
 corpora, it took 71 minutes.) The package's manifest records its provenance: the commit, the recipe's and the training
 data's hashes, and the gate's scores. `python -m picovox_train.smoke` runs every stage's entry point for a few steps on
 the CPU.
@@ -533,7 +534,7 @@ for 28 minutes.
 ## Training the voice model
 
 The voice network ships at the size the student ladder below chose - d64: an 80-wide encoder of 3 layers and a 64-wide
-decoder of 4 (282,627 parameters, 334 KB gzipped). make train trains it directly on the training speech
+decoder of 4 (282,627 parameters, 311 KB gzipped). make train trains it directly on the training speech
 (`picovox_train/trainmulti.py`, the recipe's `voice` - its `defaults.config` the size), in two stages:
 
 1. **Stage A** - the spectral loss through the differentiable synthesizer on the clips (and the duration, F0, and
@@ -543,6 +544,14 @@ decoder of 4 (282,627 parameters, 334 KB gzipped). make train trains it directly
 2. **Stage B** - from A's last checkpoint, with the adversarial critic and feature matching against the over-smoothing,
    10,000 steps of a warmup-stable-decay schedule (constant, then the last 25% cooled down by 1 - sqrt -
    `picovox_train/optim.py`); its best validation checkpoint is the voice.
+
+Both stages add the perceptual loss (`picovox_train/perceptual.py`, weight 5): each step's first 4 rendered crops
+against their recordings in the pinned wav2vec2 phoneme recognizer's layers 3 and 6 (frozen), the mean cosine distance
+of their frames. Chosen by the gap measure (`picovox_train.quality gap`) and checked by listener models it never
+trained against, it brought the voices a fifth closer to their source (fd L12 2,051, against 2.0.0's distilled voice's
+2,522 and 2,700-2,730 without it), as close in the speaker embedding (0.278 against 0.277), and the panel's UTMOS from
+4.31 to 4.42 - two seeds alike (paper Section 13.10). It makes a step about 1.6 times as long; in blind A/B listening
+against 2.0.0's voice, no audible difference (6 of 6 trials Same).
 
 The gate (`picovox_train/panel.py`): the shipped model (`panel eval baseline=lib/models/voiceModel.js` - the packaged
 module spoken as the package loads it, `tools/unpack.js`) and the voice (`panel eval voice=CHECKPOINT --reference

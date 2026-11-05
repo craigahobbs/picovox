@@ -53,7 +53,9 @@ The network:
 
 - model.py's MultiModel and trainmulti.py - the multi-speaker model: a speaker table (a row per voice) conditioning
   the network (FiLM), trained on the training speech with an adversarial spectrogram critic (discriminator.py)
-  against the over-smoothing; the losses are losses.py's
+  against the over-smoothing; the losses are losses.py's, and perceptual.py's
+- perceptual.py - the perceptual loss: the rendered crops against the recordings in the pinned wav2vec2 phoneme
+  recognizer's layers 3 and 6 (ctc.py's, frozen)
 - optim.py - the training step's options for trainmulti.py: the lean gradient clip and AdamW step, and the
   warmup-stable-decay schedule
 - quant.py - the export's 7-bit weight quantization (per row, GPTQ's error-aware rounding), shared by export.py,

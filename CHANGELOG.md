@@ -2,7 +2,8 @@
 
 ## 2.0.1 (unreleased)
 
-- pronunciation: the G2P network is retrained (the regenerated training speech) and exported at 7 bits per weight, rounded by GPTQ (was 6 bits, nearest): book words mispronounced 0.048% (was 0.061%), 4 of the 10,000 most frequent words wrong (was 7); known misses: "Polish" and "polish", the verb "contract", and the adjective "minute" in fresh sentences. The G2P module is 360 KB gzipped (was 317 KB). The voice network's loader reads 7-bit packed weights too (the shipped voice is unchanged)
+- voices: the voice network is retrained with a perceptual loss - in both training stages, the rendered speech against its training speech in a pinned wav2vec2 phoneme recognizer's features: on the listener panel's texts the voices' mean UTMOS is 4.42 (was 4.31) and their Whisper word error rate 0.98% (was 1.13%), every voice a fifth closer to its source by the gap measure (picovox_train.quality gap) and as close in speaker similarity; blind A/B listening heard no difference. The voice network's weights are 7 bits, rounded by GPTQ (was 8): the voice module is 311 KB gzipped (was 334 KB), the package 748 KB. lib/model.js no longer reads 8-bit weights
+- pronunciation: the G2P network is retrained (the regenerated training speech) and exported at 7 bits per weight, rounded by GPTQ (was 6 bits, nearest): book words mispronounced 0.048% (was 0.061%), 4 of the 10,000 most frequent words wrong (was 7); known misses: "Polish" and "polish", the verb "contract", and the adjective "minute" in fresh sentences. The G2P module is 360 KB gzipped (was 317 KB)
 
 ## 2.0.0 (2026-10-30)
 

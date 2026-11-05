@@ -11,12 +11,13 @@ const PARAMETER_COUNT = 282627;
 
 
 test('models.voiceModel', () => {
-    // The generated voice model module - its manifest (the multi-speaker model's distilled d64 student, with the package's
-    // twelve voices' speakers, the default first) and its deflated weights as base64
+    // The generated voice model module - its manifest (the multi-speaker model, with the package's
+    // twelve voices' speakers, the default first) and its weights as base64 (7-bit packed - deflate doesn't shrink them)
     assert.equal(voiceModel.manifest.kind, 'multi');
     assert.equal(voiceModel.manifest.parameterCount, PARAMETER_COUNT);
     assert.equal(voiceModel.manifest.speakers.length, 12);
     assert.deepEqual(voiceModel.manifest.speakers[0], {...voiceModel.manifest.speakers[0], 'id': 0, 'key': 'male'});
-    assert.equal(voiceModel.encoding, 'deflate-raw');
+    assert.equal(voiceModel.encoding, 'raw');
+    assert(voiceModel.manifest.tensors.every((tensor) => tensor.encoding !== 'int8'));
     assert.match(voiceModel.weights.slice(0, 1000), /^[\sA-Za-z0-9+/=]+$/);
 });

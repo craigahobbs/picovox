@@ -15,7 +15,7 @@ source-filter synthesizer every 5 ms, trained end to end through a differentiabl
 rule-based version of the same synthesizer, calibrated against measurements of 43 human speakers, had been rated 1-2
 out of 5 for naturalness. A teacher of 932K parameters, trained on 46 hours of speech that a local text-to-speech
 model generates at train time in twelve voices - no human recordings - is distilled to a student of 283K parameters
-that scores 4.31 on an automatic naturalness predictor (UTMOS; human recordings score 3.8-4.4 on it) with a 1.1%
+that scores 4.42 on an automatic naturalness predictor (UTMOS; human recordings score 3.8-4.4 on it) with a 1.0%
 Whisper word error rate, and runs about 52 times faster than real time in Node and about 2.7 times real time on an
 iPhone running JavaScript without a JIT (as Safari does on any page served over plain http). Every word is pronounced
 by a
@@ -1468,7 +1468,8 @@ retrained with it (make train, November 4) was installed over its regression set
 33, the thin words' labels, not the rounding (the study's float seeds scored 30 on average) - for its book error
 (0.048%, was 0.061%) and frequent words (4 of the top 10,000 wrong, was 7). The voice retrained with it was not: its
 7-bit export matched the 8-bit ones, but the recipe's two cuts of the week before - the distillation and the shorter
-stage A - had cost about 0.03 UTMOS together, and two blind A/B rounds chose the shipped voice 8 to 0 (22 Same).
+stage A - had cost about 0.03 UTMOS together, and two blind A/B rounds chose the shipped voice 8 to 0 (22 Same). The first
+7-bit voice installed was the one retrained with the perceptual loss (Section 13.10).
 
 ### 13.9 A measure of the gap
 
@@ -1503,6 +1504,44 @@ layer 6 - layer 12 is dominated by what is said when the texts differ - the fit 
 wav2vec2 and speaker measure puts the fitted synthesizer parameters far closer to the source than the network's: the
 synthesizer can sound much closer to Phonon, and the gap is the network's training. UTMOS alone disagrees, and no human
 judgment has settled it.
+
+### 13.10 A perceptual loss
+
+With the gap measured, the training objective could be judged by it. Each candidate retrained stage B from one stage A
+checkpoint (seed 1), against two retrains of the unchanged recipe - 2,731 and 2,696, a seed spread of about 35:
+
+| Stage B change (one seed) | fd L12 | Closer than both controls | Panel UTMOS | WER |
+| --- | --- | --- | --- | --- |
+| None (the controls) | 2,731, 2,696 | - | 4.278 (avg), 4.294 | 1.31% |
+| The critic 64 channels wide (was 16) | 2,696 | 6 of 12 | 4.299 | 1.26% |
+| The adversarial weight 0.3 (was 0.1) | 2,709 | 6 of 12 | 4.271 | 1.36% |
+| No smoothness penalty | 2,712 | 3 of 12 | 4.296 | 1.23% |
+| **The perceptual loss, weight 5** | **2,129** | **12 of 12** | **4.410** | **1.08%** |
+
+The perceptual loss (`picovox_train/perceptual.py`) compares each step's first 4 rendered crops with their recordings
+in the features of the pinned wav2vec2 phoneme recognizer (frozen, cut after its sixth transformer layer): resampled
+to 16 kHz (differentiably) and normalized, the mean over layers 3 and 6 of each frame's cosine distance. It shares the
+gap measure's recognizer but not its layer (12), so it was also judged by listener models it never trained against -
+on the same 480 clips, the speaker embedding's paired cosine distance to the recording (ECAPA) and UTMOS (the
+recordings: 4.440):
+
+| Voice | fd L12 | ECAPA distance | UTMOS (the clips) | Panel UTMOS | WER |
+| --- | --- | --- | --- | --- | --- |
+| The recipe without it (two seeds) | 2,731, 2,696 | 0.306, 0.309 | 4.33 | 4.28-4.29 | 1.31% |
+| The shipped 2.0.0 voice (distilled) | 2,522 | 0.277 | 4.34 | 4.308 | 1.13% |
+| Stage B, weight 5 (two seeds) | 2,129, 2,130 | 0.290, 0.292 | 4.44 | 4.41 | 1.08-1.21% |
+| Stage B, weight 10 | 2,086 | 0.290 | 4.45 | 4.419 | 1.18% |
+| Stage B, weight 20 | 2,084 | 0.301 | 4.45 | 4.423 | 1.08% |
+| **Both stages, weight 5 (two seeds)** | **2,061, 2,055** | **0.280, 0.277** | **4.45** | **4.41-4.43** | **0.98-1.06%** |
+| Both stages, make train (2.0.1) | 2,051 | 0.278 | 4.45 | 4.424 | 0.98% |
+
+Weight 10 gained less than the seeds' spread, and at 20 the speaker embedding drifted; in both stages it closed a
+further 70, both seeds alike. So the recipe trains both stages with it at weight 5 - every measure as close to the
+source as the distilled voice's or closer, the gap a fifth smaller, and the clips' UTMOS level with the recordings'.
+It costs time: a step takes about 1.6 times as long, stage A about 46 minutes (was 29) and B 37 (23). In blind A/B
+listening against the 2.0.0 voice, the listener heard no difference (6 of 6 trials Same, where the voices' frames
+differ most). The second-take floor of Section 13.9 shows a gap remains, and the per-clip fit shows the synthesizer can
+close more of it.
 
 ## 14. Limitations and future work
 
