@@ -1528,7 +1528,7 @@ recordings: 4.440):
 | Voice | fd L12 | ECAPA distance | UTMOS (the clips) | Panel UTMOS | WER |
 | --- | --- | --- | --- | --- | --- |
 | The recipe without it (two seeds) | 2,731, 2,696 | 0.306, 0.309 | 4.33 | 4.28-4.29 | 1.31% |
-| The shipped 2.0.0 voice (distilled) | 2,522 | 0.277 | 4.34 | 4.308 | 1.13% |
+| The 2.0.0 voice (distilled) | 2,522 | 0.277 | 4.34 | 4.308 | 1.13% |
 | Stage B, weight 5 (two seeds) | 2,129, 2,130 | 0.290, 0.292 | 4.44 | 4.41 | 1.08-1.21% |
 | Stage B, weight 10 | 2,086 | 0.290 | 4.45 | 4.419 | 1.18% |
 | Stage B, weight 20 | 2,084 | 0.301 | 4.45 | 4.423 | 1.08% |
