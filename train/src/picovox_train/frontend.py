@@ -23,7 +23,6 @@ A token sequence is:
 """
 
 import json
-import multiprocessing
 import os
 import re
 import sys
@@ -90,79 +89,6 @@ def get_g2p():
     if _G2P is None:
         _G2P = g2pmodel.G2p(g2pmodel.read_module())
     return _G2P
-
-
-# The pronunciations of words - {word: phones}, pronounced in batches, by up to jobs worker processes (default: all
-# cores; worth it for thousands of new words), and kept in the G2P network's cache (with its ambiguity decisions)
-def pronounce_words(words, jobs=None):
-    g2p = get_g2p()
-    missing = sorted({word for word in words if word not in g2p.cache or word not in g2p.ambiguous_words})
-    jobs = min(jobs or os.cpu_count(), max(1, len(missing) // 1000))
-    if jobs > 1:
-        chunks = [missing[index::jobs] for index in range(jobs)]
-        with multiprocessing.Pool(jobs) as pool:
-            for chunk, (phones, ambiguous) in zip(chunks, pool.map(_pronounce_chunk, chunks)):
-                g2p.cache.update(zip(chunk, phones))
-                g2p.ambiguous_words.update(zip(chunk, ambiguous))
-    else:
-        g2p.pronounce_many(missing)
-    return {word: g2p.cache[word] for word in words}
-
-
-# Pronounce words with the G2P network (a worker task) - (their phones, the ambiguity head's decisions)
-def _pronounce_chunk(words):
-    g2p = get_g2p()
-    return g2p.pronounce_many(words), [g2p.ambiguous_words[word] for word in words]
-
-
-class Pronunciations(dict):
-    """Words' pronunciations - {word: phones} - and the G2P network's caches after pronouncing texts (state: the
-    alternate readings, the ambiguity decisions, and the context network's choices), for set_pronunciations"""
-
-    state = None
-
-
-# Add pronunciations to the G2P network's cache - {word: phones}, or a Pronunciations with its state (a worker
-# process's initializer, so its texts' words are pronounced once, before the work is shared out)
-def set_pronunciations(pronunciations):
-    g2p = get_g2p()
-    g2p.cache.update(pronunciations)
-    if getattr(pronunciations, 'state', None) is not None:
-        g2p.set_state(pronunciations.state)
-
-
-# The words of texts as the front end pronounces them (after numbers and abbreviations are spelled out) - distinct, in
-# first-seen order
-def text_words(texts):
-    words = {}
-
-    # Record a word (no phones)
-    def record(word):
-        words[word] = None
-        return []
-
-    for text in texts:
-        text_to_phrases(text, record)
-    return list(words)
-
-
-# Pronounce every word of texts (pronounce_words), and, with a context network, choose the readings of their ambiguous
-# words and pronounce those - a Pronunciations, for set_pronunciations
-def pronounce_texts(texts, jobs=None):
-    pronunciations = Pronunciations(pronounce_words(text_words(texts), jobs))
-    g2p = get_g2p()
-    if g2p.context is not None:
-        windows = []
-        for text in texts:
-            sequence = context_sequence(text_items(text))
-            windows.extend(g2p.context.window_of(sequence, index) for index, item in enumerate(sequence) if g2p.ambiguous_words.get(item))
-        by_reading = {}
-        for window, slot in zip(windows, g2p.context.choose_windows(windows)):
-            by_reading.setdefault(slot, set()).add(window[len(window) // 2])
-        for reading, words in sorted(by_reading.items()):
-            g2p.pronounce_many(sorted(words), reading)
-    pronunciations.state = g2p.state()
-    return pronunciations
 
 
 # Function words - unaccented, with reduced stress

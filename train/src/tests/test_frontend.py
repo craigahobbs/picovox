@@ -14,7 +14,7 @@ import warnings
 
 from picovox_train import frontend
 
-from . import data_fixtures, parity
+from . import parity
 from .helpers import captured
 
 
@@ -33,28 +33,6 @@ TEXTS = [
     'Pi is 3.14159265358979323846; 12345678901234567890 and 9,007,199,254,740,993 are long, $12345678901234567.89 too.',
     'Rev. Smith, Esq., Capt. Hook, and Ms. Ames saw No. 5, Vol. 2, and Fig. 3 on Mt. Ida; I said no. No. Gen. Lee, Ch. 4.'
 ]
-
-
-# A fake G2P network (g2pmodel.G2p's interface) - each word's phones are its length's
-class FakeG2p:
-
-    def __init__(self, context=None):
-        self.cache = {}
-        self.ambiguous_words = {}
-        self.context = context
-        self.states = []
-
-    def pronounce_many(self, words, reading=0):
-        for word in words:
-            self.cache[word] = ['K'] * len(word) + ([f'AE{reading}'])
-            self.ambiguous_words[word] = word == 'read'
-        return [self.cache[word] for word in words]
-
-    def state(self):
-        return {'readings': [self.cache]}
-
-    def set_state(self, state):
-        self.states.append(state)
 
 
 class TestFrontend(unittest.TestCase):
@@ -97,61 +75,6 @@ class TestFrontend(unittest.TestCase):
         g2p = frontend.get_g2p()
         self.assertIs(frontend.get_g2p(), g2p)
         self.assertIsNotNone(g2p.context)
-
-    def test_pronounce_words(self):
-        fake = FakeG2p()
-        with unittest.mock.patch.object(frontend, '_G2P', fake):
-            self.assertEqual(frontend.pronounce_words(['ab', 'read']), {'ab': ['K', 'K', 'AE0'], 'read': ['K'] * 4 + ['AE0']})
-
-            # Thousands of new words, in worker processes
-            words = [f'w{index:05d}' for index in range(2500)]
-            with unittest.mock.patch.object(frontend.multiprocessing, 'Pool', data_fixtures.FakePool) as pool:
-                result = frontend.pronounce_words(words + ['ab'], jobs=4)
-            self.assertIs(pool, data_fixtures.FakePool)
-            self.assertEqual(len(result), 2501)
-            self.assertEqual(result['w00001'], ['K'] * 6 + ['AE0'])
-            self.assertFalse(fake.ambiguous_words['w00001'])
-
-    def test_set_pronunciations(self):
-        fake = FakeG2p()
-        with unittest.mock.patch.object(frontend, '_G2P', fake):
-            frontend.set_pronunciations({'x': ['K']})
-            self.assertEqual(fake.cache, {'x': ['K']})
-            self.assertEqual(fake.states, [])
-            pronunciations = frontend.Pronunciations({'y': ['T']})
-            frontend.set_pronunciations(pronunciations)
-            self.assertEqual(fake.states, [])
-            pronunciations.state = {'readings': []}
-            frontend.set_pronunciations(pronunciations)
-            self.assertEqual(fake.states, [{'readings': []}])
-
-    def test_text_words(self):
-        self.assertEqual(frontend.text_words(['Mr. Smith, 21.', 'Smith 3.5']),
-                         ['mister', 'smith', 'twenty', 'one', 'three', 'point', 'five'])
-
-    def test_text_words_period_abbreviations(self):
-        # The months and days only with their period (as lib/lexicon.js)
-        self.assertEqual(frontend.text_words(['On Mon. Nov. 5, mon ami, Aug. sat.']),
-                         ['on', 'monday', 'november', 'five', 'mon', 'ami', 'august', 'sat'])
-        self.assertEqual(frontend.PERIOD_ABBREVIATIONS['sept'], 'september')
-        self.assertEqual(frontend.text_words(['Rev. Ames saw No. 5; I said no. No.']),
-                         ['reverend', 'ames', 'saw', 'number', 'five', 'i', 'said', 'no'])
-
-    def test_pronounce_texts(self):
-        # Without a context network
-        fake = FakeG2p()
-        with unittest.mock.patch.object(frontend, '_G2P', fake):
-            pronunciations = frontend.pronounce_texts(['I read it.'])
-        self.assertEqual(pronunciations, {'i': ['K', 'AE0'], 'read': ['K'] * 4 + ['AE0'], 'it': ['K', 'K', 'AE0']})
-        self.assertEqual(pronunciations.state, fake.state())
-
-        # With the G2P network's context network, the ambiguous words' chosen readings are pronounced too
-        g2p = frontend.get_g2p()
-        pronunciations = frontend.pronounce_texts(['He will lead the way. Lead is heavy. I read it yesterday.'])
-        self.assertTrue(g2p.ambiguous('lead'))
-        self.assertEqual(pronunciations['lead'], g2p.pronounce('lead'))
-        self.assertEqual(set(pronunciations.state), {'readings', 'ambiguous', 'choices'})
-        self.assertTrue(any(window[len(window) // 2] == 'lead' for window in pronunciations.state['choices']))
 
     def test_number_words(self):
         self.assertEqual(frontend.number_words(0), ['zero'])
@@ -282,6 +205,14 @@ class TestFrontend(unittest.TestCase):
             ('home', 13), ({'end': 'comma'}, 18), ('eighteen', 19), ('eighteen', 19), ({'end': 'comma'}, 24), ('aside', 27),
             ({'end': 'period'}, 27), ('the', 35), ('end', 39), ({'end': 'comma'}, 43), ('truly', 44), ({'end': 'period'}, 50)
         ])
+
+    def test_text_items_period_abbreviations(self):
+        # The months and days only with their period (as lib/lexicon.js)
+        self.assertEqual([item for item, _ in frontend.text_items('On Mon. Nov. 5, mon ami, Aug. sat.') if isinstance(item, str)],
+                         ['on', 'monday', 'november', 'five', 'mon', 'ami', 'august', 'sat'])
+        self.assertEqual(frontend.PERIOD_ABBREVIATIONS['sept'], 'september')
+        self.assertEqual([item for item, _ in frontend.text_items('Rev. Ames saw No. 5; I said no. No.') if isinstance(item, str)],
+                         ['reverend', 'ames', 'saw', 'number', 'five', 'i', 'said', 'no', 'no'])
 
     def test_text_items_accents(self):
         # Accented letters lose their accents and the ligatures read as English says them, the offsets unchanged

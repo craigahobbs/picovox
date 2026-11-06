@@ -379,7 +379,6 @@ class G2p:
         self.ambiguity_layer_columns = np.ascontiguousarray(tensors['ambiguity_layer.weight'].T)
         self.ambiguity_layer_bias = tensors['ambiguity_layer.bias']
         self.caches = [{} for _ in range(self.readings)]
-        self.cache = self.caches[0]
         self.ambiguous_words = {}
         self.last_ambiguous = []
         self.context = Context(model['context'])
@@ -499,15 +498,3 @@ class G2p:
     # The reading slots of windows (each 2 * window + 1 items)
     def choose_slots(self, windows):
         return self.context.choose_windows([tuple(window) for window in windows])
-
-    # The caches' state - {readings: [{word: phones}], ambiguous: {word: decision}, choices: {window: slot}} (for
-    # worker processes - set_state)
-    def state(self):
-        return {'readings': self.caches, 'ambiguous': self.ambiguous_words, 'choices': self.context.choices}
-
-    # Add a state's caches
-    def set_state(self, state):
-        for cache, pronunciations in zip(self.caches, state['readings']):
-            cache.update(pronunciations)
-        self.ambiguous_words.update(state['ambiguous'])
-        self.context.choices.update(state['choices'])
