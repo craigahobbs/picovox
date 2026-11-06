@@ -45,9 +45,15 @@ def f0_track(f0, voiced, frame_count, floor, ceiling):
     return numpy.clip(numpy.exp(log_f0), floor, ceiling).astype(numpy.float32)
 
 
+# The spectral loss's STFT sizes, and its log-mel terms' magnitude epsilon (a magnitude of exactly zero - the
+# band-limited audio's - has an infinite gradient)
+FFT_SIZES = (2048, 1024, 512, 256, 128)
+MEL_EPS = 1e-9
+
+
 # The multi-resolution STFT loss below a frequency (spectral convergence + mean absolute log magnitude) plus a log-mel L1
 # (each signal's STFT is taken once per size - the log-mel terms reuse the resolutions' spectra)
-def spectral_loss(predicted, target, rate, max_hz, fft_sizes=(2048, 1024, 512, 256, 128), mel_weight=1.0, mel_eps=0.0):
+def spectral_loss(predicted, target, rate, max_hz):
     spectra = {}
 
     def spectra_of(fft_size):
@@ -55,7 +61,7 @@ def spectral_loss(predicted, target, rate, max_hz, fft_sizes=(2048, 1024, 512, 2
             spectra[fft_size] = (spectral.stft(predicted, fft_size, fft_size // 4), spectral.stft(target, fft_size, fft_size // 4))
         return spectra[fft_size]
     total = 0
-    for fft_size in fft_sizes:
+    for fft_size in FFT_SIZES:
         bins = int(max_hz * fft_size / rate) + 1
         spectrum_predicted, spectrum_target = spectra_of(fft_size)
         magnitude_predicted = spectral.spectrum_magnitude(spectrum_predicted)[..., :bins]
@@ -64,17 +70,15 @@ def spectral_loss(predicted, target, rate, max_hz, fft_sizes=(2048, 1024, 512, 2
             (torch.linalg.norm(magnitude_target, dim=(1, 2)) + 1e-7)
         log_distance = (torch.log(magnitude_target) - torch.log(magnitude_predicted)).abs().mean(dim=(1, 2))
         total = total + convergence.mean() + log_distance.mean()
-    total = total / len(fft_sizes)
-    if mel_weight:
-        mel_total = 0
-        for fft_size in (1024, 256):
-            bank = mel_bank(rate, fft_size, max_hz, predicted.device)
-            spectrum_predicted, spectrum_target = spectra_of(fft_size)
-            mel_predicted = torch.log(spectral.spectrum_magnitude(spectrum_predicted, eps=mel_eps) ** 2 @ bank.T + 1e-5)
-            mel_target = torch.log(spectral.spectrum_magnitude(spectrum_target, eps=mel_eps) ** 2 @ bank.T + 1e-5)
-            mel_total = mel_total + (mel_predicted - mel_target).abs().mean()
-        total = total + mel_weight * mel_total / 2 * 0.25
-    return total
+    total = total / len(FFT_SIZES)
+    mel_total = 0
+    for fft_size in (1024, 256):
+        bank = mel_bank(rate, fft_size, max_hz, predicted.device)
+        spectrum_predicted, spectrum_target = spectra_of(fft_size)
+        mel_predicted = torch.log(spectral.spectrum_magnitude(spectrum_predicted, eps=MEL_EPS) ** 2 @ bank.T + 1e-5)
+        mel_target = torch.log(spectral.spectrum_magnitude(spectrum_target, eps=MEL_EPS) ** 2 @ bank.T + 1e-5)
+        mel_total = mel_total + (mel_predicted - mel_target).abs().mean()
+    return total + mel_total / 2 * 0.25
 
 
 _MEL_BANKS = {}
@@ -126,8 +130,8 @@ def _silence(device):
 
 
 # The model's parameter frames for a batch, ready to render - [B, 2F + 1, COUNT]: the end frame appended, frames past
-# each utterance's end silent, and F0 replaced by the recorded F0 (teacher_f0) when given
-def render_values(model, unit, batch, teacher_f0=True):
+# each utterance's end silent, and F0 replaced by the recorded F0 (teacher forcing)
+def render_values(model, unit, batch):
     values = model.parameters_from_unit(unit)
     values = torch.cat([values, values[:, -1:]], dim=1)
     total = values.shape[1]
@@ -139,7 +143,5 @@ def render_values(model, unit, batch, teacher_f0=True):
     past = (torch.arange(total, device=values.device)[None] > counts[:, None]).float()[..., None]
     silence, silence_mask = _silence(values.device)
     values = values * (1 - past * silence_mask) + silence * past * silence_mask
-    if teacher_f0:
-        f0 = batch['f0'][:, :total]
-        values = torch.cat([values[..., :params.INDEX['f0']], f0[..., None], values[..., params.INDEX['f0'] + 1:]], dim=-1)
-    return values
+    f0 = batch['f0'][:, :total]
+    return torch.cat([values[..., :params.INDEX['f0']], f0[..., None], values[..., params.INDEX['f0'] + 1:]], dim=-1)

@@ -19,6 +19,10 @@ import torch
 from . import spectral
 
 
+# The spectrograms' magnitude epsilon (a magnitude of exactly zero - the band-limited audio's - has an infinite gradient)
+MAGNITUDE_EPS = 1e-9
+
+
 # (an autograd Function needs only forward and backward, not the other abstract methods)
 class _StridedConvFunction(torch.autograd.Function):  # pylint: disable=abstract-method
     """A (3, 9) convolution of stride (1, 2) and padding (1, 4) whose input gradient is two stride-1 convolutions of the
@@ -67,13 +71,13 @@ class StridedConv2d(torch.nn.Conv2d):
         return super().forward(input)
 
 
-class SpectrogramDiscriminator(torch.nn.Module):
+# (no forward - the trainer makes each signal's spectrograms once, then scores them)
+class SpectrogramDiscriminator(torch.nn.Module):  # pylint: disable=abstract-method
     """A log-mel spectrogram discriminator at one resolution"""
 
-    def __init__(self, sample_rate, fft_size, mels, max_hz, channels=32, eps=0.0):
+    def __init__(self, sample_rate, fft_size, mels, max_hz, channels):
         super().__init__()
         self.fft_size = fft_size
-        self.eps = eps
         bank = spectral.mel_filterbank(sample_rate, fft_size, mels, high=max_hz)
         self.register_buffer('bank', torch.tensor(bank, dtype=torch.float32), persistent=False)
         leaky = torch.nn.LeakyReLU(0.2)
@@ -89,7 +93,7 @@ class SpectrogramDiscriminator(torch.nn.Module):
     def spectrogram(self, audio):
         """Audio [B, N] to the discriminator's input, its log-mel spectrogram [B, 1, T, M] - it doesn't depend on the
         discriminator's weights, so a training step computes it once per signal for all the critic's passes"""
-        magnitude = spectral.stft_magnitude(audio, self.fft_size, self.fft_size // 4, eps=self.eps)
+        magnitude = spectral.stft_magnitude(audio, self.fft_size, self.fft_size // 4, eps=MAGNITUDE_EPS)
         return torch.log(magnitude ** 2 @ self.bank.T + 1e-5)[:, None]
 
     def score(self, spectrogram):
@@ -101,23 +105,19 @@ class SpectrogramDiscriminator(torch.nn.Module):
             features.append(x)
         return self.out(x), features
 
-    def forward(self, audio):
-        """Audio [B, N] to (scores [B, 1, T, M'], intermediate features)"""
-        return self.score(self.spectrogram(audio))
 
+# (no forward - spectrograms, then score)
+class Critic(torch.nn.Module):  # pylint: disable=abstract-method
+    """Spectrogram discriminators at several resolutions, their convolutions in bfloat16 (autocast - the spectrograms,
+    the weights, and the scores stay float32; the intermediate features stay bfloat16 until generator_losses uses
+    them); channels is each convolution's width"""
 
-class Critic(torch.nn.Module):
-    """Spectrogram discriminators at several resolutions; dtype (torch.bfloat16 or torch.float16) runs their
-    convolutions in that precision (autocast - the spectrograms, the weights, and the scores stay float32; the
-    intermediate features stay in that precision until generator_losses uses them); channels is each convolution's width"""
-
-    def __init__(self, sample_rate, max_hz, eps=0.0, dtype=None, channels=32):
+    def __init__(self, sample_rate, max_hz, channels):
         super().__init__()
-        self.dtype = dtype
         self.discriminators = torch.nn.ModuleList([
-            SpectrogramDiscriminator(sample_rate, 1024, 80, max_hz, channels=channels, eps=eps),
-            SpectrogramDiscriminator(sample_rate, 512, 64, max_hz, channels=channels, eps=eps),
-            SpectrogramDiscriminator(sample_rate, 256, 32, max_hz, channels=channels, eps=eps)
+            SpectrogramDiscriminator(sample_rate, 1024, 80, max_hz, channels),
+            SpectrogramDiscriminator(sample_rate, 512, 64, max_hz, channels),
+            SpectrogramDiscriminator(sample_rate, 256, 32, max_hz, channels)
         ])
 
     def spectrograms(self, audio):
@@ -126,15 +126,9 @@ class Critic(torch.nn.Module):
 
     def score(self, spectrograms):
         """Each discriminator's (scores, features) of its input spectrogram (spectrograms())"""
-        if self.dtype is None:
-            return [discriminator.score(spectrogram) for discriminator, spectrogram in zip(self.discriminators, spectrograms)]
-        device_type = spectrograms[0].device.type
-        with torch.autocast(device_type, dtype=self.dtype):
+        with torch.autocast(spectrograms[0].device.type, dtype=torch.bfloat16):
             outputs = [discriminator.score(spectrogram) for discriminator, spectrogram in zip(self.discriminators, spectrograms)]
         return [(scores.float(), features) for scores, features in outputs]
-
-    def forward(self, audio):
-        return self.score(self.spectrograms(audio))
 
 
 # The discriminators' loss (least squares) - real toward 1, rendered toward 0

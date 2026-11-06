@@ -44,8 +44,10 @@ class TestLosses(unittest.TestCase):
         self.assertLess(float(same), 1e-3)
         loss = losses.spectral_loss(predicted, target, 16000, 7000.0)
         self.assertGreater(float(loss), float(same))
-        without_mel = losses.spectral_loss(predicted, target, 16000, 7000.0, fft_sizes=(512,), mel_weight=0.0)
-        self.assertLess(float(without_mel), float(loss))
+        # (a zero magnitude has a finite gradient in the log-mel terms - their epsilon)
+        silent = torch.zeros(1, 4096, requires_grad=True)
+        losses.spectral_loss(silent, target[:1], 16000, 7000.0).backward()
+        self.assertTrue(torch.isfinite(silent.grad).all())
         # The mel banks are cached per rate, size, band, and device
         self.assertIs(losses.mel_bank(16000, 1024, 7000.0, 'cpu'), losses.mel_bank(16000, 1024, 7000.0, 'cpu'))
         self.assertEqual(losses.mel_bank(16000, 256, 7000.0, 'cpu').shape, (32, 129))
@@ -84,7 +86,6 @@ class TestLosses(unittest.TestCase):
         self.assertEqual(float(values[1, 5, params.INDEX['av']]), params.FLOOR_DB)
         self.assertNotEqual(float(values[1, 4, params.INDEX['av']]), params.FLOOR_DB)
         self.assertTrue(torch.all(values[..., params.INDEX['f0']] == 123.0))
-        # The batch's render counts on the device, and the model's F0
-        own = losses.render_values(network, unit, {**batch, 'renderCounts': torch.tensor([6, 4])}, teacher_f0=False)
-        self.assertTrue(torch.allclose(own[..., params.INDEX['f1']], values[..., params.INDEX['f1']]))
-        self.assertFalse(torch.all(own[..., params.INDEX['f0']] == 123.0))
+        # The batch's render counts on the device
+        counted = losses.render_values(network, unit, {**batch, 'renderCounts': torch.tensor([6, 4])})
+        self.assertTrue(torch.equal(counted, values))

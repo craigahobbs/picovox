@@ -193,12 +193,10 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(length, 20)
         self.assertTrue(all(start % 2 == 0 and start + length <= 40 for start in starts))
         self.assertEqual(trainmulti.crop_starts(batch['items'][:1], 11, 20, rng), ([0], 10))
-        audio = trainmulti.crop_audio(corpus, batch['items'], [0, 2], 20, 24000)
+        audio = trainmulti.crop_audio(corpus, batch['items'], [0, 2], 20)
         self.assertEqual(audio.shape, (2, 2400))
-        resampled = trainmulti.crop_audio(corpus, batch['items'], [0, 2], 20, 16000)
-        self.assertEqual(resampled.shape, (2, 1600))
         values = torch.zeros(2, 2 * batch['frameCount'] + 1, params.COUNT)
-        crop_values, target = trainmulti.crop(values, batch, 20, 24000, rng)
+        crop_values, target = trainmulti.crop(values, batch, 20, rng)
         self.assertEqual(tuple(crop_values.shape), (2, 21, params.COUNT))
         self.assertEqual(tuple(target.shape), (2, 2400))
 
@@ -222,11 +220,6 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(float(stats['ahRel']), -20.0)
         empty = trainmulti.quality_stats(values, torch.zeros(1, 4))
         self.assertTrue(math.isnan(float(empty['b1'])))
-
-    def test_frame_tokens(self):
-        index, position = trainmulti.frame_tokens(torch.tensor([[2, 0, 3]]), 6)
-        self.assertEqual(index.tolist(), [[0, 0, 2, 2, 2, 2]])
-        self.assertTrue(numpy.allclose(position.numpy(), [[0.25, 0.75, 0.5 / 3, 1.5 / 3, 2.5 / 3, 3.5 / 3]]))
 
     def test_recipe_defaults(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -274,42 +267,37 @@ class TestPrefetcher(unittest.TestCase):
 
     def setUp(self):
         with DATA.patched():
-            self.corpora = {'tts': trainmulti.Corpus('tts', 'train')}
+            self.corpus = trainmulti.Corpus('tts', 'train')
         self.rng = numpy.random.default_rng(2)
-        self.streams = {name: trainmulti.batch_stream(corpus, 2, 10000, self.rng) for name, corpus in self.corpora.items()}
+        self.stream = trainmulti.batch_stream(self.corpus, 2, 10000, self.rng)
         self.synth = dsynth.DSynth(24000)
 
     def test_steps(self):
-        args = argparse.Namespace(crop_frames=20, rate=24000, bucket_ratio=1.125)
-        prefetcher = trainmulti.Prefetcher(self.corpora, self.streams, args, self.rng, self.synth, 0.005, depth=1)
+        args = argparse.Namespace(crop_frames=20, bucket_ratio=1.125)
+        prefetcher = trainmulti.Prefetcher(self.corpus, self.stream, args, self.rng, self.synth, 0.005, depth=1)
         # (the queue fills - the thread waits for room)
         time.sleep(0.3)
-        names = set()
         for _ in range(4):
             prepared = prefetcher.next()
-            names.add(prepared['corpusName'])
             self.assertEqual(prepared['length'], 20)
             self.assertEqual(tuple(prepared['batch']['host']['target'].shape), (2, 2400))
-            self.assertEqual(prepared['cutoffs'], [11400.0, 11400.0])
+            self.assertEqual(prepared['batch']['host']['cutoffs'].tolist(), [11400.0, 11400.0])
             self.assertEqual(prepared['plan']['count'], 2400)
             self.assertIn('host', prepared['plan'])
         prefetcher.close()
         self.assertFalse(prefetcher.thread.is_alive())
-        self.assertEqual(names, {'tts'})
 
     def test_no_plan(self):
         # (no samples to render - a zero-length crop)
-        args = argparse.Namespace(crop_frames=0, rate=24000)
-        prefetcher = trainmulti.Prefetcher(self.corpora, self.streams, args, self.rng, self.synth, 0.005)
+        args = argparse.Namespace(crop_frames=0, bucket_ratio=0)
+        prefetcher = trainmulti.Prefetcher(self.corpus, self.stream, args, self.rng, self.synth, 0.005)
         prepared = prefetcher.next()
         prefetcher.close()
-        self.assertEqual(prepared['corpusName'], 'tts')
         self.assertIsNone(prepared['plan'])
 
     def test_error(self):
-        args = argparse.Namespace(crop_frames=20, rate=24000)
-        prefetcher = trainmulti.Prefetcher(self.corpora, {'tts': iter(())}, args, self.rng, self.synth,
-                                           0.005)
+        args = argparse.Namespace(crop_frames=20, bucket_ratio=0)
+        prefetcher = trainmulti.Prefetcher(self.corpus, iter(()), args, self.rng, self.synth, 0.005)
         with self.assertRaises(StopIteration):
             prefetcher.next()
         prefetcher.close()
@@ -323,7 +311,7 @@ class TestPrefetcher(unittest.TestCase):
             time.sleep(0.3)
             return {}
         with unittest.mock.patch.object(trainmulti.Prefetcher, '_prepare', side_effect=slow_prepare):
-            prefetcher = trainmulti.Prefetcher({}, {}, None, None, None, 0.005)
+            prefetcher = trainmulti.Prefetcher(None, None, None, None, None, 0.005)
             started.wait()
             prefetcher.close()
         self.assertFalse(prefetcher.thread.is_alive())
@@ -402,11 +390,10 @@ class TestMain(unittest.TestCase):
         self.assertIn('critic', DATA.last_log)
 
     def test_critic(self):
-        # The critic alone, then with the generator's adversarial and feature-matching losses; float32 convolutions
+        # The critic alone, then with the generator's adversarial and feature-matching losses
         self.assertEqual(DATA.train('critic', '--adversarial', '0.1', '--adversarial-start', '1', '--log-every', '1'), 0)
         self.assertIn('adversarial', DATA.last_log)
         self.assertIn('matching', DATA.last_log)
-        self.assertEqual(DATA.train('critic-float32', '--adversarial', '0.1', '--critic-precision', 'float32', '--steps', '1'), 0)
 
     def test_resume(self):
         # Stopped at step 2, then resumed to the end - the critic's state restored too
@@ -461,17 +448,16 @@ class TestMain(unittest.TestCase):
         self.assertEqual((last['step'], last['val'], last['best']), (4, {'score': 3.0}, 2.0))
 
     def test_nonfinite_gradient(self):
-        # A step with a non-finite gradient norm is skipped (the unfused optimizer)
-        with unittest.mock.patch.object(torch.nn.utils, 'clip_grad_norm_', return_value=torch.tensor(math.inf)), \
-                warnings.catch_warnings():
+        # A step with a non-finite gradient norm is skipped on the device (the lean optimizer - its step counts unchanged)
+        def infinite_norm(_optimizer):
+            return torch.tensor(math.inf)
+        with unittest.mock.patch.object(trainmulti.optim.LeanOptimizer, 'grad_norm', infinite_norm), warnings.catch_warnings():
             # (the schedule steps though the optimizer didn't - torch warns)
             warnings.filterwarnings('ignore', message='Detected call of `lr_scheduler.step', category=UserWarning)
             self.assertEqual(DATA.train('nonfinite', '--steps', '1'), 0)
-        initial = MultiModel({**helpers.tiny_config(), 'speakers': 4})
         state = torch.load(DATA.run_path('nonfinite', 'last.pt'), weights_only=False)
-        self.assertEqual(state['optimizer']['state'], {})
         self.assertEqual(state['step'], 1)
-        self.assertEqual(set(state['model']), set(initial.state_dict()))
+        self.assertTrue(all(value['step'].item() == 0 for value in state['optimizer']['state'].values()))
 
     def test_nan_statistics(self):
         # The statistics are left out of the log when NaN (no strongly voiced frames)
@@ -499,7 +485,7 @@ class TestStepOptions(unittest.TestCase):
     def test_options(self):
         # Stage B (the critic) with every training step option, stopped and resumed
         init = tiny_checkpoint()
-        options = ['--recipe', 'voice.b', '--init', init, '--lean-clip', '--schedule', 'wsd', '--cooldown', '0.5', '--val-every', '1']
+        options = ['--recipe', 'voice.b', '--init', init, '--schedule', 'wsd', '--cooldown', '0.5', '--val-every', '1']
         self.assertEqual(DATA.train('options', *options, '--stop', '2', '--resume'), 0)
         self.assertEqual(DATA.train('options', *options, '--resume'), 0)
         self.assertIn('options: 3 steps from 2', DATA.last_log)
@@ -508,13 +494,3 @@ class TestStepOptions(unittest.TestCase):
         self.assertIn('score', last['val'])
         # (the lean optimizer's state - AdamW's shared step count)
         self.assertTrue(all(state['step'].item() == 3 for state in last['optimizer']['state'].values()))
-
-    def test_lean_clip(self):
-        # The lean step alone (AdamW's groups only); a non-finite step skipped on the device
-        def infinite_norm(_optimizer):
-            return torch.tensor(math.inf)
-        with unittest.mock.patch.object(trainmulti.optim.LeanOptimizer, 'grad_norm', infinite_norm), warnings.catch_warnings():
-            warnings.filterwarnings('ignore', message='Detected call of `lr_scheduler.step', category=UserWarning)
-            self.assertEqual(DATA.train('lean', '--lean-clip', '--steps', '1'), 0)
-        state = torch.load(DATA.run_path('lean', 'last.pt'), weights_only=False)
-        self.assertTrue(all(value['step'].item() == 0 for value in state['optimizer']['state'].values()))

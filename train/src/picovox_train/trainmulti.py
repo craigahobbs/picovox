@@ -14,13 +14,15 @@ flags given override them.
 
 The corpus (data.py's format, memory-mapped - the audio is read a crop at a time) is the training speech,
 build/nn/data/tts/ (tts.py) - a local TTS model's voices, each speaker's row in the speaker table its index.json
-'index' (the recipe's voices, in order). Training renders at --rate (24 kHz, the corpus's rate) and compares below each
-utterance's own band - the rendering and the recording are both low-passed at 0.95 of the recording's bandwidth before
-the losses - and the spectral losses stop at --max-hz (the synthesizer's harmonic taper).
+'index' (the recipe's voices, in order). Training renders at the corpus's rate (24 kHz, data.py SAMPLE_RATE) and
+compares below each utterance's own band - the rendering and the recording are both low-passed at 0.95 of the
+recording's bandwidth before the losses - and the spectral losses stop at --max-hz (the synthesizer's harmonic taper).
 
 The losses are losses.py's (the multi-resolution STFT and log-mel loss, durations, log F0, the fading formant guide,
 formant order, smoothness, frication band) plus:
 
+- the perceptual loss (perceptual.py, --perceptual-weight and --perceptual-crops) - the first crops of each step against
+  their recordings in the pinned wav2vec2 phoneme recognizer's features
 - the adversarial critic (discriminator.py, --adversarial and --feature-matching) - the fix for the over-smoothing of
   a deterministic network trained by spectral regression (wide formant bandwidths, and noise filling the harmonics'
   valleys)
@@ -34,10 +36,10 @@ Checkpoints and the log go to build/nn/runs/<name>/ (last.pt every --save-every 
 validation score, validated every --val-every steps from --val-from and at the end, step-<n>.pt every --keep-every steps,
 log.jsonl).
 
-The training step's options (optim.py):
+The training step (optim.py) - the lean optimizer: the gradient clip and the AdamW step in a few kernel launches (the
+global norm of one concatenation, the clip as fused AdamW's grad_scale, one shared step counter); and its learning rate
+schedule:
 
-- --lean-clip - the gradient clip and the AdamW step in a few kernel launches (the global norm of one concatenation,
-  the clip as fused AdamW's grad_scale, one shared step counter) - the same up to rounding
 - --schedule wsd --cooldown F - warmup-stable-decay: constant, then the last F of the steps cooled down to the floor by
   1 - sqrt
 """
@@ -55,17 +57,12 @@ import threading
 import time
 
 import numpy
-import soxr
 import torch
 
 from . import RECIPE_PATH, ROOT, discriminator, dsynth, optim, params, perceptual
-from .data import DATA_DIR, CorpusData
+from .data import DATA_DIR, SAMPLE_RATE, CorpusData
 from .model import FIRST_PHONE, MultiModel, core_parameter_count, parameter_count, save_checkpoint
 from .losses import F_INDEX, PRIORS, duration_loss, f0_track, render_values, spectral_loss
-
-
-# The data's sample rate
-SOURCE_RATE = 24000
 
 # The runs' directory (checkpoints and logs)
 RUNS_DIR = os.environ.get('NN_RUNS_DIR', os.path.join(ROOT, 'build', 'nn', 'runs'))
@@ -94,14 +91,14 @@ def sonorant_mask(vocab):
 class Corpus:
     """A corpus's utterances of a split, ready for training - the audio stays memory-mapped"""
 
-    def __init__(self, name, split, max_items=None, seed=0):
+    def __init__(self, name, split, max_items=None):
         self.name = name
         self.data = CorpusData(os.path.join(DATA_DIR, name))
         speakers = self.data.index['speakers']
         channels = self.data.index['channels']
         entries = self.data.entries(split)
         if max_items and len(entries) > max_items:
-            order = numpy.random.default_rng(seed).permutation(len(entries))[:max_items]
+            order = numpy.random.default_rng(0).permutation(len(entries))[:max_items]
             entries = [entries[ix] for ix in sorted(order)]
         self.items = []
         for entry in entries:
@@ -128,7 +125,7 @@ class Corpus:
     def __len__(self):
         return len(self.items)
 
-    # An item's audio samples [start, end) at the source rate (float32, zero-padded past its end)
+    # An item's audio samples [start, end) at the corpus rate (float32, zero-padded past its end)
     def audio(self, item, start, end):
         count = item['sampleCount']
         offset = item['sampleOffset']
@@ -233,25 +230,18 @@ def crop_starts(items, total, crop_frames, rng):
     return starts, length
 
 
-# The recordings' crops [B, L x rate / 200] (numpy float32) at crop starts
-def crop_audio(corpus, items, starts, length, rate):
-    per_frame = SOURCE_RATE // params.FRAME_RATE
-    crops_audio = []
-    for item, start in zip(items, starts):
-        audio = corpus.audio(item, start * per_frame, (start + length) * per_frame)
-        if rate != SOURCE_RATE:
-            audio = soxr.resample(audio, SOURCE_RATE, rate)
-            audio = numpy.pad(audio, (0, max(0, length * rate // params.FRAME_RATE - len(audio))))[:length * rate // params.FRAME_RATE]
-        crops_audio.append(audio)
-    return numpy.stack(crops_audio)
+# The recordings' crops [B, L x SAMPLE_RATE / 200] (numpy float32) at crop starts
+def crop_audio(corpus, items, starts, length):
+    per_frame = SAMPLE_RATE // params.FRAME_RATE
+    return numpy.stack([corpus.audio(item, start * per_frame, (start + length) * per_frame) for item, start in zip(items, starts)])
 
 
-# Random crops of the batch's parameter frames and recordings - (values [B, L + 1, COUNT], audio [B, L x rate / 200]);
-# crops start on even frames (10 ms)
-def crop(values, batch, crop_frames, rate, rng):
+# Random crops of the batch's parameter frames and recordings - (values [B, L + 1, COUNT], audio
+# [B, L x SAMPLE_RATE / 200]); crops start on even frames (10 ms)
+def crop(values, batch, crop_frames, rng):
     starts, length = crop_starts(batch['items'], values.shape[1], crop_frames, rng)
     crops_values = torch.stack([values[ix, start:start + length + 1] for ix, start in enumerate(starts)])
-    return crops_values, torch.tensor(crop_audio(batch['corpus'], batch['items'], starts, length, rate), device=values.device)
+    return crops_values, torch.tensor(crop_audio(batch['corpus'], batch['items'], starts, length), device=values.device)
 
 
 # The spectral loss compiled - on MPS its elementwise work fused into a few kernels (8-13% of a stage-A step; the
@@ -274,15 +264,15 @@ def band_limit(audio, cutoffs, rate, cutoff_tensor=None):
 
 
 class Prefetcher:
-    """The training steps' data made ahead on a thread, so a step's CPU work overlaps the GPU's: each step's corpus
-    choice, batch, synthesis seed, and crop starts - the same draws from rng in the same order as the training loop
-    made them - the collated batch, the recordings' crops, and the synthesizer's cycle plans of the recorded F0 (dsynth.py
-    plan_cycles - the rendered frames' F0 is the recording's, and their jitter the model's constant). next() returns
-    the steps' data in order."""
+    """The training steps' data made ahead on a thread, so a step's CPU work overlaps the GPU's: each step's batch (the
+    corpus's next from its batch stream), synthesis seed, and crop starts - the same draws from rng in the same order
+    as the training loop made them - the collated batch, the recordings' crops, and the synthesizer's cycle plans of the
+    recorded F0 (dsynth.py plan_cycles - the rendered frames' F0 is the recording's, and their jitter the model's
+    constant). next() returns the steps' data in order."""
 
-    def __init__(self, corpora, streams, args, rng, synth, jitter, depth=3):
-        self.corpora = corpora
-        self.streams = streams
+    def __init__(self, corpus, stream, args, rng, synth, jitter, depth=3):
+        self.corpus = corpus
+        self.stream = stream
         self.args = args
         self.rng = rng
         self.synth = synth
@@ -308,24 +298,21 @@ class Prefetcher:
     # One step's data (the training loop's draws from rng, in order: the batch, the seed, the crops)
     def _prepare(self):
         args = self.args
-        name = 'tts'
-        batch = collate_host(self.corpora[name], next(self.streams[name]), getattr(args, 'bucket_ratio', 0))
+        batch = collate_host(self.corpus, next(self.stream), args.bucket_ratio)
         seed = int(self.rng.integers(1 << 30))
         total = 2 * batch['frameCount'] + 1
         starts, length = crop_starts(batch['items'], total, args.crop_frames, self.rng)
         host = batch['host']
-        host['target'] = torch.from_numpy(crop_audio(batch['corpus'], batch['items'], starts, length, args.rate))
-        cutoffs = [0.95 * item['bandwidth'] for item in batch['items']]
-        host['cutoffs'] = torch.tensor(cutoffs, dtype=torch.float32)
+        host['target'] = torch.from_numpy(crop_audio(batch['corpus'], batch['items'], starts, length))
+        host['cutoffs'] = torch.tensor([0.95 * item['bandwidth'] for item in batch['items']], dtype=torch.float32)
         seeds = [seed + ix for ix in range(len(batch['items']))]
         plan = None
         f0 = host['f0'].numpy()[:, :total]
-        if f0.shape[1] == total and dsynth.sample_count(length + 1, args.rate) > 0:
+        if f0.shape[1] == total and dsynth.sample_count(length + 1, SAMPLE_RATE) > 0:
             f0_frames = numpy.stack([f0[ix, start:start + length + 1] for ix, start in enumerate(starts)]).astype(numpy.float64)
             plan = self.synth.plan_cycles(f0_frames, numpy.full(f0_frames.shape, self.jitter), seeds)
             plan['host'] = self.synth.plan_host_tensors(plan)
-        return {'corpusName': name, 'batch': batch, 'seed': seed, 'starts': starts, 'length': length, 'cutoffs': cutoffs,
-                'plan': plan}
+        return {'batch': batch, 'seed': seed, 'starts': starts, 'length': length, 'plan': plan}
 
     def next(self):
         prepared = self.queue.get()
@@ -408,9 +395,8 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
     losses['band'] = (band * frame_mask).sum() / frame_mask.sum()
 
     # The sonorant frication penalty - af above av - sonorant_af_db (dB / 10) in the sonorant tokens' middle frames
-    token_index, position = frame_tokens(batch['durations'], frames // model.config['subframes'])
-    token_at = torch.gather(batch['tokens'], 1, token_index)
-    sonorant = sonorants[token_at] & (position > 0.2) & (position < 0.8)
+    token_at = torch.gather(batch['tokens'], 1, outputs['tokenIndex'])
+    sonorant = sonorants[token_at] & (outputs['position'] > 0.2) & (outputs['position'] < 0.8)
     sonorant = sonorant.repeat_interleave(model.config['subframes'], dim=1).float() * frame_mask
     excess = torch.relu(values[..., params.INDEX['af']] - values[..., params.INDEX['av']] + args.sonorant_af_db) / 10
     losses['sonorantAf'] = (excess * sonorant).sum() / sonorant.sum().clamp(min=1)
@@ -420,30 +406,30 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
     losses['eqSmooth'] = ((eq[:, 2:] - 2 * eq[:, 1:-1] + eq[:, :-2]) ** 2).mean() / 100
 
     # The spectral loss of the rendered crops, both band-limited to the recording's band
-    render = render_values(model, unit, batch, teacher_f0=True)
+    render = render_values(model, unit, batch)
     if prepared is None:
-        crop_values, target = crop(render, batch, args.crop_frames, args.rate, rng)
+        crop_values, target = crop(render, batch, args.crop_frames, rng)
         plan = None
     else:
         starts, length = prepared['starts'], prepared['length']
         target = batch['target']
         plan = prepared['plan']
         crop_values = torch.stack([render[ix, start:start + length + 1] for ix, start in enumerate(starts)])
-    # (the rendered F0 is the recording's - render_values's teacher F0 - so the synthesizer needn't differentiate in it)
-    audio = synth(crop_values, seed=[seed + ix for ix in range(len(batch['items']))], eq=eq, plan=plan, constant_f0=True)
+    # (the rendered F0 is the recording's - render_values's teacher F0 - which the synthesizer doesn't differentiate in)
+    audio = synth(crop_values, seed=[seed + ix for ix in range(len(batch['items']))], eq=eq, plan=plan)
     target = target[:, :audio.shape[1]]
     cutoffs = [0.95 * item['bandwidth'] for item in batch['items']]
-    audio = band_limit(audio, cutoffs, args.rate, batch.get('cutoffs'))
-    target = band_limit(target, cutoffs, args.rate, batch.get('cutoffs'))
-    full_crop = audio.shape[1] == round(args.crop * args.rate)
+    audio = band_limit(audio, cutoffs, SAMPLE_RATE, batch.get('cutoffs'))
+    target = band_limit(target, cutoffs, SAMPLE_RATE, batch.get('cutoffs'))
+    full_crop = audio.shape[1] == round(args.crop * SAMPLE_RATE)
     if audio.device.type == 'mps' and full_crop:  # pragma: no cover - the Apple GPU only
         # (the full-length crops - nearly every step - through the compiled loss, the batch size a dynamic dimension)
         # (torch's API for a dynamic dimension is torch._dynamo's)
         torch._dynamo.mark_dynamic(audio, 0)  # pylint: disable=protected-access
         torch._dynamo.mark_dynamic(target, 0)  # pylint: disable=protected-access
-        losses['spectral'] = compiled_spectral_loss(audio, target, args.rate, args.max_hz, mel_eps=1e-9)
+        losses['spectral'] = compiled_spectral_loss(audio, target, SAMPLE_RATE, args.max_hz)
     else:
-        losses['spectral'] = spectral_loss(audio, target, args.rate, args.max_hz, mel_eps=1e-9)
+        losses['spectral'] = spectral_loss(audio, target, SAMPLE_RATE, args.max_hz)
 
     # (the perceptual loss - the crops in the speech recognizer's features, perceptual.py)
     # (on the first --perceptual-crops crops - the recognizer costs several times the step)
@@ -458,17 +444,6 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
     if with_values:
         return losses, audio, target, quality_stats(values.detach(), frame_mask), values
     return losses, audio, target, quality_stats(values.detach(), frame_mask)
-
-
-# Each 10 ms frame's token index [B, F] and its relative position within the token [B, F]
-def frame_tokens(durations, frame_count):
-    ends = torch.cumsum(durations, dim=1)
-    frames = torch.arange(frame_count, device=durations.device)
-    token_index = torch.searchsorted(ends, frames[None].expand(durations.shape[0], -1).contiguous(), right=True)
-    token_index = token_index.clamp(max=durations.shape[1] - 1)
-    duration = torch.gather(durations, 1, token_index).float().clamp(min=1)
-    start = torch.gather(ends - durations, 1, token_index).float()
-    return token_index, (frames[None].float() - start + 0.5) / duration
 
 
 # The validation losses and statistics of a corpus (no gradients; the model in eval mode) - mean losses and quality
@@ -523,7 +498,6 @@ def argument_parser():
     parser.add_argument('--crop', type=float, help='the rendered crop (seconds)')
     parser.add_argument('--bucket-ratio', type=float,
                         help='pad token and frame counts up to a geometric ladder of this ratio (0: no fixed shapes)')
-    parser.add_argument('--rate', type=int)
     parser.add_argument('--max-hz', type=float)
     parser.add_argument('--lr', type=float)
     parser.add_argument('--warmup', type=int)
@@ -546,9 +520,7 @@ def argument_parser():
     parser.add_argument('--feature-matching', type=float)
     parser.add_argument('--adversarial-start', type=int, help='steps of the critic alone first')
     parser.add_argument('--critic-lr', type=float)
-    parser.add_argument('--critic-precision', choices=['float32', 'bfloat16', 'float16'],
-                        help="the critic's convolutions' precision")
-    parser.add_argument('--critic-channels', type=int, default=32, help="the critic's convolutions' width")
+    parser.add_argument('--critic-channels', type=int, help="the critic's convolutions' width")
     parser.add_argument('--val-every', type=int, default=1000)
     parser.add_argument('--val-from', type=int, default=0, help='validate (every --val-every steps) from this step on')
     parser.add_argument('--save-every', type=int, default=1000, help='save last.pt every this many steps (and at validations)')
@@ -559,7 +531,6 @@ def argument_parser():
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--init', default=None, help='initialize the weights from a checkpoint')
     parser.add_argument('--seed', type=int)
-    parser.add_argument('--lean-clip', action='store_true', help='the lean clip and AdamW step (optim.py)')
     parser.add_argument('--schedule', choices=['cosine', 'wsd'], default='cosine', help='the learning rate schedule')
     parser.add_argument('--cooldown', type=float, default=0.0, help="wsd: the cooldown's share of --steps")
     parser.set_defaults(**recipe_defaults('voice.defaults'))
@@ -614,17 +585,17 @@ def main(argv=None):
 
     # Data - the training speech, its voices the speaker table's rows
     start = time.time()
-    corpus_set = Corpus('tts', 'train')
-    val_sets = {'tts': Corpus('tts', 'val', max_items=args.val_count)}
-    speakers = corpus_set.data.index['speakers']
+    corpus = Corpus('tts', 'train')
+    val_corpus = Corpus('tts', 'val', max_items=args.val_count)
+    speakers = corpus.data.index['speakers']
     speaker_keys = [None] * (1 + max(settings['index'] for settings in speakers.values()))
     for key, settings in speakers.items():
         speaker_keys[settings['index']] = key
-    print(f'data: {len(corpus_set)} utterances, val {len(val_sets["tts"])} ({time.time() - start:.1f} s)', file=sys.stderr, flush=True)
-    sonorants = torch.tensor(sonorant_mask(corpus_set.data.index['vocab']), device=device)
+    print(f'data: {len(corpus)} utterances, val {len(val_corpus)} ({time.time() - start:.1f} s)', file=sys.stderr, flush=True)
+    sonorants = torch.tensor(sonorant_mask(corpus.data.index['vocab']), device=device)
 
     # The model, the critic, and the optimizers
-    config = {'speakers': len(speaker_keys), 'vocab': len(corpus_set.data.index['vocab']), **json.loads(args.config)}
+    config = {'speakers': len(speaker_keys), 'vocab': len(corpus.data.index['vocab']), **json.loads(args.config)}
     model = MultiModel(config, priors=MULTI_PRIORS, dropout=args.dropout).to(device)
     init_digest = None
     if args.init:
@@ -633,24 +604,17 @@ def main(argv=None):
         state = torch.load(args.init, map_location=device, weights_only=False)
         missing, unexpected = model.load_state_dict(state['model'], strict=False)
         print(f'init from {args.init}: missing {missing}, unexpected {unexpected}', file=sys.stderr)
-    synth = dsynth.DSynth(args.rate).to(device)
+    synth = dsynth.DSynth(SAMPLE_RATE).to(device)
     critic = None
     if args.adversarial > 0:
-        critic_dtype = None if args.critic_precision == 'float32' else getattr(torch, args.critic_precision)
-        critic = discriminator.Critic(args.rate, args.max_hz, eps=1e-9, dtype=critic_dtype, channels=args.critic_channels).to(device)
-    # (on the GPU the fused AdamW - one kernel, not a loop over the parameters - which also skips a step with a
-    # non-finite gradient norm on the device, so the step needn't read the norm)
+        critic = discriminator.Critic(SAMPLE_RATE, args.max_hz, args.critic_channels).to(device)
+    # (on the GPU the critic's fused AdamW - one kernel, not a loop over the parameters)
     fused = device.type in ('mps', 'cuda')
     critic_optimizer = torch.optim.AdamW(critic.parameters(), lr=args.critic_lr, betas=(0.8, 0.99),
                                          fused=fused or None) if critic else None
-    # (the lean step - optim.py)
-    lean = args.lean_clip
-    if lean:
-        optimizer = optim.LeanOptimizer([{'params': list(model.parameters())}], lr=args.lr, weight_decay=args.weight_decay,
-                                        betas=(0.9, 0.98))
-    else:
-        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, betas=(0.9, 0.98),
-                                      fused=fused or None)
+    # (the model's lean step - optim.py)
+    optimizer = optim.LeanOptimizer([{'params': list(model.parameters())}], lr=args.lr, weight_decay=args.weight_decay,
+                                    betas=(0.9, 0.98))
 
     def learning_rate(step):
         return optim.lr_factor(step, args.steps, args.warmup, args.schedule, args.cooldown)
@@ -661,17 +625,14 @@ def main(argv=None):
     state = resume_state(directory, args, init_digest, device)
     if state is not None:
         model.load_state_dict(state['model'])
-        # (a checkpoint saved by the unfused AdamW resumes fused: its param groups say fused, so loading moves the
-        # step counts to the device as the fused step needs)
-        if not lean:
-            for group in state['optimizer']['param_groups']:
-                group['fused'] = fused or None
         optimizer.load_state_dict(state['optimizer'])
         scheduler.load_state_dict(state['scheduler'])
         step = state['step']
         best = state.get('best', math.inf)
         if critic is not None:
             critic.load_state_dict(state['critic'])
+            # (a checkpoint saved by the unfused AdamW resumes fused: its param groups say fused, so loading moves the
+            # step counts to the device as the fused step needs)
             for group in state['criticOptimizer']['param_groups']:
                 group['fused'] = fused or None
             critic_optimizer.load_state_dict(state['criticOptimizer'])
@@ -688,9 +649,7 @@ def main(argv=None):
                          'priors': MULTI_PRIORS, 'speakers': speaker_keys, 'args': vars(args), 'initDigest': init_digest,
                          **(extra or {})}, path)
 
-    streams = {'tts': batch_stream(corpus_set, args.batch, args.max_frames, rng)}
-    corpora = {'tts': corpus_set}
-    log = open(os.path.join(directory, 'log.jsonl'), 'a', encoding='utf-8')  # pylint: disable=consider-using-with
+    log =open(os.path.join(directory, 'log.jsonl'), 'a', encoding='utf-8')  # pylint: disable=consider-using-with
     sums = {}
     sum_counts = {}
     # The steps' loss and statistics tensors since the last log row - read only when it's written (each read
@@ -700,7 +659,7 @@ def main(argv=None):
     model.train()
     # The steps' data, made ahead on a thread - all the draws from rng are its, in the order the steps made them
     jitter = float(model.fixed[params.INDEX['jitter']].cpu())
-    prefetcher = Prefetcher(corpora, streams, args, rng, synth, jitter)
+    prefetcher = Prefetcher(corpus, batch_stream(corpus, args.batch, args.max_frames, rng), args, rng, synth, jitter)
     # The recent steps' data - their host tensors are the sources of non-blocking uploads, so each is kept until the
     # GPU is past its step (an event after it): on MPS the steps don't read the device (the synthesizer finishes its
     # plans made ahead there), so the CPU runs up to IN_FLIGHT steps ahead of the GPU
@@ -742,17 +701,8 @@ def main(argv=None):
                 losses['total'] = losses['total'] + args.adversarial * adversarial + args.feature_matching * matching
         optimizer.zero_grad()
         losses['total'].backward()
-        if lean:
-            # (the clip inside the step, which skips a non-finite one on the device)
-            optimizer.step()
-        else:
-            norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            if fused:  # pragma: no cover - the GPU's fused optimizer
-                # (the fused step skips itself - parameters, moments, and step count - when found_inf is 1)
-                optimizer.found_inf = (~torch.isfinite(norm)).float()
-                optimizer.step()
-            elif torch.isfinite(norm):
-                optimizer.step()
+        # (the clip inside the step, which skips a non-finite one on the device)
+        optimizer.step()
         scheduler.step()
         step += 1
         if device.type == 'mps':  # pragma: no cover - the Apple GPU only
@@ -797,8 +747,7 @@ def main(argv=None):
         validating = step == stop or (step % args.val_every == 0 and step >= args.val_from)
         extra = None
         if validating:
-            results = {name: validate(model, synth, corpus_set, args, device, sonorants) for name, corpus_set in val_sets.items()}
-            result = dict(results['tts'])
+            result = validate(model, synth, val_corpus, args, device, sonorants)
             print('  VAL ' + ' '.join(f'{key} {value:.4g}' for key, value in result.items()), file=sys.stderr, flush=True)
             log.write(json.dumps({'val': {'step': step, **result}}) + '\n')
             log.flush()

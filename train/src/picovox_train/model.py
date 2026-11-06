@@ -19,9 +19,9 @@ pole and zero, the frication spectrum - so the voice and style transforms of par
 shimmer are constants (the spectral loss gives jitter no gradient), and a static per-speaker channel equalizer
 (params.py's EQ, 24 bands) models the recording channel.
 
-F0 gets no useful gradient through the synthesizer (dsynth.py), so the F0 column is trained by regression on the
-recordings' Praat F0 (trainmulti.py, losses.py), and training renders with the recorded F0 (teacher forcing, as
-FastPitch does).
+F0 gets no useful gradient through the synthesizer, so the F0 column is trained by regression on the recordings' Praat
+F0 (trainmulti.py, losses.py), and training renders with the recorded F0 (teacher forcing, as FastPitch does - dsynth.py
+doesn't differentiate in it).
 
 Conditioning: MultiModel's condition vector - a speaker embedding (a row of the speaker table: one voice) - is added
 to the token features, the duration predictor's input, and the decoder's input, and modulates every conv-FFN block
@@ -44,7 +44,7 @@ import torch
 from . import params
 
 
-# The model's hyperparameters (config 'kind': 'multi')
+# The model's hyperparameters
 MULTI_CONFIG = {
     'vocab': 78,
     'dim': 128,                # token feature width
@@ -68,7 +68,7 @@ MULTI_CONFIG = {
 
 
 # Token classes (vocab.json): 0 <pad>, 1 <unk>, 2 <bos>, 3 "_" (word boundary), 4-8 phrase ends, 9+ phones
-PAD, UNK, BOS, WORD = 0, 1, 2, 3
+PAD, BOS, WORD = 0, 2, 3
 FIRST_PHONE = 9
 
 # A boundary token pauses at inference when its pause probability is above this (lib/model.js's too)
@@ -94,19 +94,26 @@ class DepthwiseConv(torch.nn.Module):
         return self.conv(x.transpose(1, 2)).transpose(1, 2)
 
 
-class ConvFFN(torch.nn.Module):
-    """A pre-norm feed-forward block with a depthwise convolution - x + W2 SiLU(DW(SiLU(W1 LN(x))))"""
+class FiLMConvFFN(torch.nn.Module):
+    """A pre-norm feed-forward block with a depthwise convolution, its pre-norm output modulated by the condition (FiLM)
+    - x + W2 SiLU(DW(SiLU(W1 (LN(x) (1 + gamma) + beta)))), [gamma, beta] = Wc c (zero at initialization, so the block
+    starts unconditioned)"""
 
-    def __init__(self, dim, hidden, kernel, dropout):
+    def __init__(self, dim, hidden, kernel, dropout, condition_dim):
         super().__init__()
         self.norm = torch.nn.LayerNorm(dim)
         self.inner = torch.nn.Linear(dim, hidden)
         self.conv = DepthwiseConv(hidden, kernel)
         self.outer = torch.nn.Linear(hidden, dim)
         self.dropout = torch.nn.Dropout(dropout)
+        self.film = torch.nn.Linear(condition_dim, 2 * dim)
+        torch.nn.init.zeros_(self.film.weight)
+        torch.nn.init.zeros_(self.film.bias)
 
-    def forward(self, x, mask):
-        hidden = torch.nn.functional.silu(self.inner(self.norm(x))) * mask
+    def forward(self, x, mask, condition):
+        gamma, beta = self.film(condition).chunk(2, dim=-1)
+        hidden = self.norm(x) * (1 + gamma) + beta
+        hidden = torch.nn.functional.silu(self.inner(hidden)) * mask
         hidden = torch.nn.functional.silu(self.conv(hidden))
         return x + self.dropout(self.outer(hidden)) * mask
 
@@ -152,24 +159,6 @@ def core_parameter_count(model):
 #
 # The multi-speaker model
 #
-
-
-class FiLMConvFFN(ConvFFN):
-    """A conv-FFN block whose pre-norm output is modulated by the condition (FiLM) - x + W2 SiLU(DW(SiLU(W1 (LN(x) (1 +
-    gamma) + beta)))), [gamma, beta] = Wc c (zero at initialization, so the block starts unconditioned)"""
-
-    def __init__(self, dim, hidden, kernel, dropout, condition_dim):
-        super().__init__(dim, hidden, kernel, dropout)
-        self.film = torch.nn.Linear(condition_dim, 2 * dim)
-        torch.nn.init.zeros_(self.film.weight)
-        torch.nn.init.zeros_(self.film.bias)
-
-    def forward(self, x, mask, condition=None):
-        gamma, beta = self.film(condition).chunk(2, dim=-1)
-        hidden = self.norm(x) * (1 + gamma) + beta
-        hidden = torch.nn.functional.silu(self.inner(hidden)) * mask
-        hidden = torch.nn.functional.silu(self.conv(hidden))
-        return x + self.dropout(self.outer(hidden)) * mask
 
 
 class MultiModel(torch.nn.Module):
@@ -270,8 +259,9 @@ class MultiModel(torch.nn.Module):
     @staticmethod
     def regulate(features, durations, frame_count=None):
         """The length regulator - token features [B, N, D] repeated for their durations [B, N] (10 ms frames) to
-        [B, F, D], with the position features [B, F, 5] and the frame mask [B, F, 1]; frame_count is F when the caller
-        knows it (max(1, the longest total duration) - reading it from the device synchronizes)"""
+        [B, F, D], with the position features [B, F, 5], the frame mask [B, F, 1], and each frame's token index [B, F];
+        frame_count is F when the caller knows it (max(1, the longest total duration) - reading it from the device
+        synchronizes)"""
         batch = features.shape[0]
         lengths = durations.sum(dim=1)
         frame_count = max(1, int(lengths.max())) if frame_count is None else frame_count
@@ -289,7 +279,7 @@ class MultiModel(torch.nn.Module):
             torch.clamp(offset, max=20) / 20, torch.clamp(duration - 1 - offset, max=20) / 20
         ], dim=-1)
         mask = (frames[None] < lengths[:, None]).float()[..., None]
-        return regulated * mask, positions * mask, mask
+        return regulated * mask, positions * mask, mask, token_index
 
     def parameters_from_unit(self, unit):
         """Normalized frames [B, T, COUNT] to parameter values, with the fixed parameters (jitter, shimmer)"""
@@ -310,28 +300,26 @@ class MultiModel(torch.nn.Module):
         """The channel equalizer gains (dB) [B, EQ_BAND_COUNT] of speaker ids [B]"""
         return (params.EQ_RANGE_DB * torch.tanh(self.eq_free))[speaker]
 
-    def forward(self, tokens, durations, speaker=None, speaker_vector=None, frame_count=None):
+    def forward(self, tokens, durations, speaker, speaker_vector=None, frame_count=None):
         """Training forward pass (teacher-forced durations [B, N], 10 ms frames) - {duration (the predictor's outputs
-        [B, N, 3]), unit (normalized parameter frames [B, 2F, COUNT]), frameMask [B, F, 1]}; frame_count is F if known
-        (regulate)"""
-        if speaker is None and speaker_vector is None:
-            speaker = torch.zeros(tokens.shape[0], dtype=torch.long, device=tokens.device)
+        [B, N, 3]), unit (normalized parameter frames [B, 2F, COUNT]), frameMask [B, F, 1], tokenIndex (each frame's
+        token [B, F]), position (each frame's relative position within its token [B, F], 0 past the durations)};
+        frame_count is F if known (regulate)"""
         condition = self.condition(speaker, speaker_vector)
         features, mask = self.encode(tokens, condition)
         duration_outputs = self.durations(features, mask, condition)
-        regulated, positions, frame_mask = self.regulate(features, durations, frame_count)
+        regulated, positions, frame_mask, token_index = self.regulate(features, durations, frame_count)
         unit = self.decode(regulated, positions, frame_mask, condition)
-        return {'duration': duration_outputs, 'unit': unit, 'frameMask': frame_mask}
+        return {'duration': duration_outputs, 'unit': unit, 'frameMask': frame_mask, 'tokenIndex': token_index,
+                'position': positions[..., 0]}
 
     @torch.no_grad()
-    def infer(self, tokens, speaker=None):
+    def infer(self, tokens, speaker):
         """Inference - {durations [B, N] (10 ms frames), values (parameter frames [B, 2F + 1, COUNT]), frames}"""
-        if speaker is None:
-            speaker = torch.zeros(tokens.shape[0], dtype=torch.long, device=tokens.device)
         condition = self.condition(speaker)
         features, mask = self.encode(tokens, condition)
         durations = self.predicted_durations(self.durations(features, mask, condition), tokens)
-        regulated, positions, frame_mask = self.regulate(features, durations)
+        regulated, positions, frame_mask, _ = self.regulate(features, durations)
         values = self.parameters_from_unit(self.decode(regulated, positions, frame_mask, condition))
         values = torch.cat([values, values[:, -1:]], dim=1)
         return {'durations': durations, 'values': values, 'frames': durations.sum(dim=1) * self.config['subframes'] + 1}

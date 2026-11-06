@@ -34,7 +34,6 @@ class TestModel(unittest.TestCase):
         mask = torch.ones(2, 5, 1)
         x = torch.randn(2, 5, 8)
         self.assertEqual(model.DepthwiseConv(8, 3)(x).shape, (2, 5, 8))
-        self.assertEqual(model.ConvFFN(8, 16, 3, 0.0)(x, mask).shape, (2, 5, 8))
         attention = model.SelfAttention(8, 2, 0.0)
         # A padded key changes nothing for the others
         padded = torch.cat([x, torch.randn(2, 1, 8)], dim=1)
@@ -46,9 +45,11 @@ class TestModel(unittest.TestCase):
         x = torch.randn(1, 5, 8)
         mask = torch.ones(1, 5, 1)
         # Zero at initialization - unconditioned
-        plain = model.ConvFFN(8, 16, 3, 0.0)
-        plain.load_state_dict({key: value for key, value in block.state_dict().items() if not key.startswith('film')})
-        self.assertTrue(torch.allclose(block(x, mask, torch.randn(1, 1, 4)), plain(x, mask)))
+        output = block(x, mask, torch.randn(1, 1, 4))
+        self.assertEqual(output.shape, (1, 5, 8))
+        self.assertTrue(torch.allclose(output, block(x, mask, torch.randn(1, 1, 4))))
+        hidden = torch.nn.functional.silu(block.conv(torch.nn.functional.silu(block.inner(block.norm(x)))))
+        self.assertTrue(torch.allclose(output, x + block.outer(hidden)))
 
     def test_parameter_count(self):
         self.assertEqual(model.parameter_count(torch.nn.Linear(3, 2)), 8)
@@ -80,20 +81,22 @@ class TestModel(unittest.TestCase):
     def test_forward(self):
         network = model.MultiModel(tiny_config()).eval()
         tokens, durations = token_batch()
-        outputs = network(tokens, durations)
+        outputs = network(tokens, durations, torch.tensor([0, 0]))
         self.assertEqual(outputs['duration'].shape, (2, 6, 3))
         self.assertEqual(outputs['unit'].shape, (2, 26, params.COUNT))
         self.assertEqual(outputs['frameMask'].shape, (2, 13, 1))
         self.assertEqual(outputs['frameMask'][1, :, 0].sum().item(), 5)
         self.assertTrue(((outputs['unit'] > 0) & (outputs['unit'] < 1)).all())
+        # Each frame's token and its position within it (0 past the durations)
+        self.assertEqual(outputs['tokenIndex'][1].tolist(), [1, 1, 2, 2, 3] + [5] * 8)
+        self.assertEqual(outputs['position'][1, :5].tolist(), [0.25, 0.75, 0.25, 0.75, 0.5])
+        self.assertEqual(outputs['position'][1, 5:].tolist(), [0.0] * 8)
         # A known frame count, the speaker, and a speaker vector
         speaker = torch.tensor([1, 0])
-        spoken = network(tokens, durations, speaker=speaker, frame_count=16)
+        spoken = network(tokens, durations, speaker, frame_count=16)
         self.assertEqual(spoken['unit'].shape, (2, 32, params.COUNT))
-        vector = network(tokens, durations, speaker_vector=network.speaker(speaker), frame_count=16)
+        vector = network(tokens, durations, torch.tensor([0, 0]), speaker_vector=network.speaker(speaker), frame_count=16)
         self.assertTrue(torch.allclose(vector['unit'], spoken['unit']))
-        # Speaker 0 by default
-        self.assertTrue(torch.allclose(network(tokens, durations, speaker=torch.tensor([0, 0]))['unit'], outputs['unit']))
 
     def test_condition(self):
         network = model.MultiModel(tiny_config())
@@ -124,24 +127,26 @@ class TestModel(unittest.TestCase):
     def test_regulate(self):
         features = torch.arange(6, dtype=torch.float32).reshape(1, 3, 2)
         durations = torch.tensor([[2, 0, 3]])
-        regulated, positions, mask = model.MultiModel.regulate(features, durations)
+        regulated, positions, mask, token_index = model.MultiModel.regulate(features, durations)
         self.assertEqual(regulated[0, :, 0].tolist(), [0.0, 0.0, 4.0, 4.0, 4.0])
+        self.assertEqual(token_index.tolist(), [[0, 0, 2, 2, 2]])
+        self.assertTrue(torch.allclose(positions[0, :, 0], torch.tensor([0.25, 0.75, 0.5 / 3, 1.5 / 3, 2.5 / 3])))
         self.assertEqual(positions.shape, (1, 5, 5))
         self.assertAlmostEqual(float(positions[0, 0, 0]), 0.25)
         self.assertAlmostEqual(float(positions[0, 4, 1]), 1 - 2.5 / 3, places=6)
         self.assertEqual(mask[0, :, 0].tolist(), [1.0] * 5)
         # A longer frame count is masked past the durations
-        regulated, _, mask = model.MultiModel.regulate(features, durations, frame_count=7)
+        regulated, _, mask, _ = model.MultiModel.regulate(features, durations, frame_count=7)
         self.assertEqual(mask[0, :, 0].tolist(), [1.0] * 5 + [0.0] * 2)
         self.assertEqual(regulated[0, 6].tolist(), [0.0, 0.0])
         # All-zero durations give one frame
-        _, _, mask = model.MultiModel.regulate(features, torch.zeros(1, 3, dtype=torch.long))
+        _, _, mask, _ = model.MultiModel.regulate(features, torch.zeros(1, 3, dtype=torch.long))
         self.assertEqual(mask.shape, (1, 1, 1))
 
     def test_infer(self):
         network = model.MultiModel(tiny_config()).eval()
         tokens, _ = token_batch()
-        result = network.infer(tokens)
+        result = network.infer(tokens, torch.tensor([0, 0]))
         self.assertEqual(result['durations'].shape, (2, 6))
         frame_count = result['values'].shape[1]
         self.assertEqual(frame_count, 2 * int(result['durations'].sum(dim=1).max().clamp(min=1)) + 1)

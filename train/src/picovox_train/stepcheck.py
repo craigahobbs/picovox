@@ -6,7 +6,8 @@ The step-0 check - the multi-speaker trainer's losses on fixed batches, from a f
 float hex strings), so two versions of the code can be compared bit for bit. It imports the package from the current
 directory's train/src, so the same file checks another tree (run it with that tree as the working directory):
 
-    build/venv-train/bin/python -B train/src/picovox_train/stepcheck.py --init build/nn/runs/multi-a/step-15000.pt --out a.json
+    NN_DATA_DIR=build/train/data build/venv-train/bin/python -B train/src/picovox_train/stepcheck.py \
+        --init build/train/runs/voice-a/step-15000.pt --out a.json
     (cd ../baseline && ../worktree/build/venv-train/bin/python -B ../worktree/train/src/picovox_train/stepcheck.py ... --out b.json)
 
 Each batch is a few validation utterances of the training speech with fixed crops and noise seeds; the model runs in
@@ -27,6 +28,7 @@ import torch  # noqa: E402
 
 from picovox_train import dsynth  # noqa: E402
 from picovox_train.trainmulti import MULTI_PRIORS, Corpus, batch_losses, collate, default_settings, sonorant_mask  # noqa: E402
+from picovox_train.data import SAMPLE_RATE  # noqa: E402
 from picovox_train.model import MultiModel  # noqa: E402
 
 
@@ -37,23 +39,21 @@ def main(argv=None):
     parser.add_argument('--device', default='cpu')
     parser.add_argument('--batches', type=int, default=3)
     parser.add_argument('--batch', type=int, default=3)
-    parser.add_argument('--config', default='{}', help='model config overrides (JSON) - for checking an option on')
     args = parser.parse_args(argv)
     settings = default_settings()
     device = torch.device(args.device)
     state = torch.load(args.init, map_location='cpu', weights_only=False)
-    config = {**state['config'], **json.loads(args.config)}
     corpus = Corpus('tts', 'val', max_items=64)
     sonorants = torch.tensor(sonorant_mask(corpus.data.index['vocab']), device=device)
-    synth = dsynth.DSynth(settings.rate).to(device)
-    out = {'init': args.init, 'device': args.device, 'config': json.loads(args.config), 'batches': []}
+    synth = dsynth.DSynth(SAMPLE_RATE).to(device)
+    out = {'init': args.init, 'device': args.device, 'batches': []}
     order = sorted(range(len(corpus)), key=lambda index: corpus.items[index]['frameCount'])
     for number in range(args.batches):
         indices = order[number * 7:number * 7 + args.batch]
         row = {'corpus': corpus.name, 'items': [corpus.items[index]['id'] for index in indices]}
         for mode in ('eval', 'train'):
             torch.manual_seed(1)
-            model = MultiModel(config, priors=MULTI_PRIORS).to(device)
+            model = MultiModel(state['config'], priors=MULTI_PRIORS).to(device)
             model.load_state_dict(state['model'], strict=False)
             model.train(mode == 'train')
             batch = collate(corpus, indices, device)
