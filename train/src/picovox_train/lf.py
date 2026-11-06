@@ -3,7 +3,7 @@
 
 """
 The Liljencrants-Fant (LF) glottal flow derivative pulse, parameterized by Rd - a port of the former lib/glottal.js (kept here
-so nn/ doesn't change when lib/ is recalibrated) - and its harmonic table.
+so the training doesn't change when lib/ is recalibrated) - and its harmonic table.
 
 The pulse's shape in normalized time (a fraction of the period) depends only on Rd, and it's normalized so its
 negative peak (Ee) is -1, so its Fourier series coefficients c_k = integral over one period of E(u) exp(-2 pi i k u) du

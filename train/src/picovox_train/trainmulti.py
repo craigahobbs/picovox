@@ -406,7 +406,7 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
     losses['eqSmooth'] = ((eq[:, 2:] - 2 * eq[:, 1:-1] + eq[:, :-2]) ** 2).mean() / 100
 
     # The spectral loss of the rendered crops, both band-limited to the recording's band
-    render = render_values(model, unit, batch, teacher_f0=True)
+    render = render_values(model, unit, batch)
     if prepared is None:
         crop_values, target = crop(render, batch, args.crop_frames, rng)
         plan = None
@@ -427,9 +427,9 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
         # (torch's API for a dynamic dimension is torch._dynamo's)
         torch._dynamo.mark_dynamic(audio, 0)  # pylint: disable=protected-access
         torch._dynamo.mark_dynamic(target, 0)  # pylint: disable=protected-access
-        losses['spectral'] = compiled_spectral_loss(audio, target, SAMPLE_RATE, args.max_hz, mel_eps=1e-9)
+        losses['spectral'] = compiled_spectral_loss(audio, target, SAMPLE_RATE, args.max_hz)
     else:
-        losses['spectral'] = spectral_loss(audio, target, SAMPLE_RATE, args.max_hz, mel_eps=1e-9)
+        losses['spectral'] = spectral_loss(audio, target, SAMPLE_RATE, args.max_hz)
 
     # (the perceptual loss - the crops in the speech recognizer's features, perceptual.py)
     # (on the first --perceptual-crops crops - the recognizer costs several times the step)
@@ -520,9 +520,7 @@ def argument_parser():
     parser.add_argument('--feature-matching', type=float)
     parser.add_argument('--adversarial-start', type=int, help='steps of the critic alone first')
     parser.add_argument('--critic-lr', type=float)
-    parser.add_argument('--critic-precision', choices=['float32', 'bfloat16', 'float16'],
-                        help="the critic's convolutions' precision")
-    parser.add_argument('--critic-channels', type=int, default=32, help="the critic's convolutions' width")
+    parser.add_argument('--critic-channels', type=int, help="the critic's convolutions' width")
     parser.add_argument('--val-every', type=int, default=1000)
     parser.add_argument('--val-from', type=int, default=0, help='validate (every --val-every steps) from this step on')
     parser.add_argument('--save-every', type=int, default=1000, help='save last.pt every this many steps (and at validations)')
@@ -609,8 +607,7 @@ def main(argv=None):
     synth = dsynth.DSynth(SAMPLE_RATE).to(device)
     critic = None
     if args.adversarial > 0:
-        critic_dtype = None if args.critic_precision == 'float32' else getattr(torch, args.critic_precision)
-        critic = discriminator.Critic(SAMPLE_RATE, args.max_hz, eps=1e-9, dtype=critic_dtype, channels=args.critic_channels).to(device)
+        critic = discriminator.Critic(SAMPLE_RATE, args.max_hz, args.critic_channels).to(device)
     # (on the GPU the critic's fused AdamW - one kernel, not a loop over the parameters)
     fused = device.type in ('mps', 'cuda')
     critic_optimizer = torch.optim.AdamW(critic.parameters(), lr=args.critic_lr, betas=(0.8, 0.99),

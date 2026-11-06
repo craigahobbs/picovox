@@ -390,11 +390,10 @@ class TestMain(unittest.TestCase):
         self.assertIn('critic', DATA.last_log)
 
     def test_critic(self):
-        # The critic alone, then with the generator's adversarial and feature-matching losses; float32 convolutions
+        # The critic alone, then with the generator's adversarial and feature-matching losses
         self.assertEqual(DATA.train('critic', '--adversarial', '0.1', '--adversarial-start', '1', '--log-every', '1'), 0)
         self.assertIn('adversarial', DATA.last_log)
         self.assertIn('matching', DATA.last_log)
-        self.assertEqual(DATA.train('critic-float32', '--adversarial', '0.1', '--critic-precision', 'float32', '--steps', '1'), 0)
 
     def test_resume(self):
         # Stopped at step 2, then resumed to the end - the critic's state restored too

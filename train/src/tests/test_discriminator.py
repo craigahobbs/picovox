@@ -61,28 +61,26 @@ class TestDiscriminator(unittest.TestCase):
         apply.assert_called_once_with(mps_input, conv.weight, conv.bias)
 
     def test_spectrogram_discriminator(self):
-        model = discriminator.SpectrogramDiscriminator(16000, 256, 32, 7000.0, channels=4)
+        model = discriminator.SpectrogramDiscriminator(16000, 256, 32, 7000.0, 4)
         audio = torch.randn(2, 4000)
         spectrogram = model.spectrogram(audio)
         self.assertEqual(spectrogram.shape, (2, 1, 63, 32))
-        scores, features = model(audio)
+        scores, features = model.score(spectrogram)
         self.assertEqual(len(features), 5)
         self.assertEqual(scores.shape, (2, 1, 63, 4))
         self.assertEqual(features[1].shape, (2, 4, 63, 16))
 
     def test_critic(self):
-        critic = discriminator.Critic(16000, 7000.0, channels=4)
+        critic = discriminator.Critic(16000, 7000.0, 4)
         audio = torch.randn(2, 4000)
-        outputs = critic(audio)
+        spectrograms = critic.spectrograms(audio)
+        outputs = critic.score(spectrograms)
         self.assertEqual(len(outputs), 3)
+        # Autocast bfloat16 - the scores float32, the features bfloat16
         self.assertEqual(outputs[0][0].dtype, torch.float32)
-        # Autocast precision - the scores float32, the features in the precision
-        low = discriminator.Critic(16000, 7000.0, dtype=torch.bfloat16, channels=4)
-        low.load_state_dict(critic.state_dict())
-        low_outputs = low(audio)
-        self.assertEqual(low_outputs[0][0].dtype, torch.float32)
-        self.assertEqual(low_outputs[0][1][0].dtype, torch.bfloat16)
-        self.assertTrue(torch.allclose(low_outputs[0][0], outputs[0][0], atol=0.1))
+        self.assertEqual(outputs[0][1][0].dtype, torch.bfloat16)
+        scores, _ = critic.discriminators[0].score(spectrograms[0])
+        self.assertTrue(torch.allclose(outputs[0][0], scores, atol=0.1))
 
     def test_losses(self):
         real = [(torch.ones(2, 3), [torch.ones(2, 2)]), (torch.ones(1, 4), [torch.zeros(3)])]

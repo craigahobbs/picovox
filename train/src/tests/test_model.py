@@ -34,7 +34,6 @@ class TestModel(unittest.TestCase):
         mask = torch.ones(2, 5, 1)
         x = torch.randn(2, 5, 8)
         self.assertEqual(model.DepthwiseConv(8, 3)(x).shape, (2, 5, 8))
-        self.assertEqual(model.ConvFFN(8, 16, 3, 0.0)(x, mask).shape, (2, 5, 8))
         attention = model.SelfAttention(8, 2, 0.0)
         # A padded key changes nothing for the others
         padded = torch.cat([x, torch.randn(2, 1, 8)], dim=1)
@@ -46,9 +45,11 @@ class TestModel(unittest.TestCase):
         x = torch.randn(1, 5, 8)
         mask = torch.ones(1, 5, 1)
         # Zero at initialization - unconditioned
-        plain = model.ConvFFN(8, 16, 3, 0.0)
-        plain.load_state_dict({key: value for key, value in block.state_dict().items() if not key.startswith('film')})
-        self.assertTrue(torch.allclose(block(x, mask, torch.randn(1, 1, 4)), plain(x, mask)))
+        output = block(x, mask, torch.randn(1, 1, 4))
+        self.assertEqual(output.shape, (1, 5, 8))
+        self.assertTrue(torch.allclose(output, block(x, mask, torch.randn(1, 1, 4))))
+        hidden = torch.nn.functional.silu(block.conv(torch.nn.functional.silu(block.inner(block.norm(x)))))
+        self.assertTrue(torch.allclose(output, x + block.outer(hidden)))
 
     def test_parameter_count(self):
         self.assertEqual(model.parameter_count(torch.nn.Linear(3, 2)), 8)

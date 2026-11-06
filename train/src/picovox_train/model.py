@@ -19,9 +19,9 @@ pole and zero, the frication spectrum - so the voice and style transforms of par
 shimmer are constants (the spectral loss gives jitter no gradient), and a static per-speaker channel equalizer
 (params.py's EQ, 24 bands) models the recording channel.
 
-F0 gets no useful gradient through the synthesizer (dsynth.py), so the F0 column is trained by regression on the
-recordings' Praat F0 (trainmulti.py, losses.py), and training renders with the recorded F0 (teacher forcing, as
-FastPitch does).
+F0 gets no useful gradient through the synthesizer, so the F0 column is trained by regression on the recordings' Praat
+F0 (trainmulti.py, losses.py), and training renders with the recorded F0 (teacher forcing, as FastPitch does - dsynth.py
+doesn't differentiate in it).
 
 Conditioning: MultiModel's condition vector - a speaker embedding (a row of the speaker table: one voice) - is added
 to the token features, the duration predictor's input, and the decoder's input, and modulates every conv-FFN block
@@ -44,7 +44,7 @@ import torch
 from . import params
 
 
-# The model's hyperparameters (config 'kind': 'multi')
+# The model's hyperparameters
 MULTI_CONFIG = {
     'vocab': 78,
     'dim': 128,                # token feature width
@@ -68,7 +68,7 @@ MULTI_CONFIG = {
 
 
 # Token classes (vocab.json): 0 <pad>, 1 <unk>, 2 <bos>, 3 "_" (word boundary), 4-8 phrase ends, 9+ phones
-PAD, UNK, BOS, WORD = 0, 1, 2, 3
+PAD, BOS, WORD = 0, 2, 3
 FIRST_PHONE = 9
 
 # A boundary token pauses at inference when its pause probability is above this (lib/model.js's too)
@@ -94,19 +94,26 @@ class DepthwiseConv(torch.nn.Module):
         return self.conv(x.transpose(1, 2)).transpose(1, 2)
 
 
-class ConvFFN(torch.nn.Module):
-    """A pre-norm feed-forward block with a depthwise convolution - x + W2 SiLU(DW(SiLU(W1 LN(x))))"""
+class FiLMConvFFN(torch.nn.Module):
+    """A pre-norm feed-forward block with a depthwise convolution, its pre-norm output modulated by the condition (FiLM)
+    - x + W2 SiLU(DW(SiLU(W1 (LN(x) (1 + gamma) + beta)))), [gamma, beta] = Wc c (zero at initialization, so the block
+    starts unconditioned)"""
 
-    def __init__(self, dim, hidden, kernel, dropout):
+    def __init__(self, dim, hidden, kernel, dropout, condition_dim):
         super().__init__()
         self.norm = torch.nn.LayerNorm(dim)
         self.inner = torch.nn.Linear(dim, hidden)
         self.conv = DepthwiseConv(hidden, kernel)
         self.outer = torch.nn.Linear(hidden, dim)
         self.dropout = torch.nn.Dropout(dropout)
+        self.film = torch.nn.Linear(condition_dim, 2 * dim)
+        torch.nn.init.zeros_(self.film.weight)
+        torch.nn.init.zeros_(self.film.bias)
 
-    def forward(self, x, mask):
-        hidden = torch.nn.functional.silu(self.inner(self.norm(x))) * mask
+    def forward(self, x, mask, condition):
+        gamma, beta = self.film(condition).chunk(2, dim=-1)
+        hidden = self.norm(x) * (1 + gamma) + beta
+        hidden = torch.nn.functional.silu(self.inner(hidden)) * mask
         hidden = torch.nn.functional.silu(self.conv(hidden))
         return x + self.dropout(self.outer(hidden)) * mask
 
@@ -152,24 +159,6 @@ def core_parameter_count(model):
 #
 # The multi-speaker model
 #
-
-
-class FiLMConvFFN(ConvFFN):
-    """A conv-FFN block whose pre-norm output is modulated by the condition (FiLM) - x + W2 SiLU(DW(SiLU(W1 (LN(x) (1 +
-    gamma) + beta)))), [gamma, beta] = Wc c (zero at initialization, so the block starts unconditioned)"""
-
-    def __init__(self, dim, hidden, kernel, dropout, condition_dim):
-        super().__init__(dim, hidden, kernel, dropout)
-        self.film = torch.nn.Linear(condition_dim, 2 * dim)
-        torch.nn.init.zeros_(self.film.weight)
-        torch.nn.init.zeros_(self.film.bias)
-
-    def forward(self, x, mask, condition=None):
-        gamma, beta = self.film(condition).chunk(2, dim=-1)
-        hidden = self.norm(x) * (1 + gamma) + beta
-        hidden = torch.nn.functional.silu(self.inner(hidden)) * mask
-        hidden = torch.nn.functional.silu(self.conv(hidden))
-        return x + self.dropout(self.outer(hidden)) * mask
 
 
 class MultiModel(torch.nn.Module):
