@@ -12,14 +12,15 @@ model is spoken by the browser path, tools/speak.js):
 
 - listen - UTMOS and the ECAPA speaker embedding (listeners.py, in a process of its own)
 - transcribe - whisper.cpp base.en (downloads/whisper/ggml-base.en.bin), cached beside each WAV; words and edit_distance give
-  the word error rate as the former tools/eval.js counted it
+  the word error rate
 - cosine - the speaker similarity of two embeddings
 - speak - a batch of texts with an exported model (its speed report)
-- score_model - an export's scores: the recipe's speakers (train/data/train.json panel) by the panel's texts
-  (tools/panel-texts.json), each speaker's mean UTMOS, WER, and mean embedding, and against a reference result, the
+- score_model - an export's scores: the recipe's voices (train/data/train.json tts voices) by the panel's texts
+  (tools/panel-texts.json), each voice's mean UTMOS, WER, and mean embedding, and against a reference result, the
   speaker similarity
-- evaluate_model - a checkpoint (exported, 7-bit - export.py - and packaged, package.py: its module's bytes and gzip
-  bytes) or a packaged module (unpacked - tools/unpack.js) spoken and scored - NN_EVAL_DIR/<name>/result.json
+- evaluate_model - a checkpoint (exported, 7-bit - export.py, as NN_EVAL_DIR/<name>/multi.json and multi.bin, which make
+  train's package stage packages - and packaged, package.py: its module's bytes and gzip bytes) or a packaged module
+  (unpacked - tools/unpack.js) spoken and scored - NN_EVAL_DIR/<name>/result.json
 - eval and gate - make train's: the shipped model (the baseline) and the trained voice evaluated, the voice's
   similarity to the baseline's, and the gate - the voice within the recipe's tolerance of the baseline
   (NN_EVAL_DIR/summary.json; the exit status 1 if not)
@@ -28,7 +29,6 @@ model is spoken by the browser path, tools/speak.js):
 import argparse
 import concurrent.futures
 import datetime
-import gzip
 import json
 import os
 import re
@@ -40,8 +40,7 @@ import time
 import numpy
 
 from .export import export, load_model
-from .model import core_parameter_count, parameter_count
-from .package import package
+from .package import module_size, package
 from . import RECIPE_PATH, ROOT, corpora
 
 
@@ -51,10 +50,13 @@ WHISPER_MODEL = corpora.WHISPER_MODEL
 TEXTS_PATH = os.path.join(ROOT, 'tools', 'panel-texts.json')
 EVAL_DIR = os.environ.get('NN_EVAL_DIR', os.path.join(ROOT, 'build', 'nn', 'eval'))
 
+# The export's name - the voice make train's package stage packages (its manifest's voice)
+EXPORT_VOICE = 'multi'
+
 
 # Score WAV files with the listener panel (on the CPU) - {path: {mos, embedding}}
 def listen(paths):
-    command = [LISTENERS_PYTHON, '-I', LISTENERS_SCRIPT, '--device', 'cpu', '--files-from', '-']
+    command = [LISTENERS_PYTHON, '-I', LISTENERS_SCRIPT, '--files-from', '-']
     process = subprocess.run(command, input='\n'.join(paths), capture_output=True, text=True, check=True)
     return {item['file']: item for item in (json.loads(line) for line in process.stdout.splitlines() if line.strip())}
 
@@ -76,7 +78,7 @@ def transcribe_all(paths, workers=6):
         return dict(zip(paths, pool.map(transcribe, paths)))
 
 
-# Words for scoring (the former tools/eval.js's words)
+# Words for scoring - lowercase, apostrophes dropped, other punctuation a word break
 def words(text):
     return [word for word in re.sub(r'[^a-z0-9\' ]+', ' ', text.lower()).replace("'", '').split() if word]
 
@@ -115,43 +117,36 @@ def speak(model_path, batch, batch_path, rate):
 
 def score_model(model_path, out_dir, settings, reference=None, whisper_workers=6):
     """Speak and score an export (model_path - its manifest and weights without the extension) - {panelSpeed, speakers,
-    utterances, panel}; settings - the recipe's panel ({speakers: [[key, sex]], rate}); reference - another model's result
-    (the similarity)"""
+    utterances, panel}; settings - load_config's ({speakers: [key], rate}); reference - another model's result (the
+    similarity)"""
     with open(model_path + '.json', encoding='utf-8') as file:
         keys = [speaker['key'] for speaker in json.load(file)['speakers']]
     items = []
-    for speaker, sex in settings['speakers']:
+    for speaker in settings['speakers']:
         for number, text in enumerate(panel_texts()):
-            items.append({'speaker': speaker, 'sex': sex, 'text': text['text'],
-                          'wav': os.path.join(out_dir, f'{speaker}-{text["id"]}.wav'), 'seed': number + 1})
+            items.append({'speaker': speaker, 'text': text['text'], 'wav': os.path.join(out_dir, f'{speaker}-{text["id"]}.wav'),
+                          'seed': number + 1})
     batch = [{'text': item['text'], 'wav': item['wav'], 'seed': item['seed'], 'speaker': keys.index(item['speaker'])} for item in items]
     result = {'panelSpeed': speak(model_path, batch, os.path.join(out_dir, 'batch.json'), settings['rate'])}
     paths = [item['wav'] for item in items]
     scores = listen(paths)
     transcripts = transcribe_all(paths, whisper_workers)
     speakers = {}
-    for speaker, sex in settings['speakers']:
+    for speaker in settings['speakers']:
         group = [item for item in items if item['speaker'] == speaker]
-        mos = [scores[item['wav']]['mos'] for item in group]
         errors = sum(edit_distance(words(item['text']), words(transcripts[item['wav']])) for item in group)
         count = sum(len(words(item['text'])) for item in group)
         embedding = numpy.mean([scores[item['wav']]['embedding'] for item in group], axis=0)
-        row = {'sex': sex, 'mos': float(numpy.mean(mos)), 'mosMin': float(numpy.min(mos)), 'wer': 100 * errors / max(1, count),
+        row = {'mos': float(numpy.mean([scores[item['wav']]['mos'] for item in group])), 'wer': 100 * errors / max(1, count),
                'embedding': embedding.tolist()}
         if reference is not None:
             row['similarity'] = cosine(embedding, reference['speakers'][speaker]['embedding'])
-            row['pairedSimilarity'] = float(numpy.mean([
-                cosine(scores[item['wav']]['embedding'], reference['utterances'][os.path.basename(item['wav'])]['embedding'])
-                for item in group]))
         speakers[speaker] = row
     result['speakers'] = speakers
-    result['utterances'] = {os.path.basename(item['wav']): {'mos': scores[item['wav']]['mos'],
-                                                            'embedding': scores[item['wav']]['embedding'],
-                                                            'transcript': transcripts[item['wav']]} for item in items}
+    result['utterances'] = {os.path.basename(item['wav']): {'mos': scores[item['wav']]['mos'], 'transcript': transcripts[item['wav']]}
+                            for item in items}
     result['panel'] = {key: float(numpy.mean([row[key] for row in speakers.values()]))
-                       for key in ('mos', 'wer', 'similarity', 'pairedSimilarity') if all(key in row for row in speakers.values())}
-    if reference is not None:
-        result['panel']['similarityMin'] = float(min(row['similarity'] for row in speakers.values()))
+                       for key in ('mos', 'wer', 'similarity') if all(key in row for row in speakers.values())}
     for path in paths:
         os.remove(path)
     return result
@@ -161,10 +156,11 @@ def score_model(model_path, out_dir, settings, reference=None, whisper_workers=6
 # make train's evaluation and gate
 #
 
-# The settings - the recipe's (train/data/train.json) panel
+# The settings - the recipe's (train/data/train.json) panel, and its speakers: the training speech's voices' keys (tts voices)
 def load_config(path=RECIPE_PATH):
     with open(path, encoding='utf-8') as file:
-        return json.load(file)['panel']
+        recipe = json.load(file)
+    return {**recipe['panel'], 'speakers': list(recipe['tts']['voices'])}
 
 
 # A path relative to the repository root as an absolute path
@@ -182,37 +178,28 @@ def log_line(text):
 
 
 def evaluate_model(name, checkpoint, settings, reference=None, whisper_workers=6):
-    """Export, package, speak, and score a checkpoint, or speak and score a packaged module (a .js path - unpacked to its
-    export, tools/unpack.js) as packaged - its result (also EVAL_DIR/<name>/result.json); reference - another model's
-    result (the similarity)"""
+    """Export, package, speak, and score a checkpoint (its export EVAL_DIR/<name>/EXPORT_VOICE.json and .bin), or speak and
+    score a packaged module (a .js path - unpacked to its export, tools/unpack.js) as packaged - its result (also
+    EVAL_DIR/<name>/result.json); reference - another model's result (the similarity)"""
     out_dir = os.path.join(EVAL_DIR, name)
     if os.path.exists(out_dir):
         shutil.rmtree(out_dir)
     os.makedirs(out_dir)
     start = time.time()
-    model_path = os.path.join(out_dir, 'model')
+    model_path = os.path.join(out_dir, EXPORT_VOICE)
     if checkpoint.endswith('.js'):
         subprocess.run(['node', os.path.join(ROOT, 'tools', 'unpack.js'), root_path(checkpoint), model_path], check=True)
-        with open(model_path + '.json', encoding='utf-8') as file:
-            manifest = json.load(file)
-        with open(root_path(checkpoint), 'rb') as file:
+        with open(root_path(checkpoint), encoding='utf-8') as file:
             module = file.read()
-        # (the parameter count - package.py's header comment)
-        result = {'name': name, 'checkpoint': checkpoint, 'step': None, 'config': manifest['config'],
-                  'parameters': int(re.search(rb'\((\d+) parameters', module).group(1)),
-                  'size': {'binBytes': os.path.getsize(model_path + '.bin'),
-                           'manifestBytes': len(json.dumps(manifest, separators=(',', ':')).encode('utf-8')),
-                           'encoding': 'module', 'moduleBytes': len(module), 'moduleGzipBytes': len(gzip.compress(module, 9))}}
     else:
         model, state = load_model(checkpoint)
-        result = {'name': name, 'checkpoint': checkpoint, 'step': state.get('step'),
-                  'config': {key: model.config[key]
-                             for key in ('dim', 'decoderDim', 'encoderLayers', 'decoderLayers', 'heads', 'ffnMultiple')},
-                  'parameters': parameter_count(model), 'parametersCore': core_parameter_count(model)}
-        export(model, state, 'model', out_dir, speaker=0)
-        _, sizes = package(model_path)
-        result['size'] = {'binBytes': sizes['binBytes'], 'manifestBytes': sizes['manifestBytes'], 'encoding': sizes['chosen'],
-                          'moduleBytes': sizes[sizes['chosen']]['bytes'], 'moduleGzipBytes': sizes[sizes['chosen']]['gzipBytes']}
+        export(model, state, EXPORT_VOICE, out_dir)
+        module = package(model_path)
+    with open(model_path + '.json', encoding='utf-8') as file:
+        parameters = json.load(file)['parameterCount']
+    size = module_size(module)
+    result = {'name': name, 'checkpoint': checkpoint, 'parameters': parameters,
+              'size': {'moduleBytes': size['bytes'], 'moduleGzipBytes': size['gzipBytes']}}
     result.update(score_model(model_path, out_dir, settings, reference, whisper_workers))
     result['seconds'] = round(time.time() - start, 1)
     with open(os.path.join(out_dir, 'result.json'), 'w', encoding='utf-8') as file:

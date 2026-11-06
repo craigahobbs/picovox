@@ -131,7 +131,7 @@ test('trainStages', () => {
         const [, body] = joinedMakefile.match(new RegExp(`^${target}:\\n((?:\\t[^\\n]*\\n)*)`, 'm'));
         assert(body.startsWith(`\t$(call TRAIN_TARGET,${target})\n`), target);
         const [make, report] = body.trimEnd().split('\n').slice(-2);
-        assert(make.endsWith(` train-util ${stamps}`) || make.endsWith(` BESIDE= ${stamps}`), target);
+        assert(make.endsWith(` --no-print-directory ${stamps}`) || make.endsWith(` BESIDE= ${stamps}`), target);
         assert.equal(report, '\t@$(TRAIN_REPORT)', target);
     }
 

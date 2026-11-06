@@ -3,9 +3,9 @@
 // critical path and the ETA), the utilization samples, and the listening samples by model
 
 
-// A local time from "YYYY-MM-DD HH:MM:SS" (or with a T) - ms
+// A local time from "YYYY-MM-DDTHH:MM:SS" - ms
 export function parseLocalTime(text) {
-    const match = text.match(/^(\d{4})-(\d\d)-(\d\d)[ T](\d\d):(\d\d):(\d\d)/);
+    const match = text.match(/^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)/);
     if (match === null) {
         return NaN;
     }
@@ -33,20 +33,16 @@ export function stageOrder(manifest) {
 }
 
 
-// The stages a make target builds - a stage and every stage it needs, or one of the manifest's targets (make train,
-// train-voice, train-g2p, and their -checks: their stages and every stage those need); an unknown target - every stage
+// The stages a make target builds - one of the manifest's targets (make train, train-voice, train-g2p): its stages and
+// every stage those need
 export function targetStages(manifest, target) {
     const byName = new Map(manifest.stages.map((stage) => [stage.stage, stage]));
-    const roots = manifest.targets?.[target] ?? (byName.has(target) ? [target] : null);
-    if (roots === null) {
-        return new Set(byName.keys());
-    }
     const included = new Set();
     const visit = (name) => {
         included.add(name);
         byName.get(name).needs.forEach(visit);
     };
-    roots.forEach(visit);
+    manifest.targets[target].forEach(visit);
     return included;
 }
 
@@ -112,15 +108,13 @@ export function sessionStart(events, now, gapMs) {
 }
 
 
-// Parse util.log (tools/trainutil.sh, or an earlier sampler's "HH:MM:SS cpu gpu stages" lines dated from baseTime) -
-// [{time, cpu, gpu, mem, system, powerIn, thermal}] (system and powerIn - the system's power and the power it takes in,
-// watts; thermal - macOS's thermal pressure level, 0 nominal to 4; NaN when not sampled) - each header line names the
-// columns
-export function parseUtilLog(text, baseTime) {
+// Parse util.log (tools/trainutil.sh - each sampler's header line names its columns, then a line a sample, its time
+// local, YYYY-MM-DDTHH:MM:SS) - [{time, cpu, gpu, mem, system, powerIn, thermal}] (system and powerIn - the system's
+// power and the power it takes in, watts; thermal - macOS's thermal pressure level, 0 nominal to 4; NaN when not
+// sampled)
+export function parseUtilLog(text) {
     const samples = [];
-    let columns = ['time', 'cpu_busy%', 'gpu%', 'mem_used%'];
-    let dayStart = new Date(baseTime).setHours(0, 0, 0, 0);
-    let previous = null;
+    let columns = [];
     for (const line of text.split('\n')) {
         const fields = line.trim().split(/\s+/);
         if (fields[0] === 'time') {
@@ -130,22 +124,10 @@ export function parseUtilLog(text, baseTime) {
         const header = columns;
         const indexes = ['cpu_busy%', 'gpu%', 'mem_used%', 'system_w', 'power_in_w', 'thermal'].map((name) => header.indexOf(name));
         const [cpu, gpu, mem, system, powerIn, thermal] = indexes.map((index) => (index === -1 ? NaN : Number(fields[index])));
-        let time;
-        if (fields[0].includes('T')) {
-            time = parseLocalTime(fields[0]);
-        } else {
-            const [hours, minutes, seconds] = fields[0].split(':').map(Number);
-            time = dayStart + ((hours * 60 + minutes) * 60 + seconds) * 1000;
-            if (previous !== null && time < previous - 12 * 3600 * 1000) {
-                // Past midnight
-                dayStart += 24 * 3600 * 1000;
-                time += 24 * 3600 * 1000;
-            }
-        }
+        const time = parseLocalTime(fields[0]);
         if (!Number.isFinite(time) || !Number.isFinite(cpu)) {
             continue;
         }
-        previous = time;
         samples.push({time, cpu, gpu, mem, system, powerIn, thermal});
     }
     return samples;

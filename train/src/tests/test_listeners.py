@@ -3,7 +3,6 @@
 
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
-import argparse
 import contextlib
 import importlib
 import io
@@ -79,9 +78,9 @@ class TestArguments(unittest.TestCase):
             list_path = os.path.join(directory, 'list.txt')
             with open(list_path, 'w', encoding='utf-8') as file:
                 file.write('b.wav\n\n  c.wav \n')
-            args = listeners.parse_args(['a.wav', '--files-from', list_path, '--no-mos', '--device', 'cpu'])
+            args = listeners.parse_args(['a.wav', '--files-from', list_path, '--no-embedding'])
         self.assertEqual(args.files, ['a.wav', 'b.wav', 'c.wav'])
-        self.assertEqual((args.no_mos, args.no_embedding, args.device, args.chunk_seconds), (True, False, 'cpu', 20))
+        self.assertTrue(args.no_embedding)
         with unittest.mock.patch.object(sys, 'stdin', io.StringIO('d.wav\n')):
             self.assertEqual(listeners.parse_args(['--files-from', '-']).files, ['d.wav'])
         with helpers.captured() as (_, stderr), self.assertRaises(SystemExit):
@@ -119,19 +118,19 @@ class TestModels(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, \
                 unittest.mock.patch.object(torch.hub, 'get_dir', return_value=directory), \
                 unittest.mock.patch.object(torch.hub, 'load', return_value=FakeUtmos()) as load:
-            model = listeners.load_utmos('cpu')
+            model = listeners.load_utmos()
             self.assertFalse(model.training)
             self.assertEqual(load.call_args, unittest.mock.call(listeners.UTMOS_REPO, 'utmos22_strong', trust_repo=True, progress=False))
             repo_dir = os.path.join(directory, listeners.UTMOS_REPO_DIR)
             os.makedirs(repo_dir)
             with open(os.path.join(repo_dir, 'hubconf.py'), 'w', encoding='utf-8') as file:
                 file.write('')
-            listeners.load_utmos('cpu')
+            listeners.load_utmos()
             self.assertEqual(load.call_args, unittest.mock.call(repo_dir, 'utmos22_strong', source='local', progress=False))
 
     def test_load_ecapa(self):
         with fake_libraries() as (_, speaker):
-            self.assertIsInstance(listeners.load_ecapa('cpu'), FakeEcapa)
+            self.assertIsInstance(listeners.load_ecapa(), FakeEcapa)
         self.assertEqual(speaker.EncoderClassifier.from_hparams.call_args, unittest.mock.call(
             source=f'/snapshots/{listeners.ECAPA_REPO}', savedir=os.path.join(listeners.CACHE_DIR, 'spkrec-ecapa-voxceleb'),
             run_opts={'device': 'cpu'}))
@@ -154,18 +153,18 @@ class TestScoring(unittest.TestCase):
 
     def test_score_file(self):
         models = {'mos': FakeUtmos(), 'embedding': FakeEcapa()}
-        with tempfile.TemporaryDirectory() as directory, helpers.captured() as (stdout, _):
+        with tempfile.TemporaryDirectory() as directory, helpers.captured() as (stdout, _), \
+                unittest.mock.patch.object(listeners, 'CHUNK_SECONDS', 0.4):
             path = write_wav(directory, 'a.wav', 1.0, 16000)
-            args = argparse.Namespace(chunk_seconds=0.4, device='cpu')
-            result = listeners.score_file(path, models, args)
-            alone = listeners.score_file(path, {}, args)
+            result = listeners.score_file(path, models)
+            alone = listeners.score_file(path, {'mos': models['mos']})
         self.assertEqual(stdout.getvalue(), '')
         self.assertEqual(set(result), {'file', 'seconds', 'mos', 'embedding'})
         self.assertEqual((result['file'], result['seconds']), (path, 1.0))
         self.assertGreater(result['mos'], 3)
         lengths = [5334, 5334, 5332]
         self.assertEqual(result['embedding'], [round(sum(length * length for length in lengths) / 16000, 5), 1.0, 0.0])
-        self.assertEqual(alone, {'file': path, 'seconds': 1.0})
+        self.assertEqual(alone, {'file': path, 'seconds': 1.0, 'mos': result['mos']})
 
 
 # Standard output with a bytes buffer (main writes its JSON lines to sys.stdout.buffer), kept readable after main closes
@@ -183,7 +182,6 @@ class TestMain(unittest.TestCase):
     def test_main(self):
         with tempfile.TemporaryDirectory() as directory, fake_libraries(), helpers.captured(), \
                 unittest.mock.patch.object(torch, 'set_num_threads') as set_num_threads, \
-                unittest.mock.patch.object(torch.backends.mps, 'is_available', return_value=False), \
                 unittest.mock.patch.object(listeners, 'load_utmos', return_value=FakeUtmos()) as load_utmos, \
                 unittest.mock.patch.object(listeners, 'quiet_libraries') as quiet:
             paths = [write_wav(directory, 'a.wav', 0.5, 16000), write_wav(directory, 'b.wav', 0.25, 22050)]
@@ -192,16 +190,16 @@ class TestMain(unittest.TestCase):
                 listeners.main(paths)
             lines = [json.loads(line) for line in stdout.buffer.getvalue().decode('utf-8').splitlines()]
             stdout = FakeStdout()
-            argv = ['listeners.py', paths[0], '--no-mos', '--no-embedding', '--device', 'cpu']
+            argv = ['listeners.py', paths[0], '--no-embedding']
             with unittest.mock.patch.object(sys, 'stdout', stdout), unittest.mock.patch.object(sys, 'argv', argv):
                 listeners.main()
             bare = [json.loads(line) for line in stdout.buffer.getvalue().decode('utf-8').splitlines()]
         quiet.assert_called()
         set_num_threads.assert_called_with(max(1, min(8, os.cpu_count() or 1)))
-        self.assertEqual(load_utmos.call_args, unittest.mock.call('cpu'))
+        self.assertEqual(load_utmos.call_args, unittest.mock.call())
         self.assertEqual([line['file'] for line in lines], paths)
         self.assertEqual(set(lines[0]), {'file', 'seconds', 'mos', 'embedding'})
-        self.assertEqual(bare, [{'file': paths[0], 'seconds': 0.5}])
+        self.assertEqual(bare, [{'file': paths[0], 'seconds': 0.5, 'mos': lines[0]['mos']}])
 
     def test_module_main(self):
         with unittest.mock.patch.object(sys, 'argv', ['listeners.py']), self.assertRaises(SystemExit), helpers.captured(), \

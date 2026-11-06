@@ -64,7 +64,7 @@ class TestSynthesize(unittest.TestCase):
         self.assertEqual(voice.eq.shape, (params.EQ_BAND_COUNT,))
         # The export's weights
         model, _ = export.load_model(self.checkpoint)
-        self.assertTrue(torch.equal(voice.model.head.weight, export.quantized_model(model).head.weight))
+        self.assertTrue(torch.equal(voice.model.head.weight, export.quantized_model(model, export.training_data()).head.weight))
         self.assertFalse(torch.equal(voice.model.head.weight, model.head.weight))
         # (the tiny training data has no <question> - remapped to <period>)
         self.assertEqual(voice.remap[voice.vocab.index('<question>')], voice.vocab.index('<period>'))

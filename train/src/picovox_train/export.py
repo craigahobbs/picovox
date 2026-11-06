@@ -5,7 +5,7 @@
 Export - a trained model (a trainmulti.py checkpoint) to the browser's format, <out>/<voice>.bin
 and <out>/<voice>.json (default train/data/), which lib/model.js loads (and package.py packages as a module):
 
-    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.export build/nn/runs/multi-b/best.pt --voice multi
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.export build/train/runs/voice-b/best.pt --voice multi
 
 The multi-speaker model (model.py's MultiModel) exports whole: its speaker table (a row per voice - the training
 speech's voices, tts.py, in the recipe's order) and its channel equalizers (eq_table, dB, a row per speaker,
@@ -52,12 +52,9 @@ CALIBRATION = 256
 CALIBRATION_SEED = 0
 
 
-# Load a checkpoint's model (on the CPU, in eval mode) - (model, checkpoint); the multi-speaker model only (config
-# 'kind': 'multi' - the single-speaker model and its trainer, nn/train.py, are in git history)
+# Load a checkpoint's model (on the CPU, in eval mode) - (model, checkpoint)
 def load_model(path, device='cpu'):
     state = torch.load(path, map_location=device, weights_only=False)
-    if state['config'].get('kind') != 'multi':
-        raise ValueError('only the multi-speaker model (config kind "multi") is supported')
     model = MultiModel(state['config'], priors=state.get('priors'))
     model.load_state_dict(state['model'])
     return model.to(device).eval(), state
@@ -75,10 +72,15 @@ def exported_tensors(model):
     return tensors
 
 
+# The training speech's data (data.py's CorpusData - the multi-speaker model's corpus), which the export reads for its
+# calibration, its token remap, its speakers, and its license
+def training_data():
+    return CorpusData(os.path.join(DATA_DIR, 'tts'))
+
+
 # The calibration utterances - [(tokens [1, N], durations [1, N], speaker [1])] - CALIBRATION of the training speech's
 # training split (a fixed seed's selection, in corpus order)
-def calibration_items():
-    data = CorpusData(os.path.join(DATA_DIR, 'tts'))
+def calibration_items(data):
     speakers = data.index['speakers']
     entries = data.entries('train')
     if len(entries) > CALIBRATION:
@@ -95,8 +97,8 @@ def calibration_items():
 
 # The quantized layers' input covariances - {weight name: H [in, in]} (float64, the mean over the calibration inputs of
 # x x^T); a depthwise convolution's per channel, [channels, kernel, kernel] (each channel's windows); not the embedding
-# tables (lookups)
-def input_covariances(model):
+# tables (lookups); data - the training speech's (training_data)
+def input_covariances(model, data):
     modules = dict(model.named_modules())
     sums = {}
     hooks = []
@@ -118,7 +120,7 @@ def input_covariances(model):
             sums[name] = (total + covariance, seen + count)
         hooks.append(module.register_forward_hook(hook))
     with torch.no_grad():
-        for tokens, durations, speaker in calibration_items():
+        for tokens, durations, speaker in calibration_items(data):
             model(tokens, durations, speaker)
     for hook in hooks:
         hook.remove()
@@ -127,17 +129,17 @@ def input_covariances(model):
 
 # A model's exported quantized tensors - {name: (values, scales)} (quant.quantize's, GPTQ where the layer has a
 # covariance)
-def quantized_tensors(model):
-    covariances = input_covariances(model)
+def quantized_tensors(model, data):
+    covariances = input_covariances(model, data)
     return {name: quant.quantize(tensor, covariances.get(name)) for name, tensor in exported_tensors(model).items()
             if quant.is_quantized(tensor, name)}
 
 
 # A copy of a model with its weights quantized and dequantized - the exported model, in PyTorch
-def quantized_model(model):
+def quantized_model(model, data):
     model = copy.deepcopy(model)
     state = model.state_dict()
-    for name, (values, scales) in quantized_tensors(model).items():
+    for name, (values, scales) in quantized_tensors(model, data).items():
         state[name] = torch.tensor(quant.dequantize(values, scales, state[name].shape))
     model.load_state_dict(state)
     return model
@@ -162,10 +164,9 @@ def token_remap(vocab, counts, minimum=10):
     return remap
 
 
-# The training token counts of the training speech (the multi-speaker model's corpus) - (counts, its vocabulary)
-def training_token_counts():
+# The training token counts of the training speech - (counts, its vocabulary)
+def training_token_counts(data):
     counts = collections.Counter()
-    data = CorpusData(os.path.join(DATA_DIR, 'tts'))
     for entry in data.entries('train'):
         counts.update(numpy.asarray(data.tokens[entry['tokenOffset']:entry['tokenOffset'] + entry['tokenCount']]).tolist())
     return counts, data.index['vocab']
@@ -173,8 +174,8 @@ def training_token_counts():
 
 # The multi-speaker model's speaker list - [{id, key, sex, source, medianF0}] from the training speech's index (each
 # speaker's row its index)
-def speaker_list(state):
-    speakers = CorpusData(os.path.join(DATA_DIR, 'tts')).index['speakers']
+def speaker_list(state, data):
+    speakers = data.index['speakers']
     out = []
     for index, key in enumerate(state['speakers']):
         speaker = speakers[key]
@@ -198,13 +199,15 @@ def relative_paths(value):
     return value
 
 
-# Export a model - writes <out>/<voice>.bin and <voice>.json, returns the manifest
-def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0):
+# Export a model - writes <out>/<voice>.bin and <voice>.json, returns the manifest (the default speaker's - the first's -
+# channel equalizer)
+def export(model, state, voice, out_dir=OUT_DIR):
     os.makedirs(out_dir, exist_ok=True)
+    corpus = training_data()
     chunks = []
     offset = 0
     tensors = []
-    quantized = quantized_tensors(model)
+    quantized = quantized_tensors(model, corpus)
     for name, tensor in exported_tensors(model).items():
         entry = {'name': name, 'shape': list(tensor.shape)}
         if name in quantized:
@@ -221,21 +224,21 @@ def export(model, state, voice, out_dir=OUT_DIR, extra=None, speaker=0):
             offset += len(data)
         tensors.append(entry)
     binary = b''.join(chunks)
-    counts, vocab = training_token_counts()
+    counts, vocab = training_token_counts(corpus)
     with torch.no_grad():
-        eq = [round(float(value), 3) for value in model.eq(torch.tensor([speaker]))[0]]
+        eq = [round(float(value), 3) for value in model.eq(torch.tensor([0]))[0]]
     manifest = {
         'format': 'voice-synth-nn', 'version': FORMAT_VERSION, 'voice': voice, 'kind': 'multi',
         'description': 'The multi-speaker neural model (picovox_train/trainmulti.py) - tokens to durations to synthesizer '
                        'parameter frames (picovox_train/params.py), rendered by lib/render.js; a voice is a row of the speaker table',
         'config': model.config, 'parameterNames': params.NAMES, 'frameRate': params.FRAME_RATE,
-        'speakers': speaker_list(state), 'defaultSpeaker': speaker,
+        'speakers': speaker_list(state, corpus), 'defaultSpeaker': 0,
         'eq': eq, 'remap': token_remap(vocab, counts), 'vocab': vocab,
         'parameterCount': parameter_count(model),
         'parameterCountCore': core_parameter_count(model),
         'bytes': len(binary), 'tensors': tensors,
         'training': {'step': state.get('step'), 'val': state.get('val'), 'args': relative_paths(state.get('args'))},
-        'license': f'Trained on speech generated by {CorpusData(os.path.join(DATA_DIR, "tts")).index["license"]}', **(extra or {})
+        'license': f'Trained on speech generated by {corpus.index["license"]}'
     }
     with open(os.path.join(out_dir, f'{voice}.bin'), 'wb') as file:
         file.write(binary)

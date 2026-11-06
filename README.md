@@ -351,17 +351,16 @@ file out:
 
 ```sh
 make build/venv-train.build                                 # build/venv-train from train/requirements.txt
-build/venv-train/bin/python -I train/src/picovox_train/listeners.py [--no-mos] [--no-embedding] [--device auto|cpu|mps] \
-    [--files-from list.txt|-] file.wav ...
+build/venv-train/bin/python -I train/src/picovox_train/listeners.py [--no-embedding] [--files-from list.txt|-] file.wav ...
 ```
 
 ```json
 {"file": "a.wav", "seconds": 2.63, "mos": 3.33, "embedding": [31.48, ...]}
 ```
 
-The models load once per run (4-7 s) and then score about 35 seconds of speech a second (6 sentences) on an M3 Max's
-GPU (MPS, the default on Apple silicon - about 3x the CPU, with the same scores). Files longer than 20 s are scored in
-chunks. The models download on first use - about 1.5 GB, into `downloads/listeners/` (torch.hub, Hugging Face - the
+The models load once per run (4-7 s) and score on the CPU (make train leaves the GPU to training - on an M3 Max's GPU,
+MPS, they scored about 3x as fast, with the same scores). Files longer than 20 s are scored in chunks. The models
+download on first use - about 1.5 GB, into `downloads/listeners/` (torch.hub, Hugging Face - the
 training speech's phoneme recognizer, `picovox_train/ctc.py`'s, downloads there too; like the training speech, `make
 clean` keeps them - `make superclean` removes them) - and later runs need no network.
 
@@ -436,7 +435,7 @@ The flow:
    trained voice when it's preferred at least as often, else too close to call. A retrain of an unchanged recipe is
    usually no audible difference - the A/B is its guardrail against a bad run; a recipe change is where it decides.
 4. `make train-install` - the trained modules that differ into `lib/models/` (the G2P when it differs below its
-   comment header; `picovox_train.trained install`) - or one model, `make train-install-voice` or `make
+   comment header, the voice but its manifest's provenance; `picovox_train.trained install`) - or one model, `make train-install-voice` or `make
    train-install-g2p`; then `make commit` and commit them.
 
 The `train-*` targets run their commands - none decides on another's results. `make train-check` and `make
@@ -447,7 +446,7 @@ time (`picovox_train/gpulock.py` - two at once each run at about half speed) whi
 
 | Stage | Runs on | Needs |
 | --- | --- | --- |
-| tts-corpus - the training speech: the local TTS model's clips (`picovox_train.tts generate` - Ollama) and their CTC alignment (`tts align`), in `downloads/tts/` | GPU - about 45 and 15 minutes the first time, a minute cached | `lib/models/g2pModel.js`, the dictionary |
+| tts-corpus - the training speech: the local TTS model's clips (`picovox_train.tts generate` - Ollama) and their CTC alignment (`tts align`), in `downloads/tts/` | GPU - about 40 and 26 minutes the first time, a minute cached | `lib/models/g2pModel.js`, the dictionary |
 | tts-readings - the heteronym tokens' readings measured (`picovox_train.measure`), and the clips whose tokens they change aligned again | GPU - a minute cached | tts-corpus |
 | data-tts - the voices' training data (`picovox_train.tts build`, `build/train/data/tts/` - the clips' checks): built once for its inputs and cached with the training speech (`downloads/tts/.../build-KEY/` - the key a hash of the selection, the alignments, the readings, the recipe's `tts`, the G2P module, and the build's own code - not the trainer's), hard-linked into the run | CPU (every core) - ~9 min to build, seconds cached | tts-readings |
 | voice-a, voice-b - the voice's two training stages (`picovox_train.trainmulti --recipe voice.a`, `voice.b`) | GPU | data-tts |
@@ -473,7 +472,7 @@ the CPU.
 Each training stage's final model - stage A's last checkpoint (which stage B starts from) and stage B's best (the model
 the package stage ships) - is rendered
 for listening as the stage finishes, in its own CPU stage beside the next GPU stage (`tools/trainsamples.js`): exported
-as the package stage exports it, it speaks `train/data/train.json`'s `samples` texts (Moby-Dick's opening, a dialogue,
+as the gate exports it (the export the package stage packages), it speaks `train/data/train.json`'s `samples` texts (Moby-Dick's opening, a dialogue,
 and heteronyms) in six of the package's voices (three female, three male) exactly as the package speaks a
 sentence (`lib/synthesis.js`, every word pronounced by the G2P network), and each sample is scored with UTMOS on the
 CPU. The shipped `lib/models/voiceModel.js` is rendered the same way, as the reference. The WAV files are

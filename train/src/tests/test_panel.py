@@ -39,7 +39,7 @@ class TestPanel(unittest.TestCase):
         self.assertEqual(scores, {'a.wav': {'file': 'a.wav', 'mos': 3.0, 'embedding': [1.0, 0.0]},
                                   'b.wav': {'file': 'b.wav', 'mos': 4.0, 'embedding': [1.0, 0.0]}})
         command, kwargs = calls[0]
-        self.assertEqual(command, [panel.LISTENERS_PYTHON, '-I', panel.LISTENERS_SCRIPT, '--device', 'cpu', '--files-from', '-'])
+        self.assertEqual(command, [panel.LISTENERS_PYTHON, '-I', panel.LISTENERS_SCRIPT, '--files-from', '-'])
         self.assertTrue(os.path.isfile(panel.LISTENERS_SCRIPT))
         self.assertEqual(kwargs['input'], 'a.wav\nb.wav')
 
@@ -146,7 +146,7 @@ class TestPanelScore(unittest.TestCase):
         def transcribe_all(paths, workers):
             self.assertEqual(workers, 2)
             return {path: 'call me ishmael' if path.endswith('one.wav') else 'is it hot' for path in paths}
-        settings = {'speakers': [['female', 'female'], ['male', 'male']], 'rate': 16000}
+        settings = {'speakers': ['female', 'male'], 'rate': 16000}
         with unittest.mock.patch.object(panel, 'panel_texts', return_value=TEXTS), \
                 unittest.mock.patch.object(panel, 'listen', side_effect=listen), \
                 unittest.mock.patch.object(panel, 'transcribe_all', side_effect=transcribe_all):
@@ -159,29 +159,26 @@ class TestPanelScore(unittest.TestCase):
         self.assertGreater(result['panelSpeed']['audioSeconds'], 0)
         self.assertEqual(set(result['speakers']), {'female', 'male'})
         female = result['speakers']['female']
-        self.assertEqual((female['sex'], female['mos'], female['mosMin']), ('female', 3.0, 3.0))
         # (one word wrong of six)
+        self.assertEqual(female, {'mos': 3.0, 'wer': female['wer'], 'embedding': [1.0, 0.0]})
         self.assertAlmostEqual(female['wer'], 100 / 6)
-        self.assertEqual(female['embedding'], [1.0, 0.0])
         self.assertEqual(set(result['utterances']),
                          {'female-one.wav', 'female-two.wav', 'male-one.wav', 'male-two.wav'})
-        self.assertEqual(result['utterances']['male-two.wav']['transcript'], 'is it hot')
+        self.assertEqual(result['utterances']['male-two.wav'], {'mos': 4.0, 'transcript': 'is it hot'})
         self.assertEqual(result['panel'], {'mos': 3.5, 'wer': 100 / 6})
 
         # Against a reference - the speaker similarity
-        reference = {'speakers': {'female': {'embedding': [1.0, 1.0]}, 'male': {'embedding': [0.0, 1.0]}},
-                     'utterances': {name: {'embedding': [0.0, 1.0]} for name in result['utterances']}}
+        reference = {'speakers': {'female': {'embedding': [1.0, 1.0]}, 'male': {'embedding': [0.0, 1.0]}}}
         result = self.score(os.path.join(self.root, 'score-reference'), reference)
         self.assertAlmostEqual(result['speakers']['female']['similarity'], 2 ** -0.5)
-        self.assertAlmostEqual(result['speakers']['female']['pairedSimilarity'], 0.0)
+        self.assertEqual(set(result['panel']), {'mos', 'wer', 'similarity'})
         self.assertAlmostEqual(result['panel']['similarity'], (2 ** -0.5 + 1) / 2)
-        self.assertAlmostEqual(result['panel']['pairedSimilarity'], 0.5)
-        self.assertAlmostEqual(result['panel']['similarityMin'], 2 ** -0.5)
 
 
-# The evaluation's recipe - a tiny panel section
-PANEL = {'speakers': [['female', 'female'], ['male', 'male']], 'rate': 16000,
-         'tolerance': {'mos': 0.05, 'wer': 1.0, 'similarity': 0.85}}
+# The evaluation's recipe - a tiny panel section, and the training speech's voices (their keys the panel's speakers)
+PANEL = {'rate': 16000, 'tolerance': {'mos': 0.05, 'wer': 1.0, 'similarity': 0.85}}
+VOICES = {'female': {'voice': 'Harper', 'sex': 'female'}, 'male': {'voice': 'Trevor', 'sex': 'male'}}
+SETTINGS = {**PANEL, 'speakers': ['female', 'male']}
 
 
 class TestEvaluation(unittest.TestCase):
@@ -196,7 +193,7 @@ class TestEvaluation(unittest.TestCase):
         cls.checkpoint = model_fixtures.write_checkpoint(os.path.join(cls.root, 'voice.pt'), seed=4)
         cls.config = os.path.join(cls.root, 'train.json')
         with open(cls.config, 'w', encoding='utf-8') as file:
-            json.dump({'panel': PANEL}, file)
+            json.dump({'tts': {'voices': VOICES}, 'panel': PANEL}, file)
 
     @classmethod
     def tearDownClass(cls):
@@ -209,13 +206,13 @@ class TestEvaluation(unittest.TestCase):
     # The panel's scores of an export - the reference's similarity if given
     def score_model(self, model_path, out_dir, settings, reference, whisper_workers):
         self.assertTrue(os.path.exists(model_path + '.json'))
-        self.assertEqual((settings, whisper_workers), (PANEL, 2))
+        self.assertEqual((settings, whisper_workers), (SETTINGS, 2))
         return {'panel': {'mos': 3.0 if reference is None else 3.5, 'wer': 2.0, **({} if reference is None else {'similarity': 0.9})},
                 'panelSpeed': {'realTimeTotal': 20.0}, 'outDir': out_dir}
 
     def test_settings(self):
-        self.assertEqual(panel.load_config(self.config), PANEL)
-        self.assertEqual(len(panel.load_config()['speakers']), 12)
+        self.assertEqual(panel.load_config(self.config), SETTINGS)
+        self.assertEqual(panel.load_config()['speakers'][:2], ['male', 'female'])
         self.assertEqual(panel.root_path('/a/b'), '/a/b')
         self.assertEqual(panel.root_path('train/data'), os.path.join(ROOT, 'train/data'))
         with captured() as (_, stderr):
@@ -225,26 +222,34 @@ class TestEvaluation(unittest.TestCase):
             self.assertTrue(file.read().endswith(' hello\n'))
 
     def test_evaluate_model(self):
-        # A checkpoint - exported and packaged; a previous evaluation's directory replaced
+        # A checkpoint - exported (the package stage's export, the same as export.py's) and packaged; a previous
+        # evaluation's directory replaced
         os.makedirs(os.path.join(panel.EVAL_DIR, 'voice', 'stale'))
         with unittest.mock.patch.object(panel, 'score_model', side_effect=self.score_model):
-            result = panel.evaluate_model('voice', self.checkpoint, PANEL, whisper_workers=2)
-        self.assertEqual((result['name'], result['step'], result['config']['dim']), ('voice', 3, 16))
+            result = panel.evaluate_model('voice', self.checkpoint, SETTINGS, whisper_workers=2)
+        self.assertEqual((result['name'], result['checkpoint']), ('voice', self.checkpoint))
         self.assertEqual(result['panel']['mos'], 3.0)
-        self.assertGreater(result['size']['moduleBytes'], result['size']['binBytes'])
-        self.assertEqual(result['parameters'], export.parameter_count(export.load_model(self.checkpoint)[0]))
         out_dir = os.path.join(panel.EVAL_DIR, 'voice')
+        export_dir = os.path.join(self.root, 'voice-export')
+        with helpers.captured():
+            export.main([self.checkpoint, '--voice', 'multi', '--out', export_dir])
+        for suffix in ('json', 'bin'):
+            with open(os.path.join(out_dir, f'multi.{suffix}'), 'rb') as file, \
+                    open(os.path.join(export_dir, f'multi.{suffix}'), 'rb') as exported:
+                self.assertEqual(file.read(), exported.read(), suffix)
+        text = package.package(os.path.join(out_dir, 'multi'))
+        self.assertEqual(result['size'], {'moduleBytes': len(text.encode('utf-8')),
+                                          'moduleGzipBytes': package.module_size(text)['gzipBytes']})
+        self.assertEqual(result['parameters'], export.parameter_count(export.load_model(self.checkpoint)[0]))
         self.assertFalse(os.path.exists(os.path.join(out_dir, 'stale')))
         self.assertEqual(panel.load_result('voice'), result)
-        with open(os.path.join(out_dir, 'model.json'), encoding='utf-8') as file:
-            self.assertEqual(json.load(file)['defaultSpeaker'], 0)
 
     def test_evaluate_module(self):
         # A packaged module - unpacked (tools/unpack.js), scored as packaged
         model, state = export.load_model(self.checkpoint)
         export_dir = os.path.join(self.root, 'module-export')
         export.export(model, state, 'model', export_dir)
-        text, _ = package.package(os.path.join(export_dir, 'model'))
+        text = package.package(os.path.join(export_dir, 'model'))
         module_path = os.path.join(self.root, 'voiceModel.js')
         with open(module_path, 'w', encoding='utf-8') as file:
             file.write(text)
@@ -259,12 +264,11 @@ class TestEvaluation(unittest.TestCase):
                 file.write(weights)
         with unittest.mock.patch.object(panel, 'score_model', side_effect=self.score_model), \
                 unittest.mock.patch.object(panel.subprocess, 'run', side_effect=unpack):
-            result = panel.evaluate_model('baseline', module_path, PANEL, reference={'speakers': {}}, whisper_workers=2)
-        self.assertEqual((result['checkpoint'], result['step']), (module_path, None))
+            result = panel.evaluate_model('baseline', module_path, SETTINGS, reference={'speakers': {}}, whisper_workers=2)
+        self.assertEqual(result['checkpoint'], module_path)
         self.assertEqual(result['parameters'], export.parameter_count(model))
-        self.assertEqual(result['size']['encoding'], 'module')
-        self.assertEqual(result['size']['moduleBytes'], len(text.encode('utf-8')))
-        self.assertEqual(result['size']['binBytes'], os.path.getsize(os.path.join(export_dir, 'model.bin')))
+        self.assertEqual(result['size'], {'moduleBytes': len(text.encode('utf-8')),
+                                          'moduleGzipBytes': package.module_size(text)['gzipBytes']})
         self.assertEqual(result['panel']['mos'], 3.5)
 
     def run_main(self, *argv):
@@ -277,7 +281,7 @@ class TestEvaluation(unittest.TestCase):
         calls = []
 
         def evaluate_model(name, checkpoint, settings, reference, whisper_workers):
-            self.assertEqual(settings, PANEL)
+            self.assertEqual(settings, SETTINGS)
             calls.append((name, checkpoint, reference, whisper_workers))
             result = {'name': name, 'parameters': 10, 'size': {'moduleBytes': 100, 'moduleGzipBytes': 90}, 'seconds': 1.0,
                       'panel': {'mos': 3.0, 'wer': 1.5, **({'similarity': 0.9} if reference else {})}}

@@ -6,13 +6,16 @@
 # TRAIN_DIR/stages.jsonl ({"stage", "event": start|end|fail, "time": epoch seconds}), and each command's output (stdout
 # and stderr) also in TRAIN_DIR/logs/STAGE.log and any --log file (a training run's train.log)
 #
-# tools/trainstage.sh TRAIN_DIR STAGE start|end
-# tools/trainstage.sh TRAIN_DIR STAGE [--log FILE]... -- [VAR=value]... COMMAND [ARG]...
+# tools/trainstage.sh TRAIN_DIR STAGE MAKE_PID start|end
+# tools/trainstage.sh TRAIN_DIR STAGE MAKE_PID [--log FILE]... -- [VAR=value]... COMMAND [ARG]...
+#
+# MAKE_PID is the running make's process id (the Makefile's STAGE passes it)
 
 set -u
 dir=$1
 stage=$2
-shift 2
+make_pid=$3
+shift 3
 mkdir -p "$dir/logs"
 
 # Append an event (with optional extra JSON members)
@@ -20,12 +23,10 @@ event() {
     printf '{"stage": "%s", "event": "%s", "time": %s%s}\n' "$stage" "$1" "$(date +%s)" "${2:-}" >> "$dir/stages.jsonl"
 }
 
-# The start and end events - a start also starts the utilization sampler for the life of this make, if none runs (make
-# train starts it first; a stage target run alone doesn't)
+# The start and end events - a start also starts the utilization sampler for the life of the make, if none runs
 if [ "${1:-}" = start ] || [ "${1:-}" = end ]; then
     event "$1"
     if [ "$1" = start ]; then
-        make_pid=$(ps -o ppid= -p "$PPID" | tr -d ' ')
         nohup "$(dirname "$0")/trainutil.sh" "$dir" "$make_pid" >/dev/null 2>&1 &
     fi
     exit 0
