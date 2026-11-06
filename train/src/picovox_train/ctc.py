@@ -149,6 +149,27 @@ def ctc_log_posteriors(model, device, samples_list, max_batch_seconds=80.0):
     return results
 
 
+# Run groups through the recognizer overlapped (its batches as one at a time, the results in order): read(group) a
+# group's input (a thread - the next group's while the recognizer runs), infer(group, input) the recognizer's (the GPU)
+# - the group's tasks, and finish(task) a task's result (worker processes - a group's while the recognizer runs the
+# next); yields (group, results)
+def overlapped(groups, read, infer, finish, jobs=None):
+    import concurrent.futures  # pylint: disable=import-outside-toplevel
+    with concurrent.futures.ThreadPoolExecutor(1) as reader, concurrent.futures.ProcessPoolExecutor(jobs) as workers:
+        reading = reader.submit(read, groups[0]) if groups else None
+        previous = None
+        for index, group in enumerate(groups):
+            inputs = reading.result()
+            if index + 1 < len(groups):
+                reading = reader.submit(read, groups[index + 1])
+            finishing = workers.map(finish, infer(group, inputs), chunksize=8)
+            if previous is not None:
+                yield previous[0], list(previous[1])
+            previous = (group, finishing)
+        if previous is not None:
+            yield previous[0], list(previous[1])
+
+
 # Viterbi CTC alignment of a sequence of distinct positions - log posteriors [frames, positions] and the blank's
 # [frames]; returns each position's run of frames [(first, last)], or None if there are too few frames
 def ctc_viterbi(position_scores, blank_scores):

@@ -89,6 +89,17 @@ def build_args(out, limit=None):
     return argparse.Namespace(recipe=tts.RECIPE_PATH, jobs=1, out=out, limit=limit)
 
 
+# Write a corpus's measured readings (readings.py's) - a clip's word at a position read as its second reading (readings,
+# the word's readings' first variants)
+def write_readings(directory, clip_id, position, word, word_readings):
+    os.makedirs(os.path.join(directory, 'readings'), exist_ok=True)
+    with open(os.path.join(directory, 'readings', 'words.json'), 'w', encoding='utf-8') as file:
+        json.dump({'words': {word: [[variant] for variant in word_readings]}}, file)
+    with open(os.path.join(directory, 'readings', 'readings.jsonl'), 'w', encoding='utf-8') as file:
+        token = {'position': position, 'word': word, 'class': 'strong', 'frontEnd': 0, 'reading': 1}
+        file.write(json.dumps({'id': clip_id, 'tokens': [token]}) + '\n')
+
+
 # Rewrite a corpus's alignments.jsonl - {id: record changes}
 def edit_alignments(directory, changes):
     path = os.path.join(directory, 'alignments.jsonl')
@@ -483,25 +494,29 @@ class TestAlign(unittest.TestCase):
 
     def test_align_command(self):
         with tts_corpus(TEXTS[:4], aligned=False) as (directory, _, clips), fake_recognizer(), \
-                unittest.mock.patch.object(readings, 'overrides', return_value={}) as overrides, \
                 helpers.captured() as (_, stderr):
             # A clip too short to align, and one not generated
             write_wav(tts.wav_path(directory, clips[2]), numpy.zeros(4800), 24000)
             os.remove(tts.wav_path(directory, clips[3]))
             self.assertEqual(tts.align_command(align_args()), 0)
             first = self.read_records(directory)
-            # Nothing changed - nothing to align
-            self.assertEqual(tts.align_command(align_args()), 0)
+            # Nothing changed - the stamp current
+            with unittest.mock.patch.object(tts, 'clip_fronts') as clip_fronts:
+                self.assertEqual(tts.align_command(align_args()), 0)
+            clip_fronts.assert_not_called()
             again = self.read_records(directory)
+            # The stamp gone - the front end's pass, nothing to align
+            os.remove(os.path.join(directory, 'alignments.stamp'))
+            self.assertEqual(tts.align_command(align_args()), 0)
+            self.assertTrue(tts.alignment_current(directory, clips[:3]))
             # A measured reading changes a clip's phones; a new aligner realigns every clip
-            overrides.return_value = {clips[1]['id']: {'1': 'P AY1 P'}}
+            write_readings(directory, clips[1]['id'], 1, 'lead', ['L IY1 D', 'P AY1 P'])
             self.assertEqual(tts.align_command(align_args(batch=256)), 0)
             reading = self.read_records(directory)
             with unittest.mock.patch.object(tts, 'aligner_key', return_value='new'):
                 self.assertEqual(tts.align_command(align_args()), 0)
             realigned = self.read_records(directory)
             latest = tts.read_alignments(directory)
-        self.assertEqual(overrides.call_args.args, (directory,))
         self.assertEqual([record['id'] for record in first], [clip['id'] for clip in clips[:3]])
         by_id = {record['id']: record for record in first}
         self.assertEqual(by_id[clips[2]['id']], {'id': clips[2]['id'], 'aligner': tts.aligner_key(),
@@ -526,8 +541,29 @@ class TestAlign(unittest.TestCase):
         self.assertIn('tts align: 3 clips, 3 to align\n', output)
         self.assertIn('  2/3 clips, ', output)
         self.assertIn('tts align: aligned 2 of 3 clips (1 failed)', output)
+        self.assertIn('tts align: 3 clips, the alignment is current\n', output)
         self.assertIn('tts align: 3 clips, 0 to align\n', output)
         self.assertIn('tts align: 3 clips, 1 to align\n', output)
+
+    def test_alignment_stamp(self):
+        with tts_corpus(TEXTS[:2]) as (directory, _, clips):
+            self.assertTrue(tts.alignment_current(directory, clips))
+            stamp = tts.alignment_stamp(directory, clips)
+            # Another clip, the alignments, the readings, the aligner, or the code - another stamp
+            self.assertNotEqual(tts.alignment_stamp(directory, clips[:1]), stamp)
+            self.assertFalse(tts.alignment_current(directory, clips[:1]))
+            with unittest.mock.patch.object(tts, 'aligner_key', return_value='new'):
+                self.assertNotEqual(tts.alignment_stamp(directory, clips), stamp)
+            with unittest.mock.patch.object(tts, 'file_sha256', side_effect=lambda path: 'x' if path.endswith('g2pModel.js') else 'y'):
+                self.assertNotEqual(tts.alignment_stamp(directory, clips), stamp)
+            edit_alignments(directory, {clips[0]['id']: {'score': -2.0}})
+            self.assertNotEqual(tts.alignment_stamp(directory, clips), stamp)
+            changed = tts.alignment_stamp(directory, clips)
+            write_readings(directory, clips[1]['id'], 1, 'lead', ['L IY1 D', 'P AY1 P'])
+            self.assertNotEqual(tts.alignment_stamp(directory, clips), changed)
+            # No stamp
+            os.remove(os.path.join(directory, 'alignments.stamp'))
+            self.assertFalse(tts.alignment_current(directory, clips))
 
     def test_read_alignments(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -634,6 +670,7 @@ class TestBuild(unittest.TestCase):
             labels, seconds = data_fixtures.text_labels(clips[6]['text'])
             samples = data_fixtures.labels_audio(labels, seconds, 24000)
             write_wav(tts.wav_path(directory, clips[6]), numpy.clip(samples * 20, -1, 1), 24000)
+            ctc_fixtures.stamp(directory)
             yield directory, settings, clips
 
     def test_build_command(self):
@@ -732,6 +769,7 @@ class TestBuild(unittest.TestCase):
             os.makedirs(os.path.join(directory, 'readings'))
             with open(os.path.join(directory, 'readings', 'readings.jsonl'), 'w', encoding='utf-8') as file:
                 file.write('{}\n')
+            ctc_fixtures.stamp(directory)
             other = tts.build_key(settings, directory)
             self.assertNotEqual(other, key)
             self.run_build(build_args(second))
@@ -779,9 +817,10 @@ class TestBuild(unittest.TestCase):
         self.assertEqual([entry['sentence'] for entry in index['utterances']], [clips[0]['id'], clips[2]['id']])
 
     def test_build_stale_alignment(self):
-        with self.corpus() as (_, _, clips), tempfile.TemporaryDirectory() as out, \
-                unittest.mock.patch.object(readings, 'overrides', return_value={clips[1]['id']: {'1': 'P AY1 P'}}), \
-                self.assertRaisesRegex(ValueError, f'^{clips[1]["id"]}: the front end\'s phones differ from its alignment\'s'):
+        # The readings measured since the alignment - align again
+        with self.corpus() as (directory, _, clips), tempfile.TemporaryDirectory() as out, \
+                self.assertRaisesRegex(ValueError, '^the alignment isn\'t current'):
+            write_readings(directory, clips[1]['id'], 1, 'lead', ['L IY1 D', 'P AY1 P'])
             self.run_build(build_args(out))
 
 

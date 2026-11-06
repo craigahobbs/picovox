@@ -7,12 +7,13 @@ import math
 import os
 import tempfile
 import unittest
+import unittest.mock
 
 import numpy
 
 from picovox_train import ctc, frontend
 from tests import data_fixtures
-from tests.ctc_fixtures import VOCAB, FakeCtc, fake_recognizer, greedy_of
+from tests.ctc_fixtures import VOCAB, FakeCtc, FakeExecutor, fake_recognizer, greedy_of
 from tests.helpers import write_wav
 
 
@@ -85,6 +86,24 @@ class TestRecognizer(unittest.TestCase):
 
 
 class TestAlignment(unittest.TestCase):
+
+    def test_overlapped(self):
+        calls = []
+
+        # (each phase's calls, in the order they're made)
+        def read(group):
+            calls.append(('read', group))
+            return [value * 10 for value in group]
+
+        def infer(group, inputs):
+            calls.append(('infer', group))
+            return [(value, value + 1) for value in inputs]
+        with unittest.mock.patch('concurrent.futures.ProcessPoolExecutor', FakeExecutor):
+            results = list(ctc.overlapped([[1, 2], [3]], read, infer, sum, jobs=2))
+            self.assertEqual(list(ctc.overlapped([], read, infer, sum)), [])
+        self.assertEqual(results, [([1, 2], [21, 41]), ([3], [61])])
+        # (each group read and inferred once - the reads in a thread)
+        self.assertEqual(sorted(calls), [('infer', [1, 2]), ('infer', [3]), ('read', [1, 2]), ('read', [3])])
 
     def test_ctc_viterbi(self):
         self.assertIsNone(ctc.ctc_viterbi(numpy.zeros((2, 3)), numpy.zeros(2)))

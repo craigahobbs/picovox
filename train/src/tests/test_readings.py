@@ -200,11 +200,24 @@ class TestReadings(unittest.TestCase):
         self.assertEqual(quotas, {'read': 5, 'use': 3, 'dawn': 1, 'wound': 3})
 
     def test_measure_key(self):
-        key = measure.measure_key({'read': [['R IY1 D'], ['R EH1 D']]})
+        settings = ctc_fixtures.tts_settings()
+        clips = [{'id': 'a'}, {'id': 'b'}]
+        key = measure.measure_key(settings, clips)
         self.assertEqual(len(key), 12)
-        self.assertNotEqual(measure.measure_key({'read': [['R IY1 D']]}), key)
+        self.assertEqual(measure.measure_key(settings, clips), key)
+        # The settings, the clips (a bigger corpus), the aligner, the checks, and the front end, the dictionary, and the spec
         with unittest.mock.patch.object(measure, 'FORMANT_MARGIN', 0.5):
-            self.assertNotEqual(measure.measure_key({'read': [['R IY1 D'], ['R EH1 D']]}), key)
+            self.assertNotEqual(measure.measure_key(settings, clips), key)
+        self.assertNotEqual(measure.measure_key(settings, clips + [{'id': 'c'}]), key)
+        with unittest.mock.patch.object(tts, 'aligner_key', return_value='new'):
+            self.assertNotEqual(measure.measure_key(settings, clips), key)
+        self.assertNotEqual(measure.measure_key(dict(settings, checks={}), clips), key)
+        self.assertIn(corpora.CMUDICT_PATH, tts.code_files('readings'))
+        for name in ('g2pModel.js', 'context-labels.json', 'readings.py', 'frontend.py'):
+            with unittest.mock.patch.object(tts, 'file_sha256', side_effect=lambda path, end=name: 'z' if path.endswith(end) else 'y'):
+                changed = measure.measure_key(settings, clips)
+            with unittest.mock.patch.object(tts, 'file_sha256', return_value='y'):
+                self.assertNotEqual(changed, measure.measure_key(settings, clips), name)
 
     def test_word_times(self):
         record = record_of(['<bos>', 'R', 'EH1', 'D', '_', '<comma>', 'L', 'IY1', 'D', '<period>'])
@@ -242,7 +255,7 @@ class TestReadings(unittest.TestCase):
         controls = {'went': ('ctc', ['W EH1 N T', 'W IY1 N T']), 'home': ('ctc', ['HH OW1 M', 'HH AW1 M']),
                     'cats': ('voicing', ['K AE1 T S', 'K AE1 T Z']), 'times': ('voicing', ['T AY1 M Z', 'T AY1 M S'])}
         names = ['read', '', 'insult', 'went', 'home', 'cats', 'times']
-        tasks = measure.clip_tasks(record, words, classes, controls, names)
+        tasks = measure.clip_tasks(record, words, classes, controls, {'tokens': tokens, 'words': names})
         self.assertEqual([(task['position'], task['word'], task.get('control', False)) for task in tasks],
                          [(0, 'read', False), (3, 'went', True), (5, 'cats', True)])
         segment = tasks[0].pop('segment')
@@ -254,6 +267,11 @@ class TestReadings(unittest.TestCase):
         self.assertEqual(tasks[1]['method'], 'ctc')
         self.assertEqual(tasks[1]['candidates'], ['W EH1 N T', 'W IY1 N T'])
         self.assertEqual(tasks[2]['method'], 'voicing')
+
+        # A token aligned with its measured reading - frontEnd is still the front end's own
+        aligned = tokens[:2] + ['IY1'] + tokens[3:]
+        tasks = measure.clip_tasks(record_of(aligned, 5.0), words, classes, controls, {'tokens': tokens, 'words': names})
+        self.assertEqual((tasks[0]['phones'], tasks[0]['frontEnd']), ('R IY1 D', 1))
 
     def test_control_words(self):
         counts = {word: 6 for word in ('went', 'home', 'look', 'times', 'cats', 'dark', 'night', 'read', 'lead', 'the', 'cat', 'zzzz')}
@@ -388,6 +406,13 @@ class TestReadings(unittest.TestCase):
                 with captured() as (_, stderr):
                     self.assertEqual(measure.main(['--recipe', recipe]), 0)
                 self.assertIn('is current', stderr.getvalue())
+
+                # Another selection (a clip less) - measured again
+                os.remove(tts.wav_path(directory, clips[-1]))
+                with captured() as (_, stderr):
+                    self.assertEqual(measure.main(['--recipe', recipe, '-j', '1']), 0)
+                self.assertIn('measure: 13 clips', stderr.getvalue())
+                self.assertNotEqual(readings.read_json(os.path.join(out, 'summary.json'))['key'], summary['key'])
 
                 # A sample - measured, not kept as current
                 with captured() as (_, stderr):
