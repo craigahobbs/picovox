@@ -16,7 +16,6 @@ import re
 import time
 import unittest.mock
 import wave
-import zlib
 
 import numpy
 
@@ -185,6 +184,5 @@ def unpack_module(path):
     with open(path, encoding='utf-8') as file:
         text = file.read()
     manifest = js_literal(re.search(r'^export const manifest = (.*?);$', text, re.M | re.S).group(1))
-    encoding = re.search(r"^export const encoding = '([^']*)';$", text, re.M).group(1)
     weights = base64.b64decode(re.search(r'^export const weights = `(.*?)`;$', text, re.M | re.S).group(1).replace('\n', ''))
-    return manifest, zlib.decompress(weights, -15) if encoding == 'deflate-raw' else weights
+    return manifest, weights

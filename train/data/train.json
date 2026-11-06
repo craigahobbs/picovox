@@ -93,10 +93,7 @@
               "critic-channels": 16, "seed": 1}
     },
     "panel": {
-        "description": "The listener panel (picovox_train/panel.py eval and gate): a voice model spoken through the browser path (tools/speak.js, at rate Hz) on the panel texts (tools/panel-texts.json) in the speakers' voices, scored with UTMOS, Whisper's WER, and the speaker similarity to a reference's renderings of the same speakers and texts (make train's: the shipped lib/models/voiceModel.js, evaluated as packaged - the baseline)",
-        "speakers": [["female", "female"], ["sarah", "female"], ["helen", "female"], ["amy", "female"], ["kate", "female"],
-                     ["grace", "female"], ["male", "male"], ["james", "male"], ["robert", "male"], ["michael", "male"],
-                     ["david", "male"], ["thomas", "male"]],
+        "description": "The listener panel (picovox_train/panel.py eval and gate): a voice model spoken through the browser path (tools/speak.js, at rate Hz) on the panel texts (tools/panel-texts.json) in each of the training speech's voices (tts voices), scored with UTMOS, Whisper's WER, and the speaker similarity to a reference's renderings of the same speakers and texts (make train's: the shipped lib/models/voiceModel.js, evaluated as packaged - the baseline)",
         "rate": 16000,
         "tolerance": {
             "description": "The gate (panel.py gate --against: make train's baseline): the voice passes if its mean UTMOS is within mos of the basis's, its Whisper WER at most wer points worse, and its speaker similarity to the basis at least similarity - the per-speaker cosine of the mean ECAPA embedding of the voice's panel renderings with the mean of the basis's renderings of the same texts, averaged over the voices",

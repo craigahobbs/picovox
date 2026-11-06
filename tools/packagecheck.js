@@ -6,7 +6,7 @@
 // process.getBuiltinModule is hidden while they load, as in a browser), every tensor loads bit-identically, the model
 // speaks the same frames, and the same import works in a worker thread (as in a Web Worker).
 //
-//     node tools/packagecheck.js lib/models/voiceModel.js build/train/export/multi
+//     node tools/packagecheck.js lib/models/voiceModel.js build/train/eval/voice/multi
 //
 // It prints one JSON line - the tensors and frames compared, and the load times.
 

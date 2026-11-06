@@ -473,7 +473,7 @@ the CPU.
 Each training stage's final model - stage A's last checkpoint (which stage B starts from) and stage B's best (the model
 the package stage ships) - is rendered
 for listening as the stage finishes, in its own CPU stage beside the next GPU stage (`tools/trainsamples.js`): exported
-as the package stage exports it, it speaks `train/data/train.json`'s `samples` texts (Moby-Dick's opening, a dialogue,
+as the gate exports it (the export the package stage packages), it speaks `train/data/train.json`'s `samples` texts (Moby-Dick's opening, a dialogue,
 and heteronyms) in six of the package's voices (three female, three male) exactly as the package speaks a
 sentence (`lib/synthesis.js`, every word pronounced by the G2P network), and each sample is scored with UTMOS on the
 CPU. The shipped `lib/models/voiceModel.js` is rendered the same way, as the reference. The WAV files are

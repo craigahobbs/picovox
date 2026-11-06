@@ -8,12 +8,6 @@ import {strict as assert} from 'node:assert';
 import test from 'node:test';
 
 
-// Bytes compressed with a built-in stream ('deflate-raw')
-async function deflate(bytes) {
-    return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer());
-}
-
-
 // Base64 of bytes, in lines (as picovox_train/package.py wraps them)
 function base64Lines(bytes) {
     return Buffer.from(bytes).toString('base64').replace(/.{1,8}/g, '$&\n');
@@ -27,25 +21,18 @@ const manifest = {'vocab': [], 'tensors': [{'name': 'weight', 'shape': [2, 2], '
 
 
 test('package.packagedWeights', async () => {
-    // Raw and deflated weights
+    // Raw weights
     assert.deepEqual(new Uint8Array(await packagedWeights({'encoding': 'raw', 'weights': base64Lines(weights)})), weights);
-    const deflated = base64Lines(await deflate(weights));
-    assert.deepEqual(new Uint8Array(await packagedWeights({'encoding': 'deflate-raw', 'weights': deflated})), weights);
 
     // An unknown encoding
-    await assert.rejects(packagedWeights({'encoding': 'gzip', 'weights': ''}), {'message': 'unknown package encoding gzip'});
+    await assert.rejects(packagedWeights({'encoding': 'deflate-raw', 'weights': ''}), {'message': 'unknown package encoding deflate-raw'});
 });
 
 
 test('package.loadPackagedModel', async () => {
-    for (const module of [
-        {manifest, 'encoding': 'raw', 'weights': base64Lines(weights)},
-        {manifest, 'encoding': 'deflate-raw', 'weights': base64Lines(await deflate(weights))}
-    ]) {
-        const model = await loadPackagedModel(module);
-        assert.equal(model.manifest, manifest);
-        assert.deepEqual(Array.from(model.tensors.weight.data), [1.5, -2, 0.25, 8]);
-    }
+    const packaged = await loadPackagedModel({manifest, 'encoding': 'raw', 'weights': base64Lines(weights)});
+    assert.equal(packaged.manifest, manifest);
+    assert.deepEqual(Array.from(packaged.tensors.weight.data), [1.5, -2, 0.25, 8]);
 
     // The package's voice model
     const model = await loadPackagedModel(voiceModule);

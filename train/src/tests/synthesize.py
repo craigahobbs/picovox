@@ -14,7 +14,7 @@ import numpy
 import torch
 
 from picovox_train import params
-from picovox_train.export import load_model, quantized_model, token_remap, training_token_counts
+from picovox_train.export import load_model, quantized_model, token_remap, training_data, training_token_counts
 from picovox_train.frontend import tokenize
 from picovox_train.model import BOS
 
@@ -43,8 +43,9 @@ class Voice:
 
     def __init__(self, checkpoint, device='cpu', speaker=0):
         model, state = load_model(checkpoint, device)
-        self.model = quantized_model(model).eval()
-        counts, self.vocab = training_token_counts()
+        data = training_data()
+        self.model = quantized_model(model, data).eval()
+        counts, self.vocab = training_token_counts(data)
         remap = token_remap(self.vocab, counts)
         self.remap = {self.vocab.index(source): self.vocab.index(target) for source, target in remap.items()}
         self.device = device
