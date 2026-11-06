@@ -254,7 +254,8 @@ const chartHelp = {
         'recording\'s, in cents (100 cents = one semitone).',
     'secondsPerStep': 'Wall-clock seconds per training step (one batch). Spikes are stalls - the GPU shared with other jobs, ' +
         'or new batch shapes compiling.',
-    'lr': 'The learning rate - how big each update is. It warms up, then decays on a cosine schedule.',
+    'lr': 'The learning rate - how big each update is. It warms up, then decays - stage A on a cosine schedule, stage B ' +
+        'held constant, then cooled down over its last steps (warmup-stable-decay).',
     'durPhone': 'Phone-duration error (log units) - how far the predicted length of each speech sound is from the ' +
         'recording\'s.',
     'durPause': 'Pause-placement error - whether the model puts a pause at each word or phrase boundary where the voice ' +
@@ -284,7 +285,10 @@ const chartHelp = {
     'adversarial': 'The voice\'s adversarial loss (stage B) - how well it fools the critic. Pushes toward sharper, more ' +
         'natural-sounding detail than the spectral loss can.',
     'matching': 'Feature matching (stage B) - the voice matching the critic\'s internal features of real recordings; ' +
-        'steadies the adversarial training.'
+        'steadies the adversarial training.',
+    'perceptual': 'The perceptual loss - how far the synthesized speech is from the recording in a pretrained speech ' +
+        'recognizer\'s features (the wav2vec2 phoneme recognizer\'s layers 3 and 6, frame by frame) - what a listener ' +
+        'hears as the same speech, beyond the spectrum. Lower is closer.'
 };
 
 
@@ -920,7 +924,7 @@ async function loadTrain() {
         status = 'stopped';
     }
     // (the run's samples - from its start)
-    const samples = utilResult === null ? [] : trainModel.parseUtilLog(utilResult.text, Number.isFinite(start) ? start : now).
+    const samples = utilResult === null ? [] : trainModel.parseUtilLog(utilResult.text).
         filter((sample) => !Number.isFinite(start) || sample.time >= start);
     // (the run's end - a finished run's last stage's, a stopped or failed run's last activity: its stages' last event or
     // its last utilization sample; a running run has none)
@@ -982,7 +986,7 @@ const trainHelp = {
         'skipped (not in this run\'s make target). Each shows its start and end, its time against the expected time, and ' +
         'the mean CPU and GPU use while it ran. Stage events come from TRAIN_DIR/stages.jsonl.',
     'runs': 'The make train stages that train a network, each a run in TRAIN_DIR/runs/ - the voice\'s stages A and B. ' +
-        'Select one for its curves (the Runs tab has every measurement\'s).',
+        'Select one for its curves - every measurement it logs.',
     'gates': 'The checks make train must pass: the heteronym relabeling reproduces train/data/g2p-relabel.json; the ' +
         'retrained G2P is identical to the committed lib/models/g2pModel.js (else within the recipe\'s tolerances) with ' +
         'its held-out context accuracy; the shipped model and the voice through the listener panel (UTMOS - naturalness, ' +
