@@ -251,8 +251,9 @@ $(TRAIN_DIR)/data-tts.done: $(TRAIN_DIR)/tts-readings.done
 
 # The G2P (CPU): the network's four stages (one core, deterministic), the heteronym context labels (the books - pinned
 # texts, train/data/books.json - the training speech's measured readings, and part-of-speech tags), the context network
-# and its held-out accuracy gate (cross-validated over the books) beside the G2P network, then the reading stage (two threads), the
-# export to $(TRAIN_DIR)/g2pModel.js, and picovox_train.context check against the committed module; and the heteronym
+# and its held-out accuracy gate (cross-validated over the books) beside the G2P network, the reading stage (two threads)
+# after the network beside the context network, then the export to $(TRAIN_DIR)/g2pModel.js and picovox_train.context
+# check against the committed module; and the heteronym
 # relabeling, which must reproduce train/data/g2p-relabel.json (the G2P network's input).
 #
 # In make train, the G2P's memory-bound stages (the context labels, the relabeling) are scheduled after the voices'
@@ -296,10 +297,16 @@ $(TRAIN_DIR)/context-network.done: $(TRAIN_DIR)/context-labels.done
 	@$(STAGE) end
 	touch $@
 
-$(TRAIN_DIR)/g2p.done: $(TRAIN_DIR)/g2p-network.done $(TRAIN_DIR)/context-labels.done $(TRAIN_DIR)/context-network.done
+# (the reading stage - from the G2P network and the labels, beside the context network)
+$(TRAIN_DIR)/g2p-reading.done: $(TRAIN_DIR)/g2p-network.done $(TRAIN_DIR)/context-labels.done
 	@$(STAGE) start
 	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.context train-g2p --labels $(TRAIN_DIR)/context/labels.json --init $(TRAIN_DIR)/g2p/focus.pt \
-		--out $(TRAIN_DIR)/context/g2p.pt --log $(TRAIN_DIR)/context/train.log
+		--out $(TRAIN_DIR)/context/g2p.pt
+	@$(STAGE) end
+	touch $@
+
+$(TRAIN_DIR)/g2p.done: $(TRAIN_DIR)/g2p-reading.done $(TRAIN_DIR)/context-network.done
+	@$(STAGE) start
 	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.context export --g2p $(TRAIN_DIR)/context/g2p.pt --context $(TRAIN_DIR)/context/context.pt \
 		--out $(TRAIN_DIR)/g2pModel.js
 	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.context check $(TRAIN_DIR)/g2pModel.js
