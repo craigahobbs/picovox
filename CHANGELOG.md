@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.2 (2026-11-06)
+
+- [702edfe](https://github.com/craigahobbs/picovox/commit/702edfe) - style "auto" without the paragraph beat - the quotations in the dialogue style (an exclaimed one's in the exclaim style), the narration neutral: each paragraph's arc (its first sentence lifted, its pitch stepping down sentence by sentence) sounded like the voice changing for no reason, and a blind A/B heard no difference without it. Breaking, for imports of lib/ modules (the API, lib/index.js, is unchanged): lib/style.js paragraphBeat and paragraphBeats, and lib/synthesis.js's beat option, are removed
+- [e0705e1](https://github.com/craigahobbs/picovox/commit/e0705e1) - a quotation's attribution is the quotation's sentence: a lowercase word after "!" or "?" (or a quotation's closing period) continues the sentence - '"Help!" he screamed.' was two sentences, the attribution read on its own after a sentence's pause; now one, the "!" a phrase break
+
 ## 2.0.1 (2026-11-05)
 
 - [0c46ef3](https://github.com/craigahobbs/picovox/commit/0c46ef3) - voices: the voice network is retrained with a perceptual loss - in both training stages, the rendered speech against its training speech in a pinned wav2vec2 phoneme recognizer's features: on the listener panel's texts the voices' mean UTMOS is 4.42 (was 4.31) and their Whisper word error rate 0.98% (was 1.13%), every voice a fifth closer to its source by the gap measure (picovox_train.quality gap) and as close in speaker similarity; blind A/B listening heard no difference. The voice network's weights are 7 bits, rounded by GPTQ (was 8): the voice module is 311 KB gzipped (was 334 KB), the package 748 KB. lib/model.js no longer reads 8-bit weights
