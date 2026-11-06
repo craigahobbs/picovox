@@ -793,9 +793,9 @@ def command_export(args):
 # The gate - the held-out aligned accuracy against the majority baseline
 #
 
-# The gate's words (the recipe's: read, use, close, lives) less the words whose readings differ only by S against Z - the
-# aligner can't judge those (word-final voicing), so the regression set covers them - and its margin over the majority
-# baseline
+# The gate's words (the recipe's: read, use, close, lives) less the words whose readings differ only by S against Z (the
+# stem-final voicing pairs - use, close: their held-out accuracy is reported per word, not gated; the regression set
+# covers them) - and its margin over the majority baseline
 GATE_WORDS = RECIPE['gate']['words']
 GATE_MARGIN = RECIPE['gate']['margin']
 

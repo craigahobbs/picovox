@@ -5,7 +5,7 @@
 Training the grapheme-to-phoneme (G2P) network - the app's only pronouncer (lib/g2p.js runs lib/models/g2pModel.js for
 every word; g2pmodel.py is its Python port). The recipe is train/data/train.json's "g2p" settings:
 
-    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p train --out build/nn/g2p-train   # every stage (resumable)
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p train --out build/train/g2p   # every stage (resumable)
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p evaluate [lib/models/g2pModel.js | CHECKPOINT]
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p book TEXT --name NAME --title TITLE --url URL
 

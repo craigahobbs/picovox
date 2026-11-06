@@ -1,5 +1,5 @@
 {
- "description": "The heteronym labels' curated part (nn/heteronyms.py): words with their own part-of-speech tag mappings (a variant of the reading: the spaCy tags; \"Cap\" before a tag - a capitalized token), readings the dictionary lacks (\"missing\"), mappings reviewed by hand (\"reviewed\" - for words without aligned tokens to check them), family words left out (\"exclude\"), collocations (a regular expression over the 40 characters each side, lowercased, and the reading it fixes - reviewed by hand), and hand-labeled seed sentences per reading.",
+ "description": "The heteronym labels' curated part (picovox_train/contextlabels.py - read by readings.py load_spec): words with their own part-of-speech tag mappings (a variant of the reading: the spaCy tags; \"Cap\" before a tag - a capitalized token), readings the dictionary lacks (\"missing\"), family words left out (\"exclude\"), collocations (a regular expression over the 40 characters each side, lowercased, and the reading it fixes - reviewed by hand), and hand-labeled seed sentences per reading.",
  "words": {
   "read": {
    "tags": {
