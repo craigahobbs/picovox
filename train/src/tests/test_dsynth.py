@@ -315,18 +315,18 @@ class TestFilters(unittest.TestCase):
 
 class TestLibraries(unittest.TestCase):
 
-    def test_loaders(self):
-        for loader, cache in ((dsynth._harmonic_library, dsynth._HARMONIC_LIBRARY), (dsynth._tract_library, dsynth._TRACT_LIBRARY),
-                              (dsynth._frication_library, dsynth._FRICATION_LIBRARY)):
-            with unittest.mock.patch.dict(cache, clear=True), \
-                    unittest.mock.patch.object(torch.mps, 'compile_shader', return_value='library') as compile_shader:
-                self.assertEqual(loader(), 'library')
-                self.assertEqual(loader(), 'library')
-                compile_shader.assert_called_once()
-            # No Metal - no library
-            with unittest.mock.patch.dict(cache, clear=True), \
-                    unittest.mock.patch.object(torch.mps, 'compile_shader', side_effect=RuntimeError('no Metal')):
-                self.assertIsNone(loader())
+    def test_metal_library(self):
+        # Each source's library compiled once
+        with unittest.mock.patch.dict(dsynth._METAL_LIBRARIES, clear=True), \
+                unittest.mock.patch.object(torch.mps, 'compile_shader', side_effect=lambda source: f'library {len(source)}') as compile_shader:
+            for source in (dsynth._HARMONIC_SOURCE, dsynth._TRACT_SOURCE, dsynth._FRICATION_SOURCE):
+                self.assertEqual(dsynth._metal_library(source), f'library {len(source)}')
+                self.assertEqual(dsynth._metal_library(source), f'library {len(source)}')
+            self.assertEqual(compile_shader.call_count, 3)
+        # No Metal - no library
+        with unittest.mock.patch.dict(dsynth._METAL_LIBRARIES, clear=True), \
+                unittest.mock.patch.object(torch.mps, 'compile_shader', side_effect=RuntimeError('no Metal')):
+            self.assertIsNone(dsynth._metal_library(dsynth._TRACT_SOURCE))
 
     def test_amplitudes_library_for(self):
         self.assertIsNone(dsynth._amplitudes_library_for(torch.zeros(1)))
@@ -334,13 +334,9 @@ class TestLibraries(unittest.TestCase):
         values.device.type = 'mps'
         self.assertIsNone(dsynth._amplitudes_library_for(values))
         values.dtype = torch.float32
-        with unittest.mock.patch.dict(dsynth._AMPLITUDES_LIBRARY, clear=True):
-            with unittest.mock.patch.object(torch.mps, 'compile_shader', return_value='library'):
-                self.assertEqual(dsynth._amplitudes_library_for(values), 'library')
+        with unittest.mock.patch.dict(dsynth._METAL_LIBRARIES, clear=True), \
+                unittest.mock.patch.object(torch.mps, 'compile_shader', return_value='library'):
             self.assertEqual(dsynth._amplitudes_library_for(values), 'library')
-        with unittest.mock.patch.dict(dsynth._AMPLITUDES_LIBRARY, clear=True), \
-                unittest.mock.patch.object(torch.mps, 'compile_shader', side_effect=RuntimeError('no Metal')):
-            self.assertIsNone(dsynth._amplitudes_library_for(values))
 
     def test_amplitudes_source_constants(self):
         # The amplitudes kernel's literals are params's values - the reference rate, the equalizer's lowest band and band
@@ -359,8 +355,7 @@ class TestKernels(unittest.TestCase):
 
     def setUp(self):
         self.library = FakeLibrary()
-        for loader in ('_harmonic_library', '_tract_library', '_frication_library'):
-            self.enterContext(unittest.mock.patch.object(dsynth, loader, return_value=self.library))
+        self.enterContext(unittest.mock.patch.object(dsynth, '_metal_library', return_value=self.library))
 
     def test_kernel_gates(self):
         # The kernels apply only to MPS float32 [B, T, 1] parameters
@@ -459,7 +454,7 @@ class TestKernels(unittest.TestCase):
         self.assertEqual(library.calls[0], ('frication', [4, 16], 64))
 
     def test_harmonic_amplitudes_metal(self):
-        # The amplitudes by the kernel (a constant F0) equal the PyTorch path's - values and gradients, with and without
+        # The amplitudes by the kernel equal the PyTorch path's - values and gradients, with and without
         # the channel equalizer, and with only one part's gradient
         synth = dsynth.DSynth(24000)
         frames = torch.tensor([speech_frames(5), speech_frames(5, f0=200.0)], dtype=torch.float32, requires_grad=True)
@@ -468,7 +463,7 @@ class TestKernels(unittest.TestCase):
 
         # The PyTorch path's amplitudes and gradients
         def amplitudes_and_grads(case_eq, weights):
-            real, imag = synth.harmonic_amplitudes(frames, 20, case_eq, constant_f0=True)
+            real, imag = synth.harmonic_amplitudes(frames, 20, case_eq)
             inputs = (frames,) if case_eq is None else (frames, case_eq)
             loss = (weights[0] * real.sum() if weights[0] else 0) + (weights[1] * imag.sum() if weights[1] else 0)
             return real.detach(), imag.detach(), torch.autograd.grad(loss, inputs)
@@ -495,15 +490,12 @@ class TestDSynth(unittest.TestCase):
         self.assertEqual(audio.shape, (dsynth.sample_count(40, 24000),))
         self.assertTrue(torch.isfinite(audio).all())
         self.assertGreater(float(audio.abs().max()), 0.01)
-        # A batch, seeds by item, the parts
-        batch = synth(values[None].repeat(2, 1, 1), seed=[3, 4], return_parts=True)
-        self.assertTrue(torch.allclose(batch['audio'][0], audio))
-        self.assertFalse(torch.allclose(batch['audio'][1], audio))
-        self.assertTrue(torch.allclose(batch['voicing'] + batch['noise'], batch['audio']))
-        parts = synth(values, seed=3, return_parts=True)
-        self.assertEqual(parts['voicing'].shape, audio.shape)
+        # A batch, seeds by item
+        batch = synth(values[None].repeat(2, 1, 1), seed=[3, 4])
+        self.assertTrue(torch.allclose(batch[0], audio))
+        self.assertFalse(torch.allclose(batch[1], audio))
         # An int seed counts up by item
-        self.assertTrue(torch.allclose(synth(values[None].repeat(2, 1, 1), seed=3)[1], batch['audio'][1]))
+        self.assertTrue(torch.allclose(synth(values[None].repeat(2, 1, 1), seed=3)[1], batch[1]))
         # A single frame renders nothing
         self.assertEqual(synth(values[:1]).shape, (0,))
         self.assertEqual(synth(values[None, :1]).shape, (1, 0))
@@ -530,11 +522,7 @@ class TestDSynth(unittest.TestCase):
         grad = torch.autograd.grad((audio ** 2).sum(), values)[0]
         self.assertGreater(float(grad[:, params.INDEX['av']].abs().sum()), 0)
         self.assertGreater(float(grad[:, params.INDEX['f1']].abs().sum()), 0)
-        self.assertGreater(float(grad[:, params.INDEX['f0']].abs().sum()), 0)
-        # A constant F0 isn't differentiated
-        constant = synth(values[None], seed=1, constant_f0=True)
-        self.assertTrue(torch.allclose(constant, audio))
-        grad = torch.autograd.grad((constant ** 2).sum(), values)[0]
+        # (the F0 isn't differentiated - training renders a recording's)
         self.assertEqual(float(grad[:, params.INDEX['f0']].abs().sum()), 0.0)
 
     def test_plans(self):
@@ -599,13 +587,13 @@ class TestDSynth(unittest.TestCase):
         values = unittest.mock.Mock(dtype=torch.float32)
         values.device.type = 'mps'
         host = {'fraction': torch.zeros(1), 'f0': torch.zeros(1)}
-        with unittest.mock.patch.object(dsynth, '_harmonic_library', return_value='library'):
+        with unittest.mock.patch.object(dsynth, '_metal_library', return_value='library'):
             self.assertTrue(synth._can_defer(values, {'host': host}))
             self.assertFalse(synth._can_defer(values, {}))
             self.assertFalse(synth._can_defer(values, {'host': {'fraction': torch.zeros(1)}}))
             self.assertFalse(synth._can_defer(values, {'host': {**host, 'fraction': torch.zeros(1, dtype=torch.float64)}}))
             self.assertFalse(synth._can_defer(torch.zeros(1), {'host': host}))
-        with unittest.mock.patch.object(dsynth, '_harmonic_library', return_value=None):
+        with unittest.mock.patch.object(dsynth, '_metal_library', return_value=None):
             self.assertFalse(synth._can_defer(values, {'host': host}))
 
     def test_harmonic_count(self):

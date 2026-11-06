@@ -3,10 +3,10 @@
 
 """
 The differentiable source-filter synthesizer - renders parameter frames (params.py) to audio in PyTorch, batched,
-differentiably with respect to every parameter's amplitude and filter effect, at any sample rate. lib/render.js is
-the same synthesizer in JavaScript.
+differentiably with respect to every parameter's amplitude and filter effect but F0's (training renders the recordings'
+F0), at any sample rate. lib/render.js is the same synthesizer in JavaScript.
 
-    synth = DSynth(sample_rate=22050).to(device)
+    synth = DSynth(24000).to(device)
     audio = synth(values)          # values [B, T, params.COUNT] in parameter units -> audio [B, N]
 
 The design (DDSP-style - no recursive filters, so nothing backpropagates through long IIR recursions):
@@ -17,8 +17,8 @@ The design (DDSP-style - no recursive filters, so nothing backpropagates through
   frequency response of the former lib/klatt.js's filter at k * F0 - with a taper near the Nyquist frequency. The amplitudes are
   interpolated linearly between frames per sample, and summed against the harmonics' phases, so the result is a pulse
   train filtered by the tract, with the tract's phase.
-- The glottal phase, cycle by cycle, is computed in float64 on the CPU (it's not differentiated - F0's gradient comes
-  through the harmonic amplitudes, which sample the envelope at k * F0): F0 linearly interpolated per sample, with
+- The glottal phase, cycle by cycle, is computed in float64 on the CPU (it's not differentiated, nor is F0 in the
+  harmonic amplitudes, which sample the envelope at k * F0): F0 linearly interpolated per sample, with
   jitter (each cycle's period perturbed by a Gaussian draw times the jitter) and shimmer (each cycle's amplitude, the
   draws interpolated across the cycle).
 - Noise (aspiration and frication) is white noise scaled per sample by its level (ah, af interpolated - so onsets
@@ -266,6 +266,20 @@ def linear_values(values):
     return torch.cat([levels, values.index_select(-1, other_columns)], dim=-1).index_select(-1, order)
 
 
+# The Metal libraries compiled, by source
+_METAL_LIBRARIES = {}
+
+
+# A Metal kernel source's library, compiled once (None where there is none - no Metal)
+def _metal_library(source):
+    if source not in _METAL_LIBRARIES:
+        try:
+            _METAL_LIBRARIES[source] = torch.mps.compile_shader(source)
+        except Exception:  # pylint: disable=broad-except
+            _METAL_LIBRARIES[source] = None
+    return _METAL_LIBRARIES[source]
+
+
 #
 # The harmonic sum on Apple GPUs (MPS, float32) - a Metal kernel for the forward and one for the backward, so the
 # [B, T - 1, H, K] phases, cosines, and sines (half a gigabyte each for a training batch) are never stored: the same
@@ -354,17 +368,6 @@ kernel void harmonic_sum_backward(device float* grad_re [[buffer(0)]], device fl
     grad_im[index] = im;
 }
 '''
-_HARMONIC_LIBRARY = {}
-
-
-# The harmonic sum's Metal library (None where there is none)
-def _harmonic_library():
-    if 'library' not in _HARMONIC_LIBRARY:
-        try:
-            _HARMONIC_LIBRARY['library'] = torch.mps.compile_shader(_HARMONIC_SOURCE)
-        except Exception:  # pylint: disable=broad-except
-            _HARMONIC_LIBRARY['library'] = None
-    return _HARMONIC_LIBRARY['library']
 
 
 # (an autograd Function needs only forward and backward, not the other abstract methods)
@@ -382,7 +385,7 @@ class _HarmonicSum(torch.autograd.Function):  # pylint: disable=abstract-method
             active = _cached(('active', harmonics, str(amp_re.device)),
                              lambda: torch.tensor([harmonics], dtype=torch.int32, device=amp_re.device))
         out = torch.empty_like(phase)
-        _harmonic_library().harmonic_sum(out, phase, amp_re, amp_im, weight, dims, active, threads=out.numel())
+        _metal_library(_HARMONIC_SOURCE).harmonic_sum(out, phase, amp_re, amp_im, weight, dims, active, threads=out.numel())
         ctx.save_for_backward(phase, weight, active)
         ctx.dims = dims
         return out
@@ -393,8 +396,8 @@ class _HarmonicSum(torch.autograd.Function):  # pylint: disable=abstract-method
         batch, frames, _, harmonics = ctx.dims
         grad_re = torch.empty(batch, frames, harmonics, dtype=grad.dtype, device=grad.device)
         grad_im = torch.empty_like(grad_re)
-        _harmonic_library().harmonic_sum_backward(grad_re, grad_im, grad.contiguous(), phase, weight, ctx.dims, active,
-                                                  threads=grad_re.numel())
+        _metal_library(_HARMONIC_SOURCE).harmonic_sum_backward(grad_re, grad_im, grad.contiguous(), phase, weight, ctx.dims, active,
+                                                               threads=grad_re.numel())
         return None, grad_re, grad_im, None, None
 
 
@@ -516,17 +519,6 @@ kernel void tract_response_trig_backward(device float* grad_c1 [[buffer(0)]], de
     grad_s2[index] = g_s2;
 }
 '''
-_TRACT_LIBRARY = {}
-
-
-# The tract kernels' Metal library (None where there is none)
-def _tract_library():
-    if 'library' not in _TRACT_LIBRARY:
-        try:
-            _TRACT_LIBRARY['library'] = torch.mps.compile_shader(_TRACT_SOURCE)
-        except Exception:  # pylint: disable=broad-except
-            _TRACT_LIBRARY['library'] = None
-    return _TRACT_LIBRARY['library']
 
 
 # (an autograd Function needs only forward and backward, not the other abstract methods)
@@ -542,8 +534,8 @@ class _TractResponse(torch.autograd.Function):  # pylint: disable=abstract-metho
         dims, flags = [batch, frames, bins, resonators], [int(per_frame), int(with_phase)]
         magnitude = torch.empty(batch, frames, bins, dtype=coef_b.dtype, device=coef_b.device)
         phase = torch.empty_like(magnitude) if with_phase else magnitude
-        _tract_library().tract_response(magnitude, phase, cos1, sin1, cos2, sin2, coef_b, coef_c, log_a, dims, flags,
-                                        threads=magnitude.numel())
+        _metal_library(_TRACT_SOURCE).tract_response(magnitude, phase, cos1, sin1, cos2, sin2, coef_b, coef_c, log_a, dims, flags,
+                                                     threads=magnitude.numel())
         ctx.save_for_backward(cos1, sin1, cos2, sin2, coef_b, coef_c)
         ctx.dims, ctx.flags = dims, flags
         return (magnitude, phase) if with_phase else magnitude
@@ -562,7 +554,7 @@ class _TractResponse(torch.autograd.Function):  # pylint: disable=abstract-metho
         grad_b = torch.empty_like(coef_b)
         grad_c = torch.empty_like(coef_b)
         grad_log_a = torch.empty_like(coef_b)
-        library = _tract_library()
+        library = _metal_library(_TRACT_SOURCE)
         library.tract_response_backward(grad_b, grad_c, grad_log_a, grad_magnitude, grad_phase, cos1, sin1, cos2, sin2,
                                         coef_b, coef_c, dims, flags, threads=coef_b.numel())
         grad_trig = [None] * 4
@@ -579,7 +571,7 @@ class _TractResponse(torch.autograd.Function):  # pylint: disable=abstract-metho
 def _tract_kernel(trig, poles, zero, phase):
     center = poles[0][0]
     if center.device.type != 'mps' or center.dtype != torch.float32 or center.dim() != 3 or center.shape[-1] != 1 or \
-            _tract_library() is None:
+            _metal_library(_TRACT_SOURCE) is None:
         return None
     return _tract_metal(trig, poles, zero, phase)  # pragma: no cover - MPS only (the tests run on the CPU)
 
@@ -719,17 +711,6 @@ kernel void frication_backward(device float* grad_coef [[buffer(0)]], device con
     }
 }
 '''
-_FRICATION_LIBRARY = {}
-
-
-# The frication kernels' Metal library (None where there is none)
-def _frication_library():
-    if 'library' not in _FRICATION_LIBRARY:
-        try:
-            _FRICATION_LIBRARY['library'] = torch.mps.compile_shader(_FRICATION_SOURCE)
-        except Exception:  # pylint: disable=broad-except
-            _FRICATION_LIBRARY['library'] = None
-    return _FRICATION_LIBRARY['library']
 
 
 # (an autograd Function needs only forward and backward, not the other abstract methods)
@@ -743,7 +724,7 @@ class _FricationResponse(torch.autograd.Function):  # pylint: disable=abstract-m
         bins = cos1.shape[-1]
         dims = [batch * frames, bins]
         out = torch.empty(batch, frames, bins, dtype=coef.dtype, device=coef.device)
-        _frication_library().frication(out, cos1, sin1, cos2, sin2, coef, dims, threads=out.numel())
+        _metal_library(_FRICATION_SOURCE).frication(out, cos1, sin1, cos2, sin2, coef, dims, threads=out.numel())
         ctx.save_for_backward(cos1, sin1, cos2, sin2, coef)
         ctx.dims = dims
         return out
@@ -752,8 +733,8 @@ class _FricationResponse(torch.autograd.Function):  # pylint: disable=abstract-m
     def backward(ctx, grad):  # pylint: disable=arguments-differ
         cos1, sin1, cos2, sin2, coef = ctx.saved_tensors
         grad_coef = torch.empty_like(coef)
-        _frication_library().frication_backward(grad_coef, grad.contiguous(), cos1, sin1, cos2, sin2, coef, ctx.dims,
-                                                threads=ctx.dims[0])
+        _metal_library(_FRICATION_SOURCE).frication_backward(grad_coef, grad.contiguous(), cos1, sin1, cos2, sin2, coef, ctx.dims,
+                                                             threads=ctx.dims[0])
         return None, None, None, None, grad_coef
 
 
@@ -764,7 +745,7 @@ def _frication_kernel(trig, values):
     center = values['fp1']
     if center.device.type != 'mps' or center.dtype != torch.float32 or center.dim() != 3 or center.shape[-1] != 1 or \
             trig[0].dim() != 1 or trig[0].dtype != torch.float32 or any(value.requires_grad for value in trig) or \
-            _frication_library() is None:
+            _metal_library(_FRICATION_SOURCE) is None:
         return None
     return _frication_metal(trig, values)  # pragma: no cover - MPS only (the tests run on the CPU)
 
@@ -779,7 +760,7 @@ def _frication_metal(trig, values):
 
 
 #
-# The harmonic amplitudes on Apple GPUs (MPS, float32, a constant F0) - a Metal kernel for harmonic_amplitudes after the
+# The harmonic amplitudes on Apple GPUs (MPS, float32 - the F0 not differentiated) - a Metal kernel for harmonic_amplitudes after the
 # tract: the high shelf, the channel equalizer, the harmonic taper, the magnitude and phase, the LF source's
 # interpolation in Rd, and the complex product (the forward per harmonic; the backward per frame, over the harmonics),
 # so their [B, T, K] intermediates are never stored. The shelf's per-frame biquad coefficients are made by PyTorch as
@@ -961,19 +942,13 @@ kernel void amplitudes_backward(device float* grad_av [[buffer(0)]], device floa
     }
 }
 '''
-_AMPLITUDES_LIBRARY = {}
 
 
 # The harmonic amplitudes' Metal library for values (None where there is none, or the values aren't MPS float32)
 def _amplitudes_library_for(values):
     if values.device.type != 'mps' or values.dtype != torch.float32:
         return None
-    if 'library' not in _AMPLITUDES_LIBRARY:
-        try:
-            _AMPLITUDES_LIBRARY['library'] = torch.mps.compile_shader(_AMPLITUDES_SOURCE)
-        except Exception:  # pylint: disable=broad-except
-            _AMPLITUDES_LIBRARY['library'] = None
-    return _AMPLITUDES_LIBRARY['library']
+    return _metal_library(_AMPLITUDES_SOURCE)
 
 
 # (an autograd Function needs only forward and backward, not the other abstract methods)
@@ -1031,7 +1006,7 @@ def _row_draws(seeds, stream, counts):
 class DSynth(torch.nn.Module):
     """The differentiable synthesizer - see the module documentation"""
 
-    def __init__(self, sample_rate=22050, noise='torch'):
+    def __init__(self, sample_rate, noise='torch'):
         super().__init__()
         self.sample_rate = sample_rate
         self.noise = noise
@@ -1115,7 +1090,7 @@ class DSynth(torch.nn.Module):
     # harmonic sum's Metal kernel, and the plan's host tensors in the values' dtype)
     def _can_defer(self, values, plan):
         host = plan.get('host')
-        return values.device.type == 'mps' and values.dtype == torch.float32 and _harmonic_library() is not None and \
+        return values.device.type == 'mps' and values.dtype == torch.float32 and _metal_library(_HARMONIC_SOURCE) is not None and \
             host is not None and host['fraction'].dtype == values.dtype and 'f0' in host
 
     # A plan made ahead, finished on the device without reading the frames (no synchronization): its tensors (the
@@ -1208,12 +1183,11 @@ class DSynth(torch.nn.Module):
         return int(min(params.LF_HARMONICS - 1, math.ceil(params.HARMONIC_TAPER_END * self.sample_rate / lowest)))
 
     # The frames' complex harmonic amplitudes [B, T, K] (real, imaginary) and the harmonic numbers; linear is the
-    # values' linear_values, if already computed; constant_f0 - the frames' F0 is a constant (a recording's), so the
-    # amplitudes aren't differentiated in it
-    def harmonic_amplitudes(self, values, harmonics, eq=None, linear=None, constant_f0=False):
+    # values' linear_values, if already computed - not differentiated in the F0 (training renders a recording's)
+    def harmonic_amplitudes(self, values, harmonics, eq=None, linear=None):
         split = split_values(values, linear)
         k = torch.arange(1, harmonics + 1, device=values.device, dtype=values.dtype)
-        f0 = torch.clamp(split['f0'].detach() if constant_f0 else split['f0'], min=params.F0_MIN)
+        f0 = torch.clamp(split['f0'].detach(), min=params.F0_MIN)
         frequency = f0 * k
         trig = frequency_trig(frequency)
 
@@ -1226,10 +1200,10 @@ class DSynth(torch.nn.Module):
         source_re = table_re[low] * (1 - weight) + table_re[low + 1] * weight
         source_im = table_im[low] * (1 - weight) + table_im[low + 1] * weight
 
-        # The source shelf and the tract, as log magnitude and phase (on Apple GPUs with a constant F0, everything but
-        # the tract in a Metal kernel)
+        # The source shelf and the tract, as log magnitude and phase (on Apple GPUs, everything but the tract in a Metal
+        # kernel)
         tract_magnitude, tract_phase = tract_log(frequency, split, trig)
-        if constant_f0 and _amplitudes_library_for(values) is not None:
+        if _amplitudes_library_for(values) is not None:
             shelf = torch.cat([torch.broadcast_to(coefficient, split['shelf'].shape)
                                for coefficient in _shelf_coefficients(split['shelf'])], dim=-1)
             return _HarmonicAmplitudes.apply(f0[..., 0].contiguous(), split['av'][..., 0].contiguous(), low.int().contiguous(),
@@ -1246,9 +1220,9 @@ class DSynth(torch.nn.Module):
         return source_re * filter_re - source_im * filter_im, source_re * filter_im + source_im * filter_re
 
     # The harmonic (voicing) signal [B, N]
-    def _voicing(self, values, linear, tensors, grid, harmonics, eq=None, constant_f0=False):
+    def _voicing(self, values, linear, tensors, grid, harmonics, eq=None):
         batch = values.shape[0]
-        amp_re, amp_im = self.harmonic_amplitudes(values, harmonics, eq, linear, constant_f0)
+        amp_re, amp_im = self.harmonic_amplitudes(values, harmonics, eq, linear)
         # (a deferred plan's harmonic count is on the device - the amplitudes are made for its upper bound)
         active = tensors.get('harmonics')
 
@@ -1256,7 +1230,7 @@ class DSynth(torch.nn.Module):
         # amplitudes interpolated between frames - on Apple GPUs in the Metal kernels, else the interval's two frames'
         # sums in one product each
         weight = grid['gridWeight']
-        if values.device.type == 'mps' and values.dtype == torch.float32 and _harmonic_library() is not None:
+        if values.device.type == 'mps' and values.dtype == torch.float32 and _metal_library(_HARMONIC_SOURCE) is not None:
             # (MPS only - the tests run on the CPU)
             signal = _HarmonicSum.apply(tensors['fraction'].contiguous(), amp_re.contiguous(), amp_im.contiguous(),  # pragma: no cover
                                         weight[0].contiguous(), active)
@@ -1336,13 +1310,13 @@ class DSynth(torch.nn.Module):
             window_sum[quarter:quarter + frames_count] += window_squared[quarter]
         return window_sum
 
-    def forward(self, values, seed=1, return_parts=False, eq=None, plan=None, constant_f0=False):
+    def forward(self, values, seed=1, eq=None, plan=None):
         """Render parameter values [B, T, COUNT] (or [T, COUNT]) to audio [B, N] (or [N]); seed is an int or a list; eq is
         the optional channel equalizer's gains (dB) [B, EQ_BAND_COUNT] (or [EQ_BAND_COUNT]); plan is the
         optional cycle plan made ahead (plan_cycles, of these values' F0 and jitter and these seeds, optionally with its
-        plan_host_tensors as 'host') - it leaves only a few columns to read from the device here; constant_f0 says the
-        values' F0 is a constant (a recording's, as training renders) - the rendering isn't differentiated in
-        it (the F0 column's gradient is zero), which saves the harmonic amplitudes' frequency gradients"""
+        plan_host_tensors as 'host') - it leaves only a few columns to read from the device here. The rendering isn't
+        differentiated in the values' F0 (training renders a recording's - the F0 column's gradient is zero), which
+        saves the harmonic amplitudes' frequency gradients."""
         squeeze = values.dim() == 2
         if squeeze:
             values = values[None]
@@ -1381,13 +1355,10 @@ class DSynth(torch.nn.Module):
             harmonics = plan['harmonics']
 
         # The voicing, with shimmer, and the noise
-        voicing = self._voicing(values, linear, tensors, grid, harmonics, eq, constant_f0)
+        voicing = self._voicing(values, linear, tensors, grid, harmonics, eq)
         index, weight = grid['index'], grid['weight']
         shimmer_amount = linear[:, index, params.INDEX['shimmer']] * (1 - weight) + linear[:, index + 1, params.INDEX['shimmer']] * weight
         voicing = voicing * torch.relu(1 + shimmer_amount * tensors['shimmer'])
         noise = self._noise_signal(values, linear, tensors, grid, count, eq)
         audio = voicing + noise
-        if return_parts:
-            parts = {'audio': audio, 'voicing': voicing, 'noise': noise}
-            return {key: value[0] for key, value in parts.items()} if squeeze else parts
         return audio[0] if squeeze else audio
