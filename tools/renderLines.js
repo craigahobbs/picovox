@@ -1,17 +1,14 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-// Render texts exactly as the package speaks them (lib/synthesis.js textBlocks - the voices, styles, gain, and limiter
-// at 24 kHz) to 16-bit WAV files, with the network's parameter frames - one JSON line per input line in, one out (used
-// by picovox_train/quality.py):
+// Render texts exactly as the package speaks them (lib/synthesis.js textBlocks - the voices, gain, and limiter at
+// 24 kHz, seed 1000) to 16-bit WAV files - one JSON line per text in (picovox_train/quality.py's render jobs):
 //
-//     {"text", "wav", "voice" (a voice key) or "speaker" (a speaker key of the model's speaker table), "style",
-//      "seed", "frames" (optional - a file for the frames: float32, row-major, NAMES.length values a 5 ms frame),
-//      "edits" (optional - each sentence's frames edited before rendering, for listening experiments: {"scale":
-//      {name: factor}, "add": {name: value}, "smooth": {name: milliseconds - a moving average}})}
-//  -> {"wav", "seconds", "frames", "frameCount"}
+//     {"text", "wav", "voice" (a voice key), "edits" (optional - each sentence's frames edited before rendering, for
+//      listening experiments: {"scale": {name: factor}, "add": {name: value}, "smooth": {name: milliseconds - a moving
+//      average}})}
 //
-//     node tools/renderLines.js [lib/models/voiceModel.js] < items.jsonl > rendered.jsonl
+//     node tools/renderLines.js [lib/models/voiceModel.js] < items.jsonl
 
 import {
     createSentenceRenderer, defaultSampleRate, modelLoader, paragraphPause, sentenceFrames, sentencePause, textBlocks
@@ -33,7 +30,9 @@ const loadModel = modelLoader(
     () => import(modulePath ? pathToFileURL(resolve(modulePath)).href : '../lib/models/voiceModel.js')
 );
 const model = await loadModel();
-const speakerIds = new Map(model.manifest.speakers.map((speaker) => [speaker.key, speaker.id]));
+
+// The renderer's noise seed (a text's first sentence's - each sentence's is the next)
+const seed = 1000;
 
 // A parameter's index (an unknown name throws)
 function parameterIndex(name) {
@@ -74,13 +73,12 @@ function editFrames(frames, {scale = {}, add = {}, smooth = {}}) {
 }
 
 
-// Speak text with edited frames - textBlocks's sentences, pauses, and seeds, each sentence's frames edited whole -
-// {blocks, frames}
-function editedRender(text, {voice, speaker, style, seed, edits}) {
+// Speak text with edited frames - textBlocks's sentences, pauses, and seeds, each sentence's frames edited whole - the
+// blocks
+function editedBlocks(text, voice, edits) {
     const blocks = [];
-    const allFrames = [];
     for (const sentence of splitSentences(text)) {
-        const {chunks, eq} = sentenceFrames(model, speechText(sentence.text), {voice, speaker, style});
+        const {chunks, eq} = sentenceFrames(model, speechText(sentence.text), {voice});
         const frames = editFrames([...chunks].flat(), edits);
         const pause = sentence.paragraphStart ? paragraphPause : sentencePause;
         const renderer = createSentenceRenderer({'onBlock': (block) => blocks.push(block), eq, 'seed': seed + sentence.index, pause});
@@ -88,9 +86,8 @@ function editedRender(text, {voice, speaker, style, seed, edits}) {
             renderer.push(frames);
         }
         renderer.end();
-        allFrames.push(...frames);
     }
-    return {blocks, 'frames': allFrames};
+    return blocks;
 }
 
 
@@ -100,36 +97,15 @@ for await (const chunk of process.stdin) {
     chunks.push(chunk);
 }
 
-// Render each item - its audio as the package speaks it, and the network's frames of each sentence (deterministic -
-// the seed is the renderer's noise only)
+// Render each item - its audio as the package speaks it
 const lines = Buffer.concat(chunks).toString('utf8').split('\n').filter((line) => line.trim() !== '');
 for (const line of lines) {
-    const {text, wav, voice, speaker: speakerKey, style, seed = 1000, frames: framesPath, edits} = JSON.parse(line);
-    if (speakerKey !== undefined && !speakerIds.has(speakerKey)) {
-        throw new Error(`Unknown speaker ${speakerKey}`);
-    }
-    const speaker = speakerKey === undefined ? undefined : speakerIds.get(speakerKey);
-    const edited = edits ? editedRender(text, {voice, speaker, style, seed, edits}) : null;
-    const blocks = edited ? edited.blocks : [...textBlocks(model, text, {voice, speaker, style, seed})];
+    const {text, wav, voice, edits} = JSON.parse(line);
+    const blocks = edits ? editedBlocks(text, voice, edits) : [...textBlocks(model, text, {voice, seed})];
     const samples = new Float32Array(blocks.reduce((sum, block) => sum + block.length, 0));
     blocks.reduce((offset, block) => {
         samples.set(block, offset);
         return offset + block.length;
     }, 0);
     writeFileSync(wav, toWav(samples, defaultSampleRate));
-    let frameCount = null;
-    if (framesPath !== undefined) {
-        const rows = edited ? edited.frames : [];
-        for (const sentence of edited ? [] : splitSentences(text)) {
-            for (const chunk of sentenceFrames(model, speechText(sentence.text), {voice, speaker, style}).chunks) {
-                rows.push(...chunk);
-            }
-        }
-        const values = new Float32Array(rows.length * NAMES.length);
-        rows.forEach((row, index) => values.set(row, index * NAMES.length));
-        writeFileSync(framesPath, values);
-        frameCount = rows.length;
-    }
-    const result = {wav, 'seconds': samples.length / defaultSampleRate, 'frames': framesPath ?? null, frameCount};
-    process.stdout.write(`${JSON.stringify(result)}\n`);
 }
