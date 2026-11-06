@@ -308,7 +308,8 @@ class TestLibraries(unittest.TestCase):
     def test_metal_library(self):
         # Each source's library compiled once
         with unittest.mock.patch.dict(dsynth._METAL_LIBRARIES, clear=True), \
-                unittest.mock.patch.object(torch.mps, 'compile_shader', side_effect=lambda source: f'library {len(source)}') as compile_shader:
+                unittest.mock.patch.object(torch.mps, 'compile_shader', side_effect=lambda source: f'library {len(source)}') \
+                as compile_shader:
             for source in (dsynth._HARMONIC_SOURCE, dsynth._TRACT_SOURCE, dsynth._FRICATION_SOURCE):
                 self.assertEqual(dsynth._metal_library(source), f'library {len(source)}')
                 self.assertEqual(dsynth._metal_library(source), f'library {len(source)}')
@@ -378,7 +379,6 @@ class TestKernels(unittest.TestCase):
     def test_tract_metal(self):
         # The tract by the kernels equals tract_log's PyTorch sum - values and gradients, per-frame and shared frequencies
         torch.manual_seed(1)
-        library = self.library
         frames = torch.tensor([speech_frames(4)], dtype=torch.float32, requires_grad=True)
         # The tract of the frames - by the kernels, or PyTorch
         def tract(per_frame, phase, kernel):

@@ -71,7 +71,8 @@ class StridedConv2d(torch.nn.Conv2d):
         return super().forward(input)
 
 
-class SpectrogramDiscriminator(torch.nn.Module):
+# (no forward - the trainer makes each signal's spectrograms once, then scores them)
+class SpectrogramDiscriminator(torch.nn.Module):  # pylint: disable=abstract-method
     """A log-mel spectrogram discriminator at one resolution"""
 
     def __init__(self, sample_rate, fft_size, mels, max_hz, channels):
@@ -105,7 +106,8 @@ class SpectrogramDiscriminator(torch.nn.Module):
         return self.out(x), features
 
 
-class Critic(torch.nn.Module):
+# (no forward - spectrograms, then score)
+class Critic(torch.nn.Module):  # pylint: disable=abstract-method
     """Spectrogram discriminators at several resolutions, their convolutions in bfloat16 (autocast - the spectrograms,
     the weights, and the scores stay float32; the intermediate features stay bfloat16 until generator_losses uses
     them); channels is each convolution's width"""
