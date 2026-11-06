@@ -9,22 +9,25 @@ each frame's cosine distance between the two crops' features (the recording's wi
 on lower layers, that ranked the per-clip synthesizer fit far closer to the source than the network (the paper's
 Section 13.9), and not the layer the gap is judged on (quality.py's fdL12), so the loss can't simply learn the measure.
 
-trainmulti.py adds it to the training step's loss (--perceptual-weight, off by default).
+trainmulti.py adds it to the training step's loss (--perceptual-weight - the recipe's 5, on the first
+--perceptual-crops crops of each step).
 """
+
+import math
+
+from . import ctc
+from .data import SAMPLE_RATE
+
 
 # The layers whose features the loss compares (the transformer's, 1-based)
 LAYERS = (3, 6)
 
-# The recordings' and renders' rate, and the recognizer's
-RATE = 24000
-MODEL_RATE = 16000
-
 
 class PerceptualLoss:
-    """The perceptual loss on a device - __call__(audio, target) of crops [batch, samples] at RATE"""
+    """The perceptual loss on a device - __call__(audio, target) of crops [batch, samples] at the corpus's rate
+    (data.py SAMPLE_RATE)"""
 
     def __init__(self, device, layers=LAYERS):
-        from . import ctc  # pylint: disable=import-outside-toplevel
         model, _, _ = ctc.load_ctc(device)
         self.layers = tuple(layers)
         self.encoder = model.wav2vec2
@@ -33,11 +36,26 @@ class PerceptualLoss:
         self.encoder.eval()
         for parameter in self.encoder.parameters():
             parameter.requires_grad_(False)
+        # The resampling kernels by dtype (resample)
+        self.kernels = {}
+
+    # Audio resampled to the recognizer's rate - torchaudio's resample (functional.resample) with its kernel made once
+    # per dtype, by the same function on the same device, so the same bits
+    def resample(self, audio):
+        # (resample's own two steps - torchaudio's private functions)
+        # pylint: disable=protected-access
+        import torchaudio  # pylint: disable=import-outside-toplevel,import-error
+        functional = torchaudio.functional.functional
+        gcd = math.gcd(SAMPLE_RATE, ctc.CTC_SAMPLE_RATE)
+        if audio.dtype not in self.kernels:
+            self.kernels[audio.dtype] = functional._get_sinc_resample_kernel(SAMPLE_RATE, ctc.CTC_SAMPLE_RATE, gcd, device=audio.device,
+                                                                             dtype=audio.dtype)
+        kernel, width = self.kernels[audio.dtype]
+        return functional._apply_sinc_resample_kernel(audio, SAMPLE_RATE, ctc.CTC_SAMPLE_RATE, gcd, kernel, width)
 
     # A batch's features - [layer features [batch, frames, dims]]
     def features(self, audio):
-        import torchaudio  # pylint: disable=import-outside-toplevel,import-error
-        audio = torchaudio.functional.resample(audio, RATE, MODEL_RATE)
+        audio = self.resample(audio)
         audio = (audio - audio.mean(1, keepdim=True)) / (audio.var(1, keepdim=True) + 1e-7).sqrt()
         hidden = self.encoder(audio, output_hidden_states=True).hidden_states
         return [hidden[layer] for layer in self.layers]

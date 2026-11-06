@@ -14,13 +14,15 @@ flags given override them.
 
 The corpus (data.py's format, memory-mapped - the audio is read a crop at a time) is the training speech,
 build/nn/data/tts/ (tts.py) - a local TTS model's voices, each speaker's row in the speaker table its index.json
-'index' (the recipe's voices, in order). Training renders at --rate (24 kHz, the corpus's rate) and compares below each
-utterance's own band - the rendering and the recording are both low-passed at 0.95 of the recording's bandwidth before
-the losses - and the spectral losses stop at --max-hz (the synthesizer's harmonic taper).
+'index' (the recipe's voices, in order). Training renders at the corpus's rate (24 kHz, data.py SAMPLE_RATE) and
+compares below each utterance's own band - the rendering and the recording are both low-passed at 0.95 of the
+recording's bandwidth before the losses - and the spectral losses stop at --max-hz (the synthesizer's harmonic taper).
 
 The losses are losses.py's (the multi-resolution STFT and log-mel loss, durations, log F0, the fading formant guide,
 formant order, smoothness, frication band) plus:
 
+- the perceptual loss (perceptual.py, --perceptual-weight and --perceptual-crops) - the first crops of each step against
+  their recordings in the pinned wav2vec2 phoneme recognizer's features
 - the adversarial critic (discriminator.py, --adversarial and --feature-matching) - the fix for the over-smoothing of
   a deterministic network trained by spectral regression (wide formant bandwidths, and noise filling the harmonics'
   valleys)
@@ -55,17 +57,12 @@ import threading
 import time
 
 import numpy
-import soxr
 import torch
 
 from . import RECIPE_PATH, ROOT, discriminator, dsynth, optim, params, perceptual
-from .data import DATA_DIR, CorpusData
+from .data import DATA_DIR, SAMPLE_RATE, CorpusData
 from .model import FIRST_PHONE, MultiModel, core_parameter_count, parameter_count, save_checkpoint
 from .losses import F_INDEX, PRIORS, duration_loss, f0_track, render_values, spectral_loss
-
-
-# The data's sample rate
-SOURCE_RATE = 24000
 
 # The runs' directory (checkpoints and logs)
 RUNS_DIR = os.environ.get('NN_RUNS_DIR', os.path.join(ROOT, 'build', 'nn', 'runs'))
@@ -128,7 +125,7 @@ class Corpus:
     def __len__(self):
         return len(self.items)
 
-    # An item's audio samples [start, end) at the source rate (float32, zero-padded past its end)
+    # An item's audio samples [start, end) at the corpus rate (float32, zero-padded past its end)
     def audio(self, item, start, end):
         count = item['sampleCount']
         offset = item['sampleOffset']
@@ -233,25 +230,18 @@ def crop_starts(items, total, crop_frames, rng):
     return starts, length
 
 
-# The recordings' crops [B, L x rate / 200] (numpy float32) at crop starts
-def crop_audio(corpus, items, starts, length, rate):
-    per_frame = SOURCE_RATE // params.FRAME_RATE
-    crops_audio = []
-    for item, start in zip(items, starts):
-        audio = corpus.audio(item, start * per_frame, (start + length) * per_frame)
-        if rate != SOURCE_RATE:
-            audio = soxr.resample(audio, SOURCE_RATE, rate)
-            audio = numpy.pad(audio, (0, max(0, length * rate // params.FRAME_RATE - len(audio))))[:length * rate // params.FRAME_RATE]
-        crops_audio.append(audio)
-    return numpy.stack(crops_audio)
+# The recordings' crops [B, L x SAMPLE_RATE / 200] (numpy float32) at crop starts
+def crop_audio(corpus, items, starts, length):
+    per_frame = SAMPLE_RATE // params.FRAME_RATE
+    return numpy.stack([corpus.audio(item, start * per_frame, (start + length) * per_frame) for item, start in zip(items, starts)])
 
 
-# Random crops of the batch's parameter frames and recordings - (values [B, L + 1, COUNT], audio [B, L x rate / 200]);
-# crops start on even frames (10 ms)
-def crop(values, batch, crop_frames, rate, rng):
+# Random crops of the batch's parameter frames and recordings - (values [B, L + 1, COUNT], audio
+# [B, L x SAMPLE_RATE / 200]); crops start on even frames (10 ms)
+def crop(values, batch, crop_frames, rng):
     starts, length = crop_starts(batch['items'], values.shape[1], crop_frames, rng)
     crops_values = torch.stack([values[ix, start:start + length + 1] for ix, start in enumerate(starts)])
-    return crops_values, torch.tensor(crop_audio(batch['corpus'], batch['items'], starts, length, rate), device=values.device)
+    return crops_values, torch.tensor(crop_audio(batch['corpus'], batch['items'], starts, length), device=values.device)
 
 
 # The spectral loss compiled - on MPS its elementwise work fused into a few kernels (8-13% of a stage-A step; the
@@ -313,12 +303,12 @@ class Prefetcher:
         total = 2 * batch['frameCount'] + 1
         starts, length = crop_starts(batch['items'], total, args.crop_frames, self.rng)
         host = batch['host']
-        host['target'] = torch.from_numpy(crop_audio(batch['corpus'], batch['items'], starts, length, args.rate))
+        host['target'] = torch.from_numpy(crop_audio(batch['corpus'], batch['items'], starts, length))
         host['cutoffs'] = torch.tensor([0.95 * item['bandwidth'] for item in batch['items']], dtype=torch.float32)
         seeds = [seed + ix for ix in range(len(batch['items']))]
         plan = None
         f0 = host['f0'].numpy()[:, :total]
-        if f0.shape[1] == total and dsynth.sample_count(length + 1, args.rate) > 0:
+        if f0.shape[1] == total and dsynth.sample_count(length + 1, SAMPLE_RATE) > 0:
             f0_frames = numpy.stack([f0[ix, start:start + length + 1] for ix, start in enumerate(starts)]).astype(numpy.float64)
             plan = self.synth.plan_cycles(f0_frames, numpy.full(f0_frames.shape, self.jitter), seeds)
             plan['host'] = self.synth.plan_host_tensors(plan)
@@ -418,7 +408,7 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
     # The spectral loss of the rendered crops, both band-limited to the recording's band
     render = render_values(model, unit, batch, teacher_f0=True)
     if prepared is None:
-        crop_values, target = crop(render, batch, args.crop_frames, args.rate, rng)
+        crop_values, target = crop(render, batch, args.crop_frames, rng)
         plan = None
     else:
         starts, length = prepared['starts'], prepared['length']
@@ -429,17 +419,17 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
     audio = synth(crop_values, seed=[seed + ix for ix in range(len(batch['items']))], eq=eq, plan=plan, constant_f0=True)
     target = target[:, :audio.shape[1]]
     cutoffs = [0.95 * item['bandwidth'] for item in batch['items']]
-    audio = band_limit(audio, cutoffs, args.rate, batch.get('cutoffs'))
-    target = band_limit(target, cutoffs, args.rate, batch.get('cutoffs'))
-    full_crop = audio.shape[1] == round(args.crop * args.rate)
+    audio = band_limit(audio, cutoffs, SAMPLE_RATE, batch.get('cutoffs'))
+    target = band_limit(target, cutoffs, SAMPLE_RATE, batch.get('cutoffs'))
+    full_crop = audio.shape[1] == round(args.crop * SAMPLE_RATE)
     if audio.device.type == 'mps' and full_crop:  # pragma: no cover - the Apple GPU only
         # (the full-length crops - nearly every step - through the compiled loss, the batch size a dynamic dimension)
         # (torch's API for a dynamic dimension is torch._dynamo's)
         torch._dynamo.mark_dynamic(audio, 0)  # pylint: disable=protected-access
         torch._dynamo.mark_dynamic(target, 0)  # pylint: disable=protected-access
-        losses['spectral'] = compiled_spectral_loss(audio, target, args.rate, args.max_hz, mel_eps=1e-9)
+        losses['spectral'] = compiled_spectral_loss(audio, target, SAMPLE_RATE, args.max_hz, mel_eps=1e-9)
     else:
-        losses['spectral'] = spectral_loss(audio, target, args.rate, args.max_hz, mel_eps=1e-9)
+        losses['spectral'] = spectral_loss(audio, target, SAMPLE_RATE, args.max_hz, mel_eps=1e-9)
 
     # (the perceptual loss - the crops in the speech recognizer's features, perceptual.py)
     # (on the first --perceptual-crops crops - the recognizer costs several times the step)
@@ -508,7 +498,6 @@ def argument_parser():
     parser.add_argument('--crop', type=float, help='the rendered crop (seconds)')
     parser.add_argument('--bucket-ratio', type=float,
                         help='pad token and frame counts up to a geometric ladder of this ratio (0: no fixed shapes)')
-    parser.add_argument('--rate', type=int)
     parser.add_argument('--max-hz', type=float)
     parser.add_argument('--lr', type=float)
     parser.add_argument('--warmup', type=int)
@@ -617,11 +606,11 @@ def main(argv=None):
         state = torch.load(args.init, map_location=device, weights_only=False)
         missing, unexpected = model.load_state_dict(state['model'], strict=False)
         print(f'init from {args.init}: missing {missing}, unexpected {unexpected}', file=sys.stderr)
-    synth = dsynth.DSynth(args.rate).to(device)
+    synth = dsynth.DSynth(SAMPLE_RATE).to(device)
     critic = None
     if args.adversarial > 0:
         critic_dtype = None if args.critic_precision == 'float32' else getattr(torch, args.critic_precision)
-        critic = discriminator.Critic(args.rate, args.max_hz, eps=1e-9, dtype=critic_dtype, channels=args.critic_channels).to(device)
+        critic = discriminator.Critic(SAMPLE_RATE, args.max_hz, eps=1e-9, dtype=critic_dtype, channels=args.critic_channels).to(device)
     # (on the GPU the critic's fused AdamW - one kernel, not a loop over the parameters)
     fused = device.type in ('mps', 'cuda')
     critic_optimizer = torch.optim.AdamW(critic.parameters(), lr=args.critic_lr, betas=(0.8, 0.99),

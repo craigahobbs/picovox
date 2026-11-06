@@ -193,12 +193,10 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(length, 20)
         self.assertTrue(all(start % 2 == 0 and start + length <= 40 for start in starts))
         self.assertEqual(trainmulti.crop_starts(batch['items'][:1], 11, 20, rng), ([0], 10))
-        audio = trainmulti.crop_audio(corpus, batch['items'], [0, 2], 20, 24000)
+        audio = trainmulti.crop_audio(corpus, batch['items'], [0, 2], 20)
         self.assertEqual(audio.shape, (2, 2400))
-        resampled = trainmulti.crop_audio(corpus, batch['items'], [0, 2], 20, 16000)
-        self.assertEqual(resampled.shape, (2, 1600))
         values = torch.zeros(2, 2 * batch['frameCount'] + 1, params.COUNT)
-        crop_values, target = trainmulti.crop(values, batch, 20, 24000, rng)
+        crop_values, target = trainmulti.crop(values, batch, 20, rng)
         self.assertEqual(tuple(crop_values.shape), (2, 21, params.COUNT))
         self.assertEqual(tuple(target.shape), (2, 2400))
 
@@ -275,7 +273,7 @@ class TestPrefetcher(unittest.TestCase):
         self.synth = dsynth.DSynth(24000)
 
     def test_steps(self):
-        args = argparse.Namespace(crop_frames=20, rate=24000, bucket_ratio=1.125)
+        args = argparse.Namespace(crop_frames=20, bucket_ratio=1.125)
         prefetcher = trainmulti.Prefetcher(self.corpus, self.stream, args, self.rng, self.synth, 0.005, depth=1)
         # (the queue fills - the thread waits for room)
         time.sleep(0.3)
@@ -291,14 +289,14 @@ class TestPrefetcher(unittest.TestCase):
 
     def test_no_plan(self):
         # (no samples to render - a zero-length crop)
-        args = argparse.Namespace(crop_frames=0, rate=24000, bucket_ratio=0)
+        args = argparse.Namespace(crop_frames=0, bucket_ratio=0)
         prefetcher = trainmulti.Prefetcher(self.corpus, self.stream, args, self.rng, self.synth, 0.005)
         prepared = prefetcher.next()
         prefetcher.close()
         self.assertIsNone(prepared['plan'])
 
     def test_error(self):
-        args = argparse.Namespace(crop_frames=20, rate=24000, bucket_ratio=0)
+        args = argparse.Namespace(crop_frames=20, bucket_ratio=0)
         prefetcher = trainmulti.Prefetcher(self.corpus, iter(()), args, self.rng, self.synth, 0.005)
         with self.assertRaises(StopIteration):
             prefetcher.next()

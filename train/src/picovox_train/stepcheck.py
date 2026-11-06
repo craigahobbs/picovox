@@ -27,6 +27,7 @@ import torch  # noqa: E402
 
 from picovox_train import dsynth  # noqa: E402
 from picovox_train.trainmulti import MULTI_PRIORS, Corpus, batch_losses, collate, default_settings, sonorant_mask  # noqa: E402
+from picovox_train.data import SAMPLE_RATE  # noqa: E402
 from picovox_train.model import MultiModel  # noqa: E402
 
 
@@ -45,7 +46,7 @@ def main(argv=None):
     config = {**state['config'], **json.loads(args.config)}
     corpus = Corpus('tts', 'val', max_items=64)
     sonorants = torch.tensor(sonorant_mask(corpus.data.index['vocab']), device=device)
-    synth = dsynth.DSynth(settings.rate).to(device)
+    synth = dsynth.DSynth(SAMPLE_RATE).to(device)
     out = {'init': args.init, 'device': args.device, 'config': json.loads(args.config), 'batches': []}
     order = sorted(range(len(corpus)), key=lambda index: corpus.items[index]['frameCount'])
     for number in range(args.batches):
