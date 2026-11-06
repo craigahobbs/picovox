@@ -811,11 +811,18 @@ class TestBuild(unittest.TestCase):
         self.assertEqual([entry['sentence'] for entry in index['utterances']], [clips[0]['id'], clips[2]['id']])
 
     def test_build_stale_alignment(self):
-        # The readings measured since the alignment - align again
-        with self.corpus() as (directory, _, clips), tempfile.TemporaryDirectory() as out, \
-                self.assertRaisesRegex(ValueError, '^the alignment isn\'t current'):
+        # The stamp not current (the readings measured since the alignment) - the clips' phones checked: unchanged (the
+        # corpus's overrides none), built; changed, align again
+        overrides = readings.overrides
+        with self.corpus() as (directory, _, clips), tempfile.TemporaryDirectory() as out:
             write_readings(directory, clips[1]['id'], 1, 'lead', ['L IY1 D', 'P AY1 P'])
-            self.run_build(build_args(out))
+            self.assertFalse(tts.alignment_current(directory, clips[:5] + clips[6:]))
+            self.run_build(build_args(os.path.join(out, 'same')))
+            self.assertEqual(len(data.CorpusData(os.path.join(out, 'same')).index['utterances']), 6)
+            # (a sample - built in place, not the cached build)
+            with unittest.mock.patch.object(readings, 'overrides', overrides), \
+                    self.assertRaisesRegex(ValueError, f'^{clips[1]["id"]}: the front end\'s phones differ from its alignment\'s'):
+                self.run_build(build_args(os.path.join(out, 'other'), limit=7))
 
 
 class TestMain(unittest.TestCase):

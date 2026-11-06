@@ -484,11 +484,11 @@ def phone_keys(tokens):
 
 
 # The alignment's stamp - a hash of what the clips' tokens and alignment depend on (the clips with audio, the aligner,
-# the measured readings their tokens take, and the front end - the build's code, code_files) and of alignments.jsonl
-# itself; align writes it (alignments.stamp) when every clip is aligned, so while it's current the front end's pass over
-# the clips is skipped (align's, and the build's check)
+# the measured readings their tokens take, and the front end with its G2P module - code_files('frontend')) and of
+# alignments.jsonl itself; align writes it (alignments.stamp) when every clip is aligned, so while it's current the
+# front end's pass over the clips is skipped (align's, and the build's check)
 def alignment_stamp(directory, clips):
-    files = [os.path.join(directory, 'alignments.jsonl')] + readings_files(directory) + code_files('tts')
+    files = [os.path.join(directory, 'alignments.jsonl')] + readings_files(directory) + code_files('frontend')
     return inputs_key({'clips': [clip['id'] for clip in clips], 'aligner': aligner_key()}, files)
 
 
@@ -689,8 +689,7 @@ def build_data(args, settings, directory, out):
     from .frontend import BOUNDARIES, TOKEN_IDS, vocabulary  # pylint: disable=import-outside-toplevel
     start_time = time.time()
     clips = [clip for clip in selection(settings, args.jobs, args.recipe) if os.path.exists(wav_path(directory, clip))]
-    if not alignment_current(directory, clips):
-        raise ValueError('the alignment isn\'t current (the clips, the front end, or the readings changed) - run tts align again')
+    current = alignment_current(directory, clips)
     if args.limit:
         clips = clips[::max(1, len(clips) // args.limit)][:args.limit]
     log(f'tts build: {len(clips)} clips to build')
@@ -698,8 +697,15 @@ def build_data(args, settings, directory, out):
     overrides = readings.overrides(directory)
     os.makedirs(out, exist_ok=True)
 
-    # The checks
-    checks = {clip['id']: clip_checks(records.get(clip['id']), settings['checks']) for clip in clips}
+    # The checks, and (the alignment's stamp not current) the clips' tokens against their alignments (the front end
+    # changed: align again)
+    checks = {}
+    fronts = None if current else clip_fronts(clips, overrides, args.jobs)
+    for clip in clips:
+        record = records.get(clip['id'])
+        if fronts and record and record['labels'] and phone_keys(fronts[clip['id']]['tokens']) != record['keys']:
+            raise ValueError(f'{clip["id"]}: the front end\'s phones differ from its alignment\'s - run tts align again')
+        checks[clip['id']] = clip_checks(record, settings['checks'])
 
     # The phones' mean durations (align.label_durations), and each voice's pitch range
     mean_seconds = align.mean_durations([label for clip in clips for label in (records.get(clip['id']) or {}).get('labels') or []])
