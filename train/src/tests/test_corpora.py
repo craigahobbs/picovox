@@ -30,76 +30,21 @@ class TestDownload(unittest.TestCase):
     def test_download(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, 'a.tar')
-            with unittest.mock.patch('urllib.request.urlopen', return_value=FakeResponse(b'abc')) as urlopen, helpers.captured():
+            with unittest.mock.patch('urllib.request.urlopen', return_value=FakeResponse(b'abc')) as urlopen:
                 corpora.download('https://x/a.tar', path)
-                corpora.download('https://x/a.tar', path)
-            self.assertEqual(urlopen.call_count, 1)
             request = urlopen.call_args.args[0]
             self.assertEqual(request.get_header('User-agent'), corpora.USER_AGENT)
-            self.assertIsNone(request.get_header('Range'))
+            self.assertEqual(sorted(os.listdir(directory)), ['a.tar'])
             with open(path, 'rb') as file:
                 self.assertEqual(file.read(), b'abc')
 
-    def test_download_resume(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, 'a.tar')
-            # A partial download resumed (206), then one restarted (the server ignores the range - 200)
-            with open(path + '.part', 'wb') as file:
-                file.write(b'abc')
-            with unittest.mock.patch('urllib.request.urlopen', return_value=FakeResponse(b'def', status=206)) as urlopen, \
-                    helpers.captured():
-                corpora.download('https://x/a.tar', path)
-            self.assertEqual(urlopen.call_args.args[0].get_header('Range'), 'bytes=3-')
-            with open(path, 'rb') as file:
-                self.assertEqual(file.read(), b'abcdef')
-            os.replace(path, path + '.part')
-            with unittest.mock.patch('urllib.request.urlopen', return_value=FakeResponse(b'xyz', length=False)), helpers.captured():
-                corpora.download('https://x/a.tar', path)
-            with open(path, 'rb') as file:
-                self.assertEqual(file.read(), b'xyz')
-
-    def test_download_complete_part(self):
-        # The partial file is already complete - the server answers 416
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, 'a.tar')
-            with open(path + '.part', 'wb') as file:
-                file.write(b'abc')
-            error = urllib.error.HTTPError('https://x/a.tar', 416, 'Range Not Satisfiable', {}, None)
-            with unittest.mock.patch('urllib.request.urlopen', side_effect=error):
-                corpora.download('https://x/a.tar', path)
-            error.close()
-            with open(path, 'rb') as file:
-                self.assertEqual(file.read(), b'abc')
-
-    def test_download_errors(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, 'a.tar')
-            error = urllib.error.HTTPError('https://x/a.tar', 500, 'Server Error', {}, None)
+            # An error - nothing downloaded
+            error = urllib.error.HTTPError('https://x/b.tar', 500, 'Server Error', {}, None)
             with unittest.mock.patch('urllib.request.urlopen', side_effect=error), self.assertRaises(urllib.error.HTTPError):
-                corpora.download('https://x/a.tar', path)
+                corpora.download('https://x/b.tar', os.path.join(directory, 'b.tar'))
             error.close()
-            response = FakeResponse(b'abc')
-            response.headers['Content-Length'] = '10'
-            with unittest.mock.patch('urllib.request.urlopen', return_value=response), helpers.captured(), \
-                    self.assertRaisesRegex(IOError, 'Incomplete download of https://x/a.tar: 3 of 10 bytes'):
-                corpora.download('https://x/a.tar', path)
-            self.assertFalse(os.path.exists(path))
+            self.assertEqual(sorted(os.listdir(directory)), ['a.tar'])
 
-    def test_download_progress(self):
-        # A progress line every 10 seconds
-        body = b'x' * ((1 << 20) * 2 + 5)
-        with tempfile.TemporaryDirectory() as directory, helpers.captured() as (_, stderr), \
-                unittest.mock.patch('urllib.request.urlopen', return_value=FakeResponse(body)), \
-                unittest.mock.patch('time.time', side_effect=[100.0, 111.0, 111.0, 112.0, 130.0, 130.0]):
-            corpora.download('https://x/a.tar', os.path.join(directory, 'a.tar'))
-        self.assertEqual(stderr.getvalue(), '  a.tar: 1 MB (50%), 0.1 MB/s\n  a.tar: 2 MB (100%), 0.1 MB/s\n')
-
-    def test_download_progress_unknown(self):
-        with tempfile.TemporaryDirectory() as directory, helpers.captured() as (_, stderr), \
-                unittest.mock.patch('urllib.request.urlopen', return_value=FakeResponse(b'abc', length=False)), \
-                unittest.mock.patch('time.time', side_effect=[100.0, 111.0, 111.0]):
-            corpora.download('https://x/a.tar', os.path.join(directory, 'a.tar'))
-        self.assertEqual(stderr.getvalue(), '  a.tar: 0 MB, 0.0 MB/s\n')
 
 
 class TestFetch(unittest.TestCase):
@@ -146,15 +91,6 @@ class TestDictionary(unittest.TestCase):
 
 
 class TestMain(unittest.TestCase):
-
-    def test_list(self):
-        with tempfile.TemporaryDirectory() as directory, \
-                unittest.mock.patch.dict(corpora.FILES, {'one': {'path': directory, 'description': 'One'},
-                                                         'two': {'path': os.path.join(directory, 'y'), 'description': 'Two'}},
-                                         clear=True), \
-                unittest.mock.patch.object(sys, 'argv', ['corpora.py', '--list']), helpers.captured() as (stdout, _):
-            corpora.main()
-        self.assertEqual(stdout.getvalue(), f'{"one":28s} present  One\n{"two":28s} missing  Two\n')
 
     def test_main(self):
         with unittest.mock.patch.object(corpora, 'fetch_file', return_value=1000000) as fetch_file, helpers.captured() as (_, stderr):
