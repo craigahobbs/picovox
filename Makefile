@@ -123,10 +123,10 @@ TRAIN_RUNS := $(TRAIN_DIR)/runs
 # The bookkeeping, for the training dashboard (tools/dashboard/): each stage's start, end, and failure in
 # $(TRAIN_DIR)/stages.jsonl and each command's output also in $(TRAIN_DIR)/logs/<stage>.log (tools/trainstage.sh - the
 # training stages' output also in their runs' train.log), and the CPU, GPU, and memory use with the running stages every 20 seconds
-# in $(TRAIN_DIR)/util.log (tools/trainutil.sh, for the life of make - make train starts it, and a stage's start does if
-# none runs). The stages, their dependencies, and their expected times are train/data/train-stages.json's
-# (test/testTrainStages.js checks it against these targets).
-STAGE = tools/trainstage.sh $(TRAIN_DIR) $(basename $(@F))
+# in $(TRAIN_DIR)/util.log (tools/trainutil.sh, for the life of make - a stage's start starts it if none runs: $$PPID,
+# expanded by the recipe line's shell, is make's pid). The stages, their dependencies, and their expected times are
+# train/data/train-stages.json's (test/testTrainStages.js checks it against these targets).
+STAGE = tools/trainstage.sh $(TRAIN_DIR) $(basename $(@F)) $$PPID
 
 # Record a make target's run in stages.jsonl (the training dashboard shows its stages), and keep the Mac awake while make
 # runs: macOS's caffeinate until make exits - finished, failed, or interrupted - on AC power with the lid closed too (-s;
@@ -147,24 +147,24 @@ TRAINED = @for stamp in $(1); do test -f $(TRAIN_DIR)/$$stamp || \
 	{ echo "make $@: no trained model ($(TRAIN_DIR)/$$stamp) - make train first"; exit 1; }; done
 
 # (the power check first, alone - its prompt has the terminal - then the stages, in parallel with make -j, then the report)
-.PHONY: train train-voice train-g2p train-check train-install train-util train-clean
+.PHONY: train train-voice train-g2p train-check train-install train-clean
 train:
 	$(call TRAIN_TARGET,train)
 	@tools/trainpower.sh
-	@$(MAKE) --no-print-directory train-util $(TRAIN_VOICE) $(TRAIN_G2P)
+	@$(MAKE) --no-print-directory $(TRAIN_VOICE) $(TRAIN_G2P)
 	@$(TRAIN_REPORT)
 
 train-voice:
 	$(call TRAIN_TARGET,train-voice)
 	@tools/trainpower.sh
-	@$(MAKE) --no-print-directory train-util $(TRAIN_VOICE)
+	@$(MAKE) --no-print-directory $(TRAIN_VOICE)
 	@$(TRAIN_REPORT)
 
 # make train-g2p - the G2P alone, on every core (G2P_STANDALONE_JOBS workers at the default QoS, not after the voices'
 # data build)
 train-g2p:
 	$(call TRAIN_TARGET,train-g2p)
-	@$(MAKE) --no-print-directory train-util G2P_STANDALONE=1 G2P_JOBS=$(G2P_STANDALONE_JOBS) CONTEXT_JOBS=$(G2P_STANDALONE_JOBS) BESIDE= $(TRAIN_G2P)
+	@$(MAKE) --no-print-directory G2P_STANDALONE=1 G2P_JOBS=$(G2P_STANDALONE_JOBS) CONTEXT_JOBS=$(G2P_STANDALONE_JOBS) BESIDE= $(TRAIN_G2P)
 	@$(TRAIN_REPORT)
 
 # make train-check - the trained models checked before they're installed: the package's tests with them in place of
@@ -203,10 +203,6 @@ train-install-voice:
 train-install-g2p:
 	$(call TRAINED,g2p.done)
 	$(TRAIN_PYTHON) -m picovox_train.trained install $(TRAIN_DIR) --model g2p
-
-# The utilization sampler - it exits when make does (finished, failed, or interrupted)
-train-util:
-	@mkdir -p $(TRAIN_DIR) && nohup tools/trainutil.sh $(TRAIN_DIR) $$PPID >/dev/null 2>&1 &
 
 # A from-scratch make train: remove TRAIN_DIR (make train itself never removes anything)
 train-clean:
