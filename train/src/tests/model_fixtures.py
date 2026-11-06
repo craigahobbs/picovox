@@ -26,10 +26,15 @@ def write_data(data_dir):
     helpers.write_corpus(os.path.join(data_dir, 'tts'))
 
 
-# A tiny model's checkpoint state (trainmulti.py's format, the critic aside)
+# A tiny model's checkpoint state (trainmulti.py's format, the critic aside) - its weights rounded to multiples of
+# 2^-12, the same on every machine (torch's initializers and the priors' log differ in the last bit between x86 and
+# arm64, and the export parity check's committed inputs are the exported weights)
 def checkpoint_state(seed=1, args=None, **config):
     torch.manual_seed(seed)
     model = MultiModel(helpers.tiny_config(speakers=len(SPEAKERS), **config), priors=trainmulti.MULTI_PRIORS)
+    with torch.no_grad():
+        for tensor in model.state_dict().values():
+            tensor.copy_(torch.round(tensor * 4096.0) / 4096.0)
     return {'model': model.state_dict(), 'config': model.config, 'priors': trainmulti.MULTI_PRIORS, 'speakers': list(SPEAKERS),
             'step': 3, 'val': {'score': 1.5}, 'args': dict(args or {})}
 

@@ -149,7 +149,7 @@ def _reduce(values, high_word, negative):
     with np.errstate(over='ignore', invalid='ignore'):
         rounded = np.trunc(_mul_add(1.44269504088896338700e+00, values[far], np.where(negative[far], -0.5, 0.5)))
         exponent[far] = rounded.astype(np.int64)
-    high[far] = _mul_add(-rounded, ln2_high, values[far])
+        high[far] = _mul_add(-rounded, ln2_high, values[far])
     low[far] = rounded * ln2_low
     return exponent, high, low, np.where(large, high - low, values), large, near
 
