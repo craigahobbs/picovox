@@ -81,6 +81,14 @@ def silent_runs(samples, rate):
     return runs
 
 
+# First-pass F0 of a clip (Praat, 60-700 Hz) - the voiced values (a worker task)
+def first_pass_f0(path):
+    import parselmouth  # pylint: disable=import-outside-toplevel, import-error
+    sound = parselmouth.Sound(path)
+    f0 = sound.to_pitch_ac(time_step=0.01, pitch_floor=60, pitch_ceiling=700).selected_array['frequency']
+    return f0[f0 > 0].astype(np.float32)
+
+
 # Frame-center sampling of a Praat track - values at times (k + 0.5) x FRAME_SECONDS, from track times and values
 def sample_track(track_times, track_values, frame_count, tolerance=0.006):
     centers = (np.arange(frame_count) + 0.5) * FRAME_SECONDS

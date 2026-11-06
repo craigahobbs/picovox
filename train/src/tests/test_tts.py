@@ -143,10 +143,6 @@ class TestBasics(unittest.TestCase):
         self.assertEqual(tts.text_split('Sentence 1.', {'test': 5, 'val': 5}), splits[1])
         self.assertEqual(set(tts.text_split(f'Sentence {number}.', {'test': 0, 'val': 0}) for number in range(100)), {'train'})
 
-    def test_dealing_order(self):
-        voices = {'a': {'sex': 'male'}, 'b': {'sex': 'male'}, 'c': {'sex': 'female'}, 'd': {'sex': 'male'}}
-        self.assertEqual(tts.dealing_order(voices), ['a', 'c', 'b', 'd'])
-        self.assertEqual(tts.dealing_order({}), [])
 
 
 class TestSelection(unittest.TestCase):

@@ -51,6 +51,7 @@ import urllib.error
 import urllib.request
 
 from . import RECIPE_PATH, ROOT, SOURCE_DIR, read_json
+from .corpora import file_sha256
 
 
 TTS_DIR = os.path.join(ROOT, 'downloads', 'tts')
@@ -111,19 +112,6 @@ def text_split(text, split):
 def text_voice(text, voices):
     keys = list(voices)
     return keys[int(hashlib.sha1(f'voice/{text}'.encode('utf-8')).hexdigest(), 16) % len(keys)]
-
-
-# The voices in dealing order - the recipe's, the sexes alternating (so sentences dealt in turn have both)
-def dealing_order(voices):
-    by_sex = {}
-    for key, voice in voices.items():
-        by_sex.setdefault(voice['sex'], []).append(key)
-    queues, order = list(by_sex.values()), []
-    while any(queues):
-        for queue in queues:
-            if queue:
-                order.append(queue.pop(0))
-    return order
 
 
 #
@@ -413,15 +401,6 @@ def generate_command(args):
 # The cache keys
 #
 
-# The SHA-256 of a file's bytes
-def file_sha256(path):
-    digest = hashlib.sha256()
-    with open(path, 'rb') as file:
-        for block in iter(lambda: file.read(1 << 20), b''):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 # The training package's modules a module imports, itself and transitively (its relative imports, at the top or in a
 # function) - their names
 def module_closure(name, package_dir):
@@ -579,12 +558,13 @@ def label_clip(task):
 # (ctc.overlapped): the next group's audio read and the last group's labels found while the recognizer runs
 def align_clips(args, directory, todo):
     from . import ctc  # pylint: disable=import-outside-toplevel
+    from .wav import read_mono  # pylint: disable=import-outside-toplevel
     key = aligner_key()
     model, vocab, device = ctc.load_ctc(args.device)
 
     # (a group's audio, and its labeling tasks)
     def read(group):
-        return [ctc.read_16k(wav_path(directory, clip)) for clip, _ in group]
+        return [read_mono(wav_path(directory, clip), ctc.CTC_SAMPLE_RATE) for clip, _ in group]
 
     def infer(group, samples_list):
         return [(tokens, log_posteriors, vocab, samples) for (_, tokens), log_posteriors, samples
@@ -634,15 +614,10 @@ def clip_checks(record, checks):
 # MAX_EDGE_SILENCE, its audio and frame tracks (a worker task)
 def process_clip(task):
     import numpy as np  # pylint: disable=import-outside-toplevel
-    import soxr  # pylint: disable=import-outside-toplevel
     from . import align, data  # pylint: disable=import-outside-toplevel
-    from .wav import read_wav  # pylint: disable=import-outside-toplevel
+    from .wav import read_mono  # pylint: disable=import-outside-toplevel
     path, tokens, labels, mean_seconds, settings = task
-    samples, rate = read_wav(path)
-    samples = samples.mean(axis=1)
-    if rate != data.SAMPLE_RATE:
-        samples = soxr.resample(samples, rate, data.SAMPLE_RATE, quality='VHQ')
-    samples = np.ascontiguousarray(samples)
+    samples = read_mono(path, data.SAMPLE_RATE)
     seconds = align.refine_pauses(tokens, align.label_durations(tokens, labels, mean_seconds), data.silent_runs(samples, data.SAMPLE_RATE))
     wav_seconds = len(samples) / data.SAMPLE_RATE
     speech_start, speech_end = seconds[0], wav_seconds - seconds[-1]
@@ -734,7 +709,7 @@ def build_data(args, settings, directory, out):
     # The phones' mean durations (align.label_durations), and each voice's pitch range
     mean_seconds = align.mean_durations([label for clip in clips for label in (records.get(clip['id']) or {}).get('labels') or []])
     with multiprocessing.Pool(args.jobs) as pool:
-        first_f0 = pool.map(ctc.first_pass_f0, [wav_path(directory, clip) for clip in clips], chunksize=8)
+        first_f0 = pool.map(data.first_pass_f0, [wav_path(directory, clip) for clip in clips], chunksize=8)
     pooled = collections.defaultdict(list)
     for clip, values in zip(clips, first_f0):
         pooled[clip['key']].append(values)

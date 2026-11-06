@@ -38,6 +38,12 @@ VOWELS = ['AA', 'AE', 'AH', 'AO', 'AW', 'AY', 'EH', 'ER', 'EY', 'IH', 'IY', 'OW'
 CONSONANTS = ['B', 'CH', 'D', 'DH', 'F', 'G', 'HH', 'JH', 'K', 'L', 'M', 'N', 'NG', 'P', 'R', 'S', 'SH', 'T', 'TH',
               'V', 'W', 'Y', 'Z', 'ZH']
 
+
+# A phone (or phones) without stress
+def base(phone):
+    return re.sub(r'\d', '', phone)
+
+
 # The special tokens - padding, unknown, start, word boundary, and the phrase ends (textToPhrases' phrase 'end' values)
 PAD, UNK, BOS, WORD = '<pad>', '<unk>', '<bos>', '_'
 PHRASE_ENDS = {'comma': '<comma>', 'period': '<period>', 'question': '<question>', 'wh': '<wh>',

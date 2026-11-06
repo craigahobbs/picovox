@@ -33,7 +33,7 @@ import time
 import warnings
 
 from . import RECIPE_PATH, read_json
-from .readings import CLOSED_CLASS, VOWELS, base, difference, measured_words, read_variants, reading_of, token_words, unstressed, word_class
+from .readings import CLOSED_CLASS, VOWELS, base, difference, measured_words, read_variants, reading_of, token_words, word_class
 
 
 # The context of a word - its neighbors' phones when at most NEIGHBOR_SECONDS long, else PAD seconds of the audio; the
@@ -178,11 +178,12 @@ def score_candidates(task):
 # recognizer runs
 def ctc_votes(model, vocab, device, items, batch, jobs):
     from . import ctc  # pylint: disable=import-outside-toplevel
+    from .wav import read_mono  # pylint: disable=import-outside-toplevel
     start_time = time.time()
 
     # (a group's segments, and its scoring tasks)
     def read(group):
-        return [ctc.read_segment(path, task['segment'][0], task['segment'][1]) for path, task in group]
+        return [read_mono(path, ctc.CTC_SAMPLE_RATE, start=task['segment'][0], end=task['segment'][1]) for path, task in group]
 
     def infer(group, segments):
         return [(log_posteriors, task['segment'][2], task['segment'][3], task['candidates'], task['method'], vocab)
@@ -227,7 +228,7 @@ def formant_target(task):
     found, vowels = None, {}
     own = None
     for index, candidate in enumerate(task['candidates']):
-        if unstressed(candidate) == unstressed(task['phones']):
+        if base(candidate) == base(task['phones']):
             own = index
             continue
         differing = difference(phones, candidate.split())

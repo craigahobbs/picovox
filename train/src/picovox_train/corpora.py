@@ -66,6 +66,15 @@ def read_dictionary():
         return parse_dictionary(file)
 
 
+# The SHA-256 of a file's bytes (hex)
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, 'rb') as file:
+        for block in iter(lambda: file.read(1 << 20), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 # Print a progress line to stderr
 def log(message):
     print(message, file=sys.stderr, flush=True)
@@ -123,13 +132,10 @@ def fetch_file(name):
     os.makedirs(os.path.dirname(item['path']), exist_ok=True)
     log(f'{name}: downloading {item["url"]}')
     download(item['url'], item['path'])
-    digest = hashlib.sha256()
-    with open(item['path'], 'rb') as file:
-        for chunk in iter(lambda: file.read(1 << 20), b''):
-            digest.update(chunk)
-    if digest.hexdigest() != item['sha256']:
+    digest = file_sha256(item['path'])
+    if digest != item['sha256']:
         os.remove(item['path'])
-        raise IOError(f'{name}: SHA-256 {digest.hexdigest()} is not the pinned {item["sha256"]}')
+        raise IOError(f'{name}: SHA-256 {digest} is not the pinned {item["sha256"]}')
     return os.path.getsize(item['path'])
 
 

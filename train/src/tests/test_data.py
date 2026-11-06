@@ -66,6 +66,20 @@ class TestProcessing(unittest.TestCase):
             self.assertTrue(numpy.array_equal(numpy.load(npy), values))
 
 
+class TestFirstPassF0(unittest.TestCase):
+
+    def test_first_pass_f0(self):
+        with tempfile.TemporaryDirectory() as directory, data_fixtures.fake_modules(parselmouth=data_fixtures.ANALYSIS):
+            path = os.path.join(directory, 'a.wav')
+            samples = numpy.concatenate([numpy.zeros(4000), data_fixtures.buzz(0.5, 16000), numpy.zeros(4000)])
+            helpers.write_wav(path, samples, 16000)
+            values = data.first_pass_f0(path)
+        self.assertEqual(values.dtype, numpy.float32)
+        self.assertTrue(len(values) > 20)
+        self.assertTrue(numpy.all(values > 0))
+        self.assertAlmostEqual(float(numpy.median(values)), 150.0, delta=5.0)
+
+
 class TestLoading(unittest.TestCase):
 
     def test_corpus_data(self):

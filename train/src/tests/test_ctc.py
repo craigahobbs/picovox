@@ -5,7 +5,6 @@
 
 import math
 import os
-import tempfile
 import unittest
 import unittest.mock
 
@@ -14,7 +13,6 @@ import numpy
 from picovox_train import ctc, frontend
 from tests import data_fixtures
 from tests.ctc_fixtures import VOCAB, FakeCtc, FakeExecutor, fake_recognizer, greedy_of
-from tests.helpers import write_wav
 
 
 # Log posteriors that spell recognizer tokens (each for frames frames, a blank frame after it) - [frames, vocab]
@@ -39,9 +37,6 @@ def run_posteriors(tokens, runs, frames):
 
 class TestRecognizer(unittest.TestCase):
 
-    def test_unstressed(self):
-        self.assertEqual(ctc.unstressed('HH AA1 B IY0 Z'), 'HH AA B IY Z')
-
     def test_load_ctc(self):
         with fake_recognizer() as (model, hub):
             self.assertEqual(ctc.load_ctc(), (model, VOCAB, 'cpu'))
@@ -60,29 +55,6 @@ class TestRecognizer(unittest.TestCase):
         self.assertEqual(model.calls, [(2, 8000), (1, 12800)])
         self.assertEqual(ctc.ctc_log_posteriors(model, 'cpu', []), [])
 
-    def test_read_16k(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, 'a.wav')
-            samples = data_fixtures.buzz(0.5, 16000)
-            write_wav(path, samples, 16000)
-            self.assertTrue(numpy.allclose(ctc.read_16k(path), samples, rtol=0, atol=1 / 32768))
-            # Stereo at another rate - mixed down and resampled
-            write_wav(path, numpy.stack([samples[::2], samples[::2]], axis=1), 8000)
-            resampled = ctc.read_16k(path)
-        self.assertEqual(len(resampled), 8000)
-        self.assertTrue(resampled.flags['C_CONTIGUOUS'])
-        self.assertEqual(resampled.dtype, numpy.float64)
-
-    def test_first_pass_f0(self):
-        with tempfile.TemporaryDirectory() as directory, data_fixtures.fake_modules(parselmouth=data_fixtures.ANALYSIS):
-            path = os.path.join(directory, 'a.wav')
-            samples = numpy.concatenate([numpy.zeros(4000), data_fixtures.buzz(0.5, 16000), numpy.zeros(4000)])
-            write_wav(path, samples, 16000)
-            values = ctc.first_pass_f0(path)
-        self.assertEqual(values.dtype, numpy.float32)
-        self.assertTrue(len(values) > 20)
-        self.assertTrue(numpy.all(values > 0))
-        self.assertAlmostEqual(float(numpy.median(values)), 150.0, delta=5.0)
 
 
 class TestAlignment(unittest.TestCase):
@@ -238,12 +210,6 @@ class TestVote(unittest.TestCase):
         self.assertEqual(ctc.vote([-10.0, -5.0]), 1)
         self.assertEqual(ctc.vote([-1.0, -9.0, -4.0]), 0)
         self.assertIsNone(ctc.vote([-1.0, -1.5]))
-
-    def test_read_segment(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, 'one.wav')
-            write_wav(path, numpy.zeros((24000, 2)), 24000)
-            self.assertEqual(len(ctc.read_segment(path, 0.25, 0.75)), 8000)
 
     def test_merged(self):
         self.assertEqual(ctc.merged('K AA1 T'), ctc.merged('K AO1 T'))

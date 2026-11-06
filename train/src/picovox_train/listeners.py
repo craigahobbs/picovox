@@ -117,13 +117,8 @@ def load_ecapa(device):
 
 # Read a WAV file as 16 kHz mono float32 - returns (samples, original duration in seconds)
 def read_audio(path):
-    import numpy  # pylint: disable=import-outside-toplevel
-    import soxr  # pylint: disable=import-outside-toplevel
-    from picovox_train.wav import read_wav  # pylint: disable=import-outside-toplevel
-    samples, sample_rate = read_wav(path, dtype='float32')
-    samples = samples.mean(axis=1)
-    if sample_rate != SAMPLE_RATE:
-        samples = soxr.resample(samples, sample_rate, SAMPLE_RATE, quality='HQ').astype(numpy.float32)
+    from picovox_train.wav import read_mono  # pylint: disable=import-outside-toplevel
+    samples = read_mono(path, SAMPLE_RATE, dtype='float32', quality='HQ')
     return samples, len(samples) / SAMPLE_RATE
 
 

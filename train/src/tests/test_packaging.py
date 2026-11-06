@@ -65,12 +65,6 @@ class TestPackageText(unittest.TestCase):
         self.assertIn('// The model acoustic model (None parameters, 7-bit weights) for', text)
         self.assertIn('(7 bytes, deflated) as base64.', text)
 
-    def test_file_sha256(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, 'file')
-            with open(path, 'wb') as file:
-                file.write(b'hello')
-            self.assertEqual(package.file_sha256(path), hashlib.sha256(b'hello').hexdigest())
 
 
 class TestProvenance(unittest.TestCase):

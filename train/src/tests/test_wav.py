@@ -10,7 +10,8 @@ import wave
 
 import numpy
 
-from picovox_train.wav import read_wav
+from picovox_train.wav import read_mono, read_wav
+from tests import data_fixtures
 from tests.helpers import write_wav
 
 
@@ -42,6 +43,23 @@ class TestWav(unittest.TestCase):
         self.assertEqual((read.shape, rate), ((100, 2), 8000))
         self.assertTrue(numpy.allclose(read, samples, rtol=0, atol=1 / 32768))
         self.assertTrue(numpy.array_equal(read[:, 1], numpy.zeros(100)))
+
+    def test_read_mono(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'a.wav')
+            samples = data_fixtures.buzz(0.5, 16000)
+            write_wav(path, samples, 16000)
+            self.assertTrue(numpy.allclose(read_mono(path, 16000), samples, rtol=0, atol=1 / 32768))
+            # Stereo at another rate - mixed down and resampled; float32; a segment
+            write_wav(path, numpy.stack([samples[::2], samples[::2]], axis=1), 8000)
+            resampled = read_mono(path, 16000)
+            single = read_mono(path, 16000, dtype='float32', quality='HQ')
+            segment = read_mono(path, 16000, start=0.125, end=0.375)
+        self.assertEqual(len(resampled), 8000)
+        self.assertTrue(resampled.flags['C_CONTIGUOUS'])
+        self.assertEqual(resampled.dtype, numpy.float64)
+        self.assertEqual((len(single), single.dtype), (8000, numpy.float32))
+        self.assertEqual(len(segment), 4000)
 
     def test_not_16_bit(self):
         with tempfile.TemporaryDirectory() as directory:

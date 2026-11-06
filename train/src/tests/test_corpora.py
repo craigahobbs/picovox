@@ -20,6 +20,13 @@ from tests.data_fixtures import FakeResponse
 
 class TestDownload(unittest.TestCase):
 
+    def test_file_sha256(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, 'file')
+            with open(path, 'wb') as file:
+                file.write(b'hello')
+            self.assertEqual(corpora.file_sha256(path), hashlib.sha256(b'hello').hexdigest())
+
     def test_download(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, 'a.tar')

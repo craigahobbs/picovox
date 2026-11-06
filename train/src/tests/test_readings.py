@@ -108,8 +108,9 @@ def record_of(tokens, seconds=3.0):
 
 class TestReadings(unittest.TestCase):
 
-    def test_unstressed(self):
-        self.assertEqual(readings.unstressed('R EH1 K ER0 D'), 'R EH K ER D')
+    def test_base(self):
+        self.assertEqual(readings.base('R EH1 K ER0 D'), 'R EH K ER D')
+        self.assertEqual(readings.base('AH0'), 'AH')
 
     def test_vowel_pairs(self):
         self.assertEqual(readings.vowel_pairs('R IY1 D', 'R EH1 D'), [('IY1', 'EH1')])
@@ -358,9 +359,9 @@ class TestReadings(unittest.TestCase):
         self.assertNotIn('formants', unmatched)
         self.assertNotIn('target', voted)
 
-    def test_read_readings_overrides(self):
+    def test_read_measured_overrides(self):
         with tempfile.TemporaryDirectory() as directory:
-            self.assertIsNone(readings.read_readings(directory))
+            self.assertIsNone(readings.read_measured(directory))
             self.assertEqual(readings.overrides(directory), {})
             os.makedirs(os.path.join(directory, 'readings'))
             with open(os.path.join(directory, 'readings', 'words.json'), 'w', encoding='utf-8') as file:
@@ -371,7 +372,8 @@ class TestReadings(unittest.TestCase):
                       {'position': 5, 'word': 'record', 'class': 'weak', 'frontEnd': 0, 'reading': 1}]
             with open(os.path.join(directory, 'readings', 'readings.jsonl'), 'w', encoding='utf-8') as file:
                 file.write(json.dumps({'id': 'a', 'tokens': tokens}) + '\n' + json.dumps({'id': 'b', 'tokens': tokens[1:]}) + '\n')
-            self.assertEqual(len(readings.read_readings(directory)), 2)
+            records, words = readings.read_measured(directory)
+            self.assertEqual((len(records), sorted(words['words'])), (2, ['read', 'record']))
             self.assertEqual(readings.overrides(directory), {'a': {'1': 'R IY1 D'}})
 
     def test_measure_command(self):
@@ -399,7 +401,7 @@ class TestReadings(unittest.TestCase):
                     summary = json.load(file)
                 with open(os.path.join(out, 'words.json'), encoding='utf-8') as file:
                     words = json.load(file)
-                measured = readings.read_readings(directory)
+                measured, _ = readings.read_measured(directory)
                 overrides = readings.overrides(directory)
 
                 # Current - not measured again
