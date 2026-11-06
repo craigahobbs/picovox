@@ -149,7 +149,7 @@ class TestG2pModel(unittest.TestCase):
         self.assertIn(slot, range(3))
         window = g2p_model.context.window_of(items, 2)
         self.assertEqual(len(window), 2 * g2p_model.context.window + 1)
-        self.assertEqual(g2p_model.choose_slots([list(window)]), [slot])
+        self.assertEqual(g2p_model.context.choose_windows([window]), [slot])
         self.assertEqual(g2p_model.context.window_of(['lead'], 0), ('',) * g2p_model.context.window + ('lead',) +
                          ('',) * g2p_model.context.window)
         g2p_model.context.item_vectors(['###', 'lead'])

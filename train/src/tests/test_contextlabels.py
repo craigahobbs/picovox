@@ -83,8 +83,8 @@ class TestContextLabels(unittest.TestCase):
             file.write(text)
 
     def test_settings(self):
-        settings = contextlabels.load_settings()
-        self.assertEqual(settings['window'], contextlabels.WINDOW)
+        self.assertEqual(contextlabels.WINDOW, contextlabels.RECIPE['network']['window'])
+        self.assertIn('read', contextlabels.GATE_WORDS)
         self.assertIn('pg1342', contextlabels.HELD_OUT_BOOKS)
         self.assertIn('words', contextlabels.load_spec())
 
@@ -172,7 +172,8 @@ class TestContextLabels(unittest.TestCase):
         self.assertEqual(contextlabels.tag_reading(entry, 'VBD'), 1)
 
     def test_context_items(self):
-        self.assertEqual(contextlabels.previous_items('I read it, then read.'), {0: '', 2: 'i', 7: 'read', 11: ',', 16: 'then'})
+        items, sequence = contextlabels.context_items('I read it, then read.')
+        self.assertEqual(contextlabels.previous_items(items, sequence), {0: '', 2: 'i', 7: 'read', 11: ',', 16: 'then'})
         sequence = ['i', 'read', 'it', '.']
         self.assertEqual(contextlabels.context_window(sequence, 1), ['', '', 'i', 'read', 'it', '.', ''])
         self.assertEqual(contextlabels.paragraphs('One\ntwo.\n\n\n  Three  four.\n\n'), ['One two.', 'Three four.'])
@@ -311,7 +312,8 @@ class TestContextLabels(unittest.TestCase):
         self.assertTrue(contextlabels.regression_windows())
 
     def test_text_examples(self):
-        examples = contextlabels.text_examples('I read it. Mr. Read.', [(2, 'read', 1), (99, 'read', 0), (0, 'read', 0)])
+        items, sequence = contextlabels.context_items('I read it. Mr. Read.')
+        examples = contextlabels.text_examples(items, sequence, [(2, 'read', 1), (99, 'read', 0), (0, 'read', 0)])
         self.assertEqual(examples, [{'window': ['', '', 'i', 'read', 'it', '.', 'mister'], 'word': 'read', 'reading': 1}])
 
     def test_measured_classes(self):
@@ -390,7 +392,7 @@ class TestContextLabels(unittest.TestCase):
             books.extend({'book': 'pg1', 'text': f'The {word}.', 'tags': {'4': 'NN'}} for _ in range(nouns))
             books.extend({'book': 'pg1', 'text': f'They {word} it.', 'tags': {'5': 'VB'}} for _ in range(verbs))
         self.write(os.path.join(out, 'books.jsonl'), ''.join(json.dumps(record) + '\n' for record in books))
-        spec = {'exclude': [], 'collocations': {}, 'seeds': [{'word': 'object', 'phones': 'AH0 B JH EH1 K T', 'texts': ['I object.']}]}
+        spec = {'collocations': {}, 'seeds': [{'word': 'object', 'phones': 'AH0 B JH EH1 K T', 'texts': ['I object.']}]}
         with unittest.mock.patch.object(contextlabels, 'load_spec', lambda: spec), \
                 unittest.mock.patch.object(contextlabels, 'candidate_words', lambda spec: words), \
                 unittest.mock.patch.object(contextlabels, 'default_readings', lambda words: {word: 0 for word in words}), \
@@ -407,8 +409,10 @@ class TestContextLabels(unittest.TestCase):
             labels = json.load(file)
         # (record - three verbs, kept; conduct - two, common but too few; object - one seeded verb, fewer than MIN_ALTERNATE)
         self.assertEqual(sorted(labels['words']), ['object', 'record'])
-        self.assertEqual(labels['words']['record']['counts'], [3, 3])
-        self.assertEqual(labels['words']['object']['counts'], [4, 1])
+        def slot_counts(word):
+            return [sum(1 for example in labels['examples'] if example['word'] == word and example['slot'] == slot) for slot in range(2)]
+        self.assertEqual(slot_counts('record'), [3, 3])
+        self.assertEqual(slot_counts('object'), [4, 1])
 
     def test_labels(self):
         out = self.path('out')
@@ -457,7 +461,7 @@ class TestContextLabels(unittest.TestCase):
             {'book': 'pg2', 'text': 'You read.', 'tags': {}}
         ]
         self.write(os.path.join(out, 'books.jsonl'), ''.join(json.dumps(record) + '\n' for record in books))
-        spec = {'exclude': ['excluded'], 'collocations': {'lead': [['\\blead pipes?\\b', 'L EH1 D'], ['\\bwhite lead\\b', 'L EH1 D']]},
+        spec = {'collocations': {'lead': [['\\blead pipes?\\b', 'L EH1 D'], ['\\bwhite lead\\b', 'L EH1 D']]},
                 'seeds': [{'word': 'lead', 'phones': 'L IY1 D', 'texts': ['They lead the way.', 'Lead on.']},
                           {'word': 'bass', 'phones': 'B EY1 S', 'texts': ['The bass singer.']}]}
         defaults = {word: 0 for word in words}
@@ -479,13 +483,8 @@ class TestContextLabels(unittest.TestCase):
         with open(os.path.join(out, 'labels.json'), encoding='utf-8') as file:
             labels = json.load(file)
         self.assertEqual(sorted(labels['words']), ['lead', 'read'])
-        self.assertEqual(labels['words']['read'], {'readings': [['R IY1 D'], ['R EH1 D']], 'order': [0, 1], 'family': 'own',
-                                                   'counts': [6, 7]})
-        self.assertEqual(labels['words']['lead']['counts'], [1, 1])
-        # (the curated words' mappings are hand-written - valid; estimate - its readings measured, too few - isn't)
-        self.assertEqual(labels['valid'], ['bass', 'excluded', 'lead', 'lives', 'nodefault', 'read', 'record'])
-        self.assertEqual(labels['validation'], {'words': {'read': {'agree': 12, 'total': 12}, 'record': {'agree': 1, 'total': 1}},
-                                                'families': {'stress': {'agree': 1, 'total': 1}}})
+        self.assertEqual(labels['words']['read'], {'readings': [['R IY1 D'], ['R EH1 D']], 'order': [0, 1]})
+        self.assertEqual(set(labels), {'words', 'examples', 'transfer'})
         sources = sorted((example['word'], example['source'], example['split'], example['slot']) for example in labels['examples'])
         # (the aligned examples' split by their book - pg2 held out)
         self.assertEqual(sources.count(('read', 'aligned', 'heldout', 0)), 1)

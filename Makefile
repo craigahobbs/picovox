@@ -247,8 +247,9 @@ $(TRAIN_DIR)/data-tts.done: $(TRAIN_DIR)/tts-readings.done
 
 # The G2P (CPU): the network's four stages (one core, deterministic), the heteronym context labels (the books - pinned
 # texts, train/data/books.json - the training speech's measured readings, and part-of-speech tags), the context network
-# and its held-out accuracy gate (cross-validated over the books) beside the G2P network, then the reading stage (two threads), the
-# export to $(TRAIN_DIR)/g2pModel.js, and picovox_train.context check against the committed module; and the heteronym
+# and its held-out accuracy gate (cross-validated over the books) beside the G2P network, the reading stage (two threads)
+# after the network beside the context network, then the export to $(TRAIN_DIR)/g2pModel.js and picovox_train.context
+# check against the committed module; and the heteronym
 # relabeling, which must reproduce train/data/g2p-relabel.json (the G2P network's input).
 #
 # In make train, the G2P's memory-bound stages (the context labels, the relabeling) are scheduled after the voices'
@@ -256,9 +257,9 @@ $(TRAIN_DIR)/data-tts.done: $(TRAIN_DIR)/tts-readings.done
 # with the data build on the critical path; the G2P network itself (one core) starts at once. G2P_JOBS is the context
 # labels' worker processes - the tag workers; the outputs are the same for any count. make train runs the
 # chain beside the GPU stages, so its count is low (BESIDE) for the memory-bound context labels; the context network's
-# trainings (its four teachers, and each of cross-validate's ten folds' four teachers and network - one thread each,
-# small and compute-bound) take CONTEXT_JOBS (at 2, the folds outlasted the voice stages by 40 minutes); make train-g2p
-# runs G2P_STANDALONE_JOBS for both.
+# trainings (its four teachers and itself - fold 0 of the cross-validation - then each other fold's four teachers and
+# network, one thread each, small and compute-bound: every fold's teachers in one pool, then every fold's network) take
+# CONTEXT_JOBS (at 2, the folds outlasted the voice stages by 40 minutes); make train-g2p runs G2P_STANDALONE_JOBS for both.
 G2P_JOBS ?= 2
 CONTEXT_JOBS ?= 6
 G2P_STANDALONE_JOBS ?= 10
@@ -287,16 +288,21 @@ $(TRAIN_DIR)/context-network.done: $(TRAIN_DIR)/context-labels.done
 	@$(STAGE) start
 	$(STAGE) -- rm -f $(TRAIN_DIR)/context/train.log
 	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.context train-context --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/context.pt \
-		--log $(TRAIN_DIR)/context/train.log -j $(CONTEXT_JOBS)
-	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.context cross-validate --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/folds \
-		--log $(TRAIN_DIR)/context/train.log -j $(CONTEXT_JOBS)
+		--folds $(TRAIN_DIR)/context/folds --log $(TRAIN_DIR)/context/train.log -j $(CONTEXT_JOBS)
+	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.context folds $(TRAIN_DIR)/context/folds --labels $(TRAIN_DIR)/context/labels.json
 	@$(STAGE) end
 	touch $@
 
-$(TRAIN_DIR)/g2p.done: $(TRAIN_DIR)/g2p-network.done $(TRAIN_DIR)/context-labels.done $(TRAIN_DIR)/context-network.done
+# (the reading stage - from the G2P network and the labels, beside the context network)
+$(TRAIN_DIR)/g2p-reading.done: $(TRAIN_DIR)/g2p-network.done $(TRAIN_DIR)/context-labels.done
 	@$(STAGE) start
 	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.context train-g2p --labels $(TRAIN_DIR)/context/labels.json --init $(TRAIN_DIR)/g2p/focus.pt \
-		--out $(TRAIN_DIR)/context/g2p.pt --log $(TRAIN_DIR)/context/train.log
+		--out $(TRAIN_DIR)/context/g2p.pt
+	@$(STAGE) end
+	touch $@
+
+$(TRAIN_DIR)/g2p.done: $(TRAIN_DIR)/g2p-reading.done $(TRAIN_DIR)/context-network.done
+	@$(STAGE) start
 	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.context export --g2p $(TRAIN_DIR)/context/g2p.pt --context $(TRAIN_DIR)/context/context.pt \
 		--out $(TRAIN_DIR)/g2pModel.js
 	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.context check $(TRAIN_DIR)/g2pModel.js

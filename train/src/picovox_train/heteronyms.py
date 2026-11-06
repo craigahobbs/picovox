@@ -16,8 +16,8 @@ the CTC vote or the formants, the classes their controls pass) (python is PYTHON
 3. select - the relabeled words: significant candidates, not function words, not the context labels' candidate words
    (the context network decides their readings), not names (words the books capitalize mid-sentence more often than not
    - books.book_capitals; a name's reading is the engine's own G2P's guess), whose difference is lexical (a stressed
-   vowel's quality, or the primary stress moving with a quality change - not reduction or stress alone), with the
-   majority's share at least --share (relabel.json); with --keep, a committed word the corpus can't judge (its readings
+   vowel's quality, or the primary stress moving with a quality change - not reduction or stress alone) (relabel.json);
+   with --keep, a committed word the corpus can't judge (its readings
    unmeasured, its class's method unused, no significant majority either way, or a context word) is kept with its
    evidence, and one whose first reading is a significant majority is dropped (contradicted)
 """
@@ -48,8 +48,8 @@ def read_measured(directory):
     return records, read_json(os.path.join(directory, 'readings', 'words.json'))
 
 
-def votes(out, directory):
-    """votes.json - per measured word: its readings' first variants, class, and per reading the votes, books, and voices"""
+def votes(directory):
+    """Per measured word: its readings' first variants, class, and per reading the votes, books, and voices"""
     records, words = read_measured(directory)
     counts = {}
     for record in records:
@@ -67,9 +67,7 @@ def votes(out, directory):
             for name, value in (('books', record['book']), ('voices', record['key'])):
                 if value not in entry[name][token['reading']]:
                     entry[name][token['reading']].append(value)
-    with open(os.path.join(out, 'votes.json'), 'w', encoding='utf-8') as file:
-        json.dump({'corpus': os.path.basename(directory), 'words': counts}, file)
-    return f'{len(counts)} measured words, {sum(entry["tokens"] for entry in counts.values())} tokens'
+    return counts
 
 
 #
@@ -98,10 +96,8 @@ def significant(entry):
     return None
 
 
-def candidates(out):
-    """candidates.json - every word with a non-first majority"""
-    with open(os.path.join(out, 'votes.json'), encoding='utf-8') as file:
-        counts = json.load(file)['words']
+def candidates(counts):
+    """Every word with a non-first majority (counts - votes'), the most voted first"""
     items = []
     for word, entry in counts.items():
         best = max(range(len(entry['votes'])), key=lambda index, entry=entry: (entry['votes'][index], -index))
@@ -114,9 +110,7 @@ def candidates(out):
                       'significant': significant(entry) == best,
                       'kind': kind(entry['variants'][0].split(), entry['variants'][best].split())})
     items.sort(key=lambda item: -sum(item['votes']))
-    with open(os.path.join(out, 'candidates.json'), 'w', encoding='utf-8') as file:
-        json.dump(items, file, indent=1)
-    return f'{len(items)} words with a non-first majority, {sum(1 for item in items if item["significant"])} significant'
+    return items
 
 
 #
@@ -139,19 +133,14 @@ def lexical(first, majority):
     return primary_moves and any(base(x) != base(y) for x, y in pairs)
 
 
-def select(out, share, keep=None, context=(), names=()):
-    """relabel.json - {relabel: {word: phones}, chosen, rejected, kept, contradicted}; context, the context labels'
-    candidate words - not relabeled (the context network decides their readings), a committed one kept; names, the
-    words the books capitalize mid-sentence more often than not - not relabeled"""
-    with open(os.path.join(out, 'candidates.json'), encoding='utf-8') as file:
-        items = json.load(file)
-    with open(os.path.join(out, 'votes.json'), encoding='utf-8') as file:
-        counts = json.load(file)['words']
+def select(items, counts, keep=None, context=(), names=()):
+    """The relabeled words of the candidates (items) - {relabel: {word: phones}, chosen, rejected, kept, contradicted};
+    context, the context labels' candidate words - not relabeled (the context network decides their readings), a
+    committed one kept; names, the words the books capitalize mid-sentence more often than not - not relabeled"""
     chosen, rejected = [], []
     for item in items:
         if not item['significant']:
             continue
-        majority, first = item['votes'][item['index']], item['votes'][0]
         reasons = []
         if item['word'] in FUNCTION_WORDS:
             reasons.append('function word')
@@ -163,8 +152,6 @@ def select(out, share, keep=None, context=(), names=()):
             reasons.append(f'kind {item["kind"]}')
         elif item['kind'] == 'vowel' and not lexical(item['first'], item['majority']):
             reasons.append('reduction only')
-        if majority / (majority + first) < share:
-            reasons.append(f'share {majority / (majority + first):.2f}')
         (rejected if reasons else chosen).append(dict(item, reasons=reasons))
 
     # The committed words - kept when the corpus can't judge them, dropped when it contradicts them
@@ -181,11 +168,7 @@ def select(out, share, keep=None, context=(), names=()):
             kept.append({'word': word, 'phones': phones, 'evidence': keep['evidence'].get(word),
                          'votes': entry['votes'] if entry else None})
             relabel[word] = phones
-    with open(os.path.join(out, 'relabel.json'), 'w', encoding='utf-8') as file:
-        json.dump({'relabel': relabel, 'chosen': chosen, 'rejected': rejected, 'kept': kept, 'contradicted': contradicted}, file,
-                  indent=1)
-    return f'{len(chosen)} relabeled of {sum(item["significant"] for item in items)} significant candidates, {len(kept)} kept, ' + \
-        f'{len(contradicted)} contradicted: ' + ', '.join(f'{item["word"]} {item["majority"]}' for item in chosen)
+    return {'relabel': relabel, 'chosen': chosen, 'rejected': rejected, 'kept': kept, 'contradicted': contradicted}
 
 
 DESCRIPTION = (
@@ -218,10 +201,10 @@ def committed_text(value):
             f'    "relabel": {{\n{entries(value["relabel"])}\n    }},\n    "evidence": {{\n{entries(value["evidence"])}\n    }}\n}}\n')
 
 
-# The pinned books' directory (the context labels' - books.py)
-def books_dir():
-    from . import contextlabels  # pylint: disable=import-outside-toplevel
-    return contextlabels.BOOKS_DIR
+# Write a JSON output file
+def write_json(path, value, indent=None):
+    with open(path, 'w', encoding='utf-8') as file:
+        json.dump(value, file, indent=indent)
 
 
 def main(argv=None):
@@ -229,7 +212,6 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog='python -m picovox_train.heteronyms',
                                      description='The G2P\'s relabeled words from the training speech\'s readings')
     parser.add_argument('--out', required=True, help='the output directory')
-    parser.add_argument('--share', type=float, default=0.5, help='the least majority share (0.5: a majority)')
     parser.add_argument('--keep', help='the committed relabel file - its words the corpus can\'t judge are kept')
     parser.add_argument('--check', help='a relabel file (train/data/g2p-relabel.json) the result must equal (exit 1 if not)')
     parser.add_argument('--write', help='write the result as the committed relabel file')
@@ -240,15 +222,21 @@ def main(argv=None):
     if args.keep:
         with open(args.keep, encoding='utf-8') as file:
             keep = json.load(file)
-    print(f'votes: {votes(args.out, directory)}', file=sys.stderr, flush=True)
-    print(f'candidates: {candidates(args.out)}', file=sys.stderr, flush=True)
+    counts = votes(directory)
+    write_json(os.path.join(args.out, 'votes.json'), {'corpus': os.path.basename(directory), 'words': counts})
+    print(f'votes: {len(counts)} measured words, {sum(entry["tokens"] for entry in counts.values())} tokens', file=sys.stderr, flush=True)
+    items = candidates(counts)
+    write_json(os.path.join(args.out, 'candidates.json'), items, indent=1)
+    significant_count = sum(1 for item in items if item['significant'])
+    print(f'candidates: {len(items)} words with a non-first majority, {significant_count} significant', file=sys.stderr, flush=True)
     context = set(readings.candidate_words(readings.load_spec()))
-    with open(os.path.join(args.out, 'candidates.json'), encoding='utf-8') as file:
-        capitals = books.book_capitals(books_dir(), [item['word'] for item in json.load(file)])
+    capitals = books.book_capitals(books.BOOKS_DIR, [item['word'] for item in items])
     names = {word for word, (capital, lower) in capitals.items() if capital > lower}
-    print(f'select: {select(args.out, args.share, keep, context, names)}', file=sys.stderr, flush=True)
-    with open(os.path.join(args.out, 'relabel.json'), encoding='utf-8') as file:
-        result = json.load(file)
+    result = select(items, counts, keep, context, names)
+    write_json(os.path.join(args.out, 'relabel.json'), result, indent=1)
+    print(f'select: {len(result["chosen"])} relabeled of {significant_count} significant candidates, {len(result["kept"])} kept, '
+          f'{len(result["contradicted"])} contradicted: ' + ', '.join(f'{item["word"]} {item["majority"]}' for item in result['chosen']),
+          file=sys.stderr, flush=True)
     if args.write:
         with open(args.write, 'w', encoding='utf-8') as file:
             file.write(committed_text(committed(result, os.path.basename(directory))))

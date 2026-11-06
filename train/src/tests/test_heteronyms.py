@@ -123,20 +123,19 @@ class TestHeteronyms(unittest.TestCase):
 
     def test_votes(self):
         self.write_measured()
-        self.assertEqual(heteronyms.votes(self.out, self.corpus), '8 measured words, 36 tokens')
-        votes = self.read_out('votes.json')
-        self.assertEqual(votes['corpus'], 'phonon-0123456789ab')
-        self.assertEqual(votes['words']['lead'], {
+        votes = heteronyms.votes(self.corpus)
+        self.assertEqual(len(votes), 8)
+        self.assertEqual(votes['lead'], {
             'variants': ['L IY1 D', 'L EH1 D'], 'class': 'strong', 'tokens': 9, 'abstained': 1, 'votes': [1, 7],
             'books': [['pg9.txt'], ['pg0.txt', 'pg1.txt', 'pg2.txt', 'pg3.txt']], 'voices': [['male'], ['female', 'male']]
         })
-        self.assertEqual(votes['words']['record']['votes'], [0, 0])
-        self.assertEqual(votes['words']['record']['abstained'], 3)
+        self.assertEqual(votes['record']['votes'], [0, 0])
+        self.assertEqual(votes['record']['abstained'], 3)
 
         # (the corpus not measured)
         shutil.rmtree(os.path.join(self.corpus, 'readings'))
         with self.assertRaises(FileNotFoundError):
-            heteronyms.votes(self.out, self.corpus)
+            heteronyms.votes(self.corpus)
 
     def test_significant(self):
         books = [['pg1', 'pg2', 'pg3'], ['pg1', 'pg2', 'pg3']]
@@ -149,11 +148,14 @@ class TestHeteronyms(unittest.TestCase):
         self.assertIsNone(heteronyms.significant({'votes': [3, 4], 'books': books}))
         self.assertIsNone(heteronyms.significant({'votes': [0, 0], 'books': [[], []]}))
 
-    def test_candidates(self):
+    # The measured words' votes, and their candidates
+    def votes_and_candidates(self):
         self.write_measured()
-        heteronyms.votes(self.out, self.corpus)
-        self.assertEqual(heteronyms.candidates(self.out), '5 words with a non-first majority, 4 significant')
-        items = self.read_out('candidates.json')
+        votes = heteronyms.votes(self.corpus)
+        return heteronyms.candidates(votes), votes
+
+    def test_candidates(self):
+        items, _ = self.votes_and_candidates()
         self.assertEqual([(item['word'], item['significant'], item['kind']) for item in items],
                          [('lead', True, 'vowel'), ('the', True, 'reduced'), ('that', True, 'vowel'), ('family', True, 'syllable'),
                           ('wind', False, 'vowel')])
@@ -164,12 +166,7 @@ class TestHeteronyms(unittest.TestCase):
         self.assertAlmostEqual(items[0]['lower'], 0.5291, places=4)
 
     def test_select(self):
-        self.write_measured()
-        heteronyms.votes(self.out, self.corpus)
-        heteronyms.candidates(self.out)
-        self.assertEqual(heteronyms.select(self.out, 0.5),
-                         '1 relabeled of 4 significant candidates, 0 kept, 0 contradicted: lead L EH1 D')
-        result = self.read_out('relabel.json')
+        result = heteronyms.select(*self.votes_and_candidates())
         self.assertEqual(result['relabel'], {'lead': 'L EH1 D'})
         self.assertEqual([item['word'] for item in result['chosen']], ['lead'])
         self.assertEqual({item['word']: item['reasons'] for item in result['rejected']},
@@ -177,19 +174,8 @@ class TestHeteronyms(unittest.TestCase):
                           'family': ['kind syllable']})
         self.assertEqual((result['kept'], result['contradicted']), ([], []))
 
-        # The least share above the majority's
-        heteronyms.select(self.out, 0.9)
-        result = self.read_out('relabel.json')
-        self.assertEqual(result['relabel'], {})
-        self.assertEqual((result['rejected'][0]['word'], result['rejected'][0]['reasons']), ('lead', ['share 0.88']))
-
     def test_select_keep(self):
-        self.write_measured()
-        heteronyms.votes(self.out, self.corpus)
-        heteronyms.candidates(self.out)
-        self.assertEqual(heteronyms.select(self.out, 0.5, KEEP),
-                         '1 relabeled of 4 significant candidates, 4 kept, 1 contradicted: lead L EH1 D')
-        result = self.read_out('relabel.json')
+        result = heteronyms.select(*self.votes_and_candidates(), KEEP)
         self.assertEqual(result['relabel'], {'lead': 'L EH1 D', 'wound': 'W AW1 N D', 'record': 'R IH0 K AO1 R D',
                                              'family': 'F EY1 M L IY0', 'solo': 'S OW1 L AH0'})
         self.assertEqual(result['kept'], [
@@ -202,23 +188,15 @@ class TestHeteronyms(unittest.TestCase):
 
     def test_select_context_and_names(self):
         # A context word isn't relabeled - a committed one kept, whatever the corpus says; a name isn't relabeled
-        self.write_measured()
-        heteronyms.votes(self.out, self.corpus)
-        heteronyms.candidates(self.out)
-        heteronyms.select(self.out, 0.5, KEEP, context={'lead', 'use'})
-        result = self.read_out('relabel.json')
+        items, votes = self.votes_and_candidates()
+        result = heteronyms.select(items, votes, KEEP, context={'lead', 'use'})
         self.assertEqual(result['relabel']['lead'], 'L EH1 D')
         self.assertEqual(result['relabel']['use'], 'Y UW1 Z')
         self.assertEqual({item['word']: item['reasons'] for item in result['rejected']}['lead'], ['a context word'])
         self.assertEqual(result['contradicted'], [])
-        heteronyms.select(self.out, 0.5, names={'lead'})
-        result = self.read_out('relabel.json')
+        result = heteronyms.select(items, votes, names={'lead'})
         self.assertEqual(result['relabel'], {})
         self.assertEqual({item['word']: item['reasons'] for item in result['rejected']}['lead'], ['a name'])
-
-    def test_books_dir(self):
-        self.assertEqual(heteronyms.books_dir(), heteronyms.books_dir())
-        self.assertTrue(heteronyms.books_dir().endswith(os.path.join('build', 'nn', 'books')))
 
     def test_committed(self):
         result = {'relabel': {'lead': 'L EH1 D', 'wound': 'W AW1 N D'},
@@ -243,12 +221,15 @@ class TestHeteronyms(unittest.TestCase):
         books = os.path.join(self.directory, 'books')
         os.makedirs(books)
         with open(os.path.join(books, 'pg1.txt'), 'w', encoding='utf-8') as file:
-            file.write('The solo was long. A Solo spoke.\n')
+            file.write('The solo was long. A Solo spoke.\n\nThey met Family and Family, then family and FAMILY.\n')
+        # (the books' other files aren't read)
+        with open(os.path.join(books, 'notes.md'), 'w', encoding='utf-8') as file:
+            file.write('Family Family Family\n')
         with unittest.mock.patch.object(tts, 'load_settings', return_value={'engine': {}}), \
                 unittest.mock.patch.object(tts, 'corpus_dir', return_value=self.corpus) as corpus_dir, \
                 unittest.mock.patch.object(readings, 'load_spec', return_value={}), \
                 unittest.mock.patch.object(readings, 'candidate_words', return_value={}), \
-                unittest.mock.patch.object(heteronyms, 'books_dir', return_value=books):
+                unittest.mock.patch.object(heteronyms.books, 'BOOKS_DIR', books):
 
             # The selection, kept from the committed file and written as it
             with captured() as (_, stderr):
@@ -260,6 +241,14 @@ class TestHeteronyms(unittest.TestCase):
             with open(written, encoding='utf-8') as file:
                 text = file.read()
             self.assertTrue(text.endswith('}\n'))
+            # (the outputs - the votes, the candidates, and the selection)
+            self.assertEqual(self.read_out('votes.json')['corpus'], 'phonon-0123456789ab')
+            self.assertEqual(self.read_out('votes.json')['words']['lead']['votes'], [1, 7])
+            self.assertEqual(self.read_out('candidates.json')[0]['word'], 'lead')
+            self.assertEqual(self.read_out('relabel.json')['kept'][0]['word'], 'wound')
+            # (a word the books capitalize mid-sentence more often than not is a name)
+            self.assertEqual({item['word']: item['reasons'] for item in self.read_out('relabel.json')['rejected']}['family'],
+                             ['a name', 'kind syllable'])
             committed = json.loads(text)
             self.assertEqual(committed['corpus'], 'phonon-0123456789ab')
             self.assertEqual(sorted(committed['relabel']), ['family', 'lead', 'record', 'solo', 'wound'])

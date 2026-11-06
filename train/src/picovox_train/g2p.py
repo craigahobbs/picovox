@@ -5,7 +5,7 @@
 Training the grapheme-to-phoneme (G2P) network - the app's only pronouncer (lib/g2p.js runs lib/models/g2pModel.js for
 every word; g2pmodel.py is its Python port). The recipe is train/data/train.json's "g2p" settings:
 
-    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p train --out build/nn/g2p-train   # every stage (resumable)
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p train --out build/train/g2p   # every stage (resumable)
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p evaluate [lib/models/g2pModel.js | CHECKPOINT]
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p book TEXT --name NAME --title TITLE --url URL
 
@@ -92,8 +92,8 @@ def log_line(path, text):
 
 
 # The settings - train/data/train.json's "g2p"
-def load_config(path=RECIPE_PATH):
-    return read_json(path)['g2p']
+def load_config():
+    return read_json(RECIPE_PATH)['g2p']
 
 
 #
@@ -121,24 +121,23 @@ def split_words(words):
     return {'test': shuffled[:test_count], 'validation': shuffled[test_count:test_count + validation_count]}
 
 
-def load_data(relabel=None, fixes=FIXES_PATH, books=BOOKS_PATH):
+def load_data(relabel=None):
     """The data - {first (word: target phones), all (word: every pronunciation), labels (unknown words' phones), stems,
-    evalCounts, weightCounts, monitor, relabeled (the relabeled words)}; fixes (train/data/g2p-fixes.json - None for the
-    dictionary as it is) corrects the dictionary's label errors first, and books (train/data/g2p-books.json - None for
-    none) adds the listeners' books' words"""
+    evalCounts, weightCounts, monitor, relabeled (the relabeled words)}: the dictionary with its label errors corrected
+    (train/data/g2p-fixes.json), and the listeners' books' words (train/data/g2p-books.json)"""
     pronunciations = read_pronunciations()
     words = read_json(WORDS_PATH)
     first = {word: phones[0] for word, phones in pronunciations.items()}
     labels = {word: phones.split() for word, phones in words['labels'].items()}
     stems = words['stems']
 
-    # The dictionary's corrected labels (g2paudit.py) - the corrected pronunciation first, the wrong one dropped
-    if fixes:
-        corrections = {word: phones.split() for word, phones in read_json(fixes)['fixes'].items() if word in first}
-        derive_targets(labels, stems, first, corrections)
-        for word, phones in corrections.items():
-            pronunciations[word] = [phones] + [variant for variant in pronunciations[word] if variant not in (phones, first[word])]
-            first[word] = phones
+    # The dictionary's corrected labels (the dictionary audit's, committed) - the corrected pronunciation first, the wrong
+    # one dropped
+    corrections = {word: phones.split() for word, phones in read_json(FIXES_PATH)['fixes'].items() if word in first}
+    derive_targets(labels, stems, first, corrections)
+    for word, phones in corrections.items():
+        pronunciations[word] = [phones] + [variant for variant in pronunciations[word] if variant not in (phones, first[word])]
+        first[word] = phones
 
     # The monitoring set - the dictionary's validation words in none of the books (the 128 books - the listeners' books'
     # words leave it, so they train)
@@ -148,10 +147,9 @@ def load_data(relabel=None, fixes=FIXES_PATH, books=BOOKS_PATH):
     monitor = validation[:MONITOR_WORDS]
 
     # The books' words - their labels, their possessives, and their counts (weights)
-    if books:
-        book_counts = add_books(books, pronunciations, first, labels, stems)
-        weight_counts = dict(collections.Counter(weight_counts) + collections.Counter(book_counts))
-        monitor = [word for word in monitor if word not in book_counts]
+    book_counts = add_books(pronunciations, first, labels, stems)
+    weight_counts = dict(collections.Counter(weight_counts) + collections.Counter(book_counts))
+    monitor = [word for word in monitor if word not in book_counts]
 
     # Other targets for some dictionary words - and the rule-labeled words derived from them
     relabeled = set()
@@ -165,12 +163,21 @@ def load_data(relabel=None, fixes=FIXES_PATH, books=BOOKS_PATH):
             'weightCounts': weight_counts, 'monitor': sorted(monitor), 'relabeled': relabeled}
 
 
+# The recipe's final stage - (its settings: the recipe's with the stage's over them, its data: with its relabeled targets)
+# - the network's targets (the reading stage's data, the check's measures, and the context labels' default readings)
+def final_data():
+    config = load_config()
+    settings = {**{key: value for key, value in config.items() if key not in ('description', 'stages')}, **config['stages'][-1]}
+    relabel = settings.get('relabel')
+    return settings, load_data(relabel and os.path.join(ROOT, relabel))
+
+
 # Add the books' words (train/data/g2p-books.json, in place) - each label (a word the dictionary lacks, or a correction of
 # its label - the rule-labeled words derived from it follow) a dictionary word, and each possessive in the books the
 # dictionary lacks the stem's target with its -s suffix (a teacher's label of the word replaced); returns the books' word
 # counts, summed
-def add_books(path, pronunciations, first, labels, stems):
-    books = read_json(path)
+def add_books(pronunciations, first, labels, stems):
+    books = read_json(BOOKS_PATH)
     targets = {word: phones.split() for word, phones in books['labels'].items()}
     derive_targets(labels, stems, first, {word: phones for word, phones in targets.items() if word in first})
     for word, phones in targets.items():
@@ -279,15 +286,21 @@ def build_model(config):
             self.combine = nn.Linear(decoder + 2 * hidden, decoder)
             self.output = nn.Linear(decoder, len(PHONES))
 
-        # Encode letters [batch, time] - (outputs [batch, time, 2H], mask [batch, time], initial decoder state)
-        def encode(self, letters):
+        # Encode letters [batch, time] in readings [batch] (context.py's reading input: an alternate reading's vector added
+        # to the decoder's initial state; None - the network without it) - (outputs [batch, time, 2H], mask [batch, time],
+        # initial decoder state, the encoder's final states [batch, 2H])
+        def encode(self, letters, readings=None):
             mask = letters != 0
             packed = nn.utils.rnn.pack_padded_sequence(self.letter_embed(letters), mask.sum(1).cpu(), batch_first=True,
                                                        enforce_sorted=False)
             outputs, final = self.encoder(packed)
             outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs, batch_first=True, total_length=letters.shape[1])
-            state = torch.tanh(self.bridge(torch.cat([final[0], final[1]], -1))).unsqueeze(0)
-            return outputs, mask, state
+            ends = torch.cat([final[0], final[1]], -1)
+            state = torch.tanh(self.bridge(ends))
+            if readings is not None:
+                alternate = readings > 0
+                state = state + self.reading((readings - 1).clamp(min=0)) * alternate[:, None]
+            return outputs, mask, state.unsqueeze(0), ends
 
         # The logits of each step from the decoder outputs [batch, steps, D]
         def attend(self, decoded, encoded, mask):
@@ -296,17 +309,18 @@ def build_model(config):
             context = torch.einsum('bst,bth->bsh', torch.softmax(scores, -1), encoded)
             return self.output(torch.tanh(self.combine(torch.cat([decoded, context], -1))))
 
-        # The loss of a batch - teacher-forced cross entropy (targets end with <eos>, padded with 0)
-        def loss(self, letters, targets):
-            encoded, mask, state = self.encode(letters)
+        # The loss of a batch in readings (see encode) - teacher-forced cross entropy (targets end with <eos>, padded with
+        # 0) - and the encoder's final states
+        def loss(self, letters, targets, readings=None):
+            encoded, mask, state, ends = self.encode(letters, readings)
             previous = torch.cat([torch.full_like(targets[:, :1], EOS), targets[:, :-1]], 1)
             decoded, _ = self.decoder(self.phone_embed(previous), state)
             logits = self.attend(decoded, encoded, mask)
-            return nn.functional.cross_entropy(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1), ignore_index=0)
+            return nn.functional.cross_entropy(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1), ignore_index=0), ends
 
-        # Greedy decoding - a list of phone id lists (lib/g2p.js's limit: 3 phones a letter plus 6)
-        def decode(self, letters):
-            encoded, mask, state = self.encode(letters)
+        # Greedy decoding in readings (see encode) - a list of phone id lists (lib/g2p.js's limit: 3 phones a letter plus 6)
+        def decode(self, letters, readings=None):
+            encoded, mask, state, _ = self.encode(letters, readings)
             batch = letters.shape[0]
             previous = torch.full((batch, 1), EOS, dtype=torch.long)
             results = [[] for _ in range(batch)]
@@ -347,8 +361,9 @@ def make_batch(words, pronunciations):
     return letter_tensor, target_tensor
 
 
-# Predict words' phones with a model - a list of phone lists
-def predict(model, words, batch_size=512):
+# Predict words' phones with a model, in their readings (a list - context.py's reading input; None - the network without
+# it) - a list of phone lists
+def predict(model, words, readings=None, batch_size=512):
     import torch  # pylint: disable=import-outside-toplevel
     model.eval()
     results = []
@@ -356,7 +371,8 @@ def predict(model, words, batch_size=512):
         for start in range(0, len(words), batch_size):
             chunk = words[start:start + batch_size]
             letters = make_batch(chunk, [[] for _ in chunk])[0]
-            results.extend([PHONES[phone] for phone in phones] for phones in model.decode(letters))
+            reading = None if readings is None else torch.tensor(readings[start:start + batch_size], dtype=torch.long)
+            results.extend([PHONES[phone] for phone in phones] for phones in model.decode(letters, reading))
     return results
 
 
@@ -436,7 +452,7 @@ def train_stage(settings, stage, init, out_path, data, log):
         letters, targets = make_batch([word for word, _ in batch], [phones for _, phones in batch])
         for group in optimizer.param_groups:
             group['lr'] = learning_rate(step, steps, peak, warmup)
-        loss = model.loss(letters, targets)
+        loss, _ = model.loss(letters, targets)
         optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -477,13 +493,14 @@ def stage_digest(settings, stage, previous, data, relabel):
 def command_train(args):
     """Every stage of the recipe, each resumed if its checkpoint of the same inputs exists - <out>/<stage>.pt (and its
     .digest), train.log, done.json"""
-    config = load_config(args.config)
+    config = load_config()
     os.makedirs(args.out, exist_ok=True)
     log_path = os.path.join(args.out, 'train.log')
 
     def log(text):
         log_line(log_path, text)
-    settings = {key: value for key, value in config.items() if key != 'stages'}
+    # (the recipe's description isn't a setting - a reworded one retrains nothing)
+    settings = {key: value for key, value in config.items() if key not in ('description', 'stages')}
     init = None
     digest = None
     data = data_digest()
@@ -491,8 +508,7 @@ def command_train(args):
     for stage in config['stages']:
         stage = {**stage, **({'steps': args.steps} if args.steps else {})}
         path = os.path.join(args.out, f'{stage["name"]}.pt')
-        relabel = stage.get('relabel', settings.get('relabel'))
-        relabel = relabel and os.path.join(ROOT, relabel)
+        relabel = stage.get('relabel') and os.path.join(ROOT, stage['relabel'])
         digest = stage_digest(settings, stage, digest, data, relabel)
         if os.path.exists(path) and os.path.exists(path + '.digest') and read_text(path + '.digest') == digest:
             log(f'{stage["name"]}: done before ({path})')
@@ -627,7 +643,6 @@ def main(argv=None):
     commands = parser.add_subparsers(dest='command', required=True)
     train_parser = commands.add_parser('train', help='every stage of the recipe (resumable)')
     train_parser.add_argument('--out', required=True, help='the output directory')
-    train_parser.add_argument('--config', default=RECIPE_PATH)
     train_parser.add_argument('--steps', type=int, help='each stage this many steps (a smoke test)')
     train_parser.set_defaults(func=command_train)
     evaluate_parser = commands.add_parser('evaluate', help='the measures of a module or a checkpoint')

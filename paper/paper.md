@@ -572,7 +572,7 @@ A listener reported that the audiobook player read "Hobbes" as "hobbies". The ne
 data: the dictionary's first entry is HOBBES HH AA1 B IY0 Z - "hobbies" - while its second variant, HOBBS, and every
 other -bes word after a consonant (COOMBES, ERBES, FORBES, ZIRBES) end B Z. The network had learned the label
 faithfully, and generalized from it: it read "mobbes", a word it had never seen, as M AA1 B IY2 Z. A network that
-reproduces the dictionary reproduces its errors, so we audited the dictionary (`picovox_train/g2paudit.py`):
+reproduces the dictionary reproduces its errors, so we audited the dictionary, once (its fixes are committed data):
 
 1. **Screening by cross-validated disagreement.** Two partitions of the dictionary into five folds (a word's
    possessives in its fold) train ten screening models (the shipped recipe's network and sampling, 6,000 steps each),
@@ -1605,10 +1605,11 @@ PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.smoke    # 
 node tools/unpack.js lib/models/voiceModel.js build/voice && node tools/speak.js -m build/voice "Call me Ishmael." -o ishmael.wav
 ```
 
-The dictionary audit is `picovox_train.g2paudit` (folds, suspects, audio, adjudicate). The rule-based synthesizer's
-tools (`tools/panel.js`, `tools/targets.py`, `tools/say.js`) were removed in commit 33fbfad, the single-speaker
-trainer (`nn/train.py`) in commit 7f667db, and its exports (`data/nn/slt` and `bdl`, Section 5's voices) later; their
-versions are in git history.
+The dictionary audit was a one-off: its fixes are committed (`train/data/g2p-fixes.json`), and its tool,
+`picovox_train.g2paudit` (folds, suspects, audio, adjudicate - commits 1e86148 and 6cec8e3), was removed after. The
+rule-based synthesizer's tools (`tools/panel.js`, `tools/targets.py`, `tools/say.js`) were removed in commit 33fbfad,
+the single-speaker trainer (`nn/train.py`) in commit 7f667db, and its exports (`data/nn/slt` and `bdl`, Section 5's
+voices) later; their versions are in git history.
 
 The training dashboard (`tools/dashboard/`) follows `make train` live: the stages and the critical path, CPU and GPU
 utilization, loss curves, logs, and listening samples of each stage's final model beside the shipped model's.

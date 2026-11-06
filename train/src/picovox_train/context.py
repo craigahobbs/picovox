@@ -9,11 +9,9 @@ chooses, and the G2P pronounces the word in that reading. The commands (python i
 PYTHONPATH=train/src build/venv-train/bin/python -B):
 
     python -m picovox_train.context train-g2p --labels DIR/labels.json --init G2P.pt --out DIR/g2p.pt
-    python -m picovox_train.context train-context --labels DIR/labels.json --out DIR/context.pt [-j N]
+    python -m picovox_train.context train-context --labels DIR/labels.json --out DIR/context.pt --folds DIR/folds [-j N]
+    python -m picovox_train.context folds DIR/folds --labels DIR/labels.json       # the gate - the folds' held-out results
     python -m picovox_train.context export --g2p DIR/g2p.pt --context DIR/context.pt [--out lib/models/g2pModel.js]
-    python -m picovox_train.context gate --labels DIR/labels.json [MODULE]                           # held-out accuracy (one split)
-    python -m picovox_train.context cross-validate --labels DIR/labels.json --out DIR/folds [-j N]   # the gate, 10 folds
-    python -m picovox_train.context folds DIR/folds/fold-*.json --labels DIR/labels.json             # the gate of the folds' results
     python -m picovox_train.context check NEW.js     # make train's G2P gate: identical to lib/models/g2pModel.js,
                                                      # else the quality gate (make train-install installs it - trained.py)
 
@@ -60,19 +58,14 @@ import time
 
 import numpy
 
-from . import RECIPE_PATH, ROOT, g2pmodel
+from . import RECIPE_PATH, ROOT, g2pmodel, read_json
 from .trained import module_body
 from .g2p import (EOS, LETTERS, MAX_WORD, MODULE_LINE_LENGTH, PHONES, UPSAMPLE, build_model, learning_rate, log_line, make_batch,
-                  model_config, quantize_array, quantize_state, weight_bytes)
+                  model_config, predict, quantize_array, quantize_state, weight_bytes)
 
 
 # The recipe's settings - train/data/train.json's "context" (labels, g2p, network, export, gate)
-def load_settings(path=RECIPE_PATH):
-    with open(path, encoding='utf-8') as file:
-        return json.load(file)['context']
-
-
-RECIPE = load_settings()
+RECIPE = read_json(RECIPE_PATH)['context']
 
 # The reading slots (the default and two alternates), and the ambiguity head's hidden layer
 READINGS = RECIPE['g2p']['readings']
@@ -93,12 +86,6 @@ G2P_SETTINGS = {key: value for key, value in RECIPE['g2p'].items() if key not in
 
 # The reading stage's new tensors (their learning rate is the stage's times headRate)
 HEADS = ('reading', 'ambiguity_layer', 'ambiguity')
-
-
-# The labels (contextlabels.py labels)
-def load_labels(path):
-    with open(path, encoding='utf-8') as file:
-        return json.load(file)
 
 
 #
@@ -128,69 +115,18 @@ def load_g2p(path):
     return model
 
 
-# Encode letters with readings - (outputs, mask, initial decoder state, the encoder's final states)
-def encode_reading(model, letters, readings):
-    import torch  # pylint: disable=import-outside-toplevel
-    from torch import nn  # pylint: disable=import-outside-toplevel
-    mask = letters != 0
-    packed = nn.utils.rnn.pack_padded_sequence(model.letter_embed(letters), mask.sum(1).cpu(), batch_first=True, enforce_sorted=False)
-    outputs, final = model.encoder(packed)
-    outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs, batch_first=True, total_length=letters.shape[1])
-    ends = torch.cat([final[0], final[1]], -1)
-    state = torch.tanh(model.bridge(ends))
-    alternate = readings > 0
-    state = state + model.reading((readings - 1).clamp(min=0)) * alternate[:, None]
-    return outputs, mask, state.unsqueeze(0), ends
-
-
 # The ambiguity head's logits from the encoder's final states
 def ambiguity_logit(model, ends):
     import torch  # pylint: disable=import-outside-toplevel
     return model.ambiguity(torch.tanh(model.ambiguity_layer(ends))).squeeze(-1)
 
 
-# The loss of a batch - teacher-forced cross entropy of the readings' targets, plus the ambiguity head's
+# The loss of a batch - teacher-forced cross entropy of the readings' targets (g2p.py's), plus the ambiguity head's
 def reading_loss(model, letters, targets, readings, ambiguous, ambiguity_weight):
-    import torch  # pylint: disable=import-outside-toplevel
     from torch import nn  # pylint: disable=import-outside-toplevel
-    encoded, mask, state, ends = encode_reading(model, letters, readings)
-    previous = torch.cat([torch.full_like(targets[:, :1], EOS), targets[:, :-1]], 1)
-    decoded, _ = model.decoder(model.phone_embed(previous), state)
-    logits = model.attend(decoded, encoded, mask)
-    phone_loss = nn.functional.cross_entropy(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1), ignore_index=0)
+    phone_loss, ends = model.loss(letters, targets, readings)
     ambiguity_loss = nn.functional.binary_cross_entropy_with_logits(ambiguity_logit(model, ends), ambiguous)
     return phone_loss + ambiguity_weight * ambiguity_loss, phone_loss, ambiguity_loss
-
-
-# Greedy decoding of words in readings - phone lists (lib/g2p.js's limit: 3 phones a letter plus 6)
-def decode_readings(model, words, readings, batch_size=512):
-    import torch  # pylint: disable=import-outside-toplevel
-    model.eval()
-    results = []
-    with torch.no_grad():
-        for start in range(0, len(words), batch_size):
-            chunk = words[start:start + batch_size]
-            letters = make_batch(chunk, [[] for _ in chunk])[0]
-            reading = torch.tensor(readings[start:start + batch_size], dtype=torch.long)
-            encoded, mask, state, _ = encode_reading(model, letters, reading)
-            previous = torch.full((len(chunk), 1), EOS, dtype=torch.long)
-            phones = [[] for _ in chunk]
-            done = [False] * len(chunk)
-            limits = [3 * length + 6 for length in mask.sum(1).tolist()]
-            for step in range(3 * letters.shape[1] + 6):
-                decoded, state = model.decoder(model.phone_embed(previous), state)
-                best = model.attend(decoded, encoded, mask)[:, 0].argmax(-1)
-                for index, phone in enumerate(best.tolist()):
-                    if not done[index]:
-                        if phone <= EOS or step >= limits[index]:
-                            done[index] = True
-                        else:
-                            phones[index].append(PHONES[phone])
-                if all(done):
-                    break
-                previous = best.unsqueeze(1)
-            results.extend(phones)
-    return results
 
 
 # The ambiguity head's logits of words
@@ -202,7 +138,7 @@ def ambiguity_logits(model, words, batch_size=2048):
         for start in range(0, len(words), batch_size):
             chunk = words[start:start + batch_size]
             letters = make_batch(chunk, [[] for _ in chunk])[0]
-            _, _, _, ends = encode_reading(model, letters, torch.zeros(len(chunk), dtype=torch.long))
+            _, _, _, ends = model.encode(letters)
             logits.extend(ambiguity_logit(model, ends).tolist())
     return logits
 
@@ -236,8 +172,7 @@ def train_g2p(model, items, probabilities, labels, settings, log):
     invariant /= invariant.sum()
     reading_share, invariant_share = float(settings['readingShare']), float(settings['invariantShare'])
     steps, batch_size, peak, warmup = int(settings['steps']), int(settings['batch']), float(settings['lr']), int(settings['warmup'])
-    trained = [parameter for name, parameter in model.named_parameters()
-               if settings['train'] == 'all' or name.split('.')[0] in settings['train'].split(',')]
+    trained = [parameter for name, parameter in model.named_parameters() if name.split('.')[0] in settings['train'].split(',')]
     for parameter in model.parameters():
         parameter.requires_grad_(any(parameter is other for other in trained))
     head_rate = float(settings['headRate'])
@@ -299,24 +234,17 @@ def train_g2p(model, items, probabilities, labels, settings, log):
 
 def evaluate_g2p(model, labels, words):
     """The reading measures of a G2P - the alternate readings right, and the ambiguity head's errors over words (the
-    dictionary and labeled words) - {readingsRight, readings, ambiguousMissed, falsePositives, falsePositiveWords}"""
+    dictionary and labeled words) - {readingsRight, readings, ambiguousMissed, falsePositives}"""
     targets = reading_targets(labels, {})
-    predictions = decode_readings(model, [word for word, _, _ in targets], [reading for _, _, reading in targets])
-    right = 0
-    wrong = []
-    for (word, _, reading), predicted in zip(targets, predictions):
-        variants = labels['words'][word]['readings'][reading]
-        if ' '.join(predicted) in variants:
-            right += 1
-        else:
-            wrong.append(f'{word}/{reading} {" ".join(predicted)}')
+    predictions = predict(model, [word for word, _, _ in targets], [reading for _, _, reading in targets])
+    right = sum(' '.join(predicted) in labels['words'][word]['readings'][reading]
+                for (word, _, reading), predicted in zip(targets, predictions))
     ambiguous = set(labels['words'])
     words = sorted(set(words) | ambiguous)
     logits = ambiguity_logits(model, words)
     missed = [word for word, logit in zip(words, logits) if word in ambiguous and logit <= 0]
-    false_positives = [word for word, logit in zip(words, logits) if word not in ambiguous and logit > 0]
-    return {'readingsRight': right, 'readings': len(targets), 'readingsWrong': wrong, 'ambiguousMissed': missed,
-            'falsePositives': len(false_positives), 'falsePositiveWords': false_positives[:50]}
+    false_positives = sum(1 for word, logit in zip(words, logits) if word not in ambiguous and logit > 0)
+    return {'readingsRight': right, 'readings': len(targets), 'ambiguousMissed': missed, 'falsePositives': false_positives}
 
 
 #
@@ -420,8 +348,8 @@ class WeightQuantizer:
             parameter.data.copy_(saved)
 
 
-# The cross-validation folds - by book (fold 0 is the labels' held-out books - contextlabels.py; a book of the others is in
-# fold 1 + its hash's remainder by FOLDS - 1)
+# The cross-validation folds - by book (fold 0 is the labels' held-out books - contextlabels.py - so its network is the
+# context network itself; a book of the others is in fold 1 + its hash's remainder by FOLDS - 1)
 FOLDS = RECIPE['gate']['folds']
 
 
@@ -528,10 +456,14 @@ def train_context(labels, settings, log, teachers=None):
     return model
 
 
-# The labels of a fold (None - all the labels' splits as they are)
+# The labels of a fold (fold_labels)
 def labels_of(labels_path, fold):
-    labels = load_labels(labels_path)
-    return labels if fold is None else fold_labels(labels, fold)
+    return fold_labels(read_json(labels_path), fold)
+
+
+# A fold's log lines' prefix (none for fold 0 - the context network itself)
+def fold_prefix(fold):
+    return f'fold {fold}: ' if fold else ''
 
 
 # The teachers' seeds - "teachers" of them, 100 * seed + 1, 2, ...
@@ -540,13 +472,12 @@ def teacher_seeds(settings):
     return [100 * int(settings['seed']) + index + 1 for index in range(int(settings['teachers']))]
 
 
-# One teacher (a worker task) - (labels path, fold or None, seed, settings, log path): the context network trained with
-# that seed (no teachers of its own) - its state, quantized as exported
+# One teacher (a worker task) - (labels path, fold, seed, settings, log path): the context network trained on the fold's
+# labels with that seed (no teachers of its own) - its state, quantized as exported
 def teacher_task(task):
     labels_path, fold, seed, settings, log = task
-    prefix = '' if fold is None else f'fold {fold}: '
     teacher = train_context(labels_of(labels_path, fold), {**settings, 'seed': seed},
-                            lambda text: log_line(log, f'{prefix}teacher {seed}: {text}'))
+                            lambda text: log_line(log, f'{fold_prefix(fold)}teacher {seed}: {text}'))
     WeightQuantizer(teacher, EXPORT).quantize()
     return teacher.state_dict()
 
@@ -559,7 +490,7 @@ def run_tasks(function, tasks, jobs):
     return [function(task) for task in tasks]
 
 
-def train_student(labels_path, fold, settings, log, states):
+def train_student(labels, fold, settings, log, states):
     """The context network trained on a fold's labels toward the teachers' mean probabilities (teachers' states - none,
     the plain training) - the model"""
     settings = {**CONTEXT_SETTINGS, **settings}
@@ -568,21 +499,13 @@ def train_student(labels_path, fold, settings, log, states):
         teacher = build_context(settings)
         teacher.load_state_dict(state)
         teachers.append(teacher)
-    prefix = '' if fold is None else f'fold {fold}: '
-    return train_context(labels_of(labels_path, fold), settings, lambda text: log_line(log, f'{prefix}{text}'), teachers)
+    return train_context(labels, settings, lambda text: log_line(log, f'{fold_prefix(fold)}{text}'), teachers)
 
 
-def train_distilled(labels_path, settings, log, jobs=1):
-    """The recipe's context network - its teachers ("teachers" of them, each its own seed; in jobs worker processes),
-    then the network distilled from them (train_student) - the model"""
-    tasks = [(labels_path, None, seed, {**CONTEXT_SETTINGS, **settings}, log) for seed in teacher_seeds(settings)]
-    return train_student(labels_path, None, settings, log, run_tasks(teacher_task, tasks, jobs))
-
-
-def evaluate_context(slot_of, labels, split='heldout'):
-    """The context choices' accuracy per word and source on a split, against each word's majority slot (in the training
-    examples) - slot_of(windows) gives the chosen slots - {words: {word: {right, total, majority}}, sources: {...}}"""
-    examples = [example for example in labels['examples'] if example['split'] == split]
+def evaluate_context(slot_of, labels):
+    """The context choices' accuracy per word and source on the held-out examples, against each word's majority slot (in
+    the training examples) - slot_of(windows) gives the chosen slots - {words: {source/word: {right, total, majority}}}"""
+    examples = [example for example in labels['examples'] if example['split'] == 'heldout']
     majority = {}
     training = collections.defaultdict(collections.Counter)
     for example in labels['examples']:
@@ -592,13 +515,12 @@ def evaluate_context(slot_of, labels, split='heldout'):
         majority[word] = counter.most_common(1)[0][0]
     chosen = slot_of([example['window'] for example in examples])
     words = collections.defaultdict(lambda: {'right': 0, 'total': 0, 'majority': 0})
-    sources = collections.defaultdict(lambda: {'right': 0, 'total': 0, 'majority': 0})
     for example, slot in zip(examples, chosen):
-        for counts in (words[(example['source'], example['word'])], sources[example['source']]):
-            counts['total'] += 1
-            counts['right'] += slot == example['slot']
-            counts['majority'] += majority.get(example['word'], 0) == example['slot']
-    return {'words': {f'{source}/{word}': counts for (source, word), counts in sorted(words.items())}, 'sources': dict(sources)}
+        counts = words[(example['source'], example['word'])]
+        counts['total'] += 1
+        counts['right'] += slot == example['slot']
+        counts['majority'] += majority.get(example['word'], 0) == example['slot']
+    return {'words': {f'{source}/{word}': counts for (source, word), counts in sorted(words.items())}}
 
 
 #
@@ -632,7 +554,7 @@ def g2p_covariances(model, calibration):
     with torch.no_grad():
         for start in range(0, len(words), 1024):
             letters, targets = make_batch(words[start:start + 1024], phones[start:start + 1024])
-            encoded, mask, state, ends = encode_reading(model, letters, torch.tensor(readings[start:start + 1024]))
+            encoded, mask, state, ends = model.encode(letters, torch.tensor(readings[start:start + 1024]))
             embedded = model.letter_embed(letters)
             forward, reverse = encoded[..., :hidden], encoded[..., hidden:]
             previous_forward = torch.cat([torch.zeros_like(forward[:, :1]), forward[:, :-1]], 1)
@@ -793,9 +715,9 @@ def command_export(args):
 # The gate - the held-out aligned accuracy against the majority baseline
 #
 
-# The gate's words (the recipe's: read, use, close, lives) less the words whose readings differ only by S against Z - the
-# aligner can't judge those (word-final voicing), so the regression set covers them - and its margin over the majority
-# baseline
+# The gate's words (the recipe's: read, use, close, lives) less the words whose readings differ only by S against Z (the
+# stem-final voicing pairs - use, close: their held-out accuracy is reported per word, not gated; the regression set
+# covers them) - and its margin over the majority baseline
 GATE_WORDS = RECIPE['gate']['words']
 GATE_MARGIN = RECIPE['gate']['margin']
 
@@ -847,21 +769,6 @@ def word_margins(result, labels, least=20):
     return 'per word (vs majority): ' + ', '.join(parts)
 
 
-def command_gate(args):
-    """The held-out accuracy of a module's context network (as the app runs it - g2pmodel.py), and the gate"""
-    labels = load_labels(args.labels)
-    g2p = g2pmodel.G2p(g2pmodel.read_module(args.model))
-    result = evaluate_context(g2p.choose_slots, labels)
-    passed, line = gate_result(result, labels)
-    sources = ', '.join(f'{source} {counts["right"]}/{counts["total"]} (majority {counts["majority"]})'
-                        for source, counts in sorted(result['sources'].items()))
-    print(f'{line}; all held-out: {sources}')
-    if args.out:
-        with open(args.out, 'w', encoding='utf-8') as file:
-            json.dump(result, file, indent=1)
-    return 0 if passed else 1
-
-
 #
 # make train's check - a retrained module against the committed one: identical, else within the recipe's tolerances
 #
@@ -906,9 +813,7 @@ def command_check(args):
     for kind, (right, total) in new_kinds.items():
         if right < old_kinds.get(kind, (0, total))[0] - gate['heteronymKindDrop']:
             failures.append(f'{kind} {right}/{total} (committed {old_kinds[kind][0]})')
-    config = g2p.load_config()
-    relabel = config['stages'][-1].get('relabel')
-    data = g2p.load_data(relabel and os.path.join(g2p.ROOT, relabel))
+    _, data = g2p.final_data()
     new_measures = g2p.evaluate(js_pronouncer(args.model), data)
     old_measures = g2p.evaluate(js_pronouncer(args.committed), data)
     for name, tolerance in (('book', gate['bookError']), ('bookWrongDistinct', gate['bookDistinct']),
@@ -930,12 +835,8 @@ def command_train_g2p(args):
     """Train the reading heads from a G2P checkpoint on g2p.py's data and recipe settings - <out> (a checkpoint)"""
     import torch  # pylint: disable=import-outside-toplevel
     from . import g2p  # pylint: disable=import-outside-toplevel
-    labels = load_labels(args.labels)
-    config = g2p.load_config(args.config)
-    stage = config['stages'][-1]
-    settings = {key: value for key, value in config.items() if key != 'stages'}
-    settings = {**settings, **stage}
-    data = g2p.load_data(settings.get('relabel') and os.path.join(g2p.ROOT, settings['relabel']))
+    labels = read_json(args.labels)
+    settings, data = g2p.final_data()
     items, probabilities = g2p.training_items(data, settings)
     model = load_g2p(args.init)
     overrides = json.loads(args.settings) if args.settings else {}
@@ -949,28 +850,30 @@ def command_train_g2p(args):
 
 
 def command_train_context(args):
-    """Train the context network (its teachers first - in -j worker processes) - <out> (a checkpoint)"""
-    import torch  # pylint: disable=import-outside-toplevel
-    labels = load_labels(args.labels)
-    overrides = json.loads(args.settings) if args.settings else {}
-    model = train_distilled(args.labels, overrides, args.log, args.jobs)
-    torch.save({'config': model.config, 'state': model.state_dict(), 'settings': {**CONTEXT_SETTINGS, **overrides}}, args.out)
-    quantizer = WeightQuantizer(model, EXPORT)
-    quantizer.quantize()
-    result = evaluate_context(lambda windows: context_predict(model, windows), labels)
-    _, line = gate_result(result, labels)
-    log_line(args.log, f'train-context: {line}; {describe_heldout(result)}')
-    with open(os.path.splitext(args.out)[0] + '.json', 'w', encoding='utf-8') as file:
-        json.dump(result, file, indent=1)
+    """Train the context network and its cross-validation - the network (fold 0: the labels' own split, at its threads)
+    to <out> (a checkpoint), and each fold's held-out results to <folds>/fold-<k>.json (the other folds' networks one
+    thread each). Every fold's teachers at once, then every fold's network: -j trains that many at once, each in a
+    worker process (the results are the same for any -j). Resumable: a fold with results from the same labels and
+    settings (fold 0 with its checkpoint) isn't trained again"""
+    os.makedirs(args.folds, exist_ok=True)
+    network = {**CONTEXT_SETTINGS, **(json.loads(args.settings) if args.settings else {})}
+    settings = [network] + [{**network, 'threads': 1}] * (FOLDS - 1)
+    paths = [os.path.join(args.folds, f'fold-{fold}.json') for fold in range(FOLDS)]
+    digests = [fold_digest(args.labels, fold_settings) for fold_settings in settings]
+    folds = [fold for fold in range(FOLDS) if not fold_done(paths[fold], digests[fold]) or (fold == 0 and not os.path.exists(args.out))]
+    seeds = teacher_seeds(network)
+    states = run_tasks(teacher_task, [(args.labels, fold, seed, settings[fold], args.log) for fold in folds for seed in seeds], args.jobs)
+    run_tasks(fold_task, [(args.labels, fold, settings[fold], args.log, states[index * len(seeds):(index + 1) * len(seeds)],
+                           paths[fold], digests[fold], args.out if fold == 0 else None) for index, fold in enumerate(folds)], args.jobs)
     return 0
 
 
-# The digest of a cross-validation's inputs - the labels file and the context network's settings (less the threads)
-def fold_digest(labels_path):
+# The digest of a fold's inputs - the labels file and its network's settings
+def fold_digest(labels_path, settings):
     digest = hashlib.sha256()
     with open(labels_path, 'rb') as file:
         digest.update(file.read())
-    digest.update(json.dumps({key: value for key, value in CONTEXT_SETTINGS.items() if key != 'threads'}, sort_keys=True).encode('utf-8'))
+    digest.update(json.dumps(settings, sort_keys=True).encode('utf-8'))
     return digest.hexdigest()[:16]
 
 
@@ -982,53 +885,42 @@ def fold_done(path, digest):
         return json.load(file).get('digest') == digest
 
 
-# One fold of the cross-validation (a worker task) - (labels path, fold, results path, log path, settings, the fold's
-# teachers' states): the context network trained without the fold's books, and its held-out results (with the
-# inputs' digest) written to the results path
+# One fold's network (a worker task) - (labels path, fold, settings, log path, the fold's teachers' states, results path,
+# the inputs' digest, checkpoint path - fold 0's, else None): the context network trained without the fold's books
+# (fold 0: the network, its checkpoint written), and its held-out results (quantized as exported; with the digest)
+# written to the results path
 def fold_task(task):
-    labels_path, fold, path, log, settings, states = task
-    fold_set = labels_of(labels_path, fold)
-    model = train_student(labels_path, fold, settings, log, states)
+    import torch  # pylint: disable=import-outside-toplevel
+    labels_path, fold, settings, log, states, path, digest, checkpoint = task
+    labels = labels_of(labels_path, fold)
+    model = train_student(labels, fold, settings, log, states)
+    if checkpoint:
+        torch.save({'config': model.config, 'state': model.state_dict(), 'settings': settings}, checkpoint)
     WeightQuantizer(model, EXPORT).quantize()
-    result = {**evaluate_context(lambda windows: context_predict(model, windows), fold_set), 'digest': fold_digest(labels_path)}
+    result = evaluate_context(lambda windows: context_predict(model, windows), labels)
+    if checkpoint:
+        _, line = gate_result(result, labels)
+        log_line(log, f'train-context: {line}; {describe_heldout(result)}')
     with open(path + '.tmp', 'w', encoding='utf-8') as file:
-        json.dump(result, file, indent=1)
+        json.dump({**result, 'digest': digest}, file, indent=1)
     os.replace(path + '.tmp', path)
     return path
 
 
-def command_cross_validate(args):
-    """Train the context network once per fold of the books - each fold's held-out results to
-    <out>/fold-<k>.json (resumable: a fold with results from the same labels and settings is skipped - one from other
-    inputs is retrained) - then the cross-validated gate (command_folds). Every fold's teachers, then every fold's
-    network: -j trains that many at once, each in a worker process, and every training is one thread (the results are the
-    same for any -j)"""
-    os.makedirs(args.out, exist_ok=True)
-    paths = [os.path.join(args.out, f'fold-{fold}.json') for fold in range(FOLDS)]
-    digest = fold_digest(args.labels)
-    folds = [fold for fold, path in enumerate(paths) if not fold_done(path, digest)]
-    settings = {**CONTEXT_SETTINGS, 'threads': 1}
-    seeds = teacher_seeds(settings)
-    states = run_tasks(teacher_task, [(args.labels, fold, seed, settings, args.log) for fold in folds for seed in seeds], args.jobs)
-    run_tasks(fold_task, [(args.labels, fold, paths[fold], args.log, settings, states[index * len(seeds):(index + 1) * len(seeds)])
-                          for index, fold in enumerate(folds)], args.jobs)
-    return command_folds(argparse.Namespace(results=paths, labels=args.labels))
-
-
 def command_folds(args):
-    """The cross-validated gate - the held-out results of every fold's context network (cross-validate's
-    <out>/fold-<k>.json) pooled"""
-    pooled = {'words': collections.defaultdict(lambda: {'right': 0, 'total': 0, 'majority': 0}), 'sources': {}}
-    for path in args.results:
-        with open(path, encoding='utf-8') as file:
+    """The cross-validated gate - the held-out results of every fold's context network (train-context's
+    <folds>/fold-<k>.json) pooled"""
+    pooled = {'words': collections.defaultdict(lambda: {'right': 0, 'total': 0, 'majority': 0})}
+    for fold in range(FOLDS):
+        with open(os.path.join(args.folds, f'fold-{fold}.json'), encoding='utf-8') as file:
             result = json.load(file)
         for key, counts in result['words'].items():
             if key.startswith('aligned/'):
                 for name in ('right', 'total', 'majority'):
                     pooled['words'][key][name] += counts[name]
-    labels = load_labels(args.labels)
+    labels = read_json(args.labels)
     passed, line = gate_result(pooled, labels)
-    print(f'{len(args.results)} folds: {line}')
+    print(f'{FOLDS} folds: {line}')
     print(word_margins(pooled, labels))
     return 0 if passed else 1
 
@@ -1040,25 +932,19 @@ def main(argv=None):
     g2p_parser.add_argument('--labels', required=True)
     g2p_parser.add_argument('--init', required=True, help='the trained G2P checkpoint')
     g2p_parser.add_argument('--out', required=True)
-    g2p_parser.add_argument('--config', default=RECIPE_PATH, help='g2p.py\'s settings')
     g2p_parser.add_argument('--settings', help='JSON settings over G2P_SETTINGS')
     g2p_parser.add_argument('--log')
     g2p_parser.set_defaults(func=command_train_g2p)
-    context_parser = commands.add_parser('train-context', help='the context network')
+    context_parser = commands.add_parser('train-context', help='the context network and its cross-validation (resumable)')
     context_parser.add_argument('--labels', required=True)
-    context_parser.add_argument('--out', required=True)
+    context_parser.add_argument('--out', required=True, help='the network\'s checkpoint')
+    context_parser.add_argument('--folds', required=True, help='the folds\' results directory')
     context_parser.add_argument('--settings', help='JSON settings over CONTEXT_SETTINGS')
-    context_parser.add_argument('-j', '--jobs', type=int, default=1, help='teachers at once (worker processes)')
+    context_parser.add_argument('-j', '--jobs', type=int, default=1, help='trainings at once (worker processes)')
     context_parser.add_argument('--log')
     context_parser.set_defaults(func=command_train_context)
-    cross_parser = commands.add_parser('cross-validate', help='train every fold, then the cross-validated gate (resumable)')
-    cross_parser.add_argument('--labels', required=True)
-    cross_parser.add_argument('--out', required=True, help='the folds\' results directory')
-    cross_parser.add_argument('--log')
-    cross_parser.add_argument('-j', '--jobs', type=int, default=1, help='trainings at once (worker processes, one thread each)')
-    cross_parser.set_defaults(func=command_cross_validate)
     folds_parser = commands.add_parser('folds', help='the cross-validated gate over the folds\' held-out results')
-    folds_parser.add_argument('results', nargs='+')
+    folds_parser.add_argument('folds', help='the folds\' results directory')
     folds_parser.add_argument('--labels', required=True)
     folds_parser.set_defaults(func=command_folds)
     export_parser = commands.add_parser('export', help='the generated module')
@@ -1070,11 +956,6 @@ def main(argv=None):
     check_parser.add_argument('model')
     check_parser.add_argument('--committed', default=g2pmodel.MODULE_PATH)
     check_parser.set_defaults(func=command_check)
-    gate_parser = commands.add_parser('gate', help='the held-out accuracy of a module\'s context network (exit 1 below the gate)')
-    gate_parser.add_argument('model', nargs='?', default=g2pmodel.MODULE_PATH)
-    gate_parser.add_argument('--labels', required=True)
-    gate_parser.add_argument('--out')
-    gate_parser.set_defaults(func=command_gate)
     args = parser.parse_args(argv)
     return args.func(args)
 

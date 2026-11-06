@@ -6,8 +6,7 @@
 // sentences written apart from its seeds and collocations - its generalization beyond the context set), "names" (surnames,
 // first names, and place names - verified pronunciations: the readers' audio, the dictionary's own derived forms, and
 // well-established names). Prints one line and exits 1 when a kind's score is below its minimum (the make train gate):
-// default 0.9, context and probe 0.85 when the module has a context network (else 0), missing 0, names the shipped
-// module's score when it was added (it can only go up).
+// default 0.9, context and probe 0.85, missing 0, names the shipped module's score when it was added (it can only go up).
 //
 // node tools/heteronyms.js [-m modulePath] [--min-default 0.9] [--min-context 0.85] [--min-probe 0.85] [--min-missing 0]
 //     [--min-names N] [--show]
@@ -62,9 +61,8 @@ export function scoreHeteronyms(items) {
 }
 
 
-// The gate's minimums - the default reading, the context-dependent readings and the probes (when the module has a context
-// network; a context-free G2P gives one reading per word), and the names (the shipped module's score - raised to 0.91 with
-// the dictionary fixes, 67/73, and to 0.93 with Don Quixote's names, 80/86)
+// The gate's minimums - the default reading, the context-dependent readings and the probes, and the names (the shipped
+// module's score - raised to 0.91 with the dictionary fixes, 67/73, and to 0.93 with Don Quixote's names, 80/86)
 export const minimums = {'default': 0.9, 'context': 0.85, 'probe': 0.85, 'missing': 0, 'names': 0.93};
 
 
@@ -99,8 +97,8 @@ async function main() {
     const {kinds, misses} = scoreHeteronyms(items);
     const kindMinimums = {
         'default': Number(option('--min-default', minimums.default)),
-        'context': Number(option('--min-context', g2pModel.context ? minimums.context : 0)),
-        'probe': Number(option('--min-probe', g2pModel.context ? minimums.probe : 0)),
+        'context': Number(option('--min-context', minimums.context)),
+        'probe': Number(option('--min-probe', minimums.probe)),
         'missing': Number(option('--min-missing', minimums.missing)),
         'names': Number(option('--min-names', minimums.names))
     };

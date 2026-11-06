@@ -454,7 +454,7 @@ time (`picovox_train/gpulock.py` - two at once each run at about half speed) whi
 | voice-eval - the voice through the panel, and the gate (`picovox_train.panel gate voice --against baseline`: no worse than the shipped model) | CPU | voice-b, baseline-eval |
 | package - the voice's module, `build/train/voiceModel.js`, with its provenance | CPU | voice-eval |
 | heteronyms - the relabeled words from the measured readings, checked to reproduce `train/data/g2p-relabel.json` (the G2P network's input) | CPU, ~1 min | tts-readings (after data-tts) |
-| g2p-network, context-labels, context-network, g2p - the G2P (the network; the heteronym labels from the pinned books; the context network and its cross-validation; the reading stage, the export, and the gate) | CPU - the network one core, ~30 min | the labels: tts-readings (after data-tts) |
+| g2p-network, context-labels, context-network, g2p-reading, g2p - the G2P (the network; the heteronym labels from the pinned books; the context network and its cross-validation; beside it, the reading stage; the export and the gate) | CPU - the network one core, ~30 min | the labels: tts-readings (after data-tts) |
 | samples-reference, samples-voice-a, -voice-b - the listening samples | CPU, under a minute each | the shipped model (after data-tts); each stage's model |
 
 The critical path - the training speech (generated and aligned once - about an hour and a half the first time, a minute
@@ -506,8 +506,9 @@ fetch alone, for every pinned text: `python -m picovox_train.books fetch`.
 `make -j train-g2p` runs the G2P alone - its stages (with the training speech's readings, tts-corpus and tts-readings),
 without the voice stages or make train's ordering after the voices' data build - for G2P work. The chain's independent
 parts run in worker processes - the context labels' part-of-speech tags (by book) in `G2P_JOBS`, and the context
-network's trainings and cross-validate's ten folds (each one thread) in `CONTEXT_JOBS` - and the context network and its
-cross-validation run beside the G2P network; every output is the same for any count. Inside make train the chain runs
+network's trainings and its cross-validation's other nine folds' (each one thread) in `CONTEXT_JOBS`, every fold's
+teachers in one pool, then every fold's network - and the context network and its cross-validation run beside the G2P
+network; every output is the same for any count. Inside make train the chain runs
 beside the GPU stages, which CPU work slows (the Makefile's `BESIDE`), so `G2P_JOBS` is 2 and `CONTEXT_JOBS` 6 there;
 `make train-g2p` runs `G2P_STANDALONE_JOBS` (10) for both at the default QoS. Measured at the background QoS (the
 efficiency cores only, beside another job's load - October 2026): the context labels took 36 minutes (65 before: the
@@ -672,40 +673,30 @@ against a full one, the vowels it merges), the vowel's formants (F1 and F2, norm
 voice's own reference vowels); the noun/verb stress pairs aren't measured. Each method is gated by controls - words of
 one pronunciation with a phone swapped, whose votes are the method's false votes: a method's readings are used only
 when at most 3% of 100 or more control votes are wrong. The measured readings are the G2P's heteronym evidence - the
-relabeled words, the context labels (below), and the dictionary audit - and the voice's training tokens take the
-measured reading where the recognizer's vote differs from the front end's.
+relabeled words and the context labels (below) - and the voice's training tokens take the measured reading where the
+recognizer's vote differs from the front end's.
 
 ### The dictionary audit
 
 The network learns the dictionary's errors too (HOBBES HH AA1 B IY0 Z - "hobbies" - and, from it, "mobbes" M AA1 B
 IY2 Z), so `train/data/g2p-fixes.json` corrects the dictionary's labels where the evidence says they're wrong; `g2p.py`
 applies it in every stage, before the relabeled words (the rule-labeled words derived from a fixed word follow - HOBBES'S
-HH AA1 B Z IH0 Z). `picovox_train/g2paudit.py` finds them:
+HH AA1 B Z IH0 Z). The fixes are committed data, from a one-off audit before 2.0 (its tool, `picovox_train/g2paudit.py`,
+is in git history - commits 1e86148 and 6cec8e3).
 
-```sh
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2paudit folds --out build/nn/g2paudit -j 5     # 10 screening models (resumable)
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2paudit suspects --out build/nn/g2paudit \
-    --books build/nn/books --catalog ../picoshelf/data/catalog.json --heteronyms build/nn/context/labels.json
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2paudit audio --out build/nn/g2paudit [--speak]
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2paudit adjudicate --out build/nn/g2paudit
-```
-
-Two partitions of the dictionary into five folds (a word's possessives in its fold) train ten screening models (the
-recipe's network and sampling, 6,000 steps, no rule- or teacher-labeled words), so every word is held out by two of
-them (held-out accuracy 62% - any pronunciation, stress included; the dictionary is mostly names). A word is a suspect
-when both its models' phones differ from its label (not by stress alone) by a log-probability margin of 3, or both prefer
-another of its variants by that margin: 12,750 of 124,101 words - mostly legitimate irregulars (of, colonel) and
-foreign names. Where the training speech's voices spoke a suspect (with `--speak`, a word of too few tokens has
-sentences of the books with it spoken by the TTS model, in turn by the voices, and aligned), the CTC phoneme recognizer
-(`picovox_train/ctc.py`) scores the label and each alternative (the models' predictions, the dictionary's variants -
-those that would be a lexical correction: not stress or reduction alone, not a consonant dropped, not a merger's vowels,
-not a function word or a one- or two-letter word) on up to 12 of its aligned tokens with their neighbors; a token votes
-for a candidate 2 (log) more likely than the rest, and a confirmed error needs the votes' Wilson 95% lower bound above
-one half from 3 or more books. Control words (both models agree with the label, against a model's second guess)
-measure the method. The TTS model's pronunciation of a rare word or a name is its own G2P's guess, so a verdict is the
-engine and the fold models together. (The committed fixes were found before 2.0 with the LibriTTS-R readers'
-recordings: 140 control words, no false errors and 1.5% of the tokens' votes for the wrong candidate; the audio
-confirmed 13 errors and 143 labels, the rest without audio evidence.)
+Two partitions of the dictionary into five folds (a word's possessives in its fold) trained ten screening models (the
+recipe's network and sampling, 6,000 steps, no rule- or teacher-labeled words), so every word was held out by two of
+them (held-out accuracy 62% - any pronunciation, stress included; the dictionary is mostly names). A word was a suspect
+when both its models' phones differed from its label (not by stress alone) by a log-probability margin of 3, or both
+preferred another of its variants by that margin: 12,750 of 124,101 words - mostly legitimate irregulars (of, colonel)
+and foreign names. Where the LibriTTS-R readers spoke a suspect, the CTC phoneme recognizer (`picovox_train/ctc.py`)
+scored the label and each alternative (the models' predictions, the dictionary's variants - those that would be a
+lexical correction: not stress or reduction alone, not a consonant dropped, not a merger's vowels, not a function word
+or a one- or two-letter word) on up to 12 of its aligned tokens with their neighbors; a token voted for a candidate 2
+(log) more likely than the rest, and a confirmed error needed the votes' Wilson 95% lower bound above one half from 3
+or more speakers. Control words (both models agree with the label, against a model's second guess) measured the method:
+140 control words, no false errors and 1.5% of the tokens' votes for the wrong candidate. The audio confirmed 13 errors
+and 143 labels, the rest without audio evidence.
 
 The names regression set (`train/data/names-test.json`, run by `tools/heteronyms.js` as kind `names`): surnames, first
 names, and place names with verified pronunciations - HOBBES first (the dictionary's own evidence: its second variant,
@@ -737,21 +728,23 @@ its examples and on unlabeled transfer windows (the ambiguous words' other windo
 dropped at random (`itemDropout`).
 
 ```sh
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels books                                # the recipe's books (pinned texts)
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels aligned --out build/nn/context      # the training speech's measured readings
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels tag --out build/nn/context         # part-of-speech tags (spaCy)
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels labels --out build/nn/context       # the ambiguous words and examples
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context train-g2p --labels build/nn/context/labels.json --init build/nn/g2p-train/focus.pt \
-    --out build/nn/context/g2p.pt                                                   # the reading input and ambiguity head
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context train-context --labels build/nn/context/labels.json --out build/nn/context/context.pt -j 4
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context export --g2p build/nn/context/g2p.pt --context build/nn/context/context.pt
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels books                                 # the recipe's books (pinned texts)
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels aligned --out build/train/context    # the training speech's measured readings
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels tag --out build/train/context        # part-of-speech tags (spaCy)
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels labels --out build/train/context     # the ambiguous words and examples
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context train-g2p --labels build/train/context/labels.json --init build/train/g2p/focus.pt \
+    --out build/train/context/g2p.pt                                                # the reading input and ambiguity head
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context train-context --labels build/train/context/labels.json \
+    --out build/train/context/context.pt --folds build/train/context/folds -j 10    # the context network and its cross-validation
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context folds build/train/context/folds --labels build/train/context/labels.json
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context export --g2p build/train/context/g2p.pt --context build/train/context/context.pt
 node tools/heteronyms.js                                                            # the regression set (exit 1 below the gate)
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context cross-validate --labels build/nn/context/labels.json --out build/nn/context/folds -j 10
 ```
 
-(`tag`, `train-context` - its teachers - and `cross-validate` take `-j`, their worker processes - the results
-are the same for any count. `cross-validate` keeps a fold's results only when they are from the same labels and
-settings.)
+(`tag` and `train-context` take `-j`, their worker processes - the results are the same for any count.
+`train-context` trains every fold's teachers at once, then every fold's network - fold 0, the labels' own held-out
+books, is the context network itself - and keeps a fold's results only when they are from the same labels and
+settings; `folds` is the cross-validated gate over them.)
 
 The settings are `train/data/train.json`'s `context` section. `make train-g2p` runs all of it (the voice stages use the
 committed `lib/models/g2pModel.js`) and gates its module with `picovox_train.context check`: identical to the
@@ -768,8 +761,8 @@ on 200 or more); and hand-written seed sentences and reviewed collocations for t
 (lead the metal, bass, bow, row, does the deer, house the verb) and the pairs the audio doesn't validate - a
 collocation's token is its example, not a measured one, and the corpus's disagreements with the collocations (the TTS
 model's own reading errors) are reported. Two books and the regression set's sentences are held out - every source's
-examples of them, the book the independent unit - and the held-out accuracy gate (`picovox_train.context gate`,
-`folds`) is cross-validated by book.
+examples of them, the book the independent unit - and the held-out accuracy gate (`picovox_train.context folds`)
+is cross-validated by book.
 
 
 ## The training speech

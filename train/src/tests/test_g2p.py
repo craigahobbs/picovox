@@ -87,15 +87,14 @@ class TestG2p(unittest.TestCase):
         directory = self.directory.name
         self.dictionary = {word: list(variants) for word, variants in DICTIONARY.items()}
 
-        # The data and the settings, as objects (no fixes or books by default)
+        # The data and the settings, as objects (empty fixes and books by default)
         self.relabel_path = os.path.join(directory, 'g2p-relabel.json')
-        self.config_path = os.path.join(directory, 'train.json')
         self.files = {
             g2p.WORDS_PATH: WORDS,
             g2p.FIXES_PATH: {'fixes': {}},
             g2p.BOOKS_PATH: {'labels': {}, 'books': {}},
             self.relabel_path: {'relabel': {'lead': 'L EH1 D', 'cat': 'K AA1 T', 'unknownword': 'Y UW1'}},
-            self.config_path: {'g2p': json.loads(json.dumps(CONFIG).replace('RELABEL', self.relabel_path))}
+            g2p.RECIPE_PATH: {'g2p': json.loads(json.dumps(CONFIG).replace('RELABEL', self.relabel_path))}
         }
         self.patches = [helpers.json_files(g2p, self.files),
                         unittest.mock.patch.object(corpora, 'read_dictionary', lambda: self.dictionary)]
@@ -117,7 +116,7 @@ class TestG2p(unittest.TestCase):
             self.assertTrue(file.read().endswith(' one\n'))
 
     def test_load_config(self):
-        self.assertEqual(g2p.load_config(self.config_path)['batch'], 8)
+        self.assertEqual(g2p.load_config()['batch'], 8)
 
     def test_read_pronunciations(self):
         pronunciations = g2p.read_pronunciations()
@@ -156,9 +155,8 @@ class TestG2p(unittest.TestCase):
 
     def test_load_data_fixes(self):
         self.assertEqual(g2p.FIXES_PATH, os.path.join(g2p.ROOT, 'train', 'data', 'g2p-fixes.json'))
-        fixes_path = os.path.join(self.directory.name, 'g2p-fixes.json')
-        self.files[fixes_path] = {'fixes': {'cat': 'K AE1 T S', 'dog': 'D AA1 G', 'read': 'R EH1 D', 'lead': 'L IY1 D Z', 'zzz': 'Z'}}
-        data = g2p.load_data(fixes=fixes_path)
+        self.files[g2p.FIXES_PATH] = {'fixes': {'cat': 'K AE1 T S', 'dog': 'D AA1 G', 'read': 'R EH1 D', 'lead': 'L IY1 D Z', 'zzz': 'Z'}}
+        data = g2p.load_data()
 
         # The corrected pronunciation first, the wrong one dropped
         self.assertEqual(data['first']['dog'], ['D', 'AA1', 'G'])
@@ -173,19 +171,18 @@ class TestG2p(unittest.TestCase):
         self.assertEqual(data['labels']['readin'], ['R', 'EH1', 'D', 'IH0', 'N'])
 
         # The relabeled targets after the fixes
-        data = g2p.load_data(self.relabel_path, fixes_path)
+        data = g2p.load_data(self.relabel_path)
         self.assertEqual(data['first']['lead'], ['L', 'EH1', 'D'])
         self.assertEqual(data['first']['dog'], ['D', 'AA1', 'G'])
 
     def test_load_data_books(self):
         self.assertEqual(g2p.BOOKS_PATH, os.path.join(g2p.ROOT, 'train', 'data', 'g2p-books.json'))
         monitored = g2p.load_data()['monitor'][0]
-        books_path = os.path.join(self.directory.name, 'g2p-books.json')
-        self.files[books_path] = {'description': 'books', 'labels': {'cat': 'K AA1 T', 'doggo': 'D AA1 G OW2', 'zork': 'Z AO1 R K'},
+        self.files[g2p.BOOKS_PATH] = {'description': 'books', 'labels': {'cat': 'K AA1 T', 'doggo': 'D AA1 G OW2', 'zork': 'Z AO1 R K'},
                                   'books': {'one': {'counts': {'zork': 7, 'zork\'s': 2, 'cat': 3, 'cat\'s': 1}},
                                             'two': {'counts': {'mat\'s': 1, 'dog\'s': 1, 'nope\'s': 1, monitored: 1}}}}
         self.dictionary['dog\'s'] = [['D', 'AO1', 'G', 'Z']]
-        data = g2p.load_data(books=books_path)
+        data = g2p.load_data()
 
         # The labels - a dictionary word's corrected (its derived words follow), and new words, a teacher's label replaced
         self.assertEqual(data['first']['cat'], ['K', 'AA1', 'T'])
@@ -210,12 +207,11 @@ class TestG2p(unittest.TestCase):
 
     def test_load_data_books_relabeled(self):
         # A possessive the books added (add_books - no longer a label) follows its stem's relabel
-        books_path = os.path.join(self.directory.name, 'g2p-books.json')
-        self.files[books_path] = {'labels': {}, 'books': {'one': {'counts': {'cat\'s': 1}}}}
+        self.files[g2p.BOOKS_PATH] = {'labels': {}, 'books': {'one': {'counts': {'cat\'s': 1}}}}
         self.files[g2p.WORDS_PATH] = dict(WORDS, labels=dict(WORDS['labels'], **{'cat\'s': 'K AE1 T S'}),
                                           stems=dict(WORDS['stems'], **{'cat\'s': ['cat', 'derived']}))
-        self.assertEqual(g2p.load_data(books=books_path)['first']['cat\'s'], ['K', 'AE1', 'T', 'S'])
-        self.assertEqual(g2p.load_data(self.relabel_path, books=books_path)['first']['cat\'s'], ['K', 'AA1', 'T', 'S'])
+        self.assertEqual(g2p.load_data()['first']['cat\'s'], ['K', 'AE1', 'T', 'S'])
+        self.assertEqual(g2p.load_data(self.relabel_path)['first']['cat\'s'], ['K', 'AA1', 'T', 'S'])
 
     def test_command_book(self):
         books_path = os.path.join(self.directory.name, 'g2p-books.json')
@@ -270,8 +266,9 @@ class TestG2p(unittest.TestCase):
         letters, targets = g2p.make_batch(['cat', '123', 'dogs'], [['K', 'AE1', 'T'], [], ['D', 'AO1', 'G', 'Z']])
         self.assertEqual(letters[1].tolist()[:1], [g2p.LETTER_IDS['\'']])
         self.assertEqual(targets[0].tolist(), [g2p.PHONE_IDS['K'], g2p.PHONE_IDS['AE1'], g2p.PHONE_IDS['T'], g2p.EOS, 0])
-        loss = model.loss(letters, targets)
+        loss, ends = model.loss(letters, targets)
         self.assertGreater(loss.item(), 0)
+        self.assertEqual(tuple(ends.shape), (3, 8))
 
         # Greedy decoding stops at <eos> or the length limit
         results = model.decode(letters)
@@ -321,7 +318,7 @@ class TestG2p(unittest.TestCase):
     def test_train_evaluate(self):
         out = os.path.join(self.directory.name, 'g2p')
         with captured():
-            self.assertEqual(g2p.main(['train', '--out', out, '--config', self.config_path]), 0)
+            self.assertEqual(g2p.main(['train', '--out', out]), 0)
         with open(os.path.join(out, 'done.json'), encoding='utf-8') as file:
             done = json.load(file)
         self.assertEqual(done['checkpoint'], os.path.join(out, 'focus.pt'))
@@ -336,7 +333,7 @@ class TestG2p(unittest.TestCase):
         # its steps - --steps for each stage) trained again
         def train_log(*arguments):
             with captured():
-                self.assertEqual(g2p.main(['train', '--out', out, '--config', self.config_path, *arguments]), 0)
+                self.assertEqual(g2p.main(['train', '--out', out, *arguments]), 0)
             with open(os.path.join(out, 'train.log'), encoding='utf-8') as file:
                 return file.read()
         os.remove(os.path.join(out, 'focus.pt'))
@@ -344,9 +341,12 @@ class TestG2p(unittest.TestCase):
         self.assertIn(f'base: done before ({os.path.join(out, "base.pt")})', log)
         self.assertEqual(log.count(f'2 steps from {os.path.join(out, "base.pt")}'), 2)
         self.assertIn(f'focus: done before ({os.path.join(out, "focus.pt")})', train_log())
+        # (the recipe's description isn't an input)
+        self.files[g2p.RECIPE_PATH]['g2p']['description'] = 'The G2P, reworded'
+        self.assertEqual(train_log().count(f'focus: done before ({os.path.join(out, "focus.pt")})'), 2)
         self.files[self.relabel_path] = {'relabel': {'lead': 'L EH1 D'}}
         log = train_log()
-        self.assertEqual(log.count(f'base: done before ({os.path.join(out, "base.pt")})'), 3)
+        self.assertEqual(log.count(f'base: done before ({os.path.join(out, "base.pt")})'), 4)
         self.assertEqual(log.count(f'2 steps from {os.path.join(out, "base.pt")}'), 3)
         log = train_log('--steps', '1')
         self.assertIn('base: step 1/1 loss', log)
