@@ -481,7 +481,8 @@ def command_train(args):
 
     def log(text):
         log_line(log_path, text)
-    settings = {key: value for key, value in config.items() if key != 'stages'}
+    # (the recipe's description isn't a setting - a reworded one retrains nothing)
+    settings = {key: value for key, value in config.items() if key not in ('description', 'stages')}
     init = None
     digest = None
     data = data_digest()

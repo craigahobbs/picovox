@@ -341,9 +341,12 @@ class TestG2p(unittest.TestCase):
         self.assertIn(f'base: done before ({os.path.join(out, "base.pt")})', log)
         self.assertEqual(log.count(f'2 steps from {os.path.join(out, "base.pt")}'), 2)
         self.assertIn(f'focus: done before ({os.path.join(out, "focus.pt")})', train_log())
+        # (the recipe's description isn't an input)
+        self.files[self.config_path]['g2p']['description'] = 'The G2P, reworded'
+        self.assertEqual(train_log().count(f'focus: done before ({os.path.join(out, "focus.pt")})'), 2)
         self.files[self.relabel_path] = {'relabel': {'lead': 'L EH1 D'}}
         log = train_log()
-        self.assertEqual(log.count(f'base: done before ({os.path.join(out, "base.pt")})'), 3)
+        self.assertEqual(log.count(f'base: done before ({os.path.join(out, "base.pt")})'), 4)
         self.assertEqual(log.count(f'2 steps from {os.path.join(out, "base.pt")}'), 3)
         log = train_log('--steps', '1')
         self.assertIn('base: step 1/1 loss', log)
