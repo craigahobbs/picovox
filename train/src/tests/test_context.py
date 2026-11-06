@@ -46,9 +46,9 @@ def window(*items):
 # folds' sides), silver and seed examples, train and held out
 def tiny_labels():
     words = {
-        'read': {'readings': [['R IY1 D'], ['R EH1 D']], 'order': [0, 1], 'family': 'own', 'counts': [6, 6]},
-        'lives': {'readings': [['L IH1 V Z'], ['L AY1 V Z']], 'order': [0, 1], 'family': 'own', 'counts': [4, 4]},
-        'use': {'readings': [['Y UW1 Z'], ['Y UW1 S']], 'order': [0, 1], 'family': 'consonant', 'counts': [4, 4]}
+        'read': {'readings': [['R IY1 D'], ['R EH1 D']], 'order': [0, 1]},
+        'lives': {'readings': [['L IH1 V Z'], ['L AY1 V Z']], 'order': [0, 1]},
+        'use': {'readings': [['Y UW1 Z'], ['Y UW1 S']], 'order': [0, 1]}
     }
     examples = []
     for number in range(24):
@@ -206,10 +206,8 @@ class TestContext(unittest.TestCase):
             result = context.evaluate_g2p(model, labels, ['cat', 'dog'])
         self.assertEqual(result['readingsRight'], 2)
         self.assertEqual(result['readings'], 6)
-        self.assertEqual(result['readingsWrong'], ['lives/0 X', 'lives/1 X', 'use/0 X', 'use/1 X'])
         self.assertEqual(result['ambiguousMissed'], ['lives', 'use'])
         self.assertEqual(result['falsePositives'], 1)
-        self.assertEqual(result['falsePositiveWords'], ['cat'])
 
     def test_context_network(self):
         self.assertEqual(context.item_chars('read'), [context.CONTEXT_CHAR_IDS[char] for char in 'read'])
@@ -365,9 +363,9 @@ class TestContext(unittest.TestCase):
                                    'split': 'heldout', 'group': 'seed'})
         result = context.evaluate_context(lambda windows: [0] * len(windows), labels)
         heldout = [example for example in labels['examples'] if example['split'] == 'heldout']
-        self.assertEqual(sum(counts['total'] for counts in result['sources'].values()), len(heldout))
+        self.assertEqual(sum(counts['total'] for counts in result['words'].values()), len(heldout))
         self.assertEqual(result['words']['seed/unseen'], {'right': 1, 'total': 1, 'majority': 1})
-        self.assertEqual(result['sources']['silver'], {'right': 0, 'total': 1, 'majority': 1})
+        self.assertEqual(result['words']['silver/read'], {'right': 0, 'total': 1, 'majority': 1})
 
     def test_describe_and_gate(self):
         result = {'words': {'aligned/read': {'right': 3, 'total': 4, 'majority': 2}, 'seed/read': {'right': 1, 'total': 1, 'majority': 0},
@@ -479,38 +477,6 @@ class TestContext(unittest.TestCase):
         encoding, _ = context.encode_weights(quantized)
         self.assertEqual(encoding, {'layout': 'packed', 'deflate': False})
         self.assertEqual(context.base64_lines('a' * 250), ['a' * 120, 'a' * 120, 'a' * 10])
-
-    def test_gate(self):
-        labels = tiny_labels()
-        module_g2p = g2pmodel.G2p(g2pmodel.read_module())
-        heldout = [example for example in labels['examples'] if example['split'] == 'heldout']
-        chosen = module_g2p.choose_slots([example['window'] for example in heldout])
-
-        # The examples' slots the module's choices - better than the majority (every training slot 1)
-        for example in labels['examples']:
-            if example['split'] == 'train':
-                example['slot'] = 1
-        for example, slot in zip(heldout, chosen):
-            example['slot'] = slot
-        for example in heldout:
-            if example['word'] in ('read', 'lives') and example['source'] == 'aligned':
-                example['slot'] = 0
-        path = self.write_labels(labels)
-        with unittest.mock.patch.object(module_g2p, 'choose_slots', lambda windows: [0] * len(windows)), \
-                unittest.mock.patch.object(g2pmodel, 'G2p', lambda model: module_g2p), captured() as (stdout, _):
-            self.assertEqual(context.main(['gate', '--labels', path, '--out', self.path('gate.json')]), 0)
-        self.assertIn('; all held-out: aligned ', stdout.getvalue())
-        with open(self.path('gate.json'), encoding='utf-8') as file:
-            self.assertIn('aligned/read', json.load(file)['words'])
-
-        # The real module's choices; and below the gate
-        with captured() as (stdout, _):
-            context.main(['gate', '--labels', path])
-        self.assertIn('held-out aligned', stdout.getvalue())
-        with unittest.mock.patch.object(module_g2p, 'choose_slots', lambda windows: [2] * len(windows)), \
-                unittest.mock.patch.object(g2pmodel, 'G2p', lambda model: module_g2p), captured() as (stdout, _):
-            self.assertEqual(context.main(['gate', '--labels', path]), 1)
-        self.assertIn('FAILED', stdout.getvalue())
 
     def test_js_pronouncer_and_heteronym_scores(self):
         module_path = g2pmodel.MODULE_PATH
@@ -644,7 +610,7 @@ class TestContext(unittest.TestCase):
         for fold, digest in enumerate(digests):
             with open(self.path(os.path.join('folds', f'fold-{fold}.json')), encoding='utf-8') as file:
                 result = json.load(file)
-            self.assertIn('sources', result)
+            self.assertIn('aligned/read', result['words'])
             self.assertEqual(result['digest'], digest)
 
         # Resumed - a fold with results from the same inputs (fold 0 with its checkpoint) isn't trained again; one from other
@@ -685,7 +651,7 @@ class TestContext(unittest.TestCase):
 
         def write(fold, words):
             with open(os.path.join(folds, f'fold-{fold}.json'), 'w', encoding='utf-8') as file:
-                json.dump({'words': words, 'sources': {}, 'digest': 'abc'}, file)
+                json.dump({'words': words, 'digest': 'abc'}, file)
         write(0, {'aligned/read': {'right': 2, 'total': 2, 'majority': 1}})
         write(1, {'aligned/read': {'right': 1, 'total': 1, 'majority': 0}, 'aligned/lives': {'right': 3, 'total': 3, 'majority': 0},
                   'seed/read': {'right': 0, 'total': 9, 'majority': 9}})

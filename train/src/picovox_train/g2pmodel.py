@@ -496,10 +496,6 @@ class G2p:
     def choose_reading(self, items, index):
         return self.context.choose_windows([self.context.window_of(items, index)])[0]
 
-    # The reading slots of windows (each 2 * window + 1 items)
-    def choose_slots(self, windows):
-        return self.context.choose_windows([tuple(window) for window in windows])
-
     # The caches' state - {readings: [{word: phones}], ambiguous: {word: decision}, choices: {window: slot}} (for
     # worker processes - set_state)
     def state(self):

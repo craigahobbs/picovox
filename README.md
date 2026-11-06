@@ -762,8 +762,8 @@ on 200 or more); and hand-written seed sentences and reviewed collocations for t
 (lead the metal, bass, bow, row, does the deer, house the verb) and the pairs the audio doesn't validate - a
 collocation's token is its example, not a measured one, and the corpus's disagreements with the collocations (the TTS
 model's own reading errors) are reported. Two books and the regression set's sentences are held out - every source's
-examples of them, the book the independent unit - and the held-out accuracy gate (`picovox_train.context gate`,
-`folds`) is cross-validated by book.
+examples of them, the book the independent unit - and the held-out accuracy gate (`picovox_train.context folds`)
+is cross-validated by book.
 
 
 ## The training speech

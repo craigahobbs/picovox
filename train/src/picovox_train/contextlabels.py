@@ -504,8 +504,7 @@ def labels_command(args):
         others = sorted((reading for reading in range(len(entry['readings'])) if reading != default),
                         key=lambda reading, word=word: (-aligned_counts[word][reading], reading))
         order = [default] + others
-        ambiguous[word] = {'readings': [entry['readings'][reading] for reading in order], 'order': order,
-                           'family': entry['family'], 'counts': [counts[word][reading] for reading in order]}
+        ambiguous[word] = {'readings': [entry['readings'][reading] for reading in order], 'order': order}
     labeled = []
     for example in examples:
         entry = ambiguous.get(example['word'])
@@ -519,10 +518,8 @@ def labels_command(args):
     for word in sorted(ambiguous):
         windows = [transfer[word][key] for key in sorted(transfer[word]) if tuple(transfer[word][key]) not in known]
         transfer_windows.extend(windows[:MAX_TRANSFER])
-    validation = {'words': {word: by_word[word] for word in sorted(by_word)}, 'families': by_family}
     with open(os.path.join(args.out, 'labels.json'), 'w', encoding='utf-8') as file:
-        json.dump({'words': ambiguous, 'validation': validation, 'valid': sorted(valid), 'examples': labeled,
-                   'transfer': transfer_windows}, file)
+        json.dump({'words': ambiguous, 'examples': labeled, 'transfer': transfer_windows}, file)
     sources = collections.Counter((example['source'], example['split']) for example in labeled)
     print(f'labels: {len(ambiguous)} ambiguous words ({len(words)} candidates, {len(valid)} with a validated mapping), '
           f'{len(labeled)} examples: ' + ', '.join(f'{source} {split} {count}' for (source, split), count in sorted(sources.items())) +

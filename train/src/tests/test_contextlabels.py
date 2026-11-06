@@ -407,8 +407,10 @@ class TestContextLabels(unittest.TestCase):
             labels = json.load(file)
         # (record - three verbs, kept; conduct - two, common but too few; object - one seeded verb, fewer than MIN_ALTERNATE)
         self.assertEqual(sorted(labels['words']), ['object', 'record'])
-        self.assertEqual(labels['words']['record']['counts'], [3, 3])
-        self.assertEqual(labels['words']['object']['counts'], [4, 1])
+        def slot_counts(word):
+            return [sum(1 for example in labels['examples'] if example['word'] == word and example['slot'] == slot) for slot in range(2)]
+        self.assertEqual(slot_counts('record'), [3, 3])
+        self.assertEqual(slot_counts('object'), [4, 1])
 
     def test_labels(self):
         out = self.path('out')
@@ -479,13 +481,8 @@ class TestContextLabels(unittest.TestCase):
         with open(os.path.join(out, 'labels.json'), encoding='utf-8') as file:
             labels = json.load(file)
         self.assertEqual(sorted(labels['words']), ['lead', 'read'])
-        self.assertEqual(labels['words']['read'], {'readings': [['R IY1 D'], ['R EH1 D']], 'order': [0, 1], 'family': 'own',
-                                                   'counts': [6, 7]})
-        self.assertEqual(labels['words']['lead']['counts'], [1, 1])
-        # (the curated words' mappings are hand-written - valid; estimate - its readings measured, too few - isn't)
-        self.assertEqual(labels['valid'], ['bass', 'excluded', 'lead', 'lives', 'nodefault', 'read', 'record'])
-        self.assertEqual(labels['validation'], {'words': {'read': {'agree': 12, 'total': 12}, 'record': {'agree': 1, 'total': 1}},
-                                                'families': {'stress': {'agree': 1, 'total': 1}}})
+        self.assertEqual(labels['words']['read'], {'readings': [['R IY1 D'], ['R EH1 D']], 'order': [0, 1]})
+        self.assertEqual(set(labels), {'words', 'examples', 'transfer'})
         sources = sorted((example['word'], example['source'], example['split'], example['slot']) for example in labels['examples'])
         # (the aligned examples' split by their book - pg2 held out)
         self.assertEqual(sources.count(('read', 'aligned', 'heldout', 0)), 1)

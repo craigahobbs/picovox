@@ -12,7 +12,6 @@ PYTHONPATH=train/src build/venv-train/bin/python -B):
     python -m picovox_train.context train-context --labels DIR/labels.json --out DIR/context.pt --folds DIR/folds [-j N]
     python -m picovox_train.context folds DIR/folds --labels DIR/labels.json       # the gate - the folds' held-out results
     python -m picovox_train.context export --g2p DIR/g2p.pt --context DIR/context.pt [--out lib/models/g2pModel.js]
-    python -m picovox_train.context gate --labels DIR/labels.json [MODULE]         # held-out accuracy (one split)
     python -m picovox_train.context check NEW.js     # make train's G2P gate: identical to lib/models/g2pModel.js,
                                                      # else the quality gate (make train-install installs it - trained.py)
 
@@ -235,24 +234,17 @@ def train_g2p(model, items, probabilities, labels, settings, log):
 
 def evaluate_g2p(model, labels, words):
     """The reading measures of a G2P - the alternate readings right, and the ambiguity head's errors over words (the
-    dictionary and labeled words) - {readingsRight, readings, ambiguousMissed, falsePositives, falsePositiveWords}"""
+    dictionary and labeled words) - {readingsRight, readings, ambiguousMissed, falsePositives}"""
     targets = reading_targets(labels, {})
     predictions = predict(model, [word for word, _, _ in targets], [reading for _, _, reading in targets])
-    right = 0
-    wrong = []
-    for (word, _, reading), predicted in zip(targets, predictions):
-        variants = labels['words'][word]['readings'][reading]
-        if ' '.join(predicted) in variants:
-            right += 1
-        else:
-            wrong.append(f'{word}/{reading} {" ".join(predicted)}')
+    right = sum(' '.join(predicted) in labels['words'][word]['readings'][reading]
+                for (word, _, reading), predicted in zip(targets, predictions))
     ambiguous = set(labels['words'])
     words = sorted(set(words) | ambiguous)
     logits = ambiguity_logits(model, words)
     missed = [word for word, logit in zip(words, logits) if word in ambiguous and logit <= 0]
-    false_positives = [word for word, logit in zip(words, logits) if word not in ambiguous and logit > 0]
-    return {'readingsRight': right, 'readings': len(targets), 'readingsWrong': wrong, 'ambiguousMissed': missed,
-            'falsePositives': len(false_positives), 'falsePositiveWords': false_positives[:50]}
+    false_positives = sum(1 for word, logit in zip(words, logits) if word not in ambiguous and logit > 0)
+    return {'readingsRight': right, 'readings': len(targets), 'ambiguousMissed': missed, 'falsePositives': false_positives}
 
 
 #
@@ -512,7 +504,7 @@ def train_student(labels, fold, settings, log, states):
 
 def evaluate_context(slot_of, labels):
     """The context choices' accuracy per word and source on the held-out examples, against each word's majority slot (in
-    the training examples) - slot_of(windows) gives the chosen slots - {words: {word: {right, total, majority}}, sources}"""
+    the training examples) - slot_of(windows) gives the chosen slots - {words: {source/word: {right, total, majority}}}"""
     examples = [example for example in labels['examples'] if example['split'] == 'heldout']
     majority = {}
     training = collections.defaultdict(collections.Counter)
@@ -523,13 +515,12 @@ def evaluate_context(slot_of, labels):
         majority[word] = counter.most_common(1)[0][0]
     chosen = slot_of([example['window'] for example in examples])
     words = collections.defaultdict(lambda: {'right': 0, 'total': 0, 'majority': 0})
-    sources = collections.defaultdict(lambda: {'right': 0, 'total': 0, 'majority': 0})
     for example, slot in zip(examples, chosen):
-        for counts in (words[(example['source'], example['word'])], sources[example['source']]):
-            counts['total'] += 1
-            counts['right'] += slot == example['slot']
-            counts['majority'] += majority.get(example['word'], 0) == example['slot']
-    return {'words': {f'{source}/{word}': counts for (source, word), counts in sorted(words.items())}, 'sources': dict(sources)}
+        counts = words[(example['source'], example['word'])]
+        counts['total'] += 1
+        counts['right'] += slot == example['slot']
+        counts['majority'] += majority.get(example['word'], 0) == example['slot']
+    return {'words': {f'{source}/{word}': counts for (source, word), counts in sorted(words.items())}}
 
 
 #
@@ -778,21 +769,6 @@ def word_margins(result, labels, least=20):
     return 'per word (vs majority): ' + ', '.join(parts)
 
 
-def command_gate(args):
-    """The held-out accuracy of a module's context network (as the app runs it - g2pmodel.py), and the gate"""
-    labels = read_json(args.labels)
-    g2p = g2pmodel.G2p(g2pmodel.read_module(args.model))
-    result = evaluate_context(g2p.choose_slots, labels)
-    passed, line = gate_result(result, labels)
-    sources = ', '.join(f'{source} {counts["right"]}/{counts["total"]} (majority {counts["majority"]})'
-                        for source, counts in sorted(result['sources'].items()))
-    print(f'{line}; all held-out: {sources}')
-    if args.out:
-        with open(args.out, 'w', encoding='utf-8') as file:
-            json.dump(result, file, indent=1)
-    return 0 if passed else 1
-
-
 #
 # make train's check - a retrained module against the committed one: identical, else within the recipe's tolerances
 #
@@ -934,7 +910,7 @@ def fold_task(task):
 def command_folds(args):
     """The cross-validated gate - the held-out results of every fold's context network (train-context's
     <folds>/fold-<k>.json) pooled"""
-    pooled = {'words': collections.defaultdict(lambda: {'right': 0, 'total': 0, 'majority': 0}), 'sources': {}}
+    pooled = {'words': collections.defaultdict(lambda: {'right': 0, 'total': 0, 'majority': 0})}
     for fold in range(FOLDS):
         with open(os.path.join(args.folds, f'fold-{fold}.json'), encoding='utf-8') as file:
             result = json.load(file)
@@ -980,11 +956,6 @@ def main(argv=None):
     check_parser.add_argument('model')
     check_parser.add_argument('--committed', default=g2pmodel.MODULE_PATH)
     check_parser.set_defaults(func=command_check)
-    gate_parser = commands.add_parser('gate', help='the held-out accuracy of a module\'s context network (exit 1 below the gate)')
-    gate_parser.add_argument('model', nargs='?', default=g2pmodel.MODULE_PATH)
-    gate_parser.add_argument('--labels', required=True)
-    gate_parser.add_argument('--out')
-    gate_parser.set_defaults(func=command_gate)
     args = parser.parse_args(argv)
     return args.func(args)
 
