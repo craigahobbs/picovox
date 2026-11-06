@@ -22,11 +22,16 @@ log=$dir/util.log
 pid_file=$dir/util.pid
 mkdir -p "$dir"
 
-# One sampler per TRAIN_DIR
-if [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
-    exit 0
+# One sampler per TRAIN_DIR - the pid file claimed atomically (stages that start in the same second each start a
+# sampler), a stale one (its sampler gone) replaced
+claim() { (set -o noclobber; echo $$ > "$pid_file") 2>/dev/null; }
+if ! claim; then
+    if kill -0 "$(cat "$pid_file" 2>/dev/null)" 2>/dev/null; then
+        exit 0
+    fi
+    rm -f "$pid_file"
+    claim || exit 0
 fi
-echo $$ > "$pid_file"
 trap 'rm -f "$pid_file"' EXIT
 
 # Each start writes the header (it marks a new make train in a resumed log)
