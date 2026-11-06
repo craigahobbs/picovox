@@ -87,7 +87,7 @@ class TestG2p(unittest.TestCase):
         directory = self.directory.name
         self.dictionary = {word: list(variants) for word, variants in DICTIONARY.items()}
 
-        # The data and the settings, as objects (no fixes or books by default)
+        # The data and the settings, as objects (empty fixes and books by default)
         self.relabel_path = os.path.join(directory, 'g2p-relabel.json')
         self.config_path = os.path.join(directory, 'train.json')
         self.files = {
@@ -156,9 +156,8 @@ class TestG2p(unittest.TestCase):
 
     def test_load_data_fixes(self):
         self.assertEqual(g2p.FIXES_PATH, os.path.join(g2p.ROOT, 'train', 'data', 'g2p-fixes.json'))
-        fixes_path = os.path.join(self.directory.name, 'g2p-fixes.json')
-        self.files[fixes_path] = {'fixes': {'cat': 'K AE1 T S', 'dog': 'D AA1 G', 'read': 'R EH1 D', 'lead': 'L IY1 D Z', 'zzz': 'Z'}}
-        data = g2p.load_data(fixes=fixes_path)
+        self.files[g2p.FIXES_PATH] = {'fixes': {'cat': 'K AE1 T S', 'dog': 'D AA1 G', 'read': 'R EH1 D', 'lead': 'L IY1 D Z', 'zzz': 'Z'}}
+        data = g2p.load_data()
 
         # The corrected pronunciation first, the wrong one dropped
         self.assertEqual(data['first']['dog'], ['D', 'AA1', 'G'])
@@ -173,19 +172,18 @@ class TestG2p(unittest.TestCase):
         self.assertEqual(data['labels']['readin'], ['R', 'EH1', 'D', 'IH0', 'N'])
 
         # The relabeled targets after the fixes
-        data = g2p.load_data(self.relabel_path, fixes_path)
+        data = g2p.load_data(self.relabel_path)
         self.assertEqual(data['first']['lead'], ['L', 'EH1', 'D'])
         self.assertEqual(data['first']['dog'], ['D', 'AA1', 'G'])
 
     def test_load_data_books(self):
         self.assertEqual(g2p.BOOKS_PATH, os.path.join(g2p.ROOT, 'train', 'data', 'g2p-books.json'))
         monitored = g2p.load_data()['monitor'][0]
-        books_path = os.path.join(self.directory.name, 'g2p-books.json')
-        self.files[books_path] = {'description': 'books', 'labels': {'cat': 'K AA1 T', 'doggo': 'D AA1 G OW2', 'zork': 'Z AO1 R K'},
+        self.files[g2p.BOOKS_PATH] = {'description': 'books', 'labels': {'cat': 'K AA1 T', 'doggo': 'D AA1 G OW2', 'zork': 'Z AO1 R K'},
                                   'books': {'one': {'counts': {'zork': 7, 'zork\'s': 2, 'cat': 3, 'cat\'s': 1}},
                                             'two': {'counts': {'mat\'s': 1, 'dog\'s': 1, 'nope\'s': 1, monitored: 1}}}}
         self.dictionary['dog\'s'] = [['D', 'AO1', 'G', 'Z']]
-        data = g2p.load_data(books=books_path)
+        data = g2p.load_data()
 
         # The labels - a dictionary word's corrected (its derived words follow), and new words, a teacher's label replaced
         self.assertEqual(data['first']['cat'], ['K', 'AA1', 'T'])
@@ -210,12 +208,11 @@ class TestG2p(unittest.TestCase):
 
     def test_load_data_books_relabeled(self):
         # A possessive the books added (add_books - no longer a label) follows its stem's relabel
-        books_path = os.path.join(self.directory.name, 'g2p-books.json')
-        self.files[books_path] = {'labels': {}, 'books': {'one': {'counts': {'cat\'s': 1}}}}
+        self.files[g2p.BOOKS_PATH] = {'labels': {}, 'books': {'one': {'counts': {'cat\'s': 1}}}}
         self.files[g2p.WORDS_PATH] = dict(WORDS, labels=dict(WORDS['labels'], **{'cat\'s': 'K AE1 T S'}),
                                           stems=dict(WORDS['stems'], **{'cat\'s': ['cat', 'derived']}))
-        self.assertEqual(g2p.load_data(books=books_path)['first']['cat\'s'], ['K', 'AE1', 'T', 'S'])
-        self.assertEqual(g2p.load_data(self.relabel_path, books=books_path)['first']['cat\'s'], ['K', 'AA1', 'T', 'S'])
+        self.assertEqual(g2p.load_data()['first']['cat\'s'], ['K', 'AE1', 'T', 'S'])
+        self.assertEqual(g2p.load_data(self.relabel_path)['first']['cat\'s'], ['K', 'AA1', 'T', 'S'])
 
     def test_command_book(self):
         books_path = os.path.join(self.directory.name, 'g2p-books.json')

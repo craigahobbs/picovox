@@ -121,24 +121,23 @@ def split_words(words):
     return {'test': shuffled[:test_count], 'validation': shuffled[test_count:test_count + validation_count]}
 
 
-def load_data(relabel=None, fixes=FIXES_PATH, books=BOOKS_PATH):
+def load_data(relabel=None):
     """The data - {first (word: target phones), all (word: every pronunciation), labels (unknown words' phones), stems,
-    evalCounts, weightCounts, monitor, relabeled (the relabeled words)}; fixes (train/data/g2p-fixes.json - None for the
-    dictionary as it is) corrects the dictionary's label errors first, and books (train/data/g2p-books.json - None for
-    none) adds the listeners' books' words"""
+    evalCounts, weightCounts, monitor, relabeled (the relabeled words)}: the dictionary with its label errors corrected
+    (train/data/g2p-fixes.json), and the listeners' books' words (train/data/g2p-books.json)"""
     pronunciations = read_pronunciations()
     words = read_json(WORDS_PATH)
     first = {word: phones[0] for word, phones in pronunciations.items()}
     labels = {word: phones.split() for word, phones in words['labels'].items()}
     stems = words['stems']
 
-    # The dictionary's corrected labels (g2paudit.py) - the corrected pronunciation first, the wrong one dropped
-    if fixes:
-        corrections = {word: phones.split() for word, phones in read_json(fixes)['fixes'].items() if word in first}
-        derive_targets(labels, stems, first, corrections)
-        for word, phones in corrections.items():
-            pronunciations[word] = [phones] + [variant for variant in pronunciations[word] if variant not in (phones, first[word])]
-            first[word] = phones
+    # The dictionary's corrected labels (the dictionary audit's, committed) - the corrected pronunciation first, the wrong
+    # one dropped
+    corrections = {word: phones.split() for word, phones in read_json(FIXES_PATH)['fixes'].items() if word in first}
+    derive_targets(labels, stems, first, corrections)
+    for word, phones in corrections.items():
+        pronunciations[word] = [phones] + [variant for variant in pronunciations[word] if variant not in (phones, first[word])]
+        first[word] = phones
 
     # The monitoring set - the dictionary's validation words in none of the books (the 128 books - the listeners' books'
     # words leave it, so they train)
@@ -148,10 +147,9 @@ def load_data(relabel=None, fixes=FIXES_PATH, books=BOOKS_PATH):
     monitor = validation[:MONITOR_WORDS]
 
     # The books' words - their labels, their possessives, and their counts (weights)
-    if books:
-        book_counts = add_books(books, pronunciations, first, labels, stems)
-        weight_counts = dict(collections.Counter(weight_counts) + collections.Counter(book_counts))
-        monitor = [word for word in monitor if word not in book_counts]
+    book_counts = add_books(pronunciations, first, labels, stems)
+    weight_counts = dict(collections.Counter(weight_counts) + collections.Counter(book_counts))
+    monitor = [word for word in monitor if word not in book_counts]
 
     # Other targets for some dictionary words - and the rule-labeled words derived from them
     relabeled = set()
@@ -169,8 +167,8 @@ def load_data(relabel=None, fixes=FIXES_PATH, books=BOOKS_PATH):
 # its label - the rule-labeled words derived from it follow) a dictionary word, and each possessive in the books the
 # dictionary lacks the stem's target with its -s suffix (a teacher's label of the word replaced); returns the books' word
 # counts, summed
-def add_books(path, pronunciations, first, labels, stems):
-    books = read_json(path)
+def add_books(pronunciations, first, labels, stems):
+    books = read_json(BOOKS_PATH)
     targets = {word: phones.split() for word, phones in books['labels'].items()}
     derive_targets(labels, stems, first, {word: phones for word, phones in targets.items() if word in first})
     for word, phones in targets.items():

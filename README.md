@@ -673,40 +673,30 @@ against a full one, the vowels it merges), the vowel's formants (F1 and F2, norm
 voice's own reference vowels); the noun/verb stress pairs aren't measured. Each method is gated by controls - words of
 one pronunciation with a phone swapped, whose votes are the method's false votes: a method's readings are used only
 when at most 3% of 100 or more control votes are wrong. The measured readings are the G2P's heteronym evidence - the
-relabeled words, the context labels (below), and the dictionary audit - and the voice's training tokens take the
-measured reading where the recognizer's vote differs from the front end's.
+relabeled words and the context labels (below) - and the voice's training tokens take the measured reading where the
+recognizer's vote differs from the front end's.
 
 ### The dictionary audit
 
 The network learns the dictionary's errors too (HOBBES HH AA1 B IY0 Z - "hobbies" - and, from it, "mobbes" M AA1 B
 IY2 Z), so `train/data/g2p-fixes.json` corrects the dictionary's labels where the evidence says they're wrong; `g2p.py`
 applies it in every stage, before the relabeled words (the rule-labeled words derived from a fixed word follow - HOBBES'S
-HH AA1 B Z IH0 Z). `picovox_train/g2paudit.py` finds them:
+HH AA1 B Z IH0 Z). The fixes are committed data, from a one-off audit before 2.0 (its tool, `picovox_train/g2paudit.py`,
+is in git history - commits 1e86148 and 6cec8e3).
 
-```sh
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2paudit folds --out build/nn/g2paudit -j 5     # 10 screening models (resumable)
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2paudit suspects --out build/nn/g2paudit \
-    --books build/nn/books --catalog ../picoshelf/data/catalog.json --heteronyms build/nn/context/labels.json
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2paudit audio --out build/nn/g2paudit [--speak]
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2paudit adjudicate --out build/nn/g2paudit
-```
-
-Two partitions of the dictionary into five folds (a word's possessives in its fold) train ten screening models (the
-recipe's network and sampling, 6,000 steps, no rule- or teacher-labeled words), so every word is held out by two of
-them (held-out accuracy 62% - any pronunciation, stress included; the dictionary is mostly names). A word is a suspect
-when both its models' phones differ from its label (not by stress alone) by a log-probability margin of 3, or both prefer
-another of its variants by that margin: 12,750 of 124,101 words - mostly legitimate irregulars (of, colonel) and
-foreign names. Where the training speech's voices spoke a suspect (with `--speak`, a word of too few tokens has
-sentences of the books with it spoken by the TTS model, in turn by the voices, and aligned), the CTC phoneme recognizer
-(`picovox_train/ctc.py`) scores the label and each alternative (the models' predictions, the dictionary's variants -
-those that would be a lexical correction: not stress or reduction alone, not a consonant dropped, not a merger's vowels,
-not a function word or a one- or two-letter word) on up to 12 of its aligned tokens with their neighbors; a token votes
-for a candidate 2 (log) more likely than the rest, and a confirmed error needs the votes' Wilson 95% lower bound above
-one half from 3 or more books. Control words (both models agree with the label, against a model's second guess)
-measure the method. The TTS model's pronunciation of a rare word or a name is its own G2P's guess, so a verdict is the
-engine and the fold models together. (The committed fixes were found before 2.0 with the LibriTTS-R readers'
-recordings: 140 control words, no false errors and 1.5% of the tokens' votes for the wrong candidate; the audio
-confirmed 13 errors and 143 labels, the rest without audio evidence.)
+Two partitions of the dictionary into five folds (a word's possessives in its fold) trained ten screening models (the
+recipe's network and sampling, 6,000 steps, no rule- or teacher-labeled words), so every word was held out by two of
+them (held-out accuracy 62% - any pronunciation, stress included; the dictionary is mostly names). A word was a suspect
+when both its models' phones differed from its label (not by stress alone) by a log-probability margin of 3, or both
+preferred another of its variants by that margin: 12,750 of 124,101 words - mostly legitimate irregulars (of, colonel)
+and foreign names. Where the LibriTTS-R readers spoke a suspect, the CTC phoneme recognizer (`picovox_train/ctc.py`)
+scored the label and each alternative (the models' predictions, the dictionary's variants - those that would be a
+lexical correction: not stress or reduction alone, not a consonant dropped, not a merger's vowels, not a function word
+or a one- or two-letter word) on up to 12 of its aligned tokens with their neighbors; a token voted for a candidate 2
+(log) more likely than the rest, and a confirmed error needed the votes' Wilson 95% lower bound above one half from 3
+or more speakers. Control words (both models agree with the label, against a model's second guess) measured the method:
+140 control words, no false errors and 1.5% of the tokens' votes for the wrong candidate. The audio confirmed 13 errors
+and 143 labels, the rest without audio evidence.
 
 The names regression set (`train/data/names-test.json`, run by `tools/heteronyms.js` as kind `names`): surnames, first
 names, and place names with verified pronunciations - HOBBES first (the dictionary's own evidence: its second variant,
