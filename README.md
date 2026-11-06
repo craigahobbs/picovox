@@ -436,7 +436,7 @@ The flow:
    trained voice when it's preferred at least as often, else too close to call. A retrain of an unchanged recipe is
    usually no audible difference - the A/B is its guardrail against a bad run; a recipe change is where it decides.
 4. `make train-install` - the trained modules that differ into `lib/models/` (the G2P when it differs below its
-   comment header; `picovox_train.trained install`) - or one model, `make train-install-voice` or `make
+   comment header, the voice but its manifest's provenance; `picovox_train.trained install`) - or one model, `make train-install-voice` or `make
    train-install-g2p`; then `make commit` and commit them.
 
 The `train-*` targets run their commands - none decides on another's results. `make train-check` and `make

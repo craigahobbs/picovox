@@ -5,8 +5,9 @@
 make train's trained models - the report that ends make train, and make train-install. make train trains both models to
 their gates in TRAIN_DIR (TRAIN_DIR/g2pModel.js and voiceModel.js) and leaves lib/models/ unchanged; the report says
 what each model is, how the voice scored against the shipped one, and whether each differs from the committed module.
-make train-install replaces the committed modules with the trained ones that differ - the G2P below its comment header
-(its provenance differs run to run), the voice byte for byte; make train-install-voice and train-install-g2p, one model.
+make train-install replaces the committed modules with the trained ones that differ - the G2P below its comment header,
+the voice but its manifest's provenance (each differs run to run); make train-install-voice and train-install-g2p, one
+model.
 
     PYTHONPATH=train/src python3 -B -m picovox_train.trained report build/train                  # make train's report
     PYTHONPATH=train/src python3 -B -m picovox_train.trained install build/train [--model voice]  # make train-install
@@ -39,13 +40,29 @@ def module_body(path):
     return lines[next((index for index, line in enumerate(lines) if not line.startswith('//')), len(lines)):]
 
 
-# Whether a trained module differs from the committed one - the G2P below its comment header, the voice (its provenance
-# in its manifest) byte for byte
+# A voice module's content but its provenance - (its manifest without its provenance - the commit, the hashes, and the
+# gate's scores differ run to run - and the text after the manifest: its weights), as tools/packagecheck.js compares a
+# package with its export
+def voice_content(path):
+    with open(path, encoding='utf-8') as file:
+        text = file.read()
+    match = re.search(r'^export const manifest = (.*?);$', text, re.M | re.S)
+    # (the manifest's literal is JSON with its long strings concatenated - package.py's wrap_json)
+    manifest = json.loads(re.sub(r'(?<!\\)"\s*\+\s*"', '', match.group(1)))
+    manifest.pop('provenance', None)
+    return manifest, text[match.end():]
+
+
+# Whether a trained module differs from the committed one - the G2P below its comment header, the voice but its
+# provenance
 def differs(name, path, committed):
     if name == 'G2P':
         return module_body(path) != module_body(committed)
-    with open(path, 'rb') as file, open(committed, 'rb') as committed_file:
-        return file.read() != committed_file.read()
+    return voice_content(path) != voice_content(committed)
+
+
+# How a trained module is identical to the committed one
+IDENTICAL = {'G2P': ' (below its header)', 'voice': ' (but its provenance)'}
 
 
 # A path for display - relative to the repository when it's in it
@@ -104,8 +121,7 @@ def command_report(args):
     print(f'make train: the trained models in {display_path(args.train_dir)} (lib/models/ unchanged)')
     for name, path, committed in models:
         changed = differs(name, path, committed)
-        state = f'differs from {display_path(committed)}' if changed else \
-            f'identical to {display_path(committed)}' + (' (below its header)' if name == 'G2P' else '')
+        state = f'differs from {display_path(committed)}' if changed else f'identical to {display_path(committed)}{IDENTICAL[name]}'
         print(f'  The {name} - {display_path(path)}: {state}')
         lines = voice_lines(args.train_dir, path) if name == 'voice' else (g2p_lines(args.train_dir) if changed else [])
         for line in lines:
@@ -129,8 +145,8 @@ def command_install(args):
             installed.append(name)
             print(f'install: {display_path(committed)} is now {display_path(path)}')
         else:
-            print(f'install: {display_path(path)} is identical to {display_path(committed)}' +
-                  (' (below its header)' if name == 'G2P' else '') + f' - {display_path(committed)} kept')
+            print(f'install: {display_path(path)} is identical to {display_path(committed)}{IDENTICAL[name]} - '
+                  f'{display_path(committed)} kept')
     if 'G2P' in installed:
         print('install: the voice\'s data, built with the earlier G2P, is rebuilt by the next make train')
     if installed:
