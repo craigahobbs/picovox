@@ -351,17 +351,16 @@ file out:
 
 ```sh
 make build/venv-train.build                                 # build/venv-train from train/requirements.txt
-build/venv-train/bin/python -I train/src/picovox_train/listeners.py [--no-mos] [--no-embedding] [--device auto|cpu|mps] \
-    [--files-from list.txt|-] file.wav ...
+build/venv-train/bin/python -I train/src/picovox_train/listeners.py [--no-embedding] [--files-from list.txt|-] file.wav ...
 ```
 
 ```json
 {"file": "a.wav", "seconds": 2.63, "mos": 3.33, "embedding": [31.48, ...]}
 ```
 
-The models load once per run (4-7 s) and then score about 35 seconds of speech a second (6 sentences) on an M3 Max's
-GPU (MPS, the default on Apple silicon - about 3x the CPU, with the same scores). Files longer than 20 s are scored in
-chunks. The models download on first use - about 1.5 GB, into `downloads/listeners/` (torch.hub, Hugging Face - the
+The models load once per run (4-7 s) and score on the CPU (make train leaves the GPU to training - on an M3 Max's GPU,
+MPS, they scored about 3x as fast, with the same scores). Files longer than 20 s are scored in chunks. The models
+download on first use - about 1.5 GB, into `downloads/listeners/` (torch.hub, Hugging Face - the
 training speech's phoneme recognizer, `picovox_train/ctc.py`'s, downloads there too; like the training speech, `make
 clean` keeps them - `make superclean` removes them) - and later runs need no network.
 

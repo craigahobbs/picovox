@@ -89,7 +89,7 @@ async function main() {
 
     // UTMOS on the CPU
     const listeners = join(repository, 'build/venv-train/bin/python');
-    const output = execFileSync(listeners, ['-I', 'train/src/picovox_train/listeners.py', '--device', 'cpu', '--no-embedding',
+    const output = execFileSync(listeners, ['-I', 'train/src/picovox_train/listeners.py', '--no-embedding',
         ...samples.map((sample) => join(work, sample.file))], {'cwd': repository, 'encoding': 'utf8',
         'maxBuffer': 16 * 1024 * 1024, 'stdio': ['ignore', 'pipe', 'inherit']});
     const scores = parseScores(output);

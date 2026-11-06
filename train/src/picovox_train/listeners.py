@@ -4,8 +4,7 @@
 """
 The listener-model panel - neural listeners that score WAV files, one JSON object per file (JSON lines) on stdout.
 
-    build/venv-train/bin/python -I train/src/picovox_train/listeners.py [--no-mos] [--no-embedding]
-        [--device auto|cpu|mps] [--files-from list.txt|-] file.wav ...
+    build/venv-train/bin/python -I train/src/picovox_train/listeners.py [--no-embedding] [--files-from list.txt|-] file.wav ...
 
 Each line is {"file", "seconds", "mos", "embedding"}:
 
@@ -17,10 +16,9 @@ Each line is {"file", "seconds", "mos", "embedding"}:
 (The emotion2vec+ emotion recognizer, for the style experiments - paper Section 12.7 - is in git history.)
 
 Audio (16-bit PCM WAV, of any sample rate - picovox_train/wav.py) is mixed to mono and resampled to 16 kHz. Files
-longer than --chunk-seconds are scored in chunks (MOS averaged by duration, embeddings averaged). All models are loaded
-once per run. Model files are cached under downloads/listeners/ (like the corpora, kept by make clean); after the first
-run, no network access is needed. On Apple silicon the models run on the GPU (MPS) by default - about 3x faster than the
-CPU, with the same scores to four decimals.
+longer than CHUNK_SECONDS are scored in chunks (MOS averaged by duration, embeddings averaged). The models run on the CPU
+(make train leaves the GPU to training), loaded once per run. Model files are cached under downloads/listeners/ (like
+the corpora, kept by make clean); after the first run, no network access is needed.
 """
 
 import argparse
@@ -38,6 +36,9 @@ import warnings
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 CACHE_DIR = os.path.join(ROOT, 'downloads', 'listeners')
 SAMPLE_RATE = 16000
+
+# Files longer than this are scored in chunks of at most this length (seconds)
+CHUNK_SECONDS = 20
 
 UTMOS_REPO = 'tarepan/SpeechMOS:v1.2.0'
 UTMOS_REPO_DIR = 'tarepan_SpeechMOS_v1.2.0'
@@ -59,11 +60,7 @@ def parse_args(argv):
     parser.add_argument('files', nargs='*', help='WAV files')
     parser.add_argument('--files-from', metavar='PATH',
                         help='read more WAV paths, one per line, from a file (- for stdin)')
-    parser.add_argument('--no-mos', action='store_true', help='skip the UTMOS naturalness score')
     parser.add_argument('--no-embedding', action='store_true', help='skip the ECAPA speaker embedding')
-    parser.add_argument('--device', default='auto', choices=['auto', 'cpu', 'mps'],
-                        help='the torch device (default auto - mps on Apple silicon, else cpu)')
-    parser.add_argument('--chunk-seconds', type=float, default=20, help='score longer files in chunks of this length')
     args = parser.parse_args(argv)
     if args.files_from:
         with (sys.stdin if args.files_from == '-' else open(args.files_from, encoding='utf-8')) as list_file:
@@ -97,22 +94,22 @@ def hf_snapshot(repo):
 
 
 # Load UTMOS22 strong (torch.hub) - from the hub cache when present, so no network access is needed
-def load_utmos(device):
+def load_utmos():
     import torch  # pylint: disable=import-outside-toplevel
     repo_dir = os.path.join(torch.hub.get_dir(), UTMOS_REPO_DIR)
     if os.path.isfile(os.path.join(repo_dir, 'hubconf.py')):
         model = to_stderr(torch.hub.load, repo_dir, 'utmos22_strong', source='local', progress=False)
     else:
         model = to_stderr(torch.hub.load, UTMOS_REPO, 'utmos22_strong', trust_repo=True, progress=False)
-    return model.to(device).eval()
+    return model.eval()
 
 
 # Load the ECAPA-TDNN speaker encoder (speechbrain)
-def load_ecapa(device):
+def load_ecapa():
     from speechbrain.inference.speaker import EncoderClassifier  # pylint: disable=import-outside-toplevel,import-error
     source = hf_snapshot(ECAPA_REPO)
     savedir = os.path.join(CACHE_DIR, 'spkrec-ecapa-voxceleb')
-    return to_stderr(EncoderClassifier.from_hparams, source=source, savedir=savedir, run_opts={'device': device})
+    return to_stderr(EncoderClassifier.from_hparams, source=source, savedir=savedir, run_opts={'device': 'cpu'})
 
 
 # Read a WAV file as 16 kHz mono float32 - returns (samples, original duration in seconds)
@@ -134,20 +131,19 @@ def chunks(samples, chunk_seconds):
     return [samples[ix:ix + size] for ix in range(0, len(samples), size)] or [samples]
 
 
-# Score one file with the loaded models - returns its result object
-def score_file(path, models, args):
+# Score one file with the loaded models ({mos, embedding - optional}) - returns its result object
+def score_file(path, models):
     import numpy  # pylint: disable=import-outside-toplevel
     import torch  # pylint: disable=import-outside-toplevel
     samples, seconds = read_audio(path)
     result = {'file': path, 'seconds': round(seconds, 3)}
-    parts = chunks(samples, args.chunk_seconds)
+    parts = chunks(samples, CHUNK_SECONDS)
     weights = numpy.array([len(part) for part in parts], dtype=numpy.float64)
     weights /= weights.sum()
-    batches = [torch.from_numpy(part).unsqueeze(0).to(args.device) for part in parts]
+    batches = [torch.from_numpy(part).unsqueeze(0) for part in parts]
     with torch.inference_mode():
-        if 'mos' in models:
-            scores = [models['mos'](batch, SAMPLE_RATE).item() for batch in batches]
-            result['mos'] = round(float(numpy.dot(weights, scores)), 4)
+        scores = [models['mos'](batch, SAMPLE_RATE).item() for batch in batches]
+        result['mos'] = round(float(numpy.dot(weights, scores)), 4)
         if 'embedding' in models:
             embeddings = [models['embedding'].encode_batch(batch).squeeze().cpu().numpy() for batch in batches]
             embedding = numpy.average(numpy.stack(embeddings), axis=0, weights=weights)
@@ -155,22 +151,18 @@ def score_file(path, models, args):
     return result
 
 
-# Load the requested models and score every file, writing JSON lines to stdout
+# Load the models and score every file, writing JSON lines to stdout
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
     quiet_libraries()
     import torch  # pylint: disable=import-outside-toplevel
     torch.set_num_threads(max(1, min(8, os.cpu_count() or 1)))
-    if args.device == 'auto':
-        args.device = 'mps' if torch.backends.mps.is_available() else 'cpu'
-    models = {}
-    if not args.no_mos:
-        models['mos'] = load_utmos(args.device)
+    models = {'mos': load_utmos()}
     if not args.no_embedding:
-        models['embedding'] = load_ecapa(args.device)
+        models['embedding'] = load_ecapa()
     output = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
     for path in args.files:
-        output.write(json.dumps(score_file(path, models, args)) + '\n')
+        output.write(json.dumps(score_file(path, models)) + '\n')
     output.flush()
 
 
