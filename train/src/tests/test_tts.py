@@ -197,11 +197,8 @@ class TestSelection(unittest.TestCase):
 
     def test_book_paths(self):
         with unittest.mock.patch.object(books, 'pinned_paths', return_value=['a.txt']) as pinned:
-            self.assertEqual(tts.book_paths({'books': 'build/nn/books', 'pins': 'train/data/books.json', 'texts': ['a']}), ['a.txt'])
-            tts.book_paths({'books': '/books', 'pins': '/pins.json', 'texts': ['b']})
-        self.assertEqual(pinned.call_args_list[0].args, (os.path.join(tts.ROOT, 'build/nn/books'), ['a'],
-                                                         os.path.join(tts.ROOT, 'train/data/books.json')))
-        self.assertEqual(pinned.call_args_list[1].args, ('/books', ['b'], '/pins.json'))
+            self.assertEqual(tts.book_paths(['a']), ['a.txt'])
+        self.assertEqual(pinned.call_args.args, (books.BOOKS_DIR, ['a'], books.PINS_PATH))
 
     def test_selection_key(self):
         recipe = {'context': {'labels': {'texts': ['a']}, 'gate': {'words': ['lead']}}}
@@ -209,17 +206,18 @@ class TestSelection(unittest.TestCase):
             pins = os.path.join(directory, 'books.json')
             with open(pins, 'w', encoding='utf-8') as file:
                 file.write('{}')
-            settings = tts_settings(texts=dict(tts_settings()['texts'], pins=pins))
-            key = tts.selection_key(settings, recipe)
-            self.assertEqual(len(key), 12)
-            # The engine and the workers aren't the selection's
-            self.assertEqual(tts.selection_key(dict(settings, workers=7, engine={}), recipe), key)
-            self.assertNotEqual(tts.selection_key(dict(settings, seed=2), recipe), key)
-            self.assertNotEqual(tts.selection_key(dict(settings, fill=['c']), recipe), key)
-            with open(pins, 'w', encoding='utf-8') as file:
-                file.write('{"a": 1}')
-            self.assertNotEqual(tts.selection_key(settings, recipe), key)
-        # The repository's pins (relative to the root)
+            settings = tts_settings()
+            with unittest.mock.patch.object(books, 'PINS_PATH', pins):
+                key = tts.selection_key(settings, recipe)
+                self.assertEqual(len(key), 12)
+                # The engine and the workers aren't the selection's
+                self.assertEqual(tts.selection_key(dict(settings, workers=7, engine={}), recipe), key)
+                self.assertNotEqual(tts.selection_key(dict(settings, seed=2), recipe), key)
+                self.assertNotEqual(tts.selection_key(dict(settings, fill=['c']), recipe), key)
+                with open(pins, 'w', encoding='utf-8') as file:
+                    file.write('{"a": 1}')
+                self.assertNotEqual(tts.selection_key(settings, recipe), key)
+        # The repository's pins
         self.assertEqual(len(tts.selection_key(tts_settings(), recipe)), 12)
 
 

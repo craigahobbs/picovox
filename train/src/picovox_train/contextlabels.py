@@ -91,8 +91,8 @@ MIN_ALTERNATE_SHARE = SETTINGS['minAlternateShare']
 MIN_UNMEASURED_ALTERNATE = SETTINGS['minUnmeasuredAlternate']
 
 # The books (pinned Project Gutenberg texts - books.py - fetched to the books directory), and the held-out books
-BOOKS_DIR = os.path.join(ROOT, SETTINGS['books'])
-PINS_PATH = os.path.join(ROOT, SETTINGS['pins'])
+BOOKS_DIR = books.BOOKS_DIR
+PINS_PATH = books.PINS_PATH
 HELD_OUT_BOOKS = set(SETTINGS['heldOutBooks'])
 
 # The most silver examples of a word kept (the most frequent words have thousands)

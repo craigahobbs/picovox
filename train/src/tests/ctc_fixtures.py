@@ -108,7 +108,7 @@ def tts_settings(**overrides):
         'engine': {'url': 'http://localhost:11434', 'model': 'phonon', 'digest': '0123456789ab', 'license': 'Phonon (Apache 2.0)'},
         'voices': {'male': {'voice': 'Trevor', 'sex': 'male'}, 'female': {'voice': 'Harper', 'sex': 'female'}},
         'hoursPerVoice': 0.001, 'wordsPerSecond': 3.0, 'workers': 2, 'seed': 1,
-        'texts': {'books': 'build/nn/books', 'pins': 'train/data/books.json', 'minWords': 3, 'maxWords': 40},
+        'texts': {'minWords': 3, 'maxWords': 40},
         'fill': ['fill.txt'],
         'coverage': {'gate': 2, 'context': 1, 'other': 1},
         'split': {'test': 5, 'val': 5},

@@ -182,19 +182,17 @@ def excluded_texts():
     return [' '.join(WORD.findall(' '.join(word['text'] for word in tokenize(text)['words']).lower())) for text in texts]
 
 
-# The book paths of a recipe section's texts (books.py's pinned texts)
-def book_paths(section):
+# The paths of book texts (books.py's pinned texts, in its books directory)
+def book_paths(names):
     from . import books  # pylint: disable=import-outside-toplevel
-    books_dir = section['books'] if os.path.isabs(section['books']) else os.path.join(ROOT, section['books'])
-    pins = section['pins'] if os.path.isabs(section['pins']) else os.path.join(ROOT, section['pins'])
-    return books.pinned_paths(books_dir, section['texts'], pins)
+    return books.pinned_paths(books.BOOKS_DIR, names, books.PINS_PATH)
 
 
 # The selection's key - a hash of the recipe's settings it depends on, the books' pins, and the selection's rules
 def selection_key(settings, recipe):
+    from . import books  # pylint: disable=import-outside-toplevel
     keys = ('voices', 'hoursPerVoice', 'wordsPerSecond', 'seed', 'texts', 'coverage', 'split')
-    with open(os.path.join(ROOT, settings['texts']['pins']), 'rb') as file:
-        pins = hashlib.sha256(file.read()).hexdigest()
+    pins = file_sha256(books.PINS_PATH)
     basis = {'tts': {key: settings[key] for key in keys}, 'coverage': recipe['context']['labels']['texts'],
              'fill': settings['fill'], 'gate': recipe['context']['gate']['words'],
              'pins': pins, 'rules': [SENTENCE_ENDS, MARKS, ROMAN.pattern, SENTENCE.pattern, WORD.pattern]}
@@ -207,13 +205,10 @@ def select_sentences(settings, recipe, jobs):
     from . import readings  # pylint: disable=import-outside-toplevel
     excluded = excluded_texts()
     quotas = readings.coverage_quotas(settings['coverage'], recipe['context']['gate']['words'])
-    texts = settings['texts']
-    coverage_section = {'books': texts['books'], 'pins': texts['pins'], 'texts': recipe['context']['labels']['texts']}
-    fill_section = {'books': texts['books'], 'pins': texts['pins'], 'texts': settings['fill']}
 
     # The coverage's candidates - each quota word's sentences (in hash order), checked by the front end
     with concurrent.futures.ProcessPoolExecutor(jobs) as pool:
-        coverage_paths = book_paths(coverage_section)
+        coverage_paths = book_paths(recipe['context']['labels']['texts'])
         coverage_books = dict(zip(coverage_paths, pool.map(book_candidates, coverage_paths)))
     found = collections.defaultdict(list)
     for path in sorted(coverage_books):
@@ -253,7 +248,7 @@ def select_sentences(settings, recipe, jobs):
     # The fill - the fill books' sentences at random (in order of a seeded shuffle) to the recipe's hours
     target_words = settings['hoursPerVoice'] * 3600 * settings['wordsPerSecond'] * len(settings['voices'])
     with concurrent.futures.ProcessPoolExecutor(jobs) as pool:
-        fill_paths = book_paths(fill_section)
+        fill_paths = book_paths(settings['fill'])
         fill = [(os.path.basename(path), sentence) for path, items in zip(fill_paths, pool.map(book_candidates, fill_paths))
                 for _, sentence in items]
     random.Random(settings['seed']).shuffle(fill)
@@ -456,7 +451,7 @@ def inputs_key(basis, files):
 # The aligner's identity - a hash of its settings (a new aligner realigns every clip)
 def aligner_key():
     from . import ctc  # pylint: disable=import-outside-toplevel
-    basis = [ctc.CTC_REPO, ctc.CTC_SHIFT, ctc.CTC_SPLIT, ctc.EDGE_EXTEND, ctc.IPA_TOKENS]
+    basis = [ctc.CTC_REPO, ctc.CTC_SHIFT, ctc.EDGE_EXTEND, ctc.IPA_TOKENS]
     return hashlib.sha256(json.dumps(basis, sort_keys=True).encode('utf-8')).hexdigest()[:12]
 
 

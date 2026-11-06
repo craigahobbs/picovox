@@ -86,9 +86,7 @@ class TestPins(BooksCase):
         with open(os.path.join(ROOT, 'train', 'data', 'train.json'), encoding='utf-8') as file:
             recipe = json.load(file)
         pins = books.load_pins()
-        labels, texts, fill = recipe['context']['labels'], recipe['tts']['texts'], recipe['tts']['fill']
-        for settings in (labels, texts):
-            self.assertEqual(settings['pins'], 'train/data/books.json')
+        labels, fill = recipe['context']['labels'], recipe['tts']['fill']
         self.assertTrue(set(labels['texts']) <= set(pins))
         self.assertTrue(set(fill) <= set(pins))
         self.assertEqual(len(labels['texts']), 132)

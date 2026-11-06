@@ -86,11 +86,9 @@ IPA_TOKENS = {
 }
 
 # Alignment settings (chosen against the ARCTIC labels by the former arctic-check - see git history): the CTC frames'
-# time offset, how the blank frames between two phones' runs are split ('mid' - at the midpoint, the best of the
-# splits tried), and how far the first phone's start and the last phone's end may extend to the speech's energy onset
-# and offset
+# time offset, and how far the first phone's start and the last phone's end may extend to the speech's energy onset and
+# offset (the blank frames between two phones' runs are split at their midpoint - the best of the splits tried)
 CTC_SHIFT = -0.005
-CTC_SPLIT = 'mid'
 EDGE_EXTEND = 0.15
 
 
@@ -224,7 +222,7 @@ def ctc_labels(tokens, log_posteriors, vocab, samples):
     frames = len(log_posteriors)
     seconds = len(samples) / CTC_SAMPLE_RATE
 
-    # Phone boundaries - each phone's run, the blank frames between two runs split at their midpoint (CTC_SPLIT)
+    # Phone boundaries - each phone's run, the blank frames between two runs split at their midpoint
     starts, ends = [], []
     for index, (first, _) in enumerate(runs):
         start = first if index == 0 else (runs[index - 1][1] + 1 + first) / 2
