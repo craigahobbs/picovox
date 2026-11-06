@@ -150,23 +150,22 @@ quieter.
 
 ### Expressive reading: `style: 'auto'`
 
-Style `'auto'` reads a text as a narrator does - its delivery follows the text's structure:
+Style `'auto'` reads a text's dialogue as a narrator does - its delivery follows the text's quotations:
 
 - **The dialogue beat.** The quotations (between double quotation marks) are read in the `dialogue` style - a little
   higher, brighter, and quicker than the narration (pitch +7%, pace +5%) - and the narration neutral.
 - **The exclamation beat.** A quoted sentence ending in "!" is read in the `exclaim` style - livelier than the
   dialogue beat: 3 dB louder, its pitch range 20% wider, a little more pressed and quicker - excited, not shouted.
-- **The paragraph beat.** Each paragraph is read as one arc: its first sentence lifted (pitch +8%, 2 dB louder), the
-  pitch settling to 4% below the voice's by its last sentence, which is 7% slower.
 
-Style `'auto'` needs no model - it reads the text's quotation marks, exclamation marks, and paragraphs. (A small network that would read a
+Style `'auto'` needs no model - it reads the text's quotation marks and exclamation marks. (A small network that would read a
 quotation angry, shouting, or fearful was tried and dropped: even a classifier on a 4-billion-parameter embedding model
 couldn't choose those styles reliably enough - see the paper's Section 12.7.)
 
 On the listener panel's texts the beats keep the voices intelligible and natural: in all twelve voices style
-`'auto'`'s UTMOS is within 0.04 of neutral's, its word error rate at most 2.4% (neutral's 0.6-1.8%), and it reads about
-2.3 dB louder. The output is deterministic, as every style's; without `'auto'` the audio is the same as before, bit for
-bit.
+`'auto'`'s UTMOS was within 0.04 of neutral's and its word error rate at most 2.4% (neutral's 0.6-1.8%) - measured with
+the paragraph beat it had through 2.0.1 (each paragraph read as one arc - its first sentence lifted, its pitch settling;
+removed in 2.0.2: blind, it was heard as no different, and in a book it sounded like the voice changing for no reason).
+The output is deterministic, as every style's; without `'auto'` the audio is the same as before, bit for bit.
 
 ### `toWav(samples, sampleRate)`
 
@@ -204,7 +203,7 @@ that runs its own synthesis loop (PicoShelf's worker does):
 | `lib/index.js` | The API |
 | `lib/synthesis.js` | The pipeline - the voices, a sentence's blocks (`sentenceBlocks`), a text's (`textBlocks`), the gain and limiter |
 | `lib/sentences.js` | Text to sentences (`splitSentences`), their quotations (`quoteSpans`), and their speakable text (`speechText`) |
-| `lib/style.js` | Style `'auto'` - a text's quotations in the dialogue style (`autoStyles`) and its paragraph beats (`paragraphBeats`) |
+| `lib/style.js` | Style `'auto'` - a text's quotations in the dialogue style (`autoStyles`) |
 | `lib/lexicon.js` | Normalization and phrasing (`textToPhrases`), every word pronounced by the pronouncer (`setPronouncer`) |
 | `lib/g2p.js` | The grapheme-to-phoneme network's inference (`loadG2p`) - heteronyms read from their context |
 | `lib/tokens.js` | Phrases to the voice network's tokens |

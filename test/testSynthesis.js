@@ -1,17 +1,17 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-import {autoStyles, paragraphBeats} from '../lib/style.js';
 import {concatBlocks, render} from '../lib/render.js';
 import {
     createSentenceRenderer, defaultSampleRate, defaultVoice, modelLoader, outputGain, paragraphPause, sentenceBlocks,
-    sentenceFrames, sentencePause, softLimit, sourceShelf, spanFrames, styleSettings, styleTable, textBlocks, voiceSettings,
+    sentenceFrames, sentencePause, softLimit, sourceShelf, styleSettings, styleTable, textBlocks, voiceSettings,
     voiceSpeaker, voiceTable
 } from '../lib/synthesis.js';
 import {speechText, splitSentences} from '../lib/sentences.js';
 import {Buffer} from 'node:buffer';
 import {applyTransforms} from '../lib/transforms.js';
 import {strict as assert} from 'node:assert';
+import {autoStyles} from '../lib/style.js';
 import {readFileSync} from 'node:fs';
 import {speakFrames} from '../lib/model.js';
 import test from 'node:test';
@@ -31,10 +31,11 @@ function sameSamples(actual, expected) {
 }
 
 
-// A sentence spoken by the pipeline directly - the pause, then the frames rendered whole, with the gain and the limiter
-function directSentence(text, {speaker, rate = 1, seed = 1, pause = 0, sampleRate = defaultSampleRate}) {
+// A sentence spoken by the pipeline directly - the pause, then the frames (with transforms) rendered whole, with the gain
+// and the limiter
+function directSentence(text, {speaker, transforms = [], rate = 1, seed = 1, pause = 0, sampleRate = defaultSampleRate}) {
     const {frames, eq} = speakFrames(model, text, {'rate': 1 / rate, speaker});
-    const rendered = render(frames, {sampleRate, seed, eq});
+    const rendered = render(applyTransforms(frames, transforms), {sampleRate, seed, eq});
     const pauseLength = Math.round(sampleRate * pause / rate);
     const samples = new Float32Array(pauseLength + rendered.length);
     for (const [index, value] of rendered.entries()) {
@@ -197,41 +198,17 @@ test('sentenceFrames, pitch range', () => {
 });
 
 
-test('sentenceFrames, beat', () => {
-    // A beat's transforms follow the voice's and the style's, its rate times theirs
-    const text = 'The birch canoe slid on the smooth planks.';
-    const beat = {'transforms': [{'pitchScale': 1.08}, {'level': 2}], 'rate': 0.93};
-    const {chunks} = sentenceFrames(model, text, {'voice': 'helen', 'style': 'soft', 'rate': 1.1, beat});
-    const voiced = voiceSettings(model, 'helen');
-    const styled = styleSettings('soft');
-    const expected = speakFrames(model, text, {'speaker': voiced.speaker, 'rate': 1 / (1.1 * styled.rate * beat.rate)});
-    const frames = applyTransforms(expected.frames, [...voiced.transforms, ...styled.transforms, ...beat.transforms]);
-    assert.deepEqual([...chunks].flat().map((frame) => Array.from(frame)), frames.map((frame) => Array.from(frame)));
-
-    // Spans take the beat in every span; sentenceBlocks passes it on
-    const spans = [{'text': 'She said,', 'style': 'neutral'}, {'text': 'hello.', 'style': 'dialogue'}];
-    const spanned = spanFrames(model, spans, {'voice': 'helen', beat});
-    const first = sentenceFrames(model, 'She said,', {'voice': 'helen', beat});
-    assert.deepEqual([...spanned.chunks][0], [...first.chunks][0]);
-    assert.deepEqual(concatBlocks([...sentenceBlocks(model, text, {'voice': 'helen', beat})]),
-        concatBlocks([...sentenceBlocks(model, text, {'voice': 'helen', beat})]));
-    assert.notDeepEqual(concatBlocks([...sentenceBlocks(model, text, {'voice': 'helen', beat})]),
-        concatBlocks([...sentenceBlocks(model, text, {'voice': 'helen'})]));
-});
-
-
 test('textBlocks, auto', () => {
-    // Style "auto" - each sentence in its auto spans (the quotations in the dialogue style) with its paragraph beat; the
-    // narration's sentences unspanned
+    // Style "auto" - each sentence in its auto spans (the quotations in the dialogue style); the narration's sentences
+    // unspanned
     const text = 'It was late. "Who is there?" she asked.\n\nNobody answered.';
     const sentences = splitSentences(text);
     const auto = autoStyles(sentences);
-    const beats = paragraphBeats(sentences);
     assert.deepEqual([auto.spans(0), auto.spans(1).map((span) => span.style)], [null, ['dialogue', 'neutral']]);
     const expected = sentences.map((sentence) => {
         const spans = auto.spans(sentence.index)?.map((span) => ({'text': speechText(span.text), 'style': span.style}));
         return concatBlocks([...sentenceBlocks(model, speechText(sentence.text), {
-            'voice': 'kate', spans, 'beat': beats[sentence.index], 'seed': 3 + sentence.index,
+            'voice': 'kate', spans, 'seed': 3 + sentence.index,
             'pause': sentence.paragraphStart ? paragraphPause : sentencePause
         })]);
     });
@@ -260,9 +237,8 @@ test('sentenceFrames, voices', () => {
         applyTransforms([...spoken.chunks].flat(), transforms).map((frame) => Array.from(frame)));
 
     // sentenceBlocks and textBlocks take the voice too
-    const correction = {transforms, 'rate': 1};
     assert(sameSamples(concatBlocks([...sentenceBlocks(model, text, {'voice': 'female', 'seed': 2})]),
-        concatBlocks([...sentenceBlocks(model, text, {'speaker': voiceSpeaker(model, 'female'), 'seed': 2, 'beat': correction})])));
+        directSentence(text, {'speaker': voiceSpeaker(model, 'female'), transforms, 'seed': 2})));
     assert(concatBlocks([...textBlocks(model, 'Hello there.', {'voice': 'amy'})]).some((value) => value !== 0));
 });
 

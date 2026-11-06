@@ -1,8 +1,8 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-import {autoStyles, paragraphBeat, paragraphBeats} from '../lib/style.js';
 import {strict as assert} from 'node:assert';
+import {autoStyles} from '../lib/style.js';
 import {splitSentences} from '../lib/sentences.js';
 import test from 'node:test';
 
@@ -25,20 +25,3 @@ test('autoStyles', () => {
     ]);
 });
 
-
-test('paragraphBeats', () => {
-    // Each paragraph as one arc - its first sentence lifted and louder, the pitch settling to -lift/2 by its last
-    // sentence, which is slowed; a one-sentence paragraph is only lifted
-    const {lift, level, settle} = paragraphBeat;
-    const beats = paragraphBeats(splitSentences('One. Two. Three.\n\nFour.'));
-    assert.deepEqual(beats, [
-        {'transforms': [{'pitchScale': 1 + lift}, {level}, {'frication': level}], 'rate': 1},
-        {'transforms': [{'pitchScale': 1 + lift - 1.5 * lift * 0.5}], 'rate': 1},
-        {'transforms': [{'pitchScale': 1 + lift - 1.5 * lift}], 'rate': 1 - settle},
-        {'transforms': [{'pitchScale': 1 + lift}, {level}, {'frication': level}], 'rate': 1}
-    ]);
-
-    // Sentences without a paragraph start begin one
-    assert.deepEqual(paragraphBeats([{'index': 0, 'paragraphStart': false}]), [beats[3]]);
-    assert.deepEqual(paragraphBeats([]), []);
-});
