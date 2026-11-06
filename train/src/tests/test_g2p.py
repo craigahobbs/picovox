@@ -177,6 +177,12 @@ class TestG2p(unittest.TestCase):
         self.assertEqual(data['first']['lead'], ['L', 'EH1', 'D'])
         self.assertEqual(data['first']['dog'], ['D', 'AA1', 'G'])
 
+    def test_load_data_plain(self):
+        # The dictionary as it is - no fixes, no books
+        data = g2p.load_data(fixes=None, books=None)
+        self.assertEqual(data['first']['read'], ['R', 'IY1', 'D'])
+        self.assertEqual(data['relabeled'], set())
+
     def test_load_data_books(self):
         self.assertEqual(g2p.BOOKS_PATH, os.path.join(g2p.ROOT, 'train', 'data', 'g2p-books.json'))
         monitored = g2p.load_data()['monitor'][0]
