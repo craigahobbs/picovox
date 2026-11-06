@@ -1,23 +1,23 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-// make train's listening samples - a training stage's final model (a checkpoint, exported by picovox_train.export as the package
-// stage exports the voice) or a packaged model (the shipped lib/models/voiceModel.js, the reference) speaking
+// make train's listening samples - a training stage's final model (a checkpoint, exported by picovox_train.export as the gate
+// exports the voice) or a packaged model (the shipped lib/models/voiceModel.js, the reference) speaking
 // train/data/train.json's samples texts in its speakers' voices exactly as the package speaks a sentence (lib/synthesis.js
 // sentenceBlocks, every word pronounced by the G2P network), each scored with UTMOS on the CPU
 // (picovox_train/listeners.py - the GPU is left to training). The WAV files are OUT/<stage>-<speaker>-<text>.wav, and
-// OUT/index.json lists every stage's samples - [{stage, run, checkpoint, step, label, sex, speaker, text, file, seconds,
-// mos}] - updated under a lock and replaced atomically, so sample stages finishing at once keep each other's entries.
+// OUT/index.json lists every stage's samples - [{stage, run (a checkpoint's - its training stage's), checkpoint, step,
+// label, sex, speaker, text, file, seconds, mos}] - updated under a lock and replaced atomically, so sample stages
+// finishing at once keep each other's entries.
 //
 //     node tools/trainsamples.js --stage voice-a --checkpoint build/train/runs/voice-a/last.pt --out build/train/samples
 //     node tools/trainsamples.js --stage reference --model lib/models/voiceModel.js --out build/train/samples
 //
-// --run names the checkpoint's training run (default: its directory's name); --settings another recipe (default
-// train/data/train.json). The export reads the training data (NN_DATA_DIR - make train's TRAIN_ENV) for its token remap.
+// The export reads the training data (NN_DATA_DIR - make train's TRAIN_ENV) for its token remap.
 
-import {copyFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync} from 'node:fs';
 import {defaultSampleRate, sentenceBlocks, sentencePause} from '../lib/synthesis.js';
 import {dirname, join, relative, resolve} from 'node:path';
+import {mkdirSync, readFileSync, renameSync, rmSync, writeFileSync} from 'node:fs';
 import {parseArgs, parseScores, sampleFile, updateIndex} from './trainsamplesindex.js';
 import {concatBlocks} from '../lib/render.js';
 import {encodeWav} from '../lib/wav.js';
@@ -37,7 +37,7 @@ const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // Render the samples
 async function main() {
     const args = parseArgs(process.argv.slice(2));
-    const settings = JSON.parse(readFileSync(resolve(repository, args.settings), 'utf8')).samples;
+    const settings = JSON.parse(readFileSync(resolve(repository, 'train/data/train.json'), 'utf8')).samples;
     const out = resolve(args.out);
     const work = join(out, `.work-${args.stage}`);
     rmSync(work, {'recursive': true, 'force': true});
@@ -47,17 +47,14 @@ async function main() {
     // The G2P network - the package's pronouncer
     setPronouncer(await loadG2p(g2pModel));
 
-    // The model - a checkpoint (copied first, so its trainer may replace it meanwhile) exported to the browser's format,
-    // or a packaged module
+    // The model - a checkpoint (its training stage finished) exported to the browser's format, or a packaged module
     let model;
     let checkpoint;
     if (args.checkpoint !== null) {
         // (its path relative to the samples' parent - TRAIN_DIR)
         checkpoint = relative(dirname(out), resolve(args.checkpoint));
-        const copy = join(work, 'checkpoint.pt');
-        copyFileSync(args.checkpoint, copy);
         const python = join(repository, 'build/venv-train/bin/python');
-        execFileSync(python, ['-B', '-m', 'picovox_train.export', copy, '--voice', 'model', '--out', work],
+        execFileSync(python, ['-B', '-m', 'picovox_train.export', resolve(args.checkpoint), '--voice', 'model', '--out', work],
             {'cwd': repository, 'env': {...process.env, 'PYTHONPATH': join(repository, 'train/src')},
                 'stdio': ['ignore', 'ignore', 'inherit']});
         model = await loadVoice(join(work, 'model'));
@@ -66,6 +63,7 @@ async function main() {
         model = await loadVoice(args.model);
     }
     const step = model.manifest.training?.step ?? null;
+    const run = args.checkpoint === null ? null : args.stage;
     log(`${args.stage}: ${checkpoint}${step === null ? '' : ` (step ${step})`}`);
 
     // Each speaker's texts, rendered as the package renders a sentence (seed 1, normal speed)
@@ -81,7 +79,7 @@ async function main() {
             const audio = concatBlocks(blocks);
             const file = sampleFile(args.stage, speaker.key, text.key);
             writeFileSync(join(work, file), encodeWav(audio, sampleRate));
-            samples.push({'stage': args.stage, 'run': args.run, checkpoint, step, 'label': speaker.label, 'sex': speaker.sex,
+            samples.push({'stage': args.stage, run, checkpoint, step, 'label': speaker.label, 'sex': speaker.sex,
                 'speaker': speaker.key, 'text': text.key, file, 'seconds': Math.round(audio.length / sampleRate * 100) / 100});
         }
     }

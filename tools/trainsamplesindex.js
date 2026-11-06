@@ -4,16 +4,15 @@
 // make train's listening samples (tools/trainsamples.js) - its command line, its file names, the UTMOS scores, and
 // TRAIN_DIR/samples/index.json, updated under a lock and replaced atomically
 
-import {basename, dirname, join} from 'node:path';
+import {basename, join} from 'node:path';
 import {mkdirSync, readFileSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync} from 'node:fs';
 import process from 'node:process';
 
 
-// Parse the command line - {stage, checkpoint, model, run, out, settings}
+// Parse the command line - {stage, checkpoint, model, out}
 export function parseArgs(argv) {
-    const args = {'stage': null, 'checkpoint': null, 'model': null, 'run': null, 'out': null, 'settings': 'train/data/train.json'};
-    const options = {'--stage': 'stage', '--checkpoint': 'checkpoint', '--model': 'model', '--run': 'run', '--out': 'out',
-        '--settings': 'settings'};
+    const args = {'stage': null, 'checkpoint': null, 'model': null, 'out': null};
+    const options = {'--stage': 'stage', '--checkpoint': 'checkpoint', '--model': 'model', '--out': 'out'};
     for (let ix = 0; ix < argv.length; ix++) {
         if (!(argv[ix] in options) || ix + 1 >= argv.length) {
             throw new Error(`unknown or incomplete argument ${argv[ix]}`);
@@ -21,10 +20,7 @@ export function parseArgs(argv) {
         args[options[argv[ix]]] = argv[++ix];
     }
     if (args.stage === null || args.out === null || (args.checkpoint === null) === (args.model === null)) {
-        throw new Error('usage: node tools/trainsamples.js --stage STAGE (--checkpoint PATH [--run RUN] | --model MODULE) --out DIR');
-    }
-    if (args.checkpoint !== null && args.run === null) {
-        args.run = basename(dirname(args.checkpoint));
+        throw new Error('usage: node tools/trainsamples.js --stage STAGE (--checkpoint PATH | --model MODULE) --out DIR');
     }
     return args;
 }

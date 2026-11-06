@@ -10,26 +10,22 @@ import {tmpdir} from 'node:os';
 
 
 test('trainsamplesindex.parseArgs', () => {
-    assert.deepEqual(parseArgs(['--stage', 'teacher-a', '--checkpoint', 'build/train/runs/teacher-a/last.pt', '--out', 'samples']), {
-        'stage': 'teacher-a', 'checkpoint': 'build/train/runs/teacher-a/last.pt', 'model': null, 'run': 'teacher-a',
-        'out': 'samples', 'settings': 'train/data/train.json'
+    assert.deepEqual(parseArgs(['--stage', 'voice-a', '--checkpoint', 'build/train/runs/voice-a/last.pt', '--out', 'samples']), {
+        'stage': 'voice-a', 'checkpoint': 'build/train/runs/voice-a/last.pt', 'model': null, 'out': 'samples'
     });
-    assert.deepEqual(parseArgs(['--stage', 'reference', '--model', 'lib/models/voiceModel.js', '--out', 'samples',
-        '--settings', 'other.json']), {
-        'stage': 'reference', 'checkpoint': null, 'model': 'lib/models/voiceModel.js', 'run': null, 'out': 'samples',
-        'settings': 'other.json'
+    assert.deepEqual(parseArgs(['--stage', 'reference', '--model', 'lib/models/voiceModel.js', '--out', 'samples']), {
+        'stage': 'reference', 'checkpoint': null, 'model': 'lib/models/voiceModel.js', 'out': 'samples'
     });
-    assert.equal(parseArgs(['--stage', 'polish', '--checkpoint', 'best.pt', '--run', 'distill', '--out', 'samples']).run, 'distill');
     assert.throws(() => parseArgs(['--stage']), /incomplete argument --stage/);
-    assert.throws(() => parseArgs(['--bogus', 'value']), /unknown or incomplete argument --bogus/);
-    assert.throws(() => parseArgs(['--stage', 'polish', '--out', 'samples']), /usage/);
-    assert.throws(() => parseArgs(['--stage', 'polish', '--model', 'a.js', '--checkpoint', 'b.pt', '--out', 'samples']), /usage/);
+    assert.throws(() => parseArgs(['--run', 'voice-b']), /unknown or incomplete argument --run/);
+    assert.throws(() => parseArgs(['--stage', 'voice-b', '--out', 'samples']), /usage/);
+    assert.throws(() => parseArgs(['--stage', 'voice-b', '--model', 'a.js', '--checkpoint', 'b.pt', '--out', 'samples']), /usage/);
     assert.throws(() => parseArgs(['--model', 'a.js', '--out', 'samples']), /usage/);
 });
 
 
 test('trainsamplesindex.sampleFile', () => {
-    assert.equal(sampleFile('teacher-a', 'female', 'ishmael'), 'teacher-a-female-ishmael.wav');
+    assert.equal(sampleFile('voice-a', 'female', 'ishmael'), 'voice-a-female-ishmael.wav');
 });
 
 
@@ -41,12 +37,12 @@ test('trainsamplesindex.parseScores', () => {
 
 test('trainsamplesindex.mergeIndex', () => {
     const index = [
-        {'stage': 'reference', 'file': 'r.wav'}, {'stage': 'teacher-a', 'file': 'old.wav'}, {'stage': 'student', 'file': 's.wav'}
+        {'stage': 'reference', 'file': 'r.wav'}, {'stage': 'voice-a', 'file': 'old.wav'}, {'stage': 'voice-b', 'file': 'b.wav'}
     ];
-    assert.deepEqual(mergeIndex(index, 'teacher-a', [{'stage': 'teacher-a', 'file': 'new.wav'}]), [
-        {'stage': 'reference', 'file': 'r.wav'}, {'stage': 'student', 'file': 's.wav'}, {'stage': 'teacher-a', 'file': 'new.wav'}
+    assert.deepEqual(mergeIndex(index, 'voice-a', [{'stage': 'voice-a', 'file': 'new.wav'}]), [
+        {'stage': 'reference', 'file': 'r.wav'}, {'stage': 'voice-b', 'file': 'b.wav'}, {'stage': 'voice-a', 'file': 'new.wav'}
     ]);
-    assert.deepEqual(mergeIndex(null, 'polish', [{'stage': 'polish'}]), [{'stage': 'polish'}]);
+    assert.deepEqual(mergeIndex(null, 'voice-b', [{'stage': 'voice-b'}]), [{'stage': 'voice-b'}]);
 });
 
 
@@ -106,16 +102,16 @@ test('trainsamplesindex.updateIndex', () => {
     try {
         // A new index, then a stage's samples replaced, the others kept
         updateIndex(dir, 'reference', [{'stage': 'reference', 'file': 'r.wav'}]);
-        updateIndex(dir, 'polish', [{'stage': 'polish', 'file': 'p1.wav'}]);
-        updateIndex(dir, 'polish', [{'stage': 'polish', 'file': 'p2.wav'}]);
+        updateIndex(dir, 'voice-b', [{'stage': 'voice-b', 'file': 'b1.wav'}]);
+        updateIndex(dir, 'voice-b', [{'stage': 'voice-b', 'file': 'b2.wav'}]);
         assert.deepEqual(JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8')),
-            [{'stage': 'reference', 'file': 'r.wav'}, {'stage': 'polish', 'file': 'p2.wav'}]);
+            [{'stage': 'reference', 'file': 'r.wav'}, {'stage': 'voice-b', 'file': 'b2.wav'}]);
         assert.deepEqual(readdirSync(dir), ['index.json']);
 
         // An unreadable index starts over
         writeFileSync(join(dir, 'index.json'), 'not JSON');
-        updateIndex(dir, 'student', [{'stage': 'student', 'file': 's.wav'}]);
-        assert.deepEqual(JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8')), [{'stage': 'student', 'file': 's.wav'}]);
+        updateIndex(dir, 'voice-a', [{'stage': 'voice-a', 'file': 'a.wav'}]);
+        assert.deepEqual(JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8')), [{'stage': 'voice-a', 'file': 'a.wav'}]);
     } finally {
         rmSync(dir, {'recursive': true, 'force': true});
     }
