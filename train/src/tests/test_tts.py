@@ -598,7 +598,7 @@ class TestBuild(unittest.TestCase):
             write_wav(path, data_fixtures.labels_audio(labels, seconds, 16000), 16000)
             result = tts.process_clip((path, tokens, rows, align.mean_durations(rows), (75.0, 300.0, 5000)))
         self.assertAlmostEqual(result['cutStart'], data_fixtures.EDGE_SECONDS - data.MAX_EDGE_SILENCE, places=3)
-        self.assertAlmostEqual(result['seconds'][0], data.MAX_EDGE_SILENCE, places=3)
+        self.assertEqual(result['frames'][0], round(data.MAX_EDGE_SILENCE / data.FRAME_SECONDS))
         self.assertEqual(len(result['frames']), len(tokens))
         self.assertEqual(len(result['audio']), sum(result['frames']) * data.HOP)
         self.assertEqual(result['audio'].dtype, numpy.int16)
@@ -642,10 +642,12 @@ class TestBuild(unittest.TestCase):
                 stdout, stderr = self.run_build(build_args(out))
             cached = os.path.join(directory, f'build-{tts.build_key(settings, directory)}')
             corpus = data.CorpusData(out)
-            arrays = [corpus.arrays(entry) for entry in corpus.index['utterances']]
-            with open(os.path.join(out, 'alignment.jsonl'), encoding='utf-8') as file:
-                alignment = [json.loads(line) for line in file]
-            raw = [name for name in os.listdir(out) if name.endswith('.raw')]
+            arrays = [{'tokens': corpus.tokens[entry['tokenOffset']:entry['tokenOffset'] + entry['tokenCount']],
+                       'durations': corpus.durations[entry['tokenOffset']:entry['tokenOffset'] + entry['tokenCount']],
+                       'audio': corpus.audio[entry['sampleOffset']:entry['sampleOffset'] + entry['sampleCount']],
+                       'frames': corpus.frames[entry['frameOffset']:entry['frameOffset'] + entry['frameCount']]}
+                      for entry in corpus.index['utterances']]
+            files = sorted(os.listdir(out))
         index = corpus.index
         entries = {entry['id']: entry for entry in index['utterances']}
         ids = [f'{clip["key"]}/{clip["id"]}' for clip in clips]
@@ -673,10 +675,7 @@ class TestBuild(unittest.TestCase):
             self.assertEqual(int(entry_arrays['durations'].sum()), entry['frameCount'])
             self.assertEqual(len(entry_arrays['audio']), entry['sampleCount'])
             self.assertEqual(entry_arrays['frames'].shape, (entry['frameCount'], len(data.CHANNELS)))
-        self.assertEqual(raw, [])
-        self.assertEqual([row['id'] for row in alignment], list(entries))
-        self.assertEqual(alignment[0]['tokens'], ' '.join(frontend.tokenize('Call me Ishmael.')['tokens']))
-        self.assertEqual(alignment[0]['greedy'], greedy_of('Call me Ishmael.'))
+        self.assertEqual(files, ['audio.npy', 'durations.npy', 'frames.npy', 'index.json', 'tokens.npy'])
 
         # The index - the voices with clips, keyed by voice key, their rows the recipe's order
         speakers = index['speakers']

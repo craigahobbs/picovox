@@ -548,7 +548,7 @@ def process_clip(task):
     start = int(round(cut_start * data.SAMPLE_RATE))
     audio = samples[start:start + frame_count * data.HOP]
     audio = np.pad(audio, (0, frame_count * data.HOP - len(audio)))
-    return {'seconds': seconds, 'frames': frames, 'cutStart': cut_start, 'tracks': data.frame_tracks(audio, frame_count, *settings),
+    return {'frames': frames, 'cutStart': cut_start, 'tracks': data.frame_tracks(audio, frame_count, *settings),
             'audio': np.clip(np.round(audio * 32768), -32768, 32767).astype(np.int16),
             'clipped': float(np.mean(np.abs(samples) >= 0.999))}
 
@@ -626,7 +626,7 @@ def link_tree(source, target):
 
 
 def build_command(args):
-    """The voices' training data - <out>/ in data.py's format (index.json, the arrays, alignment.jsonl): the corpus's
+    """The voices' training data - <out>/ in data.py's format (index.json and the arrays): the corpus's
     build-<key>/ (built if missing or unfinished - one build at a time - and a build for other inputs removed),
     hard-linked; with --limit, a sample built in <out> itself"""
     settings = load_settings(args.recipe)
@@ -692,14 +692,13 @@ def build_data(args, settings, directory, out):
             tasks.append((wav_path(directory, clip), record['tokens'], record['labels'], mean_seconds,
                           (floor, ceiling, analysis['formantCeilings'][clip['sex']])))
             kept.append(clip)
-    names = ('tokens', 'durations', 'seconds', 'audio', 'frames')
-    dtypes = {'tokens': np.int16, 'durations': np.int16, 'seconds': np.float32, 'audio': np.int16, 'frames': np.float32}
+    names = ('tokens', 'durations', 'audio', 'frames')
+    dtypes = {'tokens': np.int16, 'durations': np.int16, 'audio': np.int16, 'frames': np.float32}
     raw_files = {name: open(os.path.join(out, name + '.raw'), 'wb') for name in names}  # pylint: disable=consider-using-with
     lengths = dict.fromkeys(names, 0)
     entries = []
     token_offset = frame_offset = 0
-    with open(os.path.join(out, 'alignment.jsonl'), 'w', encoding='utf-8') as alignment_file, \
-            multiprocessing.Pool(args.jobs) as pool:
+    with multiprocessing.Pool(args.jobs) as pool:
         for count, (clip, result) in enumerate(zip(kept, pool.imap(process_clip, tasks, chunksize=4)), 1):
             if count % BUILD_PROGRESS == 0:
                 log(f'  {count}/{len(tasks)} clips, {frame_offset / 100 / 3600:.1f} h, {time.time() - start_time:.0f} s')
@@ -720,16 +719,13 @@ def build_data(args, settings, directory, out):
                 'readings': overrides.get(clip['id'], {})
             })
             arrays = {'tokens': np.asarray([TOKEN_IDS[token] for token in record['tokens']], dtype=np.int16),
-                      'durations': np.asarray(result['frames'], dtype=np.int16),
-                      'seconds': np.asarray(result['seconds'], dtype=np.float32), 'audio': result['audio'],
+                      'durations': np.asarray(result['frames'], dtype=np.int16), 'audio': result['audio'],
                       'frames': result['tracks'].astype(np.float32)}
             for name in names:
                 raw_files[name].write(np.ascontiguousarray(arrays[name], dtype=dtypes[name]).tobytes())
                 lengths[name] += len(arrays[name])
             token_offset += len(record['tokens'])
             frame_offset += frame_count
-            alignment_file.write(json.dumps({'id': entries[-1]['id'], 'tokens': ' '.join(record['tokens']), 'frames': result['frames'],
-                                             'greedy': record['greedy'], 'confidences': record['confidences']}, ensure_ascii=False) + '\n')
     for name in names:
         raw_files[name].close()
         shape = (lengths[name], len(data.CHANNELS)) if name == 'frames' else (lengths[name],)

@@ -92,15 +92,15 @@ TEXTS = ['Call me Ishmael.', 'It was the best of times.', 'Is it cold?', 'Wait, 
          'We went home.', 'Who is there?', 'A dark night.']
 
 
-# Write a tiny corpus directory in data.py's format (index.json, tokens.npy, durations.npy, seconds.npy, audio.npy,
-# frames.npy, alignment.jsonl - tts.py's) - speakers {key: {sex, index}}, count utterances per speaker (the splits cycle
+# Write a tiny corpus directory in data.py's format (index.json, tokens.npy, durations.npy, audio.npy, frames.npy -
+# tts.py's) - speakers {key: {sex, index}}, count utterances per speaker (the splits cycle
 # train, train, val, test; the last one excluded), synthetic voiced audio. Returns the index.
 def write_corpus(directory, speakers=None, count=4, seed=0, frames_per_token=3):
     rng = numpy.random.default_rng(seed)
     speakers = speakers or {'male': {'sex': 'male', 'index': 0}, 'female': {'sex': 'female', 'index': 1}}
     os.makedirs(directory, exist_ok=True)
     splits = ['train', 'train', 'val', 'test']
-    tokens_all, durations_all, seconds_all, audio_all, frames_all = [], [], [], [], []
+    tokens_all, durations_all, audio_all, frames_all = [], [], [], []
     entries = []
     token_offset = frame_offset = 0
     for speaker_number, (key, info) in enumerate(speakers.items()):
@@ -130,7 +130,6 @@ def write_corpus(directory, speakers=None, count=4, seed=0, frames_per_token=3):
             entries.append(entry)
             tokens_all.append(ids)
             durations_all.append(durations)
-            seconds_all.append(durations.astype(numpy.float32) * 0.01)
             audio_all.append(numpy.clip(numpy.round(audio * 32768), -32768, 32767).astype(numpy.int16))
             frames_all.append(tracks)
             token_offset += len(ids)
@@ -146,13 +145,10 @@ def write_corpus(directory, speakers=None, count=4, seed=0, frames_per_token=3):
     }
     numpy.save(os.path.join(directory, 'tokens.npy'), numpy.concatenate(tokens_all))
     numpy.save(os.path.join(directory, 'durations.npy'), numpy.concatenate(durations_all))
-    numpy.save(os.path.join(directory, 'seconds.npy'), numpy.concatenate(seconds_all))
     numpy.save(os.path.join(directory, 'audio.npy'), numpy.concatenate(audio_all))
     numpy.save(os.path.join(directory, 'frames.npy'), numpy.concatenate(frames_all))
     with open(os.path.join(directory, 'index.json'), 'w', encoding='utf-8') as file:
         json.dump(index, file)
-    with open(os.path.join(directory, 'alignment.jsonl'), 'w', encoding='utf-8') as file:
-        file.write(''.join(json.dumps({'id': entry['id']}) + '\n' for entry in entries))
     return index
 
 

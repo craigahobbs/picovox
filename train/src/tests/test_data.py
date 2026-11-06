@@ -75,16 +75,12 @@ class TestLoading(unittest.TestCase):
             self.assertEqual(corpus.directory, directory)
             self.assertEqual(corpus.index, index)
             self.assertEqual(len(corpus.entries()), 6)
-            self.assertEqual(len(corpus.entries(include_excluded=True)), 8)
             self.assertEqual([entry['id'] for entry in corpus.entries('val')], ['male/0002', 'female/0002'])
-            self.assertEqual([entry['id'] for entry in corpus.entries(speakers=['female'], include_excluded=True)],
-                             ['female/0000', 'female/0001', 'female/0002', 'female/0003'])
+            self.assertEqual([entry['id'] for entry in corpus.entries('test')], [])
             entry = corpus.entries()[1]
-            arrays = corpus.arrays(entry)
-            self.assertEqual(arrays['tokens'].tolist(), frontend.tokenize(entry['text'])['ids'])
-            self.assertEqual(arrays['tokens'].dtype, numpy.int64)
-            self.assertEqual(int(arrays['durations'].sum()), entry['frameCount'])
-            self.assertEqual(arrays['seconds'].dtype, numpy.float32)
-            self.assertEqual(len(arrays['audio']), entry['sampleCount'])
-            self.assertLessEqual(float(numpy.abs(arrays['audio']).max()), 1.0)
-            self.assertEqual(arrays['frames'].shape, (entry['frameCount'], len(data.CHANNELS)))
+            tokens = corpus.tokens[entry['tokenOffset']:entry['tokenOffset'] + entry['tokenCount']]
+            self.assertEqual(tokens.tolist(), frontend.tokenize(entry['text'])['ids'])
+            self.assertEqual(int(corpus.durations[entry['tokenOffset']:entry['tokenOffset'] + entry['tokenCount']].sum()),
+                             entry['frameCount'])
+            self.assertEqual(corpus.audio.dtype, numpy.int16)
+            self.assertEqual(corpus.frames.shape, (len(corpus.audio) // data.HOP, len(data.CHANNELS)))

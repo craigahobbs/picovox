@@ -14,11 +14,9 @@ A corpus directory (build/nn/data/<corpus>/) - concatenated arrays and an index 
   Every array is memory-mapped by CorpusData.
 - tokens.npy (int16) - token ids (vocab.json)
 - durations.npy (int16) - each token's duration in frames; an utterance's durations sum to its frame count
-- seconds.npy (float32) - each token's duration in seconds, before quantization
 - audio.npy (int16) - 24 kHz audio, frameCount x 240 samples per utterance (sampleOffset = frameOffset x 240)
 - frames.npy (float32, [frames, channels]) - the auxiliary tracks at 100 frames per second (frame k is the 10 ms of
   samples [240k, 240k + 240), its center at (k + 0.5) x 10 ms)
-- alignment.jsonl - per utterance, the alignment's tokens, frames, and the recognizer's greedy phones (diagnostics)
 
 (The human corpora this module read - CMU ARCTIC's and LibriTTS-R's labels - are in git history.)
 """
@@ -167,26 +165,9 @@ class CorpusData:
             self.index = json.load(file)
         self.tokens = np.load(os.path.join(directory, 'tokens.npy'), mmap_mode='r')
         self.durations = np.load(os.path.join(directory, 'durations.npy'), mmap_mode='r')
-        self.seconds = np.load(os.path.join(directory, 'seconds.npy'), mmap_mode='r')
         self.audio = np.load(os.path.join(directory, 'audio.npy'), mmap_mode='r')
         self.frames = np.load(os.path.join(directory, 'frames.npy'), mmap_mode='r')
 
-    # The utterance entries of a split ('train', 'val', 'test', or None for all), of the speakers (None for all),
-    # included in training unless include_excluded
-    def entries(self, split=None, speakers=None, include_excluded=False):
-        return [entry for entry in self.index['utterances']
-                if (split is None or entry['split'] == split) and (speakers is None or entry['speaker'] in speakers)
-                and (include_excluded or entry['include'])]
-
-    # One utterance's arrays - {tokens, durations, seconds, audio (float32, -1 to 1), frames}
-    def arrays(self, entry):
-        tokens = slice(entry['tokenOffset'], entry['tokenOffset'] + entry['tokenCount'])
-        frames = slice(entry['frameOffset'], entry['frameOffset'] + entry['frameCount'])
-        samples = slice(entry['sampleOffset'], entry['sampleOffset'] + entry['sampleCount'])
-        return {
-            'tokens': np.array(self.tokens[tokens], dtype=np.int64),
-            'durations': np.array(self.durations[tokens], dtype=np.int64),
-            'seconds': np.array(self.seconds[tokens], dtype=np.float32),
-            'audio': np.array(self.audio[samples], dtype=np.float32) / 32768.0,
-            'frames': np.array(self.frames[frames], dtype=np.float32)
-        }
+    # The included utterance entries of a split ('train', 'val', 'test', or None for all)
+    def entries(self, split=None):
+        return [entry for entry in self.index['utterances'] if (split is None or entry['split'] == split) and entry['include']]
