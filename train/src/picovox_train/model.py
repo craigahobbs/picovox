@@ -270,8 +270,9 @@ class MultiModel(torch.nn.Module):
     @staticmethod
     def regulate(features, durations, frame_count=None):
         """The length regulator - token features [B, N, D] repeated for their durations [B, N] (10 ms frames) to
-        [B, F, D], with the position features [B, F, 5] and the frame mask [B, F, 1]; frame_count is F when the caller
-        knows it (max(1, the longest total duration) - reading it from the device synchronizes)"""
+        [B, F, D], with the position features [B, F, 5], the frame mask [B, F, 1], and each frame's token index [B, F];
+        frame_count is F when the caller knows it (max(1, the longest total duration) - reading it from the device
+        synchronizes)"""
         batch = features.shape[0]
         lengths = durations.sum(dim=1)
         frame_count = max(1, int(lengths.max())) if frame_count is None else frame_count
@@ -289,7 +290,7 @@ class MultiModel(torch.nn.Module):
             torch.clamp(offset, max=20) / 20, torch.clamp(duration - 1 - offset, max=20) / 20
         ], dim=-1)
         mask = (frames[None] < lengths[:, None]).float()[..., None]
-        return regulated * mask, positions * mask, mask
+        return regulated * mask, positions * mask, mask, token_index
 
     def parameters_from_unit(self, unit):
         """Normalized frames [B, T, COUNT] to parameter values, with the fixed parameters (jitter, shimmer)"""
@@ -310,28 +311,26 @@ class MultiModel(torch.nn.Module):
         """The channel equalizer gains (dB) [B, EQ_BAND_COUNT] of speaker ids [B]"""
         return (params.EQ_RANGE_DB * torch.tanh(self.eq_free))[speaker]
 
-    def forward(self, tokens, durations, speaker=None, speaker_vector=None, frame_count=None):
+    def forward(self, tokens, durations, speaker, speaker_vector=None, frame_count=None):
         """Training forward pass (teacher-forced durations [B, N], 10 ms frames) - {duration (the predictor's outputs
-        [B, N, 3]), unit (normalized parameter frames [B, 2F, COUNT]), frameMask [B, F, 1]}; frame_count is F if known
-        (regulate)"""
-        if speaker is None and speaker_vector is None:
-            speaker = torch.zeros(tokens.shape[0], dtype=torch.long, device=tokens.device)
+        [B, N, 3]), unit (normalized parameter frames [B, 2F, COUNT]), frameMask [B, F, 1], tokenIndex (each frame's
+        token [B, F]), position (each frame's relative position within its token [B, F], 0 past the durations)};
+        frame_count is F if known (regulate)"""
         condition = self.condition(speaker, speaker_vector)
         features, mask = self.encode(tokens, condition)
         duration_outputs = self.durations(features, mask, condition)
-        regulated, positions, frame_mask = self.regulate(features, durations, frame_count)
+        regulated, positions, frame_mask, token_index = self.regulate(features, durations, frame_count)
         unit = self.decode(regulated, positions, frame_mask, condition)
-        return {'duration': duration_outputs, 'unit': unit, 'frameMask': frame_mask}
+        return {'duration': duration_outputs, 'unit': unit, 'frameMask': frame_mask, 'tokenIndex': token_index,
+                'position': positions[..., 0]}
 
     @torch.no_grad()
-    def infer(self, tokens, speaker=None):
+    def infer(self, tokens, speaker):
         """Inference - {durations [B, N] (10 ms frames), values (parameter frames [B, 2F + 1, COUNT]), frames}"""
-        if speaker is None:
-            speaker = torch.zeros(tokens.shape[0], dtype=torch.long, device=tokens.device)
         condition = self.condition(speaker)
         features, mask = self.encode(tokens, condition)
         durations = self.predicted_durations(self.durations(features, mask, condition), tokens)
-        regulated, positions, frame_mask = self.regulate(features, durations)
+        regulated, positions, frame_mask, _ = self.regulate(features, durations)
         values = self.parameters_from_unit(self.decode(regulated, positions, frame_mask, condition))
         values = torch.cat([values, values[:, -1:]], dim=1)
         return {'durations': durations, 'values': values, 'frames': durations.sum(dim=1) * self.config['subframes'] + 1}

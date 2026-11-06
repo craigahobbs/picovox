@@ -223,11 +223,6 @@ class TestHelpers(unittest.TestCase):
         empty = trainmulti.quality_stats(values, torch.zeros(1, 4))
         self.assertTrue(math.isnan(float(empty['b1'])))
 
-    def test_frame_tokens(self):
-        index, position = trainmulti.frame_tokens(torch.tensor([[2, 0, 3]]), 6)
-        self.assertEqual(index.tolist(), [[0, 0, 2, 2, 2, 2]])
-        self.assertTrue(numpy.allclose(position.numpy(), [[0.25, 0.75, 0.5 / 3, 1.5 / 3, 2.5 / 3, 3.5 / 3]]))
-
     def test_recipe_defaults(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, 'recipe.json')
@@ -274,42 +269,37 @@ class TestPrefetcher(unittest.TestCase):
 
     def setUp(self):
         with DATA.patched():
-            self.corpora = {'tts': trainmulti.Corpus('tts', 'train')}
+            self.corpus = trainmulti.Corpus('tts', 'train')
         self.rng = numpy.random.default_rng(2)
-        self.streams = {name: trainmulti.batch_stream(corpus, 2, 10000, self.rng) for name, corpus in self.corpora.items()}
+        self.stream = trainmulti.batch_stream(self.corpus, 2, 10000, self.rng)
         self.synth = dsynth.DSynth(24000)
 
     def test_steps(self):
         args = argparse.Namespace(crop_frames=20, rate=24000, bucket_ratio=1.125)
-        prefetcher = trainmulti.Prefetcher(self.corpora, self.streams, args, self.rng, self.synth, 0.005, depth=1)
+        prefetcher = trainmulti.Prefetcher(self.corpus, self.stream, args, self.rng, self.synth, 0.005, depth=1)
         # (the queue fills - the thread waits for room)
         time.sleep(0.3)
-        names = set()
         for _ in range(4):
             prepared = prefetcher.next()
-            names.add(prepared['corpusName'])
             self.assertEqual(prepared['length'], 20)
             self.assertEqual(tuple(prepared['batch']['host']['target'].shape), (2, 2400))
-            self.assertEqual(prepared['cutoffs'], [11400.0, 11400.0])
+            self.assertEqual(prepared['batch']['host']['cutoffs'].tolist(), [11400.0, 11400.0])
             self.assertEqual(prepared['plan']['count'], 2400)
             self.assertIn('host', prepared['plan'])
         prefetcher.close()
         self.assertFalse(prefetcher.thread.is_alive())
-        self.assertEqual(names, {'tts'})
 
     def test_no_plan(self):
         # (no samples to render - a zero-length crop)
-        args = argparse.Namespace(crop_frames=0, rate=24000)
-        prefetcher = trainmulti.Prefetcher(self.corpora, self.streams, args, self.rng, self.synth, 0.005)
+        args = argparse.Namespace(crop_frames=0, rate=24000, bucket_ratio=0)
+        prefetcher = trainmulti.Prefetcher(self.corpus, self.stream, args, self.rng, self.synth, 0.005)
         prepared = prefetcher.next()
         prefetcher.close()
-        self.assertEqual(prepared['corpusName'], 'tts')
         self.assertIsNone(prepared['plan'])
 
     def test_error(self):
-        args = argparse.Namespace(crop_frames=20, rate=24000)
-        prefetcher = trainmulti.Prefetcher(self.corpora, {'tts': iter(())}, args, self.rng, self.synth,
-                                           0.005)
+        args = argparse.Namespace(crop_frames=20, rate=24000, bucket_ratio=0)
+        prefetcher = trainmulti.Prefetcher(self.corpus, iter(()), args, self.rng, self.synth, 0.005)
         with self.assertRaises(StopIteration):
             prefetcher.next()
         prefetcher.close()
@@ -323,7 +313,7 @@ class TestPrefetcher(unittest.TestCase):
             time.sleep(0.3)
             return {}
         with unittest.mock.patch.object(trainmulti.Prefetcher, '_prepare', side_effect=slow_prepare):
-            prefetcher = trainmulti.Prefetcher({}, {}, None, None, None, 0.005)
+            prefetcher = trainmulti.Prefetcher(None, None, None, None, None, 0.005)
             started.wait()
             prefetcher.close()
         self.assertFalse(prefetcher.thread.is_alive())

@@ -94,14 +94,14 @@ def sonorant_mask(vocab):
 class Corpus:
     """A corpus's utterances of a split, ready for training - the audio stays memory-mapped"""
 
-    def __init__(self, name, split, max_items=None, seed=0):
+    def __init__(self, name, split, max_items=None):
         self.name = name
         self.data = CorpusData(os.path.join(DATA_DIR, name))
         speakers = self.data.index['speakers']
         channels = self.data.index['channels']
         entries = self.data.entries(split)
         if max_items and len(entries) > max_items:
-            order = numpy.random.default_rng(seed).permutation(len(entries))[:max_items]
+            order = numpy.random.default_rng(0).permutation(len(entries))[:max_items]
             entries = [entries[ix] for ix in sorted(order)]
         self.items = []
         for entry in entries:
@@ -274,15 +274,15 @@ def band_limit(audio, cutoffs, rate, cutoff_tensor=None):
 
 
 class Prefetcher:
-    """The training steps' data made ahead on a thread, so a step's CPU work overlaps the GPU's: each step's corpus
-    choice, batch, synthesis seed, and crop starts - the same draws from rng in the same order as the training loop
-    made them - the collated batch, the recordings' crops, and the synthesizer's cycle plans of the recorded F0 (dsynth.py
-    plan_cycles - the rendered frames' F0 is the recording's, and their jitter the model's constant). next() returns
-    the steps' data in order."""
+    """The training steps' data made ahead on a thread, so a step's CPU work overlaps the GPU's: each step's batch (the
+    corpus's next from its batch stream), synthesis seed, and crop starts - the same draws from rng in the same order
+    as the training loop made them - the collated batch, the recordings' crops, and the synthesizer's cycle plans of the
+    recorded F0 (dsynth.py plan_cycles - the rendered frames' F0 is the recording's, and their jitter the model's
+    constant). next() returns the steps' data in order."""
 
-    def __init__(self, corpora, streams, args, rng, synth, jitter, depth=3):
-        self.corpora = corpora
-        self.streams = streams
+    def __init__(self, corpus, stream, args, rng, synth, jitter, depth=3):
+        self.corpus = corpus
+        self.stream = stream
         self.args = args
         self.rng = rng
         self.synth = synth
@@ -308,15 +308,13 @@ class Prefetcher:
     # One step's data (the training loop's draws from rng, in order: the batch, the seed, the crops)
     def _prepare(self):
         args = self.args
-        name = 'tts'
-        batch = collate_host(self.corpora[name], next(self.streams[name]), getattr(args, 'bucket_ratio', 0))
+        batch = collate_host(self.corpus, next(self.stream), args.bucket_ratio)
         seed = int(self.rng.integers(1 << 30))
         total = 2 * batch['frameCount'] + 1
         starts, length = crop_starts(batch['items'], total, args.crop_frames, self.rng)
         host = batch['host']
         host['target'] = torch.from_numpy(crop_audio(batch['corpus'], batch['items'], starts, length, args.rate))
-        cutoffs = [0.95 * item['bandwidth'] for item in batch['items']]
-        host['cutoffs'] = torch.tensor(cutoffs, dtype=torch.float32)
+        host['cutoffs'] = torch.tensor([0.95 * item['bandwidth'] for item in batch['items']], dtype=torch.float32)
         seeds = [seed + ix for ix in range(len(batch['items']))]
         plan = None
         f0 = host['f0'].numpy()[:, :total]
@@ -324,8 +322,7 @@ class Prefetcher:
             f0_frames = numpy.stack([f0[ix, start:start + length + 1] for ix, start in enumerate(starts)]).astype(numpy.float64)
             plan = self.synth.plan_cycles(f0_frames, numpy.full(f0_frames.shape, self.jitter), seeds)
             plan['host'] = self.synth.plan_host_tensors(plan)
-        return {'corpusName': name, 'batch': batch, 'seed': seed, 'starts': starts, 'length': length, 'cutoffs': cutoffs,
-                'plan': plan}
+        return {'batch': batch, 'seed': seed, 'starts': starts, 'length': length, 'plan': plan}
 
     def next(self):
         prepared = self.queue.get()
@@ -408,9 +405,8 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
     losses['band'] = (band * frame_mask).sum() / frame_mask.sum()
 
     # The sonorant frication penalty - af above av - sonorant_af_db (dB / 10) in the sonorant tokens' middle frames
-    token_index, position = frame_tokens(batch['durations'], frames // model.config['subframes'])
-    token_at = torch.gather(batch['tokens'], 1, token_index)
-    sonorant = sonorants[token_at] & (position > 0.2) & (position < 0.8)
+    token_at = torch.gather(batch['tokens'], 1, outputs['tokenIndex'])
+    sonorant = sonorants[token_at] & (outputs['position'] > 0.2) & (outputs['position'] < 0.8)
     sonorant = sonorant.repeat_interleave(model.config['subframes'], dim=1).float() * frame_mask
     excess = torch.relu(values[..., params.INDEX['af']] - values[..., params.INDEX['av']] + args.sonorant_af_db) / 10
     losses['sonorantAf'] = (excess * sonorant).sum() / sonorant.sum().clamp(min=1)
@@ -458,17 +454,6 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
     if with_values:
         return losses, audio, target, quality_stats(values.detach(), frame_mask), values
     return losses, audio, target, quality_stats(values.detach(), frame_mask)
-
-
-# Each 10 ms frame's token index [B, F] and its relative position within the token [B, F]
-def frame_tokens(durations, frame_count):
-    ends = torch.cumsum(durations, dim=1)
-    frames = torch.arange(frame_count, device=durations.device)
-    token_index = torch.searchsorted(ends, frames[None].expand(durations.shape[0], -1).contiguous(), right=True)
-    token_index = token_index.clamp(max=durations.shape[1] - 1)
-    duration = torch.gather(durations, 1, token_index).float().clamp(min=1)
-    start = torch.gather(ends - durations, 1, token_index).float()
-    return token_index, (frames[None].float() - start + 0.5) / duration
 
 
 # The validation losses and statistics of a corpus (no gradients; the model in eval mode) - mean losses and quality
@@ -613,17 +598,17 @@ def main(argv=None):
 
     # Data - the training speech, its voices the speaker table's rows
     start = time.time()
-    corpus_set = Corpus('tts', 'train')
-    val_sets = {'tts': Corpus('tts', 'val', max_items=args.val_count)}
-    speakers = corpus_set.data.index['speakers']
+    corpus = Corpus('tts', 'train')
+    val_corpus = Corpus('tts', 'val', max_items=args.val_count)
+    speakers = corpus.data.index['speakers']
     speaker_keys = [None] * (1 + max(settings['index'] for settings in speakers.values()))
     for key, settings in speakers.items():
         speaker_keys[settings['index']] = key
-    print(f'data: {len(corpus_set)} utterances, val {len(val_sets["tts"])} ({time.time() - start:.1f} s)', file=sys.stderr, flush=True)
-    sonorants = torch.tensor(sonorant_mask(corpus_set.data.index['vocab']), device=device)
+    print(f'data: {len(corpus)} utterances, val {len(val_corpus)} ({time.time() - start:.1f} s)', file=sys.stderr, flush=True)
+    sonorants = torch.tensor(sonorant_mask(corpus.data.index['vocab']), device=device)
 
     # The model, the critic, and the optimizers
-    config = {'speakers': len(speaker_keys), 'vocab': len(corpus_set.data.index['vocab']), **json.loads(args.config)}
+    config = {'speakers': len(speaker_keys), 'vocab': len(corpus.data.index['vocab']), **json.loads(args.config)}
     model = MultiModel(config, priors=MULTI_PRIORS, dropout=args.dropout).to(device)
     init_digest = None
     if args.init:
@@ -678,9 +663,7 @@ def main(argv=None):
                          'priors': MULTI_PRIORS, 'speakers': speaker_keys, 'args': vars(args), 'initDigest': init_digest,
                          **(extra or {})}, path)
 
-    streams = {'tts': batch_stream(corpus_set, args.batch, args.max_frames, rng)}
-    corpora = {'tts': corpus_set}
-    log = open(os.path.join(directory, 'log.jsonl'), 'a', encoding='utf-8')  # pylint: disable=consider-using-with
+    log =open(os.path.join(directory, 'log.jsonl'), 'a', encoding='utf-8')  # pylint: disable=consider-using-with
     sums = {}
     sum_counts = {}
     # The steps' loss and statistics tensors since the last log row - read only when it's written (each read
@@ -690,7 +673,7 @@ def main(argv=None):
     model.train()
     # The steps' data, made ahead on a thread - all the draws from rng are its, in the order the steps made them
     jitter = float(model.fixed[params.INDEX['jitter']].cpu())
-    prefetcher = Prefetcher(corpora, streams, args, rng, synth, jitter)
+    prefetcher = Prefetcher(corpus, batch_stream(corpus, args.batch, args.max_frames, rng), args, rng, synth, jitter)
     # The recent steps' data - their host tensors are the sources of non-blocking uploads, so each is kept until the
     # GPU is past its step (an event after it): on MPS the steps don't read the device (the synthesizer finishes its
     # plans made ahead there), so the CPU runs up to IN_FLIGHT steps ahead of the GPU
@@ -778,8 +761,7 @@ def main(argv=None):
         validating = step == stop or (step % args.val_every == 0 and step >= args.val_from)
         extra = None
         if validating:
-            results = {name: validate(model, synth, corpus_set, args, device, sonorants) for name, corpus_set in val_sets.items()}
-            result = dict(results['tts'])
+            result = validate(model, synth, val_corpus, args, device, sonorants)
             print('  VAL ' + ' '.join(f'{key} {value:.4g}' for key, value in result.items()), file=sys.stderr, flush=True)
             log.write(json.dumps({'val': {'step': step, **result}}) + '\n')
             log.flush()
