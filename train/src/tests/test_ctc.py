@@ -12,7 +12,7 @@ import numpy
 
 from picovox_train import ctc, frontend
 from tests import data_fixtures
-from tests.ctc_fixtures import VOCAB, FakeCtc, clip_labels, fake_recognizer, greedy_of
+from tests.ctc_fixtures import VOCAB, FakeCtc, fake_recognizer, greedy_of
 from tests.helpers import write_wav
 
 
@@ -160,16 +160,6 @@ class TestAlignment(unittest.TestCase):
         for frame, token in enumerate(['<pad>', 'k', 'k', '<pad>', 'k', '<s>', 'ɔː']):
             posteriors[frame, VOCAB[token]] = 0.0
         self.assertEqual(ctc.greedy_decode(posteriors, VOCAB), 'k k ɔː')
-
-    def test_label_durations(self):
-        tokens = frontend.tokenize('Call me.')['tokens']
-        labels, seconds = clip_labels('Call me.')
-        samples = data_fixtures.labels_audio([tuple(label) for label in labels], seconds, 16000)
-        durations, report = ctc.label_durations(tokens, [tuple(label) for label in labels], samples, 16000, {})
-        self.assertAlmostEqual(sum(durations), seconds)
-        self.assertEqual(report['exact'], 5)
-        self.assertIn('pausesRefined', report)
-        self.assertIn('pauseSecondsMoved', report)
 
 
 class TestVote(unittest.TestCase):

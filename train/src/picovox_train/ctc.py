@@ -276,16 +276,6 @@ def greedy_phone_error(greedy, tokens):
     return table[count][heard_count] / max(1, count), count - matched
 
 
-# Token durations (seconds, from the audio's start) of tokens from labels [(label, start, end)] - data.py's
-# alignment and pause refinement; returns (seconds, report)
-def label_durations(tokens, labels, samples, rate, mean_seconds):
-    from . import align  # pylint: disable=import-outside-toplevel
-    from .data import silent_runs  # pylint: disable=import-outside-toplevel
-    seconds, report = align.assign_durations(tokens, [(label, end - start) for label, start, end in labels], mean_seconds)
-    seconds, report['pausesRefined'], report['pauseSecondsMoved'] = align.refine_pauses(tokens, seconds, silent_runs(samples, rate))
-    return seconds, report
-
-
 # Read a 16 kHz mono clip (float64)
 def read_16k(path):
     import numpy as np  # pylint: disable=import-outside-toplevel

@@ -18,7 +18,7 @@ import warnings
 
 import numpy
 
-from picovox_train import books, ctc, data, frontend, readings, tts
+from picovox_train import align, books, ctc, data, frontend, readings, tts
 from tests import ctc_fixtures, data_fixtures, helpers
 from tests.ctc_fixtures import fake_recognizer, greedy_of, tts_corpus, tts_settings
 from tests.data_fixtures import FakeResponse
@@ -596,7 +596,7 @@ class TestBuild(unittest.TestCase):
             path = os.path.join(directory, 'a.wav')
             # A 16 kHz clip - resampled to 24 kHz; its edge silences (0.25 s) cut to MAX_EDGE_SILENCE
             write_wav(path, data_fixtures.labels_audio(labels, seconds, 16000), 16000)
-            result = tts.process_clip((path, tokens, rows, {}, (75.0, 300.0, 5000)))
+            result = tts.process_clip((path, tokens, rows, align.mean_durations(rows), (75.0, 300.0, 5000)))
         self.assertAlmostEqual(result['cutStart'], data_fixtures.EDGE_SECONDS - data.MAX_EDGE_SILENCE, places=3)
         self.assertAlmostEqual(result['seconds'][0], data.MAX_EDGE_SILENCE, places=3)
         self.assertEqual(len(result['frames']), len(tokens))

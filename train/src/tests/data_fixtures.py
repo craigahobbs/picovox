@@ -185,7 +185,7 @@ def text_labels(text):
 def labels_audio(labels, seconds, rate, seed=0):
     samples = numpy.zeros(int(round(seconds * rate)))
     for label, start, end in labels:
-        if label.lower() not in ('pau', 'sil', 'sp', ''):
+        if label != 'pau':
             begin = int(round(start * rate))
             segment = buzz(end - start, rate, seed=seed)
             samples[begin:begin + len(segment)] = segment[:len(samples) - begin]

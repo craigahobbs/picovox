@@ -528,7 +528,7 @@ def clip_checks(record, checks):
 def process_clip(task):
     import numpy as np  # pylint: disable=import-outside-toplevel
     import soxr  # pylint: disable=import-outside-toplevel
-    from . import align, ctc, data  # pylint: disable=import-outside-toplevel
+    from . import align, data  # pylint: disable=import-outside-toplevel
     from .wav import read_wav  # pylint: disable=import-outside-toplevel
     path, tokens, labels, mean_seconds, settings = task
     samples, rate = read_wav(path)
@@ -536,7 +536,7 @@ def process_clip(task):
     if rate != data.SAMPLE_RATE:
         samples = soxr.resample(samples, rate, data.SAMPLE_RATE, quality='VHQ')
     samples = np.ascontiguousarray(samples)
-    seconds, _ = ctc.label_durations(tokens, [tuple(label) for label in labels], samples, data.SAMPLE_RATE, mean_seconds)
+    seconds = align.refine_pauses(tokens, align.label_durations(tokens, labels, mean_seconds), data.silent_runs(samples, data.SAMPLE_RATE))
     wav_seconds = len(samples) / data.SAMPLE_RATE
     speech_start, speech_end = seconds[0], wav_seconds - seconds[-1]
     cut_start = max(0.0, speech_start - data.MAX_EDGE_SILENCE)
@@ -673,13 +673,8 @@ def build_data(args, settings, directory, out):
             raise ValueError(f'{clip["id"]}: the front end\'s phones differ from its alignment\'s - run tts align again')
         checks[clip['id']] = clip_checks(record, settings['checks'])
 
-    # Typical phone durations (align.py splits a label block by them), and each voice's pitch range
-    totals = collections.defaultdict(lambda: [0.0, 0])
-    for clip in clips:
-        for label, begin, end in (records.get(clip['id']) or {}).get('labels') or []:
-            totals[align.label_key(label)][0] += end - begin
-            totals[align.label_key(label)][1] += 1
-    mean_seconds = {key: total / count for key, (total, count) in totals.items()}
+    # The phones' mean durations (align.label_durations), and each voice's pitch range
+    mean_seconds = align.mean_durations([label for clip in clips for label in (records.get(clip['id']) or {}).get('labels') or []])
     with multiprocessing.Pool(args.jobs) as pool:
         first_f0 = pool.map(ctc.first_pass_f0, [wav_path(directory, clip) for clip in clips], chunksize=8)
     pooled = collections.defaultdict(list)
