@@ -227,7 +227,7 @@ test('textBlocks, auto', () => {
     const sentences = splitSentences(text);
     const auto = autoStyles(sentences);
     const beats = paragraphBeats(sentences);
-    assert.deepEqual([auto.spans(0), auto.spans(1).map((span) => span.style)], [null, ['dialogue']]);
+    assert.deepEqual([auto.spans(0), auto.spans(1).map((span) => span.style)], [null, ['dialogue', 'neutral']]);
     const expected = sentences.map((sentence) => {
         const spans = auto.spans(sentence.index)?.map((span) => ({'text': speechText(span.text), 'style': span.style}));
         return concatBlocks([...sentenceBlocks(model, speechText(sentence.text), {
@@ -349,7 +349,7 @@ test('textBlocks', () => {
     const expected = splitSentences(text).map((sentence) => directSentence(speechText(sentence.text), {
         speaker, 'rate': 0.8, 'seed': 1000 + sentence.index, 'pause': sentence.paragraphStart ? paragraphPause : sentencePause
     }));
-    assert.equal(expected.length, 5);
+    assert.equal(expected.length, 4);
     assert(sameSamples(concatBlocks([...textBlocks(model, text, {speaker, 'rate': 0.8, 'seed': 1000})]), concatBlocks(expected)));
 
     // Defaults - seed 1, normal speed, 24 kHz

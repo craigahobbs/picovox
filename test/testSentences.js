@@ -36,9 +36,24 @@ test('splitSentences, empty', () => {
 
 
 test('splitSentences, closing quotes and brackets', () => {
-    assert.deepEqual(sentenceTexts('"Stop!" she cried. (It was late.) \u201cWhy?\u201d \u2018Yes.\u2019 Go...'), [
-        ['"Stop!"', true], ['she cried.', false], ['(It was late.)', false], ['\u201cWhy?\u201d', false], ['\u2018Yes.\u2019', false],
+    assert.deepEqual(sentenceTexts('"Stop!" She ran. (It was late.) \u201cWhy?\u201d \u2018Yes.\u2019 Go...'), [
+        ['"Stop!"', true], ['She ran.', false], ['(It was late.)', false], ['\u201cWhy?\u201d', false], ['\u2018Yes.\u2019', false],
         ['Go...', false]
+    ]);
+});
+
+
+test('splitSentences, attributions and run-ons', () => {
+    // A lowercase word after "!" or "?" continues the sentence - a quotation's attribution, an exclamation's run-on
+    assert.deepEqual(sentenceTexts('"Help!" he screamed. \u201cWhere?\u201d\nasked \u00e9mile. Alas! poor Yorick. Why? because.'), [
+        ['"Help!" he screamed.', true], ['\u201cWhere?\u201d asked \u00e9mile.', false], ['Alas! poor Yorick.', false],
+        ['Why? because.', false]
+    ]);
+
+    // A quotation's closing period too ('"No." he said'), but not a period alone, and not across a paragraph break
+    assert.deepEqual(sentenceTexts('"No." he said. \u2018Go.\u2019 she said. It was 5. then 6. "Stop!"\n\nhe cried.'), [
+        ['"No." he said.', true], ['\u2018Go.\u2019 she said.', false], ['It was 5.', false], ['then 6.', false], ['"Stop!"', false],
+        ['he cried.', true]
     ]);
 });
 
@@ -99,7 +114,7 @@ test('quoteSpans', () => {
     ]);
 
     // Straight quotation marks - opening after a space, closing before one or punctuation; a quotation ending its sentence
-    assert.deepEqual(spans('"Who is there?" she asked. Nobody answered.'), [[['"Who is there?"', 0]], [['she asked.', null]],
+    assert.deepEqual(spans('"Who is there?" she asked. Nobody answered.'), [[['"Who is there?"', 0], ['she asked.', null]],
         [['Nobody answered.', null]]]);
     assert.deepEqual(spans('He said "go" and left.'), [[['He said', null], ['"go"', 0], ['and left.', null]]]);
     assert.deepEqual(spans('A "b"c d.'), [[['A', null], ['"b"', 0], ['c d.', null]]]);
