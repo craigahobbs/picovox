@@ -493,7 +493,7 @@ def labels_command(args):
     ambiguous = {}
     for word, entry in sorted(words.items()):
         default = defaults[word]
-        if default is None or word in spec['exclude']:
+        if default is None:
             continue
         total = sum(counts[word].values())
         common = {reading for reading, count in counts[word].items() if count >= max(MIN_ALTERNATE, MIN_ALTERNATE_SHARE * total)}

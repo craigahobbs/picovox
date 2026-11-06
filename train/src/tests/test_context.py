@@ -181,13 +181,13 @@ class TestContext(unittest.TestCase):
     def test_train_g2p(self):
         items, probabilities = self.tiny_items()
         lines = []
-        model = context.train_g2p(tiny_g2p(), items, probabilities, tiny_labels(), dict(G2P_TINY, train='all'), lines.append)
+        model = context.train_g2p(tiny_g2p(), items, probabilities, tiny_labels(), G2P_TINY, lines.append)
         self.assertTrue(hasattr(model, 'reading'))
         self.assertFalse(model.training)
-        self.assertIn('parameters trained (all)', lines[0])
+        self.assertIn(f'parameters trained ({context.G2P_SETTINGS["train"]})', lines[0])
         self.assertIn('train-g2p: step 3/3', lines[-1])
 
-        # Only some tensors trained (the recipe's), from a model with the heads
+        # Only the recipe's tensors trained, from a model with the heads
         before = {name: tensor.clone() for name, tensor in model.state_dict().items()}
         context.train_g2p(model, items, probabilities, tiny_labels(), G2P_TINY, lines.append)
         self.assertTrue(torch.equal(before['encoder.weight_ih_l0'], model.state_dict()['encoder.weight_ih_l0']))

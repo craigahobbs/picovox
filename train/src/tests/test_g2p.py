@@ -89,13 +89,12 @@ class TestG2p(unittest.TestCase):
 
         # The data and the settings, as objects (empty fixes and books by default)
         self.relabel_path = os.path.join(directory, 'g2p-relabel.json')
-        self.config_path = os.path.join(directory, 'train.json')
         self.files = {
             g2p.WORDS_PATH: WORDS,
             g2p.FIXES_PATH: {'fixes': {}},
             g2p.BOOKS_PATH: {'labels': {}, 'books': {}},
             self.relabel_path: {'relabel': {'lead': 'L EH1 D', 'cat': 'K AA1 T', 'unknownword': 'Y UW1'}},
-            self.config_path: {'g2p': json.loads(json.dumps(CONFIG).replace('RELABEL', self.relabel_path))}
+            g2p.RECIPE_PATH: {'g2p': json.loads(json.dumps(CONFIG).replace('RELABEL', self.relabel_path))}
         }
         self.patches = [helpers.json_files(g2p, self.files),
                         unittest.mock.patch.object(corpora, 'read_dictionary', lambda: self.dictionary)]
@@ -117,7 +116,7 @@ class TestG2p(unittest.TestCase):
             self.assertTrue(file.read().endswith(' one\n'))
 
     def test_load_config(self):
-        self.assertEqual(g2p.load_config(self.config_path)['batch'], 8)
+        self.assertEqual(g2p.load_config()['batch'], 8)
 
     def test_read_pronunciations(self):
         pronunciations = g2p.read_pronunciations()
@@ -319,7 +318,7 @@ class TestG2p(unittest.TestCase):
     def test_train_evaluate(self):
         out = os.path.join(self.directory.name, 'g2p')
         with captured():
-            self.assertEqual(g2p.main(['train', '--out', out, '--config', self.config_path]), 0)
+            self.assertEqual(g2p.main(['train', '--out', out]), 0)
         with open(os.path.join(out, 'done.json'), encoding='utf-8') as file:
             done = json.load(file)
         self.assertEqual(done['checkpoint'], os.path.join(out, 'focus.pt'))
@@ -334,7 +333,7 @@ class TestG2p(unittest.TestCase):
         # its steps - --steps for each stage) trained again
         def train_log(*arguments):
             with captured():
-                self.assertEqual(g2p.main(['train', '--out', out, '--config', self.config_path, *arguments]), 0)
+                self.assertEqual(g2p.main(['train', '--out', out, *arguments]), 0)
             with open(os.path.join(out, 'train.log'), encoding='utf-8') as file:
                 return file.read()
         os.remove(os.path.join(out, 'focus.pt'))
@@ -343,7 +342,7 @@ class TestG2p(unittest.TestCase):
         self.assertEqual(log.count(f'2 steps from {os.path.join(out, "base.pt")}'), 2)
         self.assertIn(f'focus: done before ({os.path.join(out, "focus.pt")})', train_log())
         # (the recipe's description isn't an input)
-        self.files[self.config_path]['g2p']['description'] = 'The G2P, reworded'
+        self.files[g2p.RECIPE_PATH]['g2p']['description'] = 'The G2P, reworded'
         self.assertEqual(train_log().count(f'focus: done before ({os.path.join(out, "focus.pt")})'), 2)
         self.files[self.relabel_path] = {'relabel': {'lead': 'L EH1 D'}}
         log = train_log()

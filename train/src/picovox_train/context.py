@@ -173,8 +173,7 @@ def train_g2p(model, items, probabilities, labels, settings, log):
     invariant /= invariant.sum()
     reading_share, invariant_share = float(settings['readingShare']), float(settings['invariantShare'])
     steps, batch_size, peak, warmup = int(settings['steps']), int(settings['batch']), float(settings['lr']), int(settings['warmup'])
-    trained = [parameter for name, parameter in model.named_parameters()
-               if settings['train'] == 'all' or name.split('.')[0] in settings['train'].split(',')]
+    trained = [parameter for name, parameter in model.named_parameters() if name.split('.')[0] in settings['train'].split(',')]
     for parameter in model.parameters():
         parameter.requires_grad_(any(parameter is other for other in trained))
     head_rate = float(settings['headRate'])
@@ -511,10 +510,10 @@ def train_student(labels, fold, settings, log, states):
     return train_context(labels, settings, lambda text: log_line(log, f'{fold_prefix(fold)}{text}'), teachers)
 
 
-def evaluate_context(slot_of, labels, split='heldout'):
-    """The context choices' accuracy per word and source on a split, against each word's majority slot (in the training
-    examples) - slot_of(windows) gives the chosen slots - {words: {word: {right, total, majority}}, sources: {...}}"""
-    examples = [example for example in labels['examples'] if example['split'] == split]
+def evaluate_context(slot_of, labels):
+    """The context choices' accuracy per word and source on the held-out examples, against each word's majority slot (in
+    the training examples) - slot_of(windows) gives the chosen slots - {words: {word: {right, total, majority}}, sources}"""
+    examples = [example for example in labels['examples'] if example['split'] == 'heldout']
     majority = {}
     training = collections.defaultdict(collections.Counter)
     for example in labels['examples']:

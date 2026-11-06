@@ -92,8 +92,8 @@ def log_line(path, text):
 
 
 # The settings - train/data/train.json's "g2p"
-def load_config(path=RECIPE_PATH):
-    return read_json(path)['g2p']
+def load_config():
+    return read_json(RECIPE_PATH)['g2p']
 
 
 #
@@ -493,7 +493,7 @@ def stage_digest(settings, stage, previous, data, relabel):
 def command_train(args):
     """Every stage of the recipe, each resumed if its checkpoint of the same inputs exists - <out>/<stage>.pt (and its
     .digest), train.log, done.json"""
-    config = load_config(args.config)
+    config = load_config()
     os.makedirs(args.out, exist_ok=True)
     log_path = os.path.join(args.out, 'train.log')
 
@@ -508,8 +508,7 @@ def command_train(args):
     for stage in config['stages']:
         stage = {**stage, **({'steps': args.steps} if args.steps else {})}
         path = os.path.join(args.out, f'{stage["name"]}.pt')
-        relabel = stage.get('relabel', settings.get('relabel'))
-        relabel = relabel and os.path.join(ROOT, relabel)
+        relabel = stage.get('relabel') and os.path.join(ROOT, stage['relabel'])
         digest = stage_digest(settings, stage, digest, data, relabel)
         if os.path.exists(path) and os.path.exists(path + '.digest') and read_text(path + '.digest') == digest:
             log(f'{stage["name"]}: done before ({path})')
@@ -644,7 +643,6 @@ def main(argv=None):
     commands = parser.add_subparsers(dest='command', required=True)
     train_parser = commands.add_parser('train', help='every stage of the recipe (resumable)')
     train_parser.add_argument('--out', required=True, help='the output directory')
-    train_parser.add_argument('--config', default=RECIPE_PATH)
     train_parser.add_argument('--steps', type=int, help='each stage this many steps (a smoke test)')
     train_parser.set_defaults(func=command_train)
     evaluate_parser = commands.add_parser('evaluate', help='the measures of a module or a checkpoint')

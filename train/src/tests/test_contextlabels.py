@@ -390,7 +390,7 @@ class TestContextLabels(unittest.TestCase):
             books.extend({'book': 'pg1', 'text': f'The {word}.', 'tags': {'4': 'NN'}} for _ in range(nouns))
             books.extend({'book': 'pg1', 'text': f'They {word} it.', 'tags': {'5': 'VB'}} for _ in range(verbs))
         self.write(os.path.join(out, 'books.jsonl'), ''.join(json.dumps(record) + '\n' for record in books))
-        spec = {'exclude': [], 'collocations': {}, 'seeds': [{'word': 'object', 'phones': 'AH0 B JH EH1 K T', 'texts': ['I object.']}]}
+        spec = {'collocations': {}, 'seeds': [{'word': 'object', 'phones': 'AH0 B JH EH1 K T', 'texts': ['I object.']}]}
         with unittest.mock.patch.object(contextlabels, 'load_spec', lambda: spec), \
                 unittest.mock.patch.object(contextlabels, 'candidate_words', lambda spec: words), \
                 unittest.mock.patch.object(contextlabels, 'default_readings', lambda words: {word: 0 for word in words}), \
@@ -457,7 +457,7 @@ class TestContextLabels(unittest.TestCase):
             {'book': 'pg2', 'text': 'You read.', 'tags': {}}
         ]
         self.write(os.path.join(out, 'books.jsonl'), ''.join(json.dumps(record) + '\n' for record in books))
-        spec = {'exclude': ['excluded'], 'collocations': {'lead': [['\\blead pipes?\\b', 'L EH1 D'], ['\\bwhite lead\\b', 'L EH1 D']]},
+        spec = {'collocations': {'lead': [['\\blead pipes?\\b', 'L EH1 D'], ['\\bwhite lead\\b', 'L EH1 D']]},
                 'seeds': [{'word': 'lead', 'phones': 'L IY1 D', 'texts': ['They lead the way.', 'Lead on.']},
                           {'word': 'bass', 'phones': 'B EY1 S', 'texts': ['The bass singer.']}]}
         defaults = {word: 0 for word in words}
