@@ -39,8 +39,8 @@ class SmokeRun:
         os.makedirs(os.path.join(self.root, 'train', 'data'))
         shutil.copy(os.path.join(ROOT, 'train', 'data', 'train.json'), os.path.join(self.root, 'train', 'data', 'train.json'))
         if labels:
-            os.makedirs(os.path.join(self.root, 'build', 'nn', 'context'))
-            with open(os.path.join(self.root, 'build', 'nn', 'context', 'labels.json'), 'w', encoding='utf-8') as file:
+            os.makedirs(os.path.join(self.root, 'build', 'train', 'context'))
+            with open(os.path.join(self.root, 'build', 'train', 'context', 'labels.json'), 'w', encoding='utf-8') as file:
                 file.write('{}')
         self.corpus = os.path.join(self.temp.name, 'tts')
         if corpus:
@@ -110,7 +110,7 @@ class TestSmoke(unittest.TestCase):
         self.assertRegex(lines[0], r'^ok g2p-train \([0-9]+ s\)$')
         self.assertEqual(run.command('g2p-train')[3:], ['picovox_train.g2p', 'train', '--out', os.path.join(run.out, 'g2p'),
                                                         '--steps', '3'])
-        self.assertEqual(run.command('context-g2p')[6], os.path.join(run.root, 'build', 'nn', 'context', 'labels.json'))
+        self.assertEqual(run.command('context-g2p')[6], os.path.join(run.root, 'build', 'train', 'context', 'labels.json'))
         self.assertIn('--adversarial-start', run.command('voice-b'))
         # The data stage's clips, and the voice stages on its data
         self.assertEqual(run.command('data-build')[3:], ['picovox_train.tts', 'build', '--out', os.path.join(run.out, 'data', 'tts'),
@@ -163,7 +163,7 @@ class TestSmoke(unittest.TestCase):
         self.assertIsNone(run.data_dirs['voice-a'])
 
     def test_no_labels(self):
-        # No context labels (nn.contextlabels not run) - the context stage is skipped
+        # No context labels (make train's picovox_train.contextlabels not run) - the context stage is skipped
         run = self.smoke_run(labels=False)
         self.assertEqual(run.main('--only', 'g2p,context')[0], 0)
         self.assertEqual(run.names(), ['g2p-train'])

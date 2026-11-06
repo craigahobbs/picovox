@@ -9,7 +9,7 @@ directory, each checked to finish and write its outputs:
         [--only g2p,context,data,voice,package]
 
 - g2p - picovox_train.g2p train (each stage 3 steps)
-- context - picovox_train.context train-g2p and train-context (3 steps) and export, from the g2p stage (when build/nn/context has the
+- context - picovox_train.context train-g2p and train-context (3 steps) and export, from the g2p stage (when build/train/context has the
   context labels - picovox_train.contextlabels)
 - data - picovox_train.tts build --out on a few clips of the training speech (when its corpus is generated and aligned -
   picovox_train.tts generate, align; the smoke test never runs the engine)
@@ -65,8 +65,9 @@ def main(argv=None):
     if 'g2p' in stages:
         g2p_dir = os.path.join(out, 'g2p')
         if run('g2p-train', ['picovox_train.g2p', 'train', '--out', g2p_dir, '--steps', '3'], [os.path.join(g2p_dir, 'done.json')]):
-            # The heteronym models (context.py) on the context labels, if built (picovox_train.contextlabels - build/nn/context)
-            labels = os.path.join(ROOT, 'build', 'nn', 'context', 'labels.json')
+            # The heteronym models (context.py) on the context labels, if make train built them (picovox_train.contextlabels -
+            # its TRAIN_DIR's default, build/train/context)
+            labels = os.path.join(ROOT, 'build', 'train', 'context', 'labels.json')
             if 'context' in stages and os.path.exists(labels):
                 g2p_checkpoint, context_checkpoint = os.path.join(out, 'context-g2p.pt'), os.path.join(out, 'context.pt')
                 if run('context-g2p', ['picovox_train.context', 'train-g2p', '--labels', labels, '--init',
