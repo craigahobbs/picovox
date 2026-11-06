@@ -322,7 +322,7 @@ def measure_command(args):
     if not args.limit and os.path.exists(os.path.join(out, 'summary.json')) and read_json(os.path.join(out, 'summary.json'))['key'] == key:
         log(f'measure: {out} is current')
         return 0
-    words = measured_words()
+    words, _ = measured_words()
     classes = {word: word_class(readings) for word, readings in words.items()}
     records = tts.read_alignments(directory)
     clips = [clip for clip in clips if clip['id'] in records and not tts.clip_checks(records[clip['id']], settings['checks'])[0]]

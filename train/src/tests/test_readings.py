@@ -156,8 +156,7 @@ class TestReadings(unittest.TestCase):
         self.assertIsNone(readings.reading_of('K AE1 T', word_readings))
 
     def test_token_words(self):
-        boundaries = {'<bos>', '_', '<period>', '<comma>'}
-        self.assertEqual(readings.token_words(['<bos>', 'AY1', '_', 'R', 'EH1', 'D', '<comma>', 'IH1', 'T', '<period>'], boundaries),
+        self.assertEqual(readings.token_words(['<bos>', 'AY1', '_', 'R', 'EH1', 'D', '<comma>', 'IH1', 'T', '<period>']),
                          ['AY1', 'R EH1 D', 'IH1 T'])
         self.assertEqual(readings.token_words(['<bos>', 'AY1', '_', 'IH1', 'T', '<period>']), ['AY1', 'IH1 T'])
 
@@ -194,9 +193,10 @@ class TestReadings(unittest.TestCase):
         with unittest.mock.patch.object(corpora, 'read_dictionary', lambda: dictionary), \
                 unittest.mock.patch.object(readings, 'load_spec', return_value={'words': {}}), \
                 unittest.mock.patch.object(readings, 'candidate_words', candidate_words):
-            words = readings.measured_words()
+            words, candidates = readings.measured_words()
             quotas = readings.coverage_quotas({'gate': 5, 'context': 3, 'other': 1}, ['read'])
         self.assertEqual(sorted(words), ['dawn', 'insult', 'read', 'use', 'wound'])
+        self.assertEqual(sorted(candidates), ['insult', 'use', 'wound'])
         self.assertEqual(words['wound'], [['W UW1 N D'], ['W AW1 N D']])
         self.assertEqual(quotas, {'read': 5, 'use': 3, 'dawn': 1, 'wound': 3})
 

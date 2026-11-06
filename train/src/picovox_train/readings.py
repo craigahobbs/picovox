@@ -209,13 +209,11 @@ def reading_of(phones, readings):
     return loose[0] if len(loose) == 1 else None
 
 
-# The words' phones (strings) of a token sequence - split at the word boundaries (default the front end's) and phrase
-# ends, after <bos>
-def token_words(tokens, boundaries=None):
-    boundaries = BOUNDARIES if boundaries is None else boundaries
+# The words' phones (strings) of a token sequence - split at the word boundaries and phrase ends, after <bos>
+def token_words(tokens):
     words, current = [], []
     for token in tokens[1:]:
-        if token in boundaries:
+        if token in BOUNDARIES:
             words.append(' '.join(current))
             current = []
         else:
@@ -276,9 +274,8 @@ SPEC_PATH = os.path.join(ROOT, 'train', 'data', 'context-labels.json')
 
 
 # The curated spec
-def load_spec(path=SPEC_PATH):
-    with open(path, encoding='utf-8') as file:
-        return json.load(file)
+def load_spec():
+    return read_json(SPEC_PATH)
 
 
 # A variant's vowels
@@ -342,20 +339,20 @@ def candidate_words(spec, heteronyms=None):
     return words
 
 
-# The words whose readings the corpus measures - {word: readings}: the inventory's, and the context labels' candidate
-# words (with the readings the dictionary lacks)
+# The words whose readings the corpus measures, and the context labels' candidate words (candidate_words') -
+# ({word: readings}: the inventory's, and the candidates' with the readings the dictionary lacks; the candidates)
 def measured_words():
     words = inventory()
-    for word, entry in candidate_words(load_spec(), words).items():
+    candidates = candidate_words(load_spec(), words)
+    for word, entry in candidates.items():
         words[word] = entry['readings']
-    return words
+    return words, candidates
 
 
 # The corpus's coverage quotas - {word: sentences}: the gate's words (coverage "gate"), the context labels' candidate
 # words ("context"), and the other measured words ("other"); a word whose readings can't be measured, none
 def coverage_quotas(coverage, gate_words):
-    words = measured_words()
-    context = set(candidate_words(load_spec(), inventory()))
+    words, context = measured_words()
     quotas = {}
     for word, readings in words.items():
         if word_class(readings) != 'stress':
