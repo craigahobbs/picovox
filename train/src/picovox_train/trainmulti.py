@@ -34,10 +34,10 @@ Checkpoints and the log go to build/nn/runs/<name>/ (last.pt every --save-every 
 validation score, validated every --val-every steps from --val-from and at the end, step-<n>.pt every --keep-every steps,
 log.jsonl).
 
-The training step's options (optim.py):
+The training step (optim.py) - the lean optimizer: the gradient clip and the AdamW step in a few kernel launches (the
+global norm of one concatenation, the clip as fused AdamW's grad_scale, one shared step counter); and its learning rate
+schedule:
 
-- --lean-clip - the gradient clip and the AdamW step in a few kernel launches (the global norm of one concatenation,
-  the clip as fused AdamW's grad_scale, one shared step counter) - the same up to rounding
 - --schedule wsd --cooldown F - warmup-stable-decay: constant, then the last F of the steps cooled down to the floor by
   1 - sqrt
 """
@@ -559,7 +559,6 @@ def argument_parser():
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--init', default=None, help='initialize the weights from a checkpoint')
     parser.add_argument('--seed', type=int)
-    parser.add_argument('--lean-clip', action='store_true', help='the lean clip and AdamW step (optim.py)')
     parser.add_argument('--schedule', choices=['cosine', 'wsd'], default='cosine', help='the learning rate schedule')
     parser.add_argument('--cooldown', type=float, default=0.0, help="wsd: the cooldown's share of --steps")
     parser.set_defaults(**recipe_defaults('voice.defaults'))
@@ -638,19 +637,13 @@ def main(argv=None):
     if args.adversarial > 0:
         critic_dtype = None if args.critic_precision == 'float32' else getattr(torch, args.critic_precision)
         critic = discriminator.Critic(args.rate, args.max_hz, eps=1e-9, dtype=critic_dtype, channels=args.critic_channels).to(device)
-    # (on the GPU the fused AdamW - one kernel, not a loop over the parameters - which also skips a step with a
-    # non-finite gradient norm on the device, so the step needn't read the norm)
+    # (on the GPU the critic's fused AdamW - one kernel, not a loop over the parameters)
     fused = device.type in ('mps', 'cuda')
     critic_optimizer = torch.optim.AdamW(critic.parameters(), lr=args.critic_lr, betas=(0.8, 0.99),
                                          fused=fused or None) if critic else None
-    # (the lean step - optim.py)
-    lean = args.lean_clip
-    if lean:
-        optimizer = optim.LeanOptimizer([{'params': list(model.parameters())}], lr=args.lr, weight_decay=args.weight_decay,
-                                        betas=(0.9, 0.98))
-    else:
-        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, betas=(0.9, 0.98),
-                                      fused=fused or None)
+    # (the model's lean step - optim.py)
+    optimizer = optim.LeanOptimizer([{'params': list(model.parameters())}], lr=args.lr, weight_decay=args.weight_decay,
+                                    betas=(0.9, 0.98))
 
     def learning_rate(step):
         return optim.lr_factor(step, args.steps, args.warmup, args.schedule, args.cooldown)
@@ -661,17 +654,14 @@ def main(argv=None):
     state = resume_state(directory, args, init_digest, device)
     if state is not None:
         model.load_state_dict(state['model'])
-        # (a checkpoint saved by the unfused AdamW resumes fused: its param groups say fused, so loading moves the
-        # step counts to the device as the fused step needs)
-        if not lean:
-            for group in state['optimizer']['param_groups']:
-                group['fused'] = fused or None
         optimizer.load_state_dict(state['optimizer'])
         scheduler.load_state_dict(state['scheduler'])
         step = state['step']
         best = state.get('best', math.inf)
         if critic is not None:
             critic.load_state_dict(state['critic'])
+            # (a checkpoint saved by the unfused AdamW resumes fused: its param groups say fused, so loading moves the
+            # step counts to the device as the fused step needs)
             for group in state['criticOptimizer']['param_groups']:
                 group['fused'] = fused or None
             critic_optimizer.load_state_dict(state['criticOptimizer'])
@@ -742,17 +732,8 @@ def main(argv=None):
                 losses['total'] = losses['total'] + args.adversarial * adversarial + args.feature_matching * matching
         optimizer.zero_grad()
         losses['total'].backward()
-        if lean:
-            # (the clip inside the step, which skips a non-finite one on the device)
-            optimizer.step()
-        else:
-            norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            if fused:  # pragma: no cover - the GPU's fused optimizer
-                # (the fused step skips itself - parameters, moments, and step count - when found_inf is 1)
-                optimizer.found_inf = (~torch.isfinite(norm)).float()
-                optimizer.step()
-            elif torch.isfinite(norm):
-                optimizer.step()
+        # (the clip inside the step, which skips a non-finite one on the device)
+        optimizer.step()
         scheduler.step()
         step += 1
         if device.type == 'mps':  # pragma: no cover - the Apple GPU only

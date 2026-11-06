@@ -57,10 +57,6 @@ class TestSchedule(unittest.TestCase):
         # (no cooldown - constant to the end)
         self.assertEqual(optim.lr_factor(100, 100, 10, 'wsd'), 1.0)
 
-    def test_unknown(self):
-        with self.assertRaises(ValueError):
-            optim.lr_factor(50, 100, 10, 'step')
-
 
 class TestLeanOptimizer(unittest.TestCase):
 

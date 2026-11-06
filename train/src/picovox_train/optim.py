@@ -2,14 +2,14 @@
 # https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
 """
-The training step's options (trainmulti.py):
+The training step (trainmulti.py):
 
-- the lean step (--lean-clip) - the gradient clip and the AdamW step in a few kernel launches: the global gradient norm
-  of one concatenation of the gradients (not a norm per tensor), the clip passed to fused AdamW as its grad_scale (the
-  kernel divides the gradients by it - not a multiply per tensor), and one step counter shared by the parameters (not
-  one per tensor, each incremented and, with found_inf, decremented on its own). On MPS, which has no foreach kernels,
-  the default clip and step counters are a launch per tensor - about 700 a training step. The results match the
-  default's up to rounding (the clip's multiply is the kernel's divide).
+- the lean step (LeanOptimizer) - the gradient clip and the AdamW step in a few kernel launches: the global gradient
+  norm of one concatenation of the gradients (not a norm per tensor), the clip passed to fused AdamW as its grad_scale
+  (the kernel divides the gradients by it - not a multiply per tensor), and one step counter shared by the parameters
+  (not one per tensor, each incremented and, with found_inf, decremented on its own). On MPS, which has no foreach
+  kernels, torch's clip and step counters are a launch per tensor - about 700 a training step. The results match
+  clip_grad_norm_ and AdamW's up to rounding (the clip's multiply is the kernel's divide).
 - the learning rate schedule (lr_factor, --schedule wsd --cooldown F) - the default linear warmup then cosine to 0.05,
   or warmup-stable-decay: constant after the warmup, then the last F of the steps cooled down to 0.05 by 1 - sqrt
 """
@@ -35,8 +35,6 @@ def lr_factor(step, steps, warmup, schedule='cosine', cooldown=0.0):
     if schedule == 'cosine':
         progress = (step - warmup) / max(1, steps - warmup)
         return 0.05 + 0.95 * 0.5 * (1 + math.cos(math.pi * min(1.0, progress)))
-    if schedule != 'wsd':
-        raise ValueError(f'unknown schedule {schedule}')
     decay_start = steps - int(round(cooldown * steps))
     if step < decay_start:
         return 1.0

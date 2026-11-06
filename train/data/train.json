@@ -87,9 +87,9 @@
             "feature-matching": 1.0, "adversarial-start": 500, "critic-lr": 0.0002, "critic-precision": "bfloat16", "val-count": 480,
             "seed": 1
         },
-        "a": {"steps": 30000, "stop": 15000, "lr": 0.001, "warmup": 1000, "val-every": 5000, "lean-clip": true, "seed": 1},
+        "a": {"steps": 30000, "stop": 15000, "lr": 0.001, "warmup": 1000, "val-every": 5000, "seed": 1},
         "b": {"steps": 10000, "lr": 0.0005, "warmup": 500, "schedule": "wsd", "cooldown": 0.25,
-              "adversarial": 0.1, "adversarial-start": 1000, "guide-steps": 0.001, "val-from": 7500, "lean-clip": true,
+              "adversarial": 0.1, "adversarial-start": 1000, "guide-steps": 0.001, "val-from": 7500,
               "critic-channels": 16, "seed": 1}
     },
     "panel": {

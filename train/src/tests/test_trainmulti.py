@@ -461,17 +461,16 @@ class TestMain(unittest.TestCase):
         self.assertEqual((last['step'], last['val'], last['best']), (4, {'score': 3.0}, 2.0))
 
     def test_nonfinite_gradient(self):
-        # A step with a non-finite gradient norm is skipped (the unfused optimizer)
-        with unittest.mock.patch.object(torch.nn.utils, 'clip_grad_norm_', return_value=torch.tensor(math.inf)), \
-                warnings.catch_warnings():
+        # A step with a non-finite gradient norm is skipped on the device (the lean optimizer - its step counts unchanged)
+        def infinite_norm(_optimizer):
+            return torch.tensor(math.inf)
+        with unittest.mock.patch.object(trainmulti.optim.LeanOptimizer, 'grad_norm', infinite_norm), warnings.catch_warnings():
             # (the schedule steps though the optimizer didn't - torch warns)
             warnings.filterwarnings('ignore', message='Detected call of `lr_scheduler.step', category=UserWarning)
             self.assertEqual(DATA.train('nonfinite', '--steps', '1'), 0)
-        initial = MultiModel({**helpers.tiny_config(), 'speakers': 4})
         state = torch.load(DATA.run_path('nonfinite', 'last.pt'), weights_only=False)
-        self.assertEqual(state['optimizer']['state'], {})
         self.assertEqual(state['step'], 1)
-        self.assertEqual(set(state['model']), set(initial.state_dict()))
+        self.assertTrue(all(value['step'].item() == 0 for value in state['optimizer']['state'].values()))
 
     def test_nan_statistics(self):
         # The statistics are left out of the log when NaN (no strongly voiced frames)
@@ -499,7 +498,7 @@ class TestStepOptions(unittest.TestCase):
     def test_options(self):
         # Stage B (the critic) with every training step option, stopped and resumed
         init = tiny_checkpoint()
-        options = ['--recipe', 'voice.b', '--init', init, '--lean-clip', '--schedule', 'wsd', '--cooldown', '0.5', '--val-every', '1']
+        options = ['--recipe', 'voice.b', '--init', init, '--schedule', 'wsd', '--cooldown', '0.5', '--val-every', '1']
         self.assertEqual(DATA.train('options', *options, '--stop', '2', '--resume'), 0)
         self.assertEqual(DATA.train('options', *options, '--resume'), 0)
         self.assertIn('options: 3 steps from 2', DATA.last_log)
@@ -508,13 +507,3 @@ class TestStepOptions(unittest.TestCase):
         self.assertIn('score', last['val'])
         # (the lean optimizer's state - AdamW's shared step count)
         self.assertTrue(all(state['step'].item() == 3 for state in last['optimizer']['state'].values()))
-
-    def test_lean_clip(self):
-        # The lean step alone (AdamW's groups only); a non-finite step skipped on the device
-        def infinite_norm(_optimizer):
-            return torch.tensor(math.inf)
-        with unittest.mock.patch.object(trainmulti.optim.LeanOptimizer, 'grad_norm', infinite_norm), warnings.catch_warnings():
-            warnings.filterwarnings('ignore', message='Detected call of `lr_scheduler.step', category=UserWarning)
-            self.assertEqual(DATA.train('lean', '--lean-clip', '--steps', '1'), 0)
-        state = torch.load(DATA.run_path('lean', 'last.pt'), weights_only=False)
-        self.assertTrue(all(value['step'].item() == 0 for value in state['optimizer']['state'].values()))
