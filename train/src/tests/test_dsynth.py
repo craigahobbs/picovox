@@ -146,16 +146,6 @@ class FakeLibrary:
         for buffer, value in zip((grad_b, grad_c, grad_log_a), values):
             buffer.copy_(value)
 
-    @torch.enable_grad()
-    def tract_response_trig_backward(self, grad_c1, grad_s1, grad_c2, grad_s2, grad_magnitude, grad_phase, cos1, sin1, cos2,
-                                     sin2, coef_b, coef_c, dims, flags, threads):
-        self.calls.append(('tract_response_trig_backward', dims, list(flags), threads))
-        trig = [value.clone().requires_grad_() for value in (cos1, sin1, cos2, sin2)]
-        log_a = torch.zeros_like(coef_b, requires_grad=True)
-        values = self._tract_grads(grad_magnitude, grad_phase, trig, coef_b, coef_c, flags, (*trig, log_a))
-        for buffer, value in zip((grad_c1, grad_s1, grad_c2, grad_s2), values):
-            buffer.copy_(value)
-
     def frication(self, out, cos1, sin1, cos2, sin2, coef, dims, threads):
         self.calls.append(('frication', dims, threads))
         out.copy_(_frication_reference(cos1, sin1, cos2, sin2, coef))
@@ -393,7 +383,7 @@ class TestKernels(unittest.TestCase):
         # The tract of the frames - by the kernels, or PyTorch
         def tract(per_frame, phase, kernel):
             values = dsynth.split_values(frames)
-            frequency = values['f0'] * torch.arange(1, 7) if per_frame else torch.linspace(50, 8000, 12)
+            frequency = values['f0'].detach() * torch.arange(1, 7) if per_frame else torch.linspace(50, 8000, 12)
             if not kernel:
                 return dsynth.tract_log(frequency, values, phase=phase)
             with unittest.mock.patch.object(dsynth, '_tract_kernel', dsynth._tract_metal):
@@ -417,7 +407,9 @@ class TestKernels(unittest.TestCase):
             _, phase = dsynth.tract_log(torch.linspace(50, 8000, 12), values)
         expected = torch.autograd.grad(dsynth.tract_log(torch.linspace(50, 8000, 12), dsynth.split_values(frames))[1].sum(), frames)[0]
         self.assertTrue(torch.allclose(torch.autograd.grad(phase.sum(), frames)[0], expected, rtol=1e-3, atol=1e-3))
-        self.assertIn('tract_response_trig_backward', [call[0] for call in library.calls])
+        # Differentiated frequencies - not the kernels'
+        differentiated = dsynth.frequency_trig(values['f0'] * torch.arange(1, 7))
+        self.assertIsNone(dsynth._tract_metal(differentiated, [(values['f1'], values['b1'])], (values['fnz'], values['bnz']), True))
 
     def test_tract_response_backward(self):
         # Without a magnitude gradient (autograd's unmaterialized gradient) - as a zero gradient

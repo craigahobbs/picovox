@@ -483,48 +483,14 @@ kernel void tract_response_backward(device float* grad_b [[buffer(0)]], device f
     grad_c[index] = sign * gc;
     grad_log_a[index] = sign * ga;
 }
-
-// The per-frame frequencies' trigonometry's gradients [B, T, M]
-kernel void tract_response_trig_backward(device float* grad_c1 [[buffer(0)]], device float* grad_s1 [[buffer(1)]],
-                                         device float* grad_c2 [[buffer(2)]], device float* grad_s2 [[buffer(3)]],
-                                         device const float* grad_magnitude [[buffer(4)]], device const float* grad_phase [[buffer(5)]],
-                                         device const float* cos1 [[buffer(6)]], device const float* sin1 [[buffer(7)]],
-                                         device const float* cos2 [[buffer(8)]], device const float* sin2 [[buffer(9)]],
-                                         device const float* coef_b [[buffer(10)]], device const float* coef_c [[buffer(11)]],
-                                         constant long4& dims [[buffer(12)]], constant long2& flags [[buffer(13)]],
-                                         uint index [[thread_position_in_grid]]) {
-    const long frames = dims.x * dims.y, bins = dims.z, resonators = dims.w;
-    if ((long)index >= frames * bins) {
-        return;
-    }
-    const long frame = index / bins;
-    const float gm = grad_magnitude[index];
-    const float gp = flags.y ? grad_phase[index] : 0.0f;
-    const float c1 = cos1[index], s1 = sin1[index], c2 = cos2[index], s2 = sin2[index];
-    float g_c1 = 0.0f, g_s1 = 0.0f, g_c2 = 0.0f, g_s2 = 0.0f;
-    for (long i = 0; i < resonators; i++) {
-        const float sign = i < resonators - 1 ? 1.0f : -1.0f;
-        const float b = coef_b[frame * resonators + i], c = coef_c[frame * resonators + i];
-        const float re = 1.0f - b * c1 - c * c2;
-        const float im = b * s1 + c * s2;
-        const float scale = sign / (re * re + im * im);
-        g_c1 += scale * (gm * re - gp * im) * b;
-        g_s1 -= scale * (gm * im + gp * re) * b;
-        g_c2 += scale * (gm * re - gp * im) * c;
-        g_s2 -= scale * (gm * im + gp * re) * c;
-    }
-    grad_c1[index] = g_c1;
-    grad_s1[index] = g_s1;
-    grad_c2[index] = g_c2;
-    grad_s2[index] = g_s2;
-}
 '''
 
 
 # (an autograd Function needs only forward and backward, not the other abstract methods)
 class _TractResponse(torch.autograd.Function):  # pylint: disable=abstract-method
     """The tract's log magnitude [B, T, M] (and with_phase its phase) from its frequencies' trigonometry ([B, T, M] or
-    [M] each) and its resonators' coefficients b, c, log a [B, T, R] (the last resonator the zero)"""
+    [M] each) and its resonators' coefficients b, c, log a [B, T, R] (the last resonator the zero) - differentiable in
+    the coefficients"""
 
     @staticmethod
     def forward(ctx, cos1, sin1, cos2, sin2, coef_b, coef_c, log_a, with_phase):  # pylint: disable=arguments-differ
@@ -554,20 +520,14 @@ class _TractResponse(torch.autograd.Function):  # pylint: disable=abstract-metho
         grad_b = torch.empty_like(coef_b)
         grad_c = torch.empty_like(coef_b)
         grad_log_a = torch.empty_like(coef_b)
-        library = _metal_library(_TRACT_SOURCE)
-        library.tract_response_backward(grad_b, grad_c, grad_log_a, grad_magnitude, grad_phase, cos1, sin1, cos2, sin2,
-                                        coef_b, coef_c, dims, flags, threads=coef_b.numel())
-        grad_trig = [None] * 4
-        if flags[0] and any(ctx.needs_input_grad[:4]):
-            grad_trig = [torch.empty_like(grad_magnitude) for _ in range(4)]
-            library.tract_response_trig_backward(*grad_trig, grad_magnitude, grad_phase, cos1, sin1, cos2, sin2, coef_b,
-                                                 coef_c, dims, flags, threads=grad_magnitude.numel())
-        return (*grad_trig, grad_b, grad_c, grad_log_a, None)
+        _metal_library(_TRACT_SOURCE).tract_response_backward(grad_b, grad_c, grad_log_a, grad_magnitude, grad_phase, cos1, sin1,
+                                                              cos2, sin2, coef_b, coef_c, dims, flags, threads=coef_b.numel())
+        return None, None, None, None, grad_b, grad_c, grad_log_a, None
 
 
-# The tract's log magnitude and phase by the Metal kernels, or None where they don't apply (not MPS float32, or
-# frequencies or parameters not shaped [B, T, M] / [M] and [B, T, 1]) - the resonators' coefficients made as
-# resonator_log makes them
+# The tract's log magnitude and phase by the Metal kernels, or None where they don't apply (not MPS float32,
+# frequencies or parameters not shaped [B, T, M] / [M] and [B, T, 1], or the frequencies differentiated) - the
+# resonators' coefficients made as resonator_log makes them
 def _tract_kernel(trig, poles, zero, phase):
     center = poles[0][0]
     if center.device.type != 'mps' or center.dtype != torch.float32 or center.dim() != 3 or center.shape[-1] != 1 or \
@@ -576,10 +536,12 @@ def _tract_kernel(trig, poles, zero, phase):
     return _tract_metal(trig, poles, zero, phase)  # pragma: no cover - MPS only (the tests run on the CPU)
 
 
-# _tract_kernel's response of MPS float32 [B, T, 1] parameters, or None where the frequencies don't apply
+# _tract_kernel's response of MPS float32 [B, T, 1] parameters, or None where the frequencies don't apply (or are
+# differentiated - the synthesizer's never are)
 def _tract_metal(trig, poles, zero, phase):
     batch, frames = poles[0][0].shape[:2]
-    if not (trig[0].dim() == 1 or tuple(trig[0].shape[:2]) == (batch, frames)) or trig[0].dtype != torch.float32:
+    if not (trig[0].dim() == 1 or tuple(trig[0].shape[:2]) == (batch, frames)) or trig[0].dtype != torch.float32 or \
+            any(value.requires_grad for value in trig):
         return None
     resonators = [*poles, zero]
     centers = torch.cat([torch.broadcast_to(center, (batch, frames, 1)) for center, _ in resonators], dim=-1)
