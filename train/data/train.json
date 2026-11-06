@@ -1,5 +1,5 @@
 {
-    "description": "make train's recipe - every stage's settings and seeds: the G2P network (nn/g2p.py) and its heteronym models (nn/context.py), the voice model (nn/trainmulti.py --recipe), and its evaluation and gate (nn/panel.py)",
+    "description": "make train's recipe - every stage's settings and seeds: the training speech (picovox_train/tts.py), the G2P network (picovox_train/g2p.py) and its heteronym models (picovox_train/context.py), the voice model (picovox_train/trainmulti.py --recipe), and its evaluation and gate (picovox_train/panel.py)",
     "tts": {
         "description": "The training speech (picovox_train/tts.py): book sentences spoken by a local TTS model through Ollama's speech endpoint (engine - its model pinned by digest: a new model is a new corpus, downloads/tts/<model>-<digest>/), one engine voice for each of the package's voices (voices - the model's speaker rows in this order; male, the first, the default), the heteronym coverage first (coverage - sentences a word: the context gate's words, the context labels' candidate words, the other measured words - readings.py) from the context labels' books, then the fill's books (fill) at random, to hoursPerVoice hours of speech a voice (wordsPerSecond - the engine's speaking rate, for the estimate); split by a hash of the text (split - test and val percents); a clip excluded by the checks (the recognizer's greedy phone error above maxPhoneError; cut short - truncatedTail final phones missing with under truncatedSilence seconds of trailing silence, or truncatedAlways at any; maxClipped of its samples at full scale); analysed with the formant ceilings by sex, at the engine's bandwidth (Hz)",
         "engine": {"url": "http://localhost:11434", "model": "phonon", "digest": "58f58601e4e8",
@@ -103,7 +103,7 @@
         }
     },
     "samples": {
-        "description": "The listening samples (tools/trainsamples.js): each training stage's final model - voice A and voice B - and the shipped model (lib/models/voiceModel.js) as a reference, each speaking the texts in the speakers' voices as the app speaks them (static/audiobook/worker.js), scored with UTMOS on the CPU, in $(TRAIN_DIR)/samples/ (index.json lists them) for the training dashboard's Listen tab",
+        "description": "The listening samples (tools/trainsamples.js): each training stage's final model - voice A and voice B - and the shipped model (lib/models/voiceModel.js) as a reference, each speaking the texts in the speakers' voices as the package speaks a sentence (lib/synthesis.js), scored with UTMOS on the CPU, in $(TRAIN_DIR)/samples/ (index.json lists them) for the training dashboard's Listen tab",
         "texts": [
             {"key": "ishmael", "label": "Moby-Dick's opening", "text": "Call me Ishmael. Some years ago, never mind how long precisely, having little or no money in my purse, and nothing particular to interest me on shore, I thought I would sail about a little and see the watery part of the world."},
             {"key": "dialogue", "label": "Dialogue", "text": "\"Wait! Did you hear that?\" she whispered. \"Only the wind,\" he said, laughing. \"Go back to sleep.\""},

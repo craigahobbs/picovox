@@ -29,7 +29,7 @@ class TestExport(unittest.TestCase):
         cls.patches = model_fixtures.patched_dirs(cls.root)
         cls.data_dir = cls.patches.__enter__()
         model_fixtures.write_data(cls.data_dir)
-        cls.checkpoint = model_fixtures.write_checkpoint(os.path.join(cls.root, 'teacher.pt'), args={
+        cls.checkpoint = model_fixtures.write_checkpoint(os.path.join(cls.root, 'voice.pt'), args={
             'recipe_file': os.path.join(ROOT, 'train', 'data', 'train.json'), 'init': 'build/train/runs/a/best.pt',
             'init_critic': os.path.join(cls.root, 'critic.pt'), 'steps': 3, 'config': '{}', 'files': ['/a/b', 'c']
         })
@@ -188,7 +188,7 @@ class TestExportParity(unittest.TestCase):
         cls.patches = model_fixtures.patched_dirs(cls.root)
         cls.data_dir = cls.patches.__enter__()
         model_fixtures.write_data(cls.data_dir)
-        cls.checkpoint = model_fixtures.write_checkpoint(os.path.join(cls.root, 'teacher.pt'), seed=3)
+        cls.checkpoint = model_fixtures.write_checkpoint(os.path.join(cls.root, 'voice.pt'), seed=3)
 
     @classmethod
     def tearDownClass(cls):

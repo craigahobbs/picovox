@@ -117,7 +117,7 @@ class TestPackage(unittest.TestCase):
         cls.patches = model_fixtures.patched_dirs(cls.root)
         data_dir = cls.patches.__enter__()
         model_fixtures.write_data(data_dir)
-        checkpoint = model_fixtures.write_checkpoint(os.path.join(cls.root, 'teacher.pt'))
+        checkpoint = model_fixtures.write_checkpoint(os.path.join(cls.root, 'voice.pt'))
         model, state = export.load_model(checkpoint)
         cls.export_dir = os.path.join(cls.root, 'export')
         export.export(model, state, 'model', cls.export_dir)
