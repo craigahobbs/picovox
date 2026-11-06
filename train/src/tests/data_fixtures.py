@@ -57,9 +57,6 @@ class FakePool:
     def map(self, function, iterable, chunksize=1):
         return list(self.imap(function, iterable, chunksize))
 
-    def imap_unordered(self, function, iterable, chunksize=1):
-        return self.imap(function, iterable, chunksize)
-
 
 # Fake modules in sys.modules (by name) for the context - only those names restored after (unittest.mock.patch.dict would
 # drop every module imported meanwhile, and a compiled extension can't be imported twice)

@@ -221,7 +221,10 @@ class TestHeteronyms(unittest.TestCase):
         books = os.path.join(self.directory, 'books')
         os.makedirs(books)
         with open(os.path.join(books, 'pg1.txt'), 'w', encoding='utf-8') as file:
-            file.write('The solo was long. A Solo spoke.\n')
+            file.write('The solo was long. A Solo spoke.\n\nThey met Family and Family, then family and FAMILY.\n')
+        # (the books' other files aren't read)
+        with open(os.path.join(books, 'notes.md'), 'w', encoding='utf-8') as file:
+            file.write('Family Family Family\n')
         with unittest.mock.patch.object(tts, 'load_settings', return_value={'engine': {}}), \
                 unittest.mock.patch.object(tts, 'corpus_dir', return_value=self.corpus) as corpus_dir, \
                 unittest.mock.patch.object(readings, 'load_spec', return_value={}), \
@@ -243,6 +246,9 @@ class TestHeteronyms(unittest.TestCase):
             self.assertEqual(self.read_out('votes.json')['words']['lead']['votes'], [1, 7])
             self.assertEqual(self.read_out('candidates.json')[0]['word'], 'lead')
             self.assertEqual(self.read_out('relabel.json')['kept'][0]['word'], 'wound')
+            # (a word the books capitalize mid-sentence more often than not is a name)
+            self.assertEqual({item['word']: item['reasons'] for item in self.read_out('relabel.json')['rejected']}['family'],
+                             ['a name', 'kind syllable'])
             committed = json.loads(text)
             self.assertEqual(committed['corpus'], 'phonon-0123456789ab')
             self.assertEqual(sorted(committed['relabel']), ['family', 'lead', 'record', 'solo', 'wound'])
