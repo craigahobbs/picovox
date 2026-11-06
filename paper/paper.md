@@ -1153,7 +1153,10 @@ each paragraph's first sentence is lifted (pitch +8%, 2 dB), its pitch settles t
 Moby-Dick's for the paragraph beat - six paragraphs of narration, where a subtler and a stronger arc were both
 preferred to the flat reading, the stronger slightly). The panel can't hear monotony - it scores sentences - but it
 guards the voice: in four voices the dialogue style's UTMOS is within 0.04 of neutral's (4.13-4.31), its word error
-rate unchanged (0.6-1.5%).
+rate unchanged (0.6-1.5%). The paragraph beat was removed in 2.0.2. On 2.0's voices a blind A/B - passages of six books
+in eight voices, the dialogue beat on in both - heard no difference (Same in 8 of 9 trials), while across a whole book
+its listener heard the sentence-to-sentence steps in pitch as the voice changing for no reason; style `'auto'` is the
+dialogue and exclamation beats.
 
 **The exclamation beat.** The voice model already marks an exclamation, but only by pitch: across twelve lines in four
 voices, a sentence ending in "!" is 0.5-1.4 semitones higher than the same sentence ending in ".", yet no louder (at

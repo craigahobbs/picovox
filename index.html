@@ -280,22 +280,21 @@ neutral's (4.40 and 4.26) but fearful (0.08 and 0.15 below), and can't score a w
 (6.5-9.7 dB quieter) and soft (5 dB) is within 4.1 dB of neutral's loudness - angry 3.3-3.8 dB louder, sad 3.4-3.6
 quieter.</p>
 <h3>Expressive reading: <code>style: 'auto'</code></h3>
-<p>Style <code>'auto'</code> reads a text as a narrator does - its delivery follows the text's structure:</p>
+<p>Style <code>'auto'</code> reads a text's dialogue as a narrator does - its delivery follows the text's quotations:</p>
 <ul>
 <li><strong>The dialogue beat.</strong> The quotations (between double quotation marks) are read in the <code>dialogue</code> style - a little
 higher, brighter, and quicker than the narration (pitch +7%, pace +5%) - and the narration neutral.</li>
 <li><strong>The exclamation beat.</strong> A quoted sentence ending in &quot;!&quot; is read in the <code>exclaim</code> style - livelier than the
 dialogue beat: 3 dB louder, its pitch range 20% wider, a little more pressed and quicker - excited, not shouted.</li>
-<li><strong>The paragraph beat.</strong> Each paragraph is read as one arc: its first sentence lifted (pitch +8%, 2 dB louder), the
-pitch settling to 4% below the voice's by its last sentence, which is 7% slower.</li>
 </ul>
-<p>Style <code>'auto'</code> needs no model - it reads the text's quotation marks, exclamation marks, and paragraphs. (A small network that would read a
+<p>Style <code>'auto'</code> needs no model - it reads the text's quotation marks and exclamation marks. (A small network that would read a
 quotation angry, shouting, or fearful was tried and dropped: even a classifier on a 4-billion-parameter embedding model
 couldn't choose those styles reliably enough - see the paper's Section 12.7.)</p>
 <p>On the listener panel's texts the beats keep the voices intelligible and natural: in all twelve voices style
-<code>'auto'</code>'s UTMOS is within 0.04 of neutral's, its word error rate at most 2.4% (neutral's 0.6-1.8%), and it reads about
-2.3 dB louder. The output is deterministic, as every style's; without <code>'auto'</code> the audio is the same as before, bit for
-bit.</p>
+<code>'auto'</code>'s UTMOS was within 0.04 of neutral's and its word error rate at most 2.4% (neutral's 0.6-1.8%) - measured with
+the paragraph beat it had through 2.0.1 (each paragraph read as one arc - its first sentence lifted, its pitch settling;
+removed in 2.0.2: blind, it was heard as no different, and in a book it sounded like the voice changing for no reason).
+The output is deterministic, as every style's; without <code>'auto'</code> the audio is the same as before, bit for bit.</p>
 <h3><code>toWav(samples, sampleRate)</code></h3>
 <p>Encode samples (a <code>Float32Array</code>, or an array of numbers, -1 to 1 - values beyond are clipped) as a 16-bit PCM mono WAV
 file - a <code>Uint8Array</code> of the file's bytes.</p>
@@ -369,7 +368,7 @@ that runs its own synthesis loop (PicoShelf's worker does):</p>
 </tr>
 <tr>
 <td><code>lib/style.js</code></td>
-<td>Style <code>'auto'</code> - a text's quotations in the dialogue style (<code>autoStyles</code>) and its paragraph beats (<code>paragraphBeats</code>)</td>
+<td>Style <code>'auto'</code> - a text's quotations in the dialogue style (<code>autoStyles</code>)</td>
 </tr>
 <tr>
 <td><code>lib/lexicon.js</code></td>
