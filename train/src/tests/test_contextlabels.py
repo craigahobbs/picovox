@@ -172,7 +172,8 @@ class TestContextLabels(unittest.TestCase):
         self.assertEqual(contextlabels.tag_reading(entry, 'VBD'), 1)
 
     def test_context_items(self):
-        self.assertEqual(contextlabels.previous_items('I read it, then read.'), {0: '', 2: 'i', 7: 'read', 11: ',', 16: 'then'})
+        items, sequence = contextlabels.context_items('I read it, then read.')
+        self.assertEqual(contextlabels.previous_items(items, sequence), {0: '', 2: 'i', 7: 'read', 11: ',', 16: 'then'})
         sequence = ['i', 'read', 'it', '.']
         self.assertEqual(contextlabels.context_window(sequence, 1), ['', '', 'i', 'read', 'it', '.', ''])
         self.assertEqual(contextlabels.paragraphs('One\ntwo.\n\n\n  Three  four.\n\n'), ['One two.', 'Three four.'])
@@ -311,7 +312,8 @@ class TestContextLabels(unittest.TestCase):
         self.assertTrue(contextlabels.regression_windows())
 
     def test_text_examples(self):
-        examples = contextlabels.text_examples('I read it. Mr. Read.', [(2, 'read', 1), (99, 'read', 0), (0, 'read', 0)])
+        items, sequence = contextlabels.context_items('I read it. Mr. Read.')
+        examples = contextlabels.text_examples(items, sequence, [(2, 'read', 1), (99, 'read', 0), (0, 'read', 0)])
         self.assertEqual(examples, [{'window': ['', '', 'i', 'read', 'it', '.', 'mister'], 'word': 'read', 'reading': 1}])
 
     def test_measured_classes(self):

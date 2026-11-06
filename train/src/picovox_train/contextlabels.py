@@ -163,10 +163,15 @@ def tag_reading(entry, tag, surface=None, previous=''):
     return family_reading(entry['family'], tag, entry['readings'])
 
 
-# The previous context item of each word item of a text - {offset: item} (the first word item at an offset)
-def previous_items(text):
+# A text's front-end items and their context sequence - (items, sequence), each text tokenized once
+def context_items(text):
     items = text_items(text)
-    sequence = context_sequence(items)
+    return items, context_sequence(items)
+
+
+# The previous context item of each word item of a text (its context_items) - {offset: item} (the first word item at an
+# offset)
+def previous_items(items, sequence):
     previous = {}
     for index, (item, offset) in enumerate(items):
         if isinstance(item, str) and offset not in previous:
@@ -324,10 +329,9 @@ def regression_windows():
     return windows
 
 
-# The examples of texts' words - (text, [(offset, reading in dictionary order)]) - [{window, word, reading}]
-def text_examples(text, labeled):
-    items = text_items(text)
-    sequence = context_sequence(items)
+# The examples of a text's words (its context_items) - [(offset, word, reading in dictionary order)] - [{window, word,
+# reading}]
+def text_examples(items, sequence, labeled):
     by_offset = {offset: index for index, (_, offset) in reversed(list(enumerate(items)))}
     examples = []
     for offset, word, reading in labeled:
@@ -352,7 +356,7 @@ def validate_mappings(words, aligned, aligned_tags):
     by_family = collections.defaultdict(lambda: {'agree': 0, 'total': 0})
     for record in aligned:
         tags = aligned_tags.get(record['id'], {})
-        previous = previous_items(record['text'])
+        previous = previous_items(*context_items(record['text']))
         for token in record['tokens']:
             entry = words[token['word']]
             tag = tags.get(str(token['offset']))
@@ -435,22 +439,22 @@ def labels_command(args):
                 disagree[reading != token['reading']] += 1
             elif token['word'] in eligible and (not words[token['word']]['curated'] or token['word'] in GATE_WORDS):
                 labeled.append((token['offset'], token['word'], token['reading']))
-        for example in text_examples(record['text'], labeled):
+        for example in text_examples(*context_items(record['text']), labeled):
             examples.append({**example, 'source': 'aligned', 'split': split, 'group': record['book']})
     silver = collections.Counter()
     transfer = collections.defaultdict(dict)
     with open(os.path.join(args.out, 'books.jsonl'), encoding='utf-8') as file:
         for record in map(json.loads, file):
             split = 'heldout' if record['book'] in HELD_OUT_BOOKS else 'train'
+            items, sequence = context_items(record['text'])
             if split == 'train' and MAX_TRANSFER:
-                sequence = context_sequence(text_items(record['text']))
                 for index, item in enumerate(sequence):
                     if isinstance(item, str) and item in words:
                         window = context_window(sequence, index)
                         transfer[item][hashlib.sha1(json.dumps(window).encode('utf-8')).hexdigest()] = window
             labeled, colloc = [], []
-            previous = previous_items(record['text'])
-            for item, offset in text_items(record['text']):
+            previous = previous_items(items, sequence)
+            for item, offset in items:
                 if not isinstance(item, str) or item not in words:
                     continue
                 entry = words[item]
@@ -465,7 +469,7 @@ def labels_command(args):
                 if reading is not None:
                     labeled.append((offset, item, reading))
             for source, labeled_items in (('silver', labeled), ('collocation', colloc)):
-                for example in text_examples(record['text'], labeled_items):
+                for example in text_examples(items, sequence, labeled_items):
                     if source == 'silver':
                         silver[example['word']] += 1
                         if silver[example['word']] > MAX_SILVER:
@@ -475,8 +479,9 @@ def labels_command(args):
         entry = words[seed['word']]
         reading = readings_module.reading_of(seed['phones'], entry['readings'])
         for text in seed['texts']:
-            offset = next(offset for item, offset in text_items(text) if item == seed['word'])
-            for example in text_examples(text, [(offset, seed['word'], reading)]):
+            items, sequence = context_items(text)
+            offset = next(offset for item, offset in items if item == seed['word'])
+            for example in text_examples(items, sequence, [(offset, seed['word'], reading)]):
                 examples.append({**example, 'source': 'seed', 'split': 'train', 'group': 'seed'})
     held_out = regression_windows()
     examples = [example for example in examples if tuple(example['window']) not in held_out]
