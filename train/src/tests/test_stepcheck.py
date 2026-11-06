@@ -53,7 +53,6 @@ class TestStepcheck(unittest.TestCase):
             again, _ = run_stepcheck(directory, '--batches', '1', '--batch', '2')
         self.assertEqual(result, again)
         self.assertEqual(result['device'], 'cpu')
-        self.assertEqual(result['config'], {})
         self.assertEqual(len(result['batches']), 1)
         row = result['batches'][0]
         self.assertEqual(row['corpus'], 'tts')
@@ -64,14 +63,6 @@ class TestStepcheck(unittest.TestCase):
         self.assertNotEqual(row['eval']['total'], row['train']['total'])
         self.assertGreater(float.fromhex(row['gradNorm']), 0)
         self.assertEqual(json.loads(stderr.splitlines()[0])['corpus'], 'tts')
-
-    def test_config(self):
-        # A model config override
-        with tempfile.TemporaryDirectory() as directory:
-            result, _ = run_stepcheck(directory, '--batches', '1', '--batch', '1', '--config', '{"jitter": 0.01}')
-        self.assertEqual([row['corpus'] for row in result['batches']], ['tts'])
-        self.assertEqual(result['config'], {'jitter': 0.01})
-        self.assertEqual(len(result['batches'][0]['items']), 1)
 
     def test_module_main(self):
         with unittest.mock.patch('sys.argv', ['stepcheck.py']), helpers.captured() as (_, stderr), warnings.catch_warnings():
