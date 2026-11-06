@@ -60,19 +60,14 @@ import time
 
 import numpy
 
-from . import RECIPE_PATH, ROOT, g2pmodel
+from . import RECIPE_PATH, ROOT, g2pmodel, read_json
 from .trained import module_body
 from .g2p import (EOS, LETTERS, MAX_WORD, MODULE_LINE_LENGTH, PHONES, UPSAMPLE, build_model, learning_rate, log_line, make_batch,
-                  model_config, quantize_array, quantize_state, weight_bytes)
+                  model_config, predict, quantize_array, quantize_state, weight_bytes)
 
 
 # The recipe's settings - train/data/train.json's "context" (labels, g2p, network, export, gate)
-def load_settings(path=RECIPE_PATH):
-    with open(path, encoding='utf-8') as file:
-        return json.load(file)['context']
-
-
-RECIPE = load_settings()
+RECIPE = read_json(RECIPE_PATH)['context']
 
 # The reading slots (the default and two alternates), and the ambiguity head's hidden layer
 READINGS = RECIPE['g2p']['readings']
@@ -93,12 +88,6 @@ G2P_SETTINGS = {key: value for key, value in RECIPE['g2p'].items() if key not in
 
 # The reading stage's new tensors (their learning rate is the stage's times headRate)
 HEADS = ('reading', 'ambiguity_layer', 'ambiguity')
-
-
-# The labels (contextlabels.py labels)
-def load_labels(path):
-    with open(path, encoding='utf-8') as file:
-        return json.load(file)
 
 
 #
@@ -128,69 +117,18 @@ def load_g2p(path):
     return model
 
 
-# Encode letters with readings - (outputs, mask, initial decoder state, the encoder's final states)
-def encode_reading(model, letters, readings):
-    import torch  # pylint: disable=import-outside-toplevel
-    from torch import nn  # pylint: disable=import-outside-toplevel
-    mask = letters != 0
-    packed = nn.utils.rnn.pack_padded_sequence(model.letter_embed(letters), mask.sum(1).cpu(), batch_first=True, enforce_sorted=False)
-    outputs, final = model.encoder(packed)
-    outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs, batch_first=True, total_length=letters.shape[1])
-    ends = torch.cat([final[0], final[1]], -1)
-    state = torch.tanh(model.bridge(ends))
-    alternate = readings > 0
-    state = state + model.reading((readings - 1).clamp(min=0)) * alternate[:, None]
-    return outputs, mask, state.unsqueeze(0), ends
-
-
 # The ambiguity head's logits from the encoder's final states
 def ambiguity_logit(model, ends):
     import torch  # pylint: disable=import-outside-toplevel
     return model.ambiguity(torch.tanh(model.ambiguity_layer(ends))).squeeze(-1)
 
 
-# The loss of a batch - teacher-forced cross entropy of the readings' targets, plus the ambiguity head's
+# The loss of a batch - teacher-forced cross entropy of the readings' targets (g2p.py's), plus the ambiguity head's
 def reading_loss(model, letters, targets, readings, ambiguous, ambiguity_weight):
-    import torch  # pylint: disable=import-outside-toplevel
     from torch import nn  # pylint: disable=import-outside-toplevel
-    encoded, mask, state, ends = encode_reading(model, letters, readings)
-    previous = torch.cat([torch.full_like(targets[:, :1], EOS), targets[:, :-1]], 1)
-    decoded, _ = model.decoder(model.phone_embed(previous), state)
-    logits = model.attend(decoded, encoded, mask)
-    phone_loss = nn.functional.cross_entropy(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1), ignore_index=0)
+    phone_loss, ends = model.loss(letters, targets, readings)
     ambiguity_loss = nn.functional.binary_cross_entropy_with_logits(ambiguity_logit(model, ends), ambiguous)
     return phone_loss + ambiguity_weight * ambiguity_loss, phone_loss, ambiguity_loss
-
-
-# Greedy decoding of words in readings - phone lists (lib/g2p.js's limit: 3 phones a letter plus 6)
-def decode_readings(model, words, readings, batch_size=512):
-    import torch  # pylint: disable=import-outside-toplevel
-    model.eval()
-    results = []
-    with torch.no_grad():
-        for start in range(0, len(words), batch_size):
-            chunk = words[start:start + batch_size]
-            letters = make_batch(chunk, [[] for _ in chunk])[0]
-            reading = torch.tensor(readings[start:start + batch_size], dtype=torch.long)
-            encoded, mask, state, _ = encode_reading(model, letters, reading)
-            previous = torch.full((len(chunk), 1), EOS, dtype=torch.long)
-            phones = [[] for _ in chunk]
-            done = [False] * len(chunk)
-            limits = [3 * length + 6 for length in mask.sum(1).tolist()]
-            for step in range(3 * letters.shape[1] + 6):
-                decoded, state = model.decoder(model.phone_embed(previous), state)
-                best = model.attend(decoded, encoded, mask)[:, 0].argmax(-1)
-                for index, phone in enumerate(best.tolist()):
-                    if not done[index]:
-                        if phone <= EOS or step >= limits[index]:
-                            done[index] = True
-                        else:
-                            phones[index].append(PHONES[phone])
-                if all(done):
-                    break
-                previous = best.unsqueeze(1)
-            results.extend(phones)
-    return results
 
 
 # The ambiguity head's logits of words
@@ -202,7 +140,7 @@ def ambiguity_logits(model, words, batch_size=2048):
         for start in range(0, len(words), batch_size):
             chunk = words[start:start + batch_size]
             letters = make_batch(chunk, [[] for _ in chunk])[0]
-            _, _, _, ends = encode_reading(model, letters, torch.zeros(len(chunk), dtype=torch.long))
+            _, _, _, ends = model.encode(letters)
             logits.extend(ambiguity_logit(model, ends).tolist())
     return logits
 
@@ -301,7 +239,7 @@ def evaluate_g2p(model, labels, words):
     """The reading measures of a G2P - the alternate readings right, and the ambiguity head's errors over words (the
     dictionary and labeled words) - {readingsRight, readings, ambiguousMissed, falsePositives, falsePositiveWords}"""
     targets = reading_targets(labels, {})
-    predictions = decode_readings(model, [word for word, _, _ in targets], [reading for _, _, reading in targets])
+    predictions = predict(model, [word for word, _, _ in targets], [reading for _, _, reading in targets])
     right = 0
     wrong = []
     for (word, _, reading), predicted in zip(targets, predictions):
@@ -530,7 +468,7 @@ def train_context(labels, settings, log, teachers=None):
 
 # The labels of a fold (None - all the labels' splits as they are)
 def labels_of(labels_path, fold):
-    labels = load_labels(labels_path)
+    labels = read_json(labels_path)
     return labels if fold is None else fold_labels(labels, fold)
 
 
@@ -632,7 +570,7 @@ def g2p_covariances(model, calibration):
     with torch.no_grad():
         for start in range(0, len(words), 1024):
             letters, targets = make_batch(words[start:start + 1024], phones[start:start + 1024])
-            encoded, mask, state, ends = encode_reading(model, letters, torch.tensor(readings[start:start + 1024]))
+            encoded, mask, state, ends = model.encode(letters, torch.tensor(readings[start:start + 1024]))
             embedded = model.letter_embed(letters)
             forward, reverse = encoded[..., :hidden], encoded[..., hidden:]
             previous_forward = torch.cat([torch.zeros_like(forward[:, :1]), forward[:, :-1]], 1)
@@ -849,7 +787,7 @@ def word_margins(result, labels, least=20):
 
 def command_gate(args):
     """The held-out accuracy of a module's context network (as the app runs it - g2pmodel.py), and the gate"""
-    labels = load_labels(args.labels)
+    labels = read_json(args.labels)
     g2p = g2pmodel.G2p(g2pmodel.read_module(args.model))
     result = evaluate_context(g2p.choose_slots, labels)
     passed, line = gate_result(result, labels)
@@ -906,9 +844,7 @@ def command_check(args):
     for kind, (right, total) in new_kinds.items():
         if right < old_kinds.get(kind, (0, total))[0] - gate['heteronymKindDrop']:
             failures.append(f'{kind} {right}/{total} (committed {old_kinds[kind][0]})')
-    config = g2p.load_config()
-    relabel = config['stages'][-1].get('relabel')
-    data = g2p.load_data(relabel and os.path.join(g2p.ROOT, relabel))
+    _, data = g2p.final_data()
     new_measures = g2p.evaluate(js_pronouncer(args.model), data)
     old_measures = g2p.evaluate(js_pronouncer(args.committed), data)
     for name, tolerance in (('book', gate['bookError']), ('bookWrongDistinct', gate['bookDistinct']),
@@ -930,12 +866,8 @@ def command_train_g2p(args):
     """Train the reading heads from a G2P checkpoint on g2p.py's data and recipe settings - <out> (a checkpoint)"""
     import torch  # pylint: disable=import-outside-toplevel
     from . import g2p  # pylint: disable=import-outside-toplevel
-    labels = load_labels(args.labels)
-    config = g2p.load_config(args.config)
-    stage = config['stages'][-1]
-    settings = {key: value for key, value in config.items() if key != 'stages'}
-    settings = {**settings, **stage}
-    data = g2p.load_data(settings.get('relabel') and os.path.join(g2p.ROOT, settings['relabel']))
+    labels = read_json(args.labels)
+    settings, data = g2p.final_data()
     items, probabilities = g2p.training_items(data, settings)
     model = load_g2p(args.init)
     overrides = json.loads(args.settings) if args.settings else {}
@@ -951,7 +883,7 @@ def command_train_g2p(args):
 def command_train_context(args):
     """Train the context network (its teachers first - in -j worker processes) - <out> (a checkpoint)"""
     import torch  # pylint: disable=import-outside-toplevel
-    labels = load_labels(args.labels)
+    labels = read_json(args.labels)
     overrides = json.loads(args.settings) if args.settings else {}
     model = train_distilled(args.labels, overrides, args.log, args.jobs)
     torch.save({'config': model.config, 'state': model.state_dict(), 'settings': {**CONTEXT_SETTINGS, **overrides}}, args.out)
@@ -1026,7 +958,7 @@ def command_folds(args):
             if key.startswith('aligned/'):
                 for name in ('right', 'total', 'majority'):
                     pooled['words'][key][name] += counts[name]
-    labels = load_labels(args.labels)
+    labels = read_json(args.labels)
     passed, line = gate_result(pooled, labels)
     print(f'{len(args.results)} folds: {line}')
     print(word_margins(pooled, labels))
@@ -1040,7 +972,6 @@ def main(argv=None):
     g2p_parser.add_argument('--labels', required=True)
     g2p_parser.add_argument('--init', required=True, help='the trained G2P checkpoint')
     g2p_parser.add_argument('--out', required=True)
-    g2p_parser.add_argument('--config', default=RECIPE_PATH, help='g2p.py\'s settings')
     g2p_parser.add_argument('--settings', help='JSON settings over G2P_SETTINGS')
     g2p_parser.add_argument('--log')
     g2p_parser.set_defaults(func=command_train_g2p)

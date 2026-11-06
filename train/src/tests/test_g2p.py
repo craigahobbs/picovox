@@ -267,8 +267,9 @@ class TestG2p(unittest.TestCase):
         letters, targets = g2p.make_batch(['cat', '123', 'dogs'], [['K', 'AE1', 'T'], [], ['D', 'AO1', 'G', 'Z']])
         self.assertEqual(letters[1].tolist()[:1], [g2p.LETTER_IDS['\'']])
         self.assertEqual(targets[0].tolist(), [g2p.PHONE_IDS['K'], g2p.PHONE_IDS['AE1'], g2p.PHONE_IDS['T'], g2p.EOS, 0])
-        loss = model.loss(letters, targets)
+        loss, ends = model.loss(letters, targets)
         self.assertGreater(loss.item(), 0)
+        self.assertEqual(tuple(ends.shape), (3, 8))
 
         # Greedy decoding stops at <eos> or the length limit
         results = model.decode(letters)

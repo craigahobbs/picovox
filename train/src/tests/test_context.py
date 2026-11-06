@@ -19,7 +19,7 @@ import unittest.mock
 import numpy
 import torch
 
-from picovox_train import ROOT, context, g2p, g2pmodel
+from picovox_train import RECIPE_PATH, ROOT, context, g2p, g2pmodel
 
 from . import data_fixtures, helpers
 from .helpers import captured
@@ -109,8 +109,7 @@ class TestContext(unittest.TestCase):
         return path
 
     def test_settings(self):
-        settings = context.load_settings()
-        self.assertEqual(settings['g2p']['readings'], context.READINGS)
+        self.assertEqual(context.RECIPE['g2p']['readings'], context.READINGS)
         self.assertNotIn('window', context.CONTEXT_SETTINGS)
         self.assertNotIn('readings', context.G2P_SETTINGS)
         self.assertEqual(context.CONTEXT_CHAR_IDS['\''], 1)
@@ -137,26 +136,28 @@ class TestContext(unittest.TestCase):
         loss, phone_loss, ambiguity_loss = context.reading_loss(model, letters, targets, readings, torch.tensor([1.0, 0.0]), 0.5)
         self.assertAlmostEqual(loss.item(), phone_loss.item() + 0.5 * ambiguity_loss.item(), places=5)
 
-        # The reading input changes the decoder's start only for an alternate reading
-        _, _, state_default, _ = context.encode_reading(model, letters, torch.tensor([0, 0]))
-        _, _, state_alternate, _ = context.encode_reading(model, letters, torch.tensor([2, 0]))
+        # The reading input changes the decoder's start only for an alternate reading; reading 0 is the network without it
+        _, _, state_default, _ = model.encode(letters, torch.tensor([0, 0]))
+        _, _, state_alternate, _ = model.encode(letters, torch.tensor([2, 0]))
+        _, _, state_plain, _ = model.encode(letters)
         self.assertFalse(torch.equal(state_default[0, 0], state_alternate[0, 0]))
         self.assertTrue(torch.equal(state_default[0, 1], state_alternate[0, 1]))
+        self.assertTrue(torch.equal(state_default, state_plain))
 
-    def test_decode_readings(self):
+    def test_predict_readings(self):
         model = context.add_reading_heads(tiny_g2p())
         with torch.no_grad():
             # Every step's best phone <eos> - every word done at once
             model.output.bias.zero_()
             model.output.bias[g2p.EOS] = 100.0
-            self.assertEqual(context.decode_readings(model, ['a', 'read'], [0, 1]), [[], []])
+            self.assertEqual(g2p.predict(model, ['a', 'read'], [0, 1]), [[], []])
 
             # Never <eos> - each word ends at its limit (3 phones a letter plus 6), the shorter first
             model.output.bias[g2p.EOS] = -100.0
             model.output.bias[g2p.PHONE_IDS['K']] = 100.0
-            phones = context.decode_readings(model, ['a', 'abc'], [0, 0], batch_size=1)
+            phones = g2p.predict(model, ['a', 'abc'], [0, 2], batch_size=1)
         self.assertEqual(phones, [['K'] * 9, ['K'] * 15])
-        phones = context.decode_readings(model, ['a', 'abc'], [0, 0])
+        phones = g2p.predict(model, ['a', 'abc'], [0, 0])
         self.assertEqual(phones, [['K'] * 9, ['K'] * 15])
 
     def test_ambiguity_logits(self):
@@ -200,7 +201,7 @@ class TestContext(unittest.TestCase):
         def decode(_model, words, readings):
             return [labels['words'][word]['readings'][reading][0].split() if word == 'read' else ['X']
                     for word, reading in zip(words, readings)]
-        with unittest.mock.patch.object(context, 'decode_readings', decode), \
+        with unittest.mock.patch.object(context, 'predict', decode), \
                 unittest.mock.patch.object(context, 'ambiguity_logits',
                                            lambda _model, words: [1.0 if word in ('read', 'cat') else -1.0 for word in words]):
             result = context.evaluate_g2p(model, labels, ['cat', 'dog'])
@@ -595,18 +596,16 @@ class TestContext(unittest.TestCase):
         torch.save({'config': plain.config, 'state': plain.state_dict()}, self.path('init.pt'))
         config = {'alpha': 0.5, 'uniform': 0.1, 'unknown': 0.0, 'model': {'embed': 4, 'hidden': 4},
                   'stages': [{'name': 'one'}, {'name': 'focus', 'relabel': 'train/data/g2p-relabel.json'}]}
-        config_path = self.path('train.json')
         relabels = []
 
         def load_data(relabel):
             relabels.append(relabel)
             return data
         log_path = self.path('train.log')
-        with unittest.mock.patch.object(g2p, 'load_data', load_data), helpers.json_files(g2p, {config_path: {'g2p': config}}), \
+        with unittest.mock.patch.object(g2p, 'load_data', load_data), helpers.json_files(g2p, {RECIPE_PATH: {'g2p': config}}), \
                 captured():
             self.assertEqual(context.main(['train-g2p', '--labels', self.write_labels(), '--init', self.path('init.pt'),
-                                           '--out', self.path('g2p.pt'), '--config', config_path, '--settings', json.dumps(G2P_TINY),
-                                           '--log', log_path]), 0)
+                                           '--out', self.path('g2p.pt'), '--settings', json.dumps(G2P_TINY), '--log', log_path]), 0)
         self.assertEqual(relabels, [os.path.join(ROOT, 'train/data/g2p-relabel.json')])
         checkpoint = torch.load(self.path('g2p.pt'), weights_only=False)
         self.assertEqual(checkpoint['config']['readings'], context.READINGS)
@@ -618,7 +617,7 @@ class TestContext(unittest.TestCase):
 
         # The recipe's settings (the default config), no relabeled stage
         config['stages'][-1].pop('relabel')
-        with unittest.mock.patch.object(g2p, 'load_data', load_data), unittest.mock.patch.object(g2p, 'load_config', lambda path: config), \
+        with unittest.mock.patch.object(g2p, 'load_data', load_data), unittest.mock.patch.object(g2p, 'load_config', lambda: config), \
                 unittest.mock.patch.dict(context.G2P_SETTINGS, G2P_TINY), captured():
             self.assertEqual(context.main(['train-g2p', '--labels', self.write_labels(), '--init', self.path('g2p.pt'),
                                            '--out', self.path('g2p2.pt')]), 0)

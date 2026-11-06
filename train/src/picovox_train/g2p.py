@@ -163,6 +163,15 @@ def load_data(relabel=None):
             'weightCounts': weight_counts, 'monitor': sorted(monitor), 'relabeled': relabeled}
 
 
+# The recipe's final stage - (its settings: the recipe's with the stage's over them, its data: with its relabeled targets)
+# - the network's targets (the reading stage's data, the check's measures, and the context labels' default readings)
+def final_data():
+    config = load_config()
+    settings = {**{key: value for key, value in config.items() if key not in ('description', 'stages')}, **config['stages'][-1]}
+    relabel = settings.get('relabel')
+    return settings, load_data(relabel and os.path.join(ROOT, relabel))
+
+
 # Add the books' words (train/data/g2p-books.json, in place) - each label (a word the dictionary lacks, or a correction of
 # its label - the rule-labeled words derived from it follow) a dictionary word, and each possessive in the books the
 # dictionary lacks the stem's target with its -s suffix (a teacher's label of the word replaced); returns the books' word
@@ -277,15 +286,21 @@ def build_model(config):
             self.combine = nn.Linear(decoder + 2 * hidden, decoder)
             self.output = nn.Linear(decoder, len(PHONES))
 
-        # Encode letters [batch, time] - (outputs [batch, time, 2H], mask [batch, time], initial decoder state)
-        def encode(self, letters):
+        # Encode letters [batch, time] in readings [batch] (context.py's reading input: an alternate reading's vector added
+        # to the decoder's initial state; None - the network without it) - (outputs [batch, time, 2H], mask [batch, time],
+        # initial decoder state, the encoder's final states [batch, 2H])
+        def encode(self, letters, readings=None):
             mask = letters != 0
             packed = nn.utils.rnn.pack_padded_sequence(self.letter_embed(letters), mask.sum(1).cpu(), batch_first=True,
                                                        enforce_sorted=False)
             outputs, final = self.encoder(packed)
             outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs, batch_first=True, total_length=letters.shape[1])
-            state = torch.tanh(self.bridge(torch.cat([final[0], final[1]], -1))).unsqueeze(0)
-            return outputs, mask, state
+            ends = torch.cat([final[0], final[1]], -1)
+            state = torch.tanh(self.bridge(ends))
+            if readings is not None:
+                alternate = readings > 0
+                state = state + self.reading((readings - 1).clamp(min=0)) * alternate[:, None]
+            return outputs, mask, state.unsqueeze(0), ends
 
         # The logits of each step from the decoder outputs [batch, steps, D]
         def attend(self, decoded, encoded, mask):
@@ -294,17 +309,18 @@ def build_model(config):
             context = torch.einsum('bst,bth->bsh', torch.softmax(scores, -1), encoded)
             return self.output(torch.tanh(self.combine(torch.cat([decoded, context], -1))))
 
-        # The loss of a batch - teacher-forced cross entropy (targets end with <eos>, padded with 0)
-        def loss(self, letters, targets):
-            encoded, mask, state = self.encode(letters)
+        # The loss of a batch in readings (see encode) - teacher-forced cross entropy (targets end with <eos>, padded with
+        # 0) - and the encoder's final states
+        def loss(self, letters, targets, readings=None):
+            encoded, mask, state, ends = self.encode(letters, readings)
             previous = torch.cat([torch.full_like(targets[:, :1], EOS), targets[:, :-1]], 1)
             decoded, _ = self.decoder(self.phone_embed(previous), state)
             logits = self.attend(decoded, encoded, mask)
-            return nn.functional.cross_entropy(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1), ignore_index=0)
+            return nn.functional.cross_entropy(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1), ignore_index=0), ends
 
-        # Greedy decoding - a list of phone id lists (lib/g2p.js's limit: 3 phones a letter plus 6)
-        def decode(self, letters):
-            encoded, mask, state = self.encode(letters)
+        # Greedy decoding in readings (see encode) - a list of phone id lists (lib/g2p.js's limit: 3 phones a letter plus 6)
+        def decode(self, letters, readings=None):
+            encoded, mask, state, _ = self.encode(letters, readings)
             batch = letters.shape[0]
             previous = torch.full((batch, 1), EOS, dtype=torch.long)
             results = [[] for _ in range(batch)]
@@ -345,8 +361,9 @@ def make_batch(words, pronunciations):
     return letter_tensor, target_tensor
 
 
-# Predict words' phones with a model - a list of phone lists
-def predict(model, words, batch_size=512):
+# Predict words' phones with a model, in their readings (a list - context.py's reading input; None - the network without
+# it) - a list of phone lists
+def predict(model, words, readings=None, batch_size=512):
     import torch  # pylint: disable=import-outside-toplevel
     model.eval()
     results = []
@@ -354,7 +371,8 @@ def predict(model, words, batch_size=512):
         for start in range(0, len(words), batch_size):
             chunk = words[start:start + batch_size]
             letters = make_batch(chunk, [[] for _ in chunk])[0]
-            results.extend([PHONES[phone] for phone in phones] for phones in model.decode(letters))
+            reading = None if readings is None else torch.tensor(readings[start:start + batch_size], dtype=torch.long)
+            results.extend([PHONES[phone] for phone in phones] for phones in model.decode(letters, reading))
     return results
 
 
@@ -434,7 +452,7 @@ def train_stage(settings, stage, init, out_path, data, log):
         letters, targets = make_batch([word for word, _ in batch], [phones for _, phones in batch])
         for group in optimizer.param_groups:
             group['lr'] = learning_rate(step, steps, peak, warmup)
-        loss = model.loss(letters, targets)
+        loss, _ = model.loss(letters, targets)
         optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)

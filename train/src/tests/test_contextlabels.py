@@ -83,8 +83,8 @@ class TestContextLabels(unittest.TestCase):
             file.write(text)
 
     def test_settings(self):
-        settings = contextlabels.load_settings()
-        self.assertEqual(settings['window'], contextlabels.WINDOW)
+        self.assertEqual(contextlabels.WINDOW, contextlabels.RECIPE['network']['window'])
+        self.assertIn('read', contextlabels.GATE_WORDS)
         self.assertIn('pg1342', contextlabels.HELD_OUT_BOOKS)
         self.assertIn('words', contextlabels.load_spec())
 

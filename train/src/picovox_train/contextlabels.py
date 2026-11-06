@@ -60,21 +60,16 @@ from .readings import candidate_words, load_spec, primary_vowel, variant_vowels
 TEST_PATH = os.path.join(ROOT, 'train', 'data', 'heteronyms-test.json')
 
 
-# The recipe's label settings - train/data/train.json's context.labels (and the context network's window)
-def load_settings(path=RECIPE_PATH):
-    with open(path, encoding='utf-8') as file:
-        context = json.load(file)['context']
-    return {**context['labels'], 'window': context['network']['window'], 'gateWords': context['gate']['words']}
-
-
-SETTINGS = load_settings()
+# The recipe's label settings - train/data/train.json's context.labels
+RECIPE = read_json(RECIPE_PATH)['context']
+SETTINGS = RECIPE['labels']
 
 # The context window - WINDOW items each side of the word (words, and phrase ends as marks)
-WINDOW = SETTINGS['window']
+WINDOW = RECIPE['network']['window']
 
 # The context gate's words (context.py) - their aligned readings are examples though they're curated (the gate's
 # held-out accuracy is theirs)
-GATE_WORDS = set(SETTINGS['gateWords'])
+GATE_WORDS = set(RECIPE['gate']['words'])
 
 # The mapping validation - the least agreement with the aligned readings, and the least aligned tokens for a word's own
 # check, and for its family's (a family word of too few)
@@ -401,8 +396,7 @@ def measured_classes():
 # with the relabeled targets: the readers' pronunciation, else the dictionary's first)
 def default_readings(words):
     from . import g2p  # pylint: disable=import-outside-toplevel
-    targets = g2p.load_data(g2p.load_config()['stages'][-1].get('relabel') and
-                            os.path.join(ROOT, g2p.load_config()['stages'][-1]['relabel']))['first']
+    targets = g2p.final_data()[1]['first']
     return {word: readings_module.reading_of(' '.join(targets[word]), entry['readings']) if word in targets else 0
             for word, entry in words.items()}
 
