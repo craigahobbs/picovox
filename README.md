@@ -824,8 +824,8 @@ undocumented. The training speech is used locally, at train time - it isn't dist
 voice network trained on it.
 
 make train's other downloads are pinned files, fetched by `picovox_train/corpora.py` - idempotently and sequentially,
-resuming interrupted downloads, each checked against its SHA-256 (`--list` shows them): the CMU Pronouncing Dictionary
-(`downloads/cmudict/`) and the listener panel's Whisper model (`downloads/whisper/`):
+each checked against its SHA-256: the CMU Pronouncing Dictionary (`downloads/cmudict/`) and the listener panel's Whisper
+model (`downloads/whisper/`):
 
 ```sh
 make build/venv-train.build                                         # build/venv-train (corpora.py needs only the standard library)

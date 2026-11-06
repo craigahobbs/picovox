@@ -5,11 +5,11 @@
 Download the pinned files (FILES), idempotently: the CMU Pronouncing Dictionary (the G2P's training data), into
 downloads/cmudict/, and the listener panel's Whisper model (picovox_train/panel.py), into downloads/whisper/.
 
-    build/venv-train/bin/python -I train/src/picovox_train/corpora.py [--list] [name ...]
+    build/venv-train/bin/python -I train/src/picovox_train/corpora.py [name ...]
 
-The files (names): cmudict, whisper. With no names, all of them are fetched. A file present is skipped; an interrupted
-download resumes; a file is checked against its pinned SHA-256 (a revised file fails the fetch, never trains).
-Downloads are sequential (one connection at a time) with a descriptive User-Agent. (The human speech corpora it once
+The files (names): cmudict, whisper. With no names, all of them are fetched. A file present is skipped; a file is
+downloaded whole (an interrupted download starts over) and checked against its pinned SHA-256 (a revised file fails the
+fetch, never trains). Downloads are sequential (one connection at a time) with a descriptive User-Agent. (The human speech corpora it once
 fetched - CMU ARCTIC, LibriTTS-R, LibriTTSLabel - are in git history; the training speech is tts.py's.)
 """
 
@@ -17,9 +17,9 @@ import argparse
 import hashlib
 import os
 import re
+import shutil
 import sys
 import time
-import urllib.error
 import urllib.request
 
 
@@ -66,51 +66,26 @@ def read_dictionary():
         return parse_dictionary(file)
 
 
+# The SHA-256 of a file's bytes (hex)
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, 'rb') as file:
+        for block in iter(lambda: file.read(1 << 20), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 # Print a progress line to stderr
 def log(message):
     print(message, file=sys.stderr, flush=True)
 
 
-# Download a URL to a path, resuming a partial download (path + '.part') with an HTTP Range request
+# Download a URL to a path (by way of path + '.part', so an interrupted download is never the file)
 def download(url, path):
-    if os.path.exists(path):
-        return
-    part = path + '.part'
-    offset = os.path.getsize(part) if os.path.exists(part) else 0
-    headers = {'User-Agent': USER_AGENT}
-    if offset:
-        headers['Range'] = f'bytes={offset}-'
-    request = urllib.request.Request(url, headers=headers)
-    try:
-        response = urllib.request.urlopen(request, timeout=60)
-    except urllib.error.HTTPError as error:
-        # The partial file is already complete
-        if error.code == 416:
-            os.replace(part, path)
-            return
-        raise
-    with response:
-        mode = 'ab' if offset and response.status == 206 else 'wb'
-        total = response.headers.get('Content-Length')
-        total = int(total) + (offset if mode == 'ab' else 0) if total else None
-        done = offset if mode == 'ab' else 0
-        start = time.time()
-        last = 0
-        with open(part, mode) as file:
-            while True:
-                chunk = response.read(1 << 20)
-                if not chunk:
-                    break
-                file.write(chunk)
-                done += len(chunk)
-                if time.time() - last > 10:
-                    last = time.time()
-                    rate = (done - offset) / max(1e-3, last - start) / 1e6
-                    percent = f' ({100 * done / total:.0f}%)' if total else ''
-                    log(f'  {os.path.basename(path)}: {done / 1e6:.0f} MB{percent}, {rate:.1f} MB/s')
-    if total is not None and os.path.getsize(part) != total:
-        raise IOError(f'Incomplete download of {url}: {os.path.getsize(part)} of {total} bytes')
-    os.replace(part, path)
+    request = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
+    with urllib.request.urlopen(request, timeout=60) as response, open(path + '.part', 'wb') as file:
+        shutil.copyfileobj(response, file, 1 << 20)
+    os.replace(path + '.part', path)
 
 
 # Fetch a pinned file, unless it's present - its SHA-256 checked (a mismatch removes it and fails); returns its download
@@ -123,13 +98,10 @@ def fetch_file(name):
     os.makedirs(os.path.dirname(item['path']), exist_ok=True)
     log(f'{name}: downloading {item["url"]}')
     download(item['url'], item['path'])
-    digest = hashlib.sha256()
-    with open(item['path'], 'rb') as file:
-        for chunk in iter(lambda: file.read(1 << 20), b''):
-            digest.update(chunk)
-    if digest.hexdigest() != item['sha256']:
+    digest = file_sha256(item['path'])
+    if digest != item['sha256']:
         os.remove(item['path'])
-        raise IOError(f'{name}: SHA-256 {digest.hexdigest()} is not the pinned {item["sha256"]}')
+        raise IOError(f'{name}: SHA-256 {digest} is not the pinned {item["sha256"]}')
     return os.path.getsize(item['path'])
 
 
@@ -137,13 +109,7 @@ def fetch_file(name):
 def main():
     parser = argparse.ArgumentParser(description='Download the pinned files into downloads/')
     parser.add_argument('names', nargs='*', help='files to fetch (default: all)')
-    parser.add_argument('--list', action='store_true', help='list the files and exit')
     args = parser.parse_args()
-    if args.list:
-        for name, item in FILES.items():
-            state = 'present' if os.path.exists(item['path']) else 'missing'
-            print(f'{name:28s} {state:8s} {item["description"]}')
-        return
     names = args.names or list(FILES)
     unknown = [name for name in names if name not in FILES]
     if unknown:

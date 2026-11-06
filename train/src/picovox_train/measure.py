@@ -33,7 +33,7 @@ import time
 import warnings
 
 from . import RECIPE_PATH, read_json
-from .readings import CLOSED_CLASS, VOWELS, base, difference, measured_words, read_variants, reading_of, token_words, unstressed, word_class
+from .readings import CLOSED_CLASS, VOWELS, base, difference, measured_words, read_variants, reading_of, token_words, word_class
 
 
 # The context of a word - its neighbors' phones when at most NEIGHBOR_SECONDS long, else PAD seconds of the audio; the
@@ -65,12 +65,17 @@ def log(message):
     print(message, file=sys.stderr, flush=True)
 
 
-# The measurement's key - a hash of the measured words and the method's settings (another key measures again)
-def measure_key(words):
+# The measurement's key (another key measures again) - a hash of what the readings depend on: the method's settings,
+# the clips (the selection's with audio) and their alignment (the aligner and the checks, and the front end), and the
+# measured words (the dictionary, the context labels' spec, and readings.py) - code_files('readings') is the front end
+# with the G2P module, the dictionary, and the spec. (Not the alignments themselves: the clips realigned with the
+# measured readings their tokens take are the measurement's own outcome.)
+def measure_key(settings, clips):
     from . import ctc, tts  # pylint: disable=import-outside-toplevel
-    basis = [words, ctc.VOTE_MARGIN, NEIGHBOR_SECONDS, PAD, CONTROL_WORDS, CONTROL_TOKENS, REFERENCE_CLIPS, MIN_VOWEL_SECONDS,
-             FORMANT_MARGIN, CTC_PARTNERS, FORMANT_PARTNERS, tts.aligner_key()]
-    return hashlib.sha256(json.dumps(basis, sort_keys=True).encode('utf-8')).hexdigest()[:12]
+    basis = {'settings': [ctc.VOTE_MARGIN, NEIGHBOR_SECONDS, PAD, CONTROL_WORDS, CONTROL_TOKENS, REFERENCE_CLIPS, MIN_VOWEL_SECONDS,
+                          FORMANT_MARGIN, CTC_PARTNERS, FORMANT_PARTNERS],
+             'aligner': tts.aligner_key(), 'checks': settings['checks'], 'clips': [clip['id'] for clip in clips]}
+    return tts.inputs_key(basis, tts.code_files('readings'))
 
 
 # A clip's words with their times - [(phones, start, end, labels)] from its alignment record (its phones' labels in
@@ -109,9 +114,11 @@ def voicing_positions(variant):
 
 # A clip's measurement tasks - its measured words' tokens ({position, word, class, frontEnd, method, segment, phones,
 # labels, candidates}) and at most two control tokens ({control: True, ...}); words, the measured words' readings and
-# classes; controls, {word: (method, candidates)}; names, the clip's words (the front end's)
-def clip_tasks(record, words, classes, controls, names):
+# classes; controls, {word: (method, candidates)}; front, the clip's front end tokens and words (its own - the
+# alignment's tokens take the measured readings, frontEnd is the front end's reading)
+def clip_tasks(record, words, classes, controls, front):
     timed = word_times(record)
+    names, own = front['words'], token_words(front['tokens'])
     tasks = []
     for position, (phones, start, _, labels) in enumerate(timed):
         if start is None or position >= len(names):
@@ -120,7 +127,7 @@ def clip_tasks(record, words, classes, controls, names):
         segment = word_context(timed, position, record['seconds'])
         if name in words and classes[name] != 'stress':
             readings = words[name]
-            tasks.append({'position': position, 'word': name, 'class': classes[name], 'frontEnd': reading_of(phones, readings),
+            tasks.append({'position': position, 'word': name, 'class': classes[name], 'frontEnd': reading_of(own[position], readings),
                           'method': METHODS[classes[name]], 'segment': segment, 'phones': phones, 'labels': labels,
                           'candidates': [reading[0] for reading in readings]})
         elif name in controls and controls[name][1][0] == phones and sum(bool(task.get('control')) for task in tasks) < 2:
@@ -154,19 +161,40 @@ def control_words(counts, variants, measured):
     return {word: (method, [variants[word][0], swapped]) for method, items in choices.items() for word, swapped in items}
 
 
-# The CTC votes of tasks [(clip path, task)] (in place - each task's scores and vote)
-def ctc_votes(model, vocab, device, items):
+# A token's candidate scores (a worker task: (its segment's log posteriors, the phones before and after, the candidates,
+# the method, vocab)) - (the scores, the vote)
+def score_candidates(task):
     from . import ctc  # pylint: disable=import-outside-toplevel
-    segments = [ctc.read_segment(path, task['segment'][0], task['segment'][1]) for path, task in items]
-    posteriors = ctc.ctc_log_posteriors(model, device, segments)
-    for (_, task), log_posteriors in zip(items, posteriors):
-        _, _, before, after = task['segment']
-        scores = []
-        for candidate in task['candidates']:
-            voicing = voicing_positions(candidate) if task['method'] == 'voicing' else ()
-            scores.append(ctc.candidate_log_likelihood(log_posteriors, before, candidate.split(), after, vocab, voicing))
-        task['scores'] = [round(score, 3) for score in scores]
-        task['vote'] = ctc.vote(scores)
+    log_posteriors, before, after, candidates, method, vocab = task
+    scores = []
+    for candidate in candidates:
+        voicing = voicing_positions(candidate) if method == 'voicing' else ()
+        scores.append(ctc.candidate_log_likelihood(log_posteriors, before, candidate.split(), after, vocab, voicing))
+    return [round(score, 3) for score in scores], ctc.vote(scores)
+
+
+# The CTC votes of tasks [(clip path, task)] (in place - each task's scores and vote), batch tokens at a time,
+# overlapped (ctc.overlapped): the next group's segments read and the last group's candidates scored while the
+# recognizer runs
+def ctc_votes(model, vocab, device, items, batch, jobs):
+    from . import ctc  # pylint: disable=import-outside-toplevel
+    from .wav import read_mono  # pylint: disable=import-outside-toplevel
+    start_time = time.time()
+
+    # (a group's segments, and its scoring tasks)
+    def read(group):
+        return [read_mono(path, ctc.CTC_SAMPLE_RATE, start=task['segment'][0], end=task['segment'][1]) for path, task in group]
+
+    def infer(group, segments):
+        return [(log_posteriors, task['segment'][2], task['segment'][3], task['candidates'], task['method'], vocab)
+                for (_, task), log_posteriors in zip(group, ctc.ctc_log_posteriors(model, device, segments))]
+    done = 0
+    for group, results in ctc.overlapped([items[offset:offset + batch] for offset in range(0, len(items), batch)], read, infer,
+                                         score_candidates, jobs):
+        for (_, task), (scores, vote) in zip(group, results):
+            task['scores'], task['vote'] = scores, vote
+        done += len(group)
+        log(f'  ctc {done}/{len(items)} tokens, {time.time() - start_time:.0f} s')
 
 
 # A clip's formants (a worker task: (path, sex, ceilings, [(start, end)])) - [[F1, F2] or None], each interval's
@@ -200,7 +228,7 @@ def formant_target(task):
     found, vowels = None, {}
     own = None
     for index, candidate in enumerate(task['candidates']):
-        if unstressed(candidate) == unstressed(task['phones']):
+        if base(candidate) == base(task['phones']):
             own = index
             continue
         differing = difference(phones, candidate.split())
@@ -289,23 +317,24 @@ def measure_command(args):
     settings = tts.load_settings(args.recipe)
     directory = tts.corpus_dir(settings)
     out = os.path.join(directory, 'readings')
-    words = measured_words()
-    classes = {word: word_class(readings) for word, readings in words.items()}
-    key = measure_key(words)
+    clips = [clip for clip in tts.selection(settings, args.jobs, args.recipe) if os.path.exists(tts.wav_path(directory, clip))]
+    key = measure_key(settings, clips)
     if not args.limit and os.path.exists(os.path.join(out, 'summary.json')) and read_json(os.path.join(out, 'summary.json'))['key'] == key:
         log(f'measure: {out} is current')
         return 0
+    words, _ = measured_words()
+    classes = {word: word_class(readings) for word, readings in words.items()}
     records = tts.read_alignments(directory)
-    clips = [clip for clip in tts.selection(settings, args.jobs, args.recipe)
-             if clip['id'] in records and not tts.clip_checks(records[clip['id']], settings['checks'])[0]]
+    clips = [clip for clip in clips if clip['id'] in records and not tts.clip_checks(records[clip['id']], settings['checks'])[0]]
     if args.limit:
         clips = clips[::max(1, len(clips) // args.limit)][:args.limit]
-    names = {clip_id: front['words'] for clip_id, front in tts.clip_fronts(clips, {}, args.jobs).items()}
+    fronts = tts.clip_fronts(clips, {}, args.jobs)
+    names = {clip_id: front['words'] for clip_id, front in fronts.items()}
     counts = collections.Counter(name for clip_names in names.values() for name in clip_names)
     controls = control_words(counts, read_variants(), words)
 
     # The tokens - each clip's measured words' and controls'
-    plan = [(clip, task) for clip in clips for task in clip_tasks(records[clip['id']], words, classes, controls, names[clip['id']])]
+    plan = [(clip, task) for clip in clips for task in clip_tasks(records[clip['id']], words, classes, controls, fronts[clip['id']])]
     per_control = collections.Counter()
     kept = []
     for clip, task in plan:
@@ -320,10 +349,8 @@ def measure_command(args):
 
     # The CTC votes, and the formant votes
     model, vocab, device = ctc.load_ctc(args.device)
-    voted = [(tts.wav_path(directory, clip), task) for clip, task in plan if task['method'] in ('ctc', 'voicing')]
-    for offset in range(0, len(voted), args.batch):
-        ctc_votes(model, vocab, device, voted[offset:offset + args.batch])
-        log(f'  ctc {min(len(voted), offset + args.batch)}/{len(voted)} tokens, {time.time() - start_time:.0f} s')
+    ctc_votes(model, vocab, device, [(tts.wav_path(directory, clip), task) for clip, task in plan if task['method'] in ('ctc', 'voicing')],
+              args.batch, args.jobs)
     voices = measure_formants(plan, clips, records, words, names, directory, settings, args.jobs)
     for clip, task in plan:
         if task['method'] == 'formant':

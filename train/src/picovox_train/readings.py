@@ -4,7 +4,7 @@
 """
 Heteronym readings - the pronouncing dictionary's variants of a word clustered into readings, how two readings are told
 apart in the audio (pair_class - measure.py measures them in the training speech), the words the corpus measures and
-covers (the inventory, and the context labels' candidate words), and the corpus's measured readings (read_readings, and
+covers (the inventory, and the context labels' candidate words), and the corpus's measured readings (read_measured, and
 the overrides the voice's tokens take - tts.py). The phone helpers (edit alignment, kinds of difference) are shared with
 heteronyms.py and contextlabels.py.
 
@@ -21,11 +21,10 @@ import os
 import re
 
 from . import ROOT, corpora, read_json
-from .frontend import BOUNDARIES
+from .frontend import BOUNDARIES, VOWELS, base
 from .frontend import FUNCTION_WORDS as FRONT_END_FUNCTION_WORDS
 
 
-VOWELS = {'AA', 'AE', 'AH', 'AO', 'AW', 'AY', 'EH', 'ER', 'EY', 'IH', 'IY', 'OW', 'OY', 'UH', 'UW'}
 REDUCED = {'AH', 'IH', 'ER', 'IY', 'UW'}
 VOICING = {('DH', 'TH'), ('TH', 'DH'), ('Z', 'S'), ('S', 'Z'), ('ZH', 'SH'), ('SH', 'ZH'), ('V', 'F'), ('F', 'V')}
 
@@ -44,11 +43,6 @@ ought let's i'll you'll he'll she'll we'll they'll it'll i'd you'd he'd she'd we
 i'm you're we're they're he's she's it's isn't aren't wasn't weren't don't doesn't didn't hasn't haven't hadn't won't
 wouldn't can't cannot couldn't shouldn't mustn't there's here's what's who's
 """.split())
-
-
-# A phone without its stress
-def base(phone):
-    return re.sub(r'\d', '', phone)
 
 
 # The edit alignment of two phone sequences (a stress-only substitution costs half) - the cost table
@@ -139,11 +133,6 @@ def difference(first, majority):
 CLOSED_CLASS = FUNCTION_WORDS | FRONT_END_FUNCTION_WORDS
 
 
-# Phones (a string) without stress digits
-def unstressed(phones):
-    return ' '.join(base(phone) for phone in phones.split())
-
-
 # The vowel pairs that differ between two variants - by syllable, or by the edit alignment when the counts differ
 def vowel_pairs(first, second):
     first_vowels = [phone for phone in first.split() if base(phone) in VOWELS]
@@ -216,17 +205,15 @@ def reading_of(phones, readings):
     for index, reading in enumerate(readings):
         if phones in reading:
             return index
-    loose = [index for index, reading in enumerate(readings) if unstressed(phones) in {unstressed(variant) for variant in reading}]
+    loose = [index for index, reading in enumerate(readings) if base(phones) in {base(variant) for variant in reading}]
     return loose[0] if len(loose) == 1 else None
 
 
-# The words' phones (strings) of a token sequence - split at the word boundaries (default the front end's) and phrase
-# ends, after <bos>
-def token_words(tokens, boundaries=None):
-    boundaries = BOUNDARIES if boundaries is None else boundaries
+# The words' phones (strings) of a token sequence - split at the word boundaries and phrase ends, after <bos>
+def token_words(tokens):
     words, current = [], []
     for token in tokens[1:]:
-        if token in boundaries:
+        if token in BOUNDARIES:
             words.append(' '.join(current))
             current = []
         else:
@@ -254,7 +241,7 @@ CLASSES = ('strong', 'voicing', 'weak', 'merger', 'stress')
 # recognizer merges: the formants), or 'stress' (stress alone - not measured)
 def pair_class(first, other):
     from . import ctc  # pylint: disable=import-outside-toplevel
-    if unstressed(first) == unstressed(other):
+    if base(first) == base(other):
         return 'stress'
     if ctc.merged(first) == ctc.merged(other):
         return 'merger'
@@ -287,9 +274,8 @@ SPEC_PATH = os.path.join(ROOT, 'train', 'data', 'context-labels.json')
 
 
 # The curated spec
-def load_spec(path=SPEC_PATH):
-    with open(path, encoding='utf-8') as file:
-        return json.load(file)
+def load_spec():
+    return read_json(SPEC_PATH)
 
 
 # A variant's vowels
@@ -353,20 +339,20 @@ def candidate_words(spec, heteronyms=None):
     return words
 
 
-# The words whose readings the corpus measures - {word: readings}: the inventory's, and the context labels' candidate
-# words (with the readings the dictionary lacks)
+# The words whose readings the corpus measures, and the context labels' candidate words (candidate_words') -
+# ({word: readings}: the inventory's, and the candidates' with the readings the dictionary lacks; the candidates)
 def measured_words():
     words = inventory()
-    for word, entry in candidate_words(load_spec(), words).items():
+    candidates = candidate_words(load_spec(), words)
+    for word, entry in candidates.items():
         words[word] = entry['readings']
-    return words
+    return words, candidates
 
 
 # The corpus's coverage quotas - {word: sentences}: the gate's words (coverage "gate"), the context labels' candidate
 # words ("context"), and the other measured words ("other"); a word whose readings can't be measured, none
 def coverage_quotas(coverage, gate_words):
-    words = measured_words()
-    context = set(candidate_words(load_spec(), inventory()))
+    words, context = measured_words()
     quotas = {}
     for word, readings in words.items():
         if word_class(readings) != 'stress':
@@ -374,13 +360,15 @@ def coverage_quotas(coverage, gate_words):
     return quotas
 
 
-# The corpus's measured clips - readings.jsonl's records (None if it isn't measured)
-def read_readings(directory):
+# The corpus's measured readings - (readings.jsonl's records - its measured clips, words.json), or None if it isn't
+# measured
+def read_measured(directory):
     path = os.path.join(directory, 'readings', 'readings.jsonl')
     if not os.path.exists(path):
         return None
     with open(path, encoding='utf-8') as file:
-        return [json.loads(line) for line in file]
+        records = [json.loads(line) for line in file]
+    return records, read_json(os.path.join(directory, 'readings', 'words.json'))
 
 
 # The classes whose measured readings the voice's tokens take - the CTC vote's (the formants judge the G2P's evidence only)
@@ -389,13 +377,13 @@ OVERRIDE_CLASSES = ('strong', 'voicing')
 
 # The measured readings that differ from the front end's (the voice's tokens take them) - {clip id: {position: phones}}
 def overrides(directory):
-    records = read_readings(directory)
-    if records is None:
+    measured = read_measured(directory)
+    if measured is None:
         return {}
-    words = read_json(os.path.join(directory, 'readings', 'words.json'))['words']
+    records, words = measured
     result = {}
     for record in records:
         for token in record['tokens']:
             if token['class'] in OVERRIDE_CLASSES and token['reading'] is not None and token['reading'] != token['frontEnd']:
-                result.setdefault(record['id'], {})[str(token['position'])] = words[token['word']][token['reading']][0]
+                result.setdefault(record['id'], {})[str(token['position'])] = words['words'][token['word']][token['reading']][0]
     return result

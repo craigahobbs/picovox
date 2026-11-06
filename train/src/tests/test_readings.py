@@ -108,8 +108,9 @@ def record_of(tokens, seconds=3.0):
 
 class TestReadings(unittest.TestCase):
 
-    def test_unstressed(self):
-        self.assertEqual(readings.unstressed('R EH1 K ER0 D'), 'R EH K ER D')
+    def test_base(self):
+        self.assertEqual(readings.base('R EH1 K ER0 D'), 'R EH K ER D')
+        self.assertEqual(readings.base('AH0'), 'AH')
 
     def test_vowel_pairs(self):
         self.assertEqual(readings.vowel_pairs('R IY1 D', 'R EH1 D'), [('IY1', 'EH1')])
@@ -155,8 +156,7 @@ class TestReadings(unittest.TestCase):
         self.assertIsNone(readings.reading_of('K AE1 T', word_readings))
 
     def test_token_words(self):
-        boundaries = {'<bos>', '_', '<period>', '<comma>'}
-        self.assertEqual(readings.token_words(['<bos>', 'AY1', '_', 'R', 'EH1', 'D', '<comma>', 'IH1', 'T', '<period>'], boundaries),
+        self.assertEqual(readings.token_words(['<bos>', 'AY1', '_', 'R', 'EH1', 'D', '<comma>', 'IH1', 'T', '<period>']),
                          ['AY1', 'R EH1 D', 'IH1 T'])
         self.assertEqual(readings.token_words(['<bos>', 'AY1', '_', 'IH1', 'T', '<period>']), ['AY1', 'IH1 T'])
 
@@ -193,18 +193,32 @@ class TestReadings(unittest.TestCase):
         with unittest.mock.patch.object(corpora, 'read_dictionary', lambda: dictionary), \
                 unittest.mock.patch.object(readings, 'load_spec', return_value={'words': {}}), \
                 unittest.mock.patch.object(readings, 'candidate_words', candidate_words):
-            words = readings.measured_words()
+            words, candidates = readings.measured_words()
             quotas = readings.coverage_quotas({'gate': 5, 'context': 3, 'other': 1}, ['read'])
         self.assertEqual(sorted(words), ['dawn', 'insult', 'read', 'use', 'wound'])
+        self.assertEqual(sorted(candidates), ['insult', 'use', 'wound'])
         self.assertEqual(words['wound'], [['W UW1 N D'], ['W AW1 N D']])
         self.assertEqual(quotas, {'read': 5, 'use': 3, 'dawn': 1, 'wound': 3})
 
     def test_measure_key(self):
-        key = measure.measure_key({'read': [['R IY1 D'], ['R EH1 D']]})
+        settings = ctc_fixtures.tts_settings()
+        clips = [{'id': 'a'}, {'id': 'b'}]
+        key = measure.measure_key(settings, clips)
         self.assertEqual(len(key), 12)
-        self.assertNotEqual(measure.measure_key({'read': [['R IY1 D']]}), key)
+        self.assertEqual(measure.measure_key(settings, clips), key)
+        # The settings, the clips (a bigger corpus), the aligner, the checks, and the front end, the dictionary, and the spec
         with unittest.mock.patch.object(measure, 'FORMANT_MARGIN', 0.5):
-            self.assertNotEqual(measure.measure_key({'read': [['R IY1 D'], ['R EH1 D']]}), key)
+            self.assertNotEqual(measure.measure_key(settings, clips), key)
+        self.assertNotEqual(measure.measure_key(settings, clips + [{'id': 'c'}]), key)
+        with unittest.mock.patch.object(tts, 'aligner_key', return_value='new'):
+            self.assertNotEqual(measure.measure_key(settings, clips), key)
+        self.assertNotEqual(measure.measure_key(dict(settings, checks={}), clips), key)
+        self.assertIn(corpora.CMUDICT_PATH, tts.code_files('readings'))
+        for name in ('g2pModel.js', 'context-labels.json', 'readings.py', 'frontend.py'):
+            with unittest.mock.patch.object(tts, 'file_sha256', side_effect=lambda path, end=name: 'z' if path.endswith(end) else 'y'):
+                changed = measure.measure_key(settings, clips)
+            with unittest.mock.patch.object(tts, 'file_sha256', return_value='y'):
+                self.assertNotEqual(changed, measure.measure_key(settings, clips), name)
 
     def test_word_times(self):
         record = record_of(['<bos>', 'R', 'EH1', 'D', '_', '<comma>', 'L', 'IY1', 'D', '<period>'])
@@ -242,7 +256,7 @@ class TestReadings(unittest.TestCase):
         controls = {'went': ('ctc', ['W EH1 N T', 'W IY1 N T']), 'home': ('ctc', ['HH OW1 M', 'HH AW1 M']),
                     'cats': ('voicing', ['K AE1 T S', 'K AE1 T Z']), 'times': ('voicing', ['T AY1 M Z', 'T AY1 M S'])}
         names = ['read', '', 'insult', 'went', 'home', 'cats', 'times']
-        tasks = measure.clip_tasks(record, words, classes, controls, names)
+        tasks = measure.clip_tasks(record, words, classes, controls, {'tokens': tokens, 'words': names})
         self.assertEqual([(task['position'], task['word'], task.get('control', False)) for task in tasks],
                          [(0, 'read', False), (3, 'went', True), (5, 'cats', True)])
         segment = tasks[0].pop('segment')
@@ -254,6 +268,11 @@ class TestReadings(unittest.TestCase):
         self.assertEqual(tasks[1]['method'], 'ctc')
         self.assertEqual(tasks[1]['candidates'], ['W EH1 N T', 'W IY1 N T'])
         self.assertEqual(tasks[2]['method'], 'voicing')
+
+        # A token aligned with its measured reading - frontEnd is still the front end's own
+        aligned = tokens[:2] + ['IY1'] + tokens[3:]
+        tasks = measure.clip_tasks(record_of(aligned, 5.0), words, classes, controls, {'tokens': tokens, 'words': names})
+        self.assertEqual((tasks[0]['phones'], tasks[0]['frontEnd']), ('R IY1 D', 1))
 
     def test_control_words(self):
         counts = {word: 6 for word in ('went', 'home', 'look', 'times', 'cats', 'dark', 'night', 'read', 'lead', 'the', 'cat', 'zzzz')}
@@ -340,9 +359,9 @@ class TestReadings(unittest.TestCase):
         self.assertNotIn('formants', unmatched)
         self.assertNotIn('target', voted)
 
-    def test_read_readings_overrides(self):
+    def test_read_measured_overrides(self):
         with tempfile.TemporaryDirectory() as directory:
-            self.assertIsNone(readings.read_readings(directory))
+            self.assertIsNone(readings.read_measured(directory))
             self.assertEqual(readings.overrides(directory), {})
             os.makedirs(os.path.join(directory, 'readings'))
             with open(os.path.join(directory, 'readings', 'words.json'), 'w', encoding='utf-8') as file:
@@ -353,7 +372,8 @@ class TestReadings(unittest.TestCase):
                       {'position': 5, 'word': 'record', 'class': 'weak', 'frontEnd': 0, 'reading': 1}]
             with open(os.path.join(directory, 'readings', 'readings.jsonl'), 'w', encoding='utf-8') as file:
                 file.write(json.dumps({'id': 'a', 'tokens': tokens}) + '\n' + json.dumps({'id': 'b', 'tokens': tokens[1:]}) + '\n')
-            self.assertEqual(len(readings.read_readings(directory)), 2)
+            records, words = readings.read_measured(directory)
+            self.assertEqual((len(records), sorted(words['words'])), (2, ['read', 'record']))
             self.assertEqual(readings.overrides(directory), {'a': {'1': 'R IY1 D'}})
 
     def test_measure_command(self):
@@ -381,13 +401,20 @@ class TestReadings(unittest.TestCase):
                     summary = json.load(file)
                 with open(os.path.join(out, 'words.json'), encoding='utf-8') as file:
                     words = json.load(file)
-                measured = readings.read_readings(directory)
+                measured, _ = readings.read_measured(directory)
                 overrides = readings.overrides(directory)
 
                 # Current - not measured again
                 with captured() as (_, stderr):
                     self.assertEqual(measure.main(['--recipe', recipe]), 0)
                 self.assertIn('is current', stderr.getvalue())
+
+                # Another selection (a clip less) - measured again
+                os.remove(tts.wav_path(directory, clips[-1]))
+                with captured() as (_, stderr):
+                    self.assertEqual(measure.main(['--recipe', recipe, '-j', '1']), 0)
+                self.assertIn('measure: 13 clips', stderr.getvalue())
+                self.assertNotEqual(readings.read_json(os.path.join(out, 'summary.json'))['key'], summary['key'])
 
                 # A sample - measured, not kept as current
                 with captured() as (_, stderr):

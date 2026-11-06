@@ -4,7 +4,7 @@
 """
 Our speech measurement - a wav2vec2 phoneme recognizer's CTC posteriors (facebook/wav2vec2-lv-60-espeak-cv-ft, espeak
 IPA, 20 ms frames), for the training speech's alignment and checks (tts.py) and the readings of its heteronym tokens
-(readings.py, g2paudit.py):
+(measure.py):
 
 - Alignment - our tokens (frontend.py) force-aligned to the posteriors: each of our phones is a position whose
   posterior is the sum over the IPA tokens it may be heard as (IPA_TOKENS - reductions, flaps, devoicing, the
@@ -23,19 +23,13 @@ IPA, 20 ms frames), for the training speech's alignment and checks (tts.py) and 
 import json
 import math
 import os
-import re
 
 from . import ROOT
-from .wav import read_wav
+from .frontend import base
 
 
 # (the recognizer's download, with the listener models' - downloads/listeners/, kept by make clean)
 HF_HOME = os.path.join(ROOT, 'downloads', 'listeners', 'hf')
-
-
-# A phone string without stress
-def unstressed(phones):
-    return re.sub(r'\d', '', phones)
 
 
 # The phoneme recognizer - wav2vec2 large (LibriLight 60k h pretraining) fine-tuned on CommonVoice to espeak IPA
@@ -92,11 +86,9 @@ IPA_TOKENS = {
 }
 
 # Alignment settings (chosen against the ARCTIC labels by the former arctic-check - see git history): the CTC frames'
-# time offset, how the blank frames between two phones' runs are split ('mid' - at the midpoint, the best of the
-# splits tried), and how far the first phone's start and the last phone's end may extend to the speech's energy onset
-# and offset
+# time offset, and how far the first phone's start and the last phone's end may extend to the speech's energy onset and
+# offset (the blank frames between two phones' runs are split at their midpoint - the best of the splits tried)
 CTC_SHIFT = -0.005
-CTC_SPLIT = 'mid'
 EDGE_EXTEND = 0.15
 
 
@@ -147,6 +139,27 @@ def ctc_log_posteriors(model, device, samples_list, max_batch_seconds=80.0):
     if batch:
         run(batch)
     return results
+
+
+# Run groups through the recognizer overlapped (its batches as one at a time, the results in order): read(group) a
+# group's input (a thread - the next group's while the recognizer runs), infer(group, input) the recognizer's (the GPU)
+# - the group's tasks, and finish(task) a task's result (worker processes - a group's while the recognizer runs the
+# next); yields (group, results)
+def overlapped(groups, read, infer, finish, jobs=None):
+    import concurrent.futures  # pylint: disable=import-outside-toplevel
+    with concurrent.futures.ThreadPoolExecutor(1) as reader, concurrent.futures.ProcessPoolExecutor(jobs) as workers:
+        reading = reader.submit(read, groups[0]) if groups else None
+        previous = None
+        for index, group in enumerate(groups):
+            inputs = reading.result()
+            if index + 1 < len(groups):
+                reading = reader.submit(read, groups[index + 1])
+            finishing = workers.map(finish, infer(group, inputs), chunksize=8)
+            if previous is not None:
+                yield previous[0], list(previous[1])
+            previous = (group, finishing)
+        if previous is not None:
+            yield previous[0], list(previous[1])
 
 
 # Viterbi CTC alignment of a sequence of distinct positions - log posteriors [frames, positions] and the blank's
@@ -209,7 +222,7 @@ def ctc_labels(tokens, log_posteriors, vocab, samples):
     frames = len(log_posteriors)
     seconds = len(samples) / CTC_SAMPLE_RATE
 
-    # Phone boundaries - each phone's run, the blank frames between two runs split at their midpoint (CTC_SPLIT)
+    # Phone boundaries - each phone's run, the blank frames between two runs split at their midpoint
     starts, ends = [], []
     for index, (first, _) in enumerate(runs):
         start = first if index == 0 else (runs[index - 1][1] + 1 + first) / 2
@@ -276,27 +289,6 @@ def greedy_phone_error(greedy, tokens):
     return table[count][heard_count] / max(1, count), count - matched
 
 
-# Token durations (seconds, from the audio's start) of tokens from labels [(label, start, end)] - data.py's
-# alignment and pause refinement; returns (seconds, report)
-def label_durations(tokens, labels, samples, rate, mean_seconds):
-    from . import align  # pylint: disable=import-outside-toplevel
-    from .data import silent_runs  # pylint: disable=import-outside-toplevel
-    seconds, report = align.assign_durations(tokens, [(label, end - start) for label, start, end in labels], mean_seconds)
-    seconds, report['pausesRefined'], report['pauseSecondsMoved'] = align.refine_pauses(tokens, seconds, silent_runs(samples, rate))
-    return seconds, report
-
-
-# Read a 16 kHz mono clip (float64)
-def read_16k(path):
-    import numpy as np  # pylint: disable=import-outside-toplevel
-    import soxr  # pylint: disable=import-outside-toplevel
-    samples, rate = read_wav(path)
-    samples = samples.mean(axis=1)
-    if rate != CTC_SAMPLE_RATE:
-        samples = soxr.resample(samples, rate, CTC_SAMPLE_RATE, quality='VHQ')
-    return np.ascontiguousarray(samples)
-
-
 # The recognizer's greedy (best path) phoneme string, tokens separated by spaces
 def greedy_decode(log_posteriors, vocab):
     names = {index: token for token, index in vocab.items()}
@@ -308,15 +300,6 @@ def greedy_decode(log_posteriors, vocab):
             tokens.append(names[int(index)])
         previous = index
     return ' '.join(tokens)
-
-
-# First-pass F0 of a clip (Praat, 60-700 Hz) - the voiced values (a worker task)
-def first_pass_f0(path):
-    import numpy as np  # pylint: disable=import-outside-toplevel
-    import parselmouth  # pylint: disable=import-outside-toplevel, import-error
-    sound = parselmouth.Sound(path)
-    f0 = sound.to_pitch_ac(time_step=0.01, pitch_floor=60, pitch_ceiling=700).selected_array['frequency']
-    return f0[f0 > 0].astype(np.float32)
 
 
 #
@@ -378,7 +361,7 @@ VOTE_MARGIN = 2.0
 
 # The recognizer token ids of an aligned phone (stress digit and all) - voicing, its S or Z only
 def phone_token_ids(phone, vocab, voicing=False):
-    key = unstressed(phone)
+    key = base(phone)
     tokens = (VOICING_TOKENS[key] if voicing and key in VOICING_TOKENS else STRICT_TOKENS[key]) + (REDUCTIONS if phone[-1:] == '0' else [])
     return [vocab[token] for token in dict.fromkeys(tokens) if token in vocab]
 
@@ -416,7 +399,7 @@ R_COLORED = {'AA', 'AO', 'OW', 'EH', 'IH', 'IY', 'UH'}
 def candidate_log_likelihood(log_posteriors, before, phones, after, vocab, voicing=()):
     sequence = before + phones + after
     strict = {len(before) + position for position in voicing}
-    kept = [index for index, phone in enumerate(sequence) if not (phone == 'R' and index and unstressed(sequence[index - 1]) in R_COLORED)]
+    kept = [index for index, phone in enumerate(sequence) if not (phone == 'R' and index and base(sequence[index - 1]) in R_COLORED)]
     score = ctc_log_likelihood(log_posteriors, sequence, vocab, strict)
     if len(kept) == len(sequence):
         return score
@@ -431,18 +414,11 @@ def vote(scores):
     return order[0] if scores[order[0]] - scores[order[1]] >= VOTE_MARGIN else None
 
 
-# A segment of a clip's audio at 16 kHz
-def read_segment(path, start, end):
-    import soxr  # pylint: disable=import-outside-toplevel
-    samples, rate = read_wav(path)
-    return soxr.resample(samples[int(start * rate):int(end * rate)].mean(axis=1), rate, CTC_SAMPLE_RATE, quality='VHQ')
-
-
 # A pronunciation with the mergers' vowels merged (AA and AO; AE, EH, and EY before R; IH and IY before R - the
 # recognizer's one ɪɹ token), the reduced vowels (AH0, IH0) one schwa, and without stress
 def merged(phones):
     items = phones.split()
-    bases = unstressed(phones).split()
+    bases = base(phones).split()
 
     # (a vowel before R)
     def before_r(index):

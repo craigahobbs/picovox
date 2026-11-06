@@ -86,9 +86,7 @@ class TestPins(BooksCase):
         with open(os.path.join(ROOT, 'train', 'data', 'train.json'), encoding='utf-8') as file:
             recipe = json.load(file)
         pins = books.load_pins()
-        labels, texts, fill = recipe['context']['labels'], recipe['tts']['texts'], recipe['tts']['fill']
-        for settings in (labels, texts):
-            self.assertEqual(settings['pins'], 'train/data/books.json')
+        labels, fill = recipe['context']['labels'], recipe['tts']['fill']
         self.assertTrue(set(labels['texts']) <= set(pins))
         self.assertTrue(set(fill) <= set(pins))
         self.assertEqual(len(labels['texts']), 132)
@@ -465,3 +463,14 @@ class TestBookParagraphs(BooksCase):
         self.write_book('plain', b'We went home. A dark night fell\r\non the town. Oh. Call me Ishmael.\r\n')
         self.assertEqual(books.book_paragraphs(os.path.join(self.books, 'plain.txt')),
                          ['We went home. A dark night fell on the town. Oh. Call me Ishmael.'])
+
+    def test_book_capitals(self):
+        os.makedirs(self.books)
+        with open(os.path.join(self.books, 'one.txt'), 'w', encoding='utf-8') as file:
+            file.write('Hobbes said so. Then Mr. Hobbes and hobbes, Hobbes;\nHobbes\n\nHobbes went. HOBBES and Hobbes the cat, HOBBES.\n')
+        with open(os.path.join(self.books, 'skip.md'), 'w', encoding='utf-8') as file:
+            file.write('a Hobbes')
+        counts = books.book_capitals(self.books, ['hobbes', 'cat'])
+        # (mid-sentence: "Mr. Hobbes" no - after a period; "and hobbes" lowercase; ", Hobbes" yes; "; Hobbes" no; "and Hobbes" yes)
+        self.assertEqual(counts['hobbes'], [2, 1])
+        self.assertEqual(counts['cat'], [0, 1])

@@ -63,12 +63,6 @@ class TestPackageText(unittest.TestCase):
         text = 'export const weights = `AAAA`;\n' * 10
         self.assertEqual(package.module_size(text), {'bytes': len(text), 'gzipBytes': len(gzip.compress(text.encode(), 9, mtime=0))})
 
-    def test_file_sha256(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, 'file')
-            with open(path, 'wb') as file:
-                file.write(b'hello')
-            self.assertEqual(package.file_sha256(path), hashlib.sha256(b'hello').hexdigest())
 
 
 class TestProvenance(unittest.TestCase):

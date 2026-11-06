@@ -62,7 +62,9 @@ test('trainStages', () => {
             'f\'  {number}/{len(missing)} clips, {total / 24000 / 3600:.2f} hours, {time.time() - start:.0f} s\'',
             '  500/29475 clips, 1.07 hours, 52 s'],
         'align': [ttsSource, 'f\'tts align: {len(clips)} clips, {len(todo)} to align\'', 'tts align: 29475 clips, 120 to align'],
-        'alignStep': [ttsSource, 'f\'  {offset + len(group)}/{len(todo)} clips, {time.time() - start:.0f} s\'', '  256/29475 clips, 15 s'],
+        'alignCurrent': [ttsSource, 'f\'tts align: {len(clips)} clips, the alignment is current\'',
+            'tts align: 29475 clips, the alignment is current'],
+        'alignStep': [ttsSource, 'f\'  {done}/{len(todo)} clips, {time.time() - start:.0f} s\'', '  256/29475 clips, 15 s'],
         'measure': [measureSource, 'f\'measure: {len(clips)} clips, {sum(not task.get("control") for _, task in plan)} measured tokens, \'',
             'measure: 28000 clips, 120 measured tokens, 900 control tokens'],
         'measureCurrent': [measureSource, 'f\'measure: {out} is current\'', 'measure: /downloads/tts/phonon/readings is current'],
@@ -72,7 +74,7 @@ test('trainStages', () => {
             'f\'  {count}/{len(tasks)} clips, {frame_offset / 100 / 3600:.1f} h, {time.time() - start_time:.0f} s\'',
             '  2000/29475 clips, 3.2 h, 61 s'],
         'measureStep': [measureSource,
-            'f\'  ctc {min(len(voted), offset + args.batch)}/{len(voted)} tokens, {time.time() - start_time:.0f} s\'',
+            'f\'  ctc {done}/{len(items)} tokens, {time.time() - start_time:.0f} s\'',
             '  ctc 64/120 tokens, 9 s']
     };
     for (const [name, [text, format]] of Object.entries(logLines)) {
@@ -96,6 +98,7 @@ test('trainStages', () => {
     assert.equal(logLines.buildCurrent[2].match(new RegExp(build.progress.phases[0].header))[1], undefined);
     const readings = manifest.stages.find((item) => item.stage === 'tts-readings');
     assert.equal(logLines.measureCurrent[2].match(new RegExp(readings.progress.phases[0].header))[1], undefined);
+    assert.equal(logLines.alignCurrent[2].match(new RegExp(readings.progress.phases[1].header))[1], undefined);
     assert.deepEqual(stages['tts-corpus'].recipe.filter((line) => line.includes('picovox_train.')).
         map((line) => line.match(/picovox_train\.(\w+ \w+)/)[1]), ['tts generate', 'tts align']);
     assert.equal(manifest.firstRun.stage, 'tts-corpus');

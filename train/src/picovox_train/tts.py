@@ -14,7 +14,8 @@ PYTHONPATH=train/src build/venv-train/bin/python -B):
 
 The corpus (downloads/tts/<model>-<digest>/ - make clean keeps it, make superclean removes it): selection-<key>.json
 (the clips: id, voice key, engine voice, sex, book, text, split), wav/<voice>/<id>.wav, alignments.jsonl (the latest
-record of a clip wins), and readings/ (measure.py's measures of its heteronym tokens). A clip's id is a hash of its
+record of a clip wins) and alignments.stamp (alignment_stamp - while it's current, align and the build skip the front
+end's pass over the clips), and readings/ (measure.py's measures of its heteronym tokens). A clip's id is a hash of its
 engine voice and text, so a bigger corpus or another selection only adds clips; the engine isn't deterministic, so a
 clip is generated once. A new model (or digest) is a new corpus. The voices' training data is built once for its inputs
 too: build-<key>/, keyed by a hash of everything the build reads (the selection, the alignments, the readings, the
@@ -50,6 +51,7 @@ import urllib.error
 import urllib.request
 
 from . import RECIPE_PATH, ROOT, SOURCE_DIR, read_json
+from .corpora import file_sha256
 
 
 TTS_DIR = os.path.join(ROOT, 'downloads', 'tts')
@@ -110,19 +112,6 @@ def text_split(text, split):
 def text_voice(text, voices):
     keys = list(voices)
     return keys[int(hashlib.sha1(f'voice/{text}'.encode('utf-8')).hexdigest(), 16) % len(keys)]
-
-
-# The voices in dealing order - the recipe's, the sexes alternating (so sentences dealt in turn have both)
-def dealing_order(voices):
-    by_sex = {}
-    for key, voice in voices.items():
-        by_sex.setdefault(voice['sex'], []).append(key)
-    queues, order = list(by_sex.values()), []
-    while any(queues):
-        for queue in queues:
-            if queue:
-                order.append(queue.pop(0))
-    return order
 
 
 #
@@ -193,19 +182,17 @@ def excluded_texts():
     return [' '.join(WORD.findall(' '.join(word['text'] for word in tokenize(text)['words']).lower())) for text in texts]
 
 
-# The book paths of a recipe section's texts (books.py's pinned texts)
-def book_paths(section):
+# The paths of book texts (books.py's pinned texts, in its books directory)
+def book_paths(names):
     from . import books  # pylint: disable=import-outside-toplevel
-    books_dir = section['books'] if os.path.isabs(section['books']) else os.path.join(ROOT, section['books'])
-    pins = section['pins'] if os.path.isabs(section['pins']) else os.path.join(ROOT, section['pins'])
-    return books.pinned_paths(books_dir, section['texts'], pins)
+    return books.pinned_paths(books.BOOKS_DIR, names, books.PINS_PATH)
 
 
 # The selection's key - a hash of the recipe's settings it depends on, the books' pins, and the selection's rules
 def selection_key(settings, recipe):
+    from . import books  # pylint: disable=import-outside-toplevel
     keys = ('voices', 'hoursPerVoice', 'wordsPerSecond', 'seed', 'texts', 'coverage', 'split')
-    with open(os.path.join(ROOT, settings['texts']['pins']), 'rb') as file:
-        pins = hashlib.sha256(file.read()).hexdigest()
+    pins = file_sha256(books.PINS_PATH)
     basis = {'tts': {key: settings[key] for key in keys}, 'coverage': recipe['context']['labels']['texts'],
              'fill': settings['fill'], 'gate': recipe['context']['gate']['words'],
              'pins': pins, 'rules': [SENTENCE_ENDS, MARKS, ROMAN.pattern, SENTENCE.pattern, WORD.pattern]}
@@ -218,13 +205,10 @@ def select_sentences(settings, recipe, jobs):
     from . import readings  # pylint: disable=import-outside-toplevel
     excluded = excluded_texts()
     quotas = readings.coverage_quotas(settings['coverage'], recipe['context']['gate']['words'])
-    texts = settings['texts']
-    coverage_section = {'books': texts['books'], 'pins': texts['pins'], 'texts': recipe['context']['labels']['texts']}
-    fill_section = {'books': texts['books'], 'pins': texts['pins'], 'texts': settings['fill']}
 
     # The coverage's candidates - each quota word's sentences (in hash order), checked by the front end
     with concurrent.futures.ProcessPoolExecutor(jobs) as pool:
-        coverage_paths = book_paths(coverage_section)
+        coverage_paths = book_paths(recipe['context']['labels']['texts'])
         coverage_books = dict(zip(coverage_paths, pool.map(book_candidates, coverage_paths)))
     found = collections.defaultdict(list)
     for path in sorted(coverage_books):
@@ -264,7 +248,7 @@ def select_sentences(settings, recipe, jobs):
     # The fill - the fill books' sentences at random (in order of a seeded shuffle) to the recipe's hours
     target_words = settings['hoursPerVoice'] * 3600 * settings['wordsPerSecond'] * len(settings['voices'])
     with concurrent.futures.ProcessPoolExecutor(jobs) as pool:
-        fill_paths = book_paths(fill_section)
+        fill_paths = book_paths(settings['fill'])
         fill = [(os.path.basename(path), sentence) for path, items in zip(fill_paths, pool.map(book_candidates, fill_paths))
                 for _, sentence in items]
     random.Random(settings['seed']).shuffle(fill)
@@ -409,13 +393,65 @@ def generate_command(args):
 
 
 #
+# The cache keys
+#
+
+# The training package's modules a module imports, itself and transitively (its relative imports, at the top or in a
+# function) - their names
+def module_closure(name, package_dir):
+    seen, todo = set(), [name]
+    while todo:
+        module = todo.pop()
+        seen.add(module)
+        with open(os.path.join(package_dir, f'{module}.py'), encoding='utf-8') as file:
+            source = file.read()
+        imported = set(re.findall(r'^\s*from \.(\w+) import', source, re.MULTILINE))
+        for names in re.findall(r'^\s*from \. import ([\w, ]+)', source, re.MULTILINE):
+            imported.update(item.strip() for item in names.split(','))
+        todo.extend(item for item in imported if item not in seen and os.path.isfile(os.path.join(package_dir, f'{item}.py')))
+    return seen
+
+
+# The repository files a module names - its os.path.join(ROOT, ...) paths of string literals (relative to the root)
+def named_files(path):
+    with open(path, encoding='utf-8') as file:
+        source = file.read()
+    joins = re.findall(r"os\.path\.join\(ROOT, ((?:'[^']+'(?:, )?)+)\)", source)
+    return {os.path.join(*re.findall(r"'([^']+)'", parts)) for parts in joins}
+
+
+# The files of the code a module runs - the training package's modules it imports (module_closure), the package's
+# __init__.py and data files, and the repository files that code names (the G2P module - the front end's pronouncer -
+# the book pins, the context labels' spec, the dictionary, ...; the recipe aside - a key holds the settings it reads)
+def code_files(module):
+    package_dir = os.path.join(SOURCE_DIR, 'picovox_train')
+    modules = module_closure(module, package_dir) | {'__init__'}
+    files = [os.path.join(package_dir, name) for name in sorted(os.listdir(package_dir))
+             if os.path.isfile(os.path.join(package_dir, name)) and (not name.endswith('.py') or name[:-3] in modules)]
+    named = set().union(*(named_files(os.path.join(package_dir, f'{name}.py')) for name in modules))
+    return files + [os.path.join(ROOT, name) for name in sorted(named) if os.path.join(ROOT, name) != RECIPE_PATH]
+
+
+# The corpus's readings files (measure.py's)
+def readings_files(directory):
+    readings_dir = os.path.join(directory, 'readings')
+    return [os.path.join(readings_dir, name) for name in sorted(os.listdir(readings_dir))] if os.path.isdir(readings_dir) else []
+
+
+# A cache key - a hash of a basis and of files' contents (by their paths from the root; a missing file aside)
+def inputs_key(basis, files):
+    basis = dict(basis, files={os.path.relpath(path, ROOT): file_sha256(path) for path in files if os.path.isfile(path)})
+    return hashlib.sha256(json.dumps(basis, sort_keys=True).encode('utf-8')).hexdigest()[:12]
+
+
+#
 # The alignment
 #
 
 # The aligner's identity - a hash of its settings (a new aligner realigns every clip)
 def aligner_key():
     from . import ctc  # pylint: disable=import-outside-toplevel
-    basis = [ctc.CTC_REPO, ctc.CTC_SHIFT, ctc.CTC_SPLIT, ctc.EDGE_EXTEND, ctc.IPA_TOKENS]
+    basis = [ctc.CTC_REPO, ctc.CTC_SHIFT, ctc.EDGE_EXTEND, ctc.IPA_TOKENS]
     return hashlib.sha256(json.dumps(basis, sort_keys=True).encode('utf-8')).hexdigest()[:12]
 
 
@@ -447,6 +483,24 @@ def phone_keys(tokens):
     return ' '.join(key for _, key in ctc.phone_positions(tokens))
 
 
+# The alignment's stamp - a hash of what the clips' tokens and alignment depend on (the clips with audio, the aligner,
+# the measured readings their tokens take, and the front end with its G2P module - code_files('frontend')) and of
+# alignments.jsonl itself; align writes it (alignments.stamp) when every clip is aligned, so while it's current the
+# front end's pass over the clips is skipped (align's, and the build's check)
+def alignment_stamp(directory, clips):
+    files = [os.path.join(directory, 'alignments.jsonl')] + readings_files(directory) + code_files('frontend')
+    return inputs_key({'clips': [clip['id'] for clip in clips], 'aligner': aligner_key()}, files)
+
+
+# Whether the corpus's alignment stamp is current
+def alignment_current(directory, clips):
+    path = os.path.join(directory, 'alignments.stamp')
+    if not os.path.exists(path):
+        return False
+    with open(path, encoding='utf-8') as file:
+        return file.read().strip() == alignment_stamp(directory, clips)
+
+
 # The corpus's alignments - {id: record} (the latest of a clip's records)
 def read_alignments(directory):
     path = os.path.join(directory, 'alignments.jsonl')
@@ -461,10 +515,13 @@ def read_alignments(directory):
 
 def align_command(args):
     """The clips' CTC alignment - alignments.jsonl (the clips whose phones or aligner changed, appended)"""
-    from . import ctc, readings  # pylint: disable=import-outside-toplevel
+    from . import readings  # pylint: disable=import-outside-toplevel
     settings = load_settings(args.recipe)
     directory = corpus_dir(settings)
     clips = [clip for clip in selection(settings, args.jobs, args.recipe) if os.path.exists(wav_path(directory, clip))]
+    if alignment_current(directory, clips):
+        log(f'tts align: {len(clips)} clips, the alignment is current')
+        return 0
     overrides = readings.overrides(directory)
     records = read_alignments(directory)
     key = aligner_key()
@@ -476,31 +533,56 @@ def align_command(args):
         if record is None or record['aligner'] != key or record['keys'] != phone_keys(tokens):
             todo.append((clip, tokens))
     log(f'tts align: {len(clips)} clips, {len(todo)} to align')
-    if not todo:
-        return 0
+    if todo:
+        align_clips(args, directory, todo)
+    with open(os.path.join(directory, 'alignments.stamp'), 'w', encoding='utf-8') as file:
+        file.write(alignment_stamp(directory, clips) + '\n')
+    return 0
+
+
+# A clip's alignment (a worker task: (tokens, log posteriors, vocab, 16 kHz samples)) - (its samples, and its labels,
+# confidences, and score and its greedy phones - None if it can't be aligned: too short, or too few frames)
+def label_clip(task):
+    from . import ctc  # pylint: disable=import-outside-toplevel
+    tokens, log_posteriors, vocab, samples = task
+    result = ctc.ctc_labels(tokens, log_posteriors, vocab, samples) if len(samples) > 0.3 * ctc.CTC_SAMPLE_RATE else None
+    return len(samples), result, None if result is None else ctc.greedy_decode(log_posteriors, vocab)
+
+
+# Align clips [(clip, tokens)] - their records appended to alignments.jsonl, args.batch clips at a time, overlapped
+# (ctc.overlapped): the next group's audio read and the last group's labels found while the recognizer runs
+def align_clips(args, directory, todo):
+    from . import ctc  # pylint: disable=import-outside-toplevel
+    from .wav import read_mono  # pylint: disable=import-outside-toplevel
+    key = aligner_key()
     model, vocab, device = ctc.load_ctc(args.device)
-    start, failures = time.time(), 0
+
+    # (a group's audio, and its labeling tasks)
+    def read(group):
+        return [read_mono(wav_path(directory, clip), ctc.CTC_SAMPLE_RATE) for clip, _ in group]
+
+    def infer(group, samples_list):
+        return [(tokens, log_posteriors, vocab, samples) for (_, tokens), log_posteriors, samples
+                in zip(group, ctc.ctc_log_posteriors(model, device, samples_list), samples_list)]
+    groups = [todo[offset:offset + args.batch] for offset in range(0, len(todo), args.batch)]
+    start, done, failures = time.time(), 0, 0
     with open(os.path.join(directory, 'alignments.jsonl'), 'a', encoding='utf-8') as file:
-        for offset in range(0, len(todo), args.batch):
-            group = todo[offset:offset + args.batch]
-            samples_list = [ctc.read_16k(wav_path(directory, clip)) for clip, _ in group]
-            posteriors = ctc.ctc_log_posteriors(model, device, samples_list)
-            for (clip, tokens), samples, log_posteriors in zip(group, samples_list, posteriors):
+        for group, results in ctc.overlapped(groups, read, infer, label_clip, args.jobs):
+            for (clip, tokens), (samples, result, greedy) in zip(group, results):
                 record = {'id': clip['id'], 'aligner': key, 'keys': phone_keys(tokens), 'tokens': tokens,
-                          'seconds': round(len(samples) / ctc.CTC_SAMPLE_RATE, 4), 'labels': None}
-                result = ctc.ctc_labels(tokens, log_posteriors, vocab, samples) if len(samples) > 0.3 * ctc.CTC_SAMPLE_RATE else None
+                          'seconds': round(samples / ctc.CTC_SAMPLE_RATE, 4), 'labels': None}
                 if result is None:
                     failures += 1
                 else:
                     labels, confidences, score = result
                     record.update({'labels': [[label, round(begin, 4), round(end, 4)] for label, begin, end in labels],
                                    'confidences': [round(value, 4) for value in confidences], 'score': round(score, 4),
-                                   'greedy': ctc.greedy_decode(log_posteriors, vocab)})
+                                   'greedy': greedy})
                 file.write(json.dumps(record, ensure_ascii=False) + '\n')
             file.flush()
-            log(f'  {offset + len(group)}/{len(todo)} clips, {time.time() - start:.0f} s')
+            done += len(group)
+            log(f'  {done}/{len(todo)} clips, {time.time() - start:.0f} s')
     log(f'tts align: aligned {len(todo) - failures} of {len(todo)} clips ({failures} failed) in {time.time() - start:.0f} s')
-    return 0
 
 
 #
@@ -527,16 +609,11 @@ def clip_checks(record, checks):
 # MAX_EDGE_SILENCE, its audio and frame tracks (a worker task)
 def process_clip(task):
     import numpy as np  # pylint: disable=import-outside-toplevel
-    import soxr  # pylint: disable=import-outside-toplevel
-    from . import align, ctc, data  # pylint: disable=import-outside-toplevel
-    from .wav import read_wav  # pylint: disable=import-outside-toplevel
+    from . import align, data  # pylint: disable=import-outside-toplevel
+    from .wav import read_mono  # pylint: disable=import-outside-toplevel
     path, tokens, labels, mean_seconds, settings = task
-    samples, rate = read_wav(path)
-    samples = samples.mean(axis=1)
-    if rate != data.SAMPLE_RATE:
-        samples = soxr.resample(samples, rate, data.SAMPLE_RATE, quality='VHQ')
-    samples = np.ascontiguousarray(samples)
-    seconds, _ = ctc.label_durations(tokens, [tuple(label) for label in labels], samples, data.SAMPLE_RATE, mean_seconds)
+    samples = read_mono(path, data.SAMPLE_RATE)
+    seconds = align.refine_pauses(tokens, align.label_durations(tokens, labels, mean_seconds), data.silent_runs(samples, data.SAMPLE_RATE))
     wav_seconds = len(samples) / data.SAMPLE_RATE
     speech_start, speech_end = seconds[0], wav_seconds - seconds[-1]
     cut_start = max(0.0, speech_start - data.MAX_EDGE_SILENCE)
@@ -548,7 +625,7 @@ def process_clip(task):
     start = int(round(cut_start * data.SAMPLE_RATE))
     audio = samples[start:start + frame_count * data.HOP]
     audio = np.pad(audio, (0, frame_count * data.HOP - len(audio)))
-    return {'seconds': seconds, 'frames': frames, 'cutStart': cut_start, 'tracks': data.frame_tracks(audio, frame_count, *settings),
+    return {'frames': frames, 'cutStart': cut_start, 'tracks': data.frame_tracks(audio, frame_count, *settings),
             'audio': np.clip(np.round(audio * 32768), -32768, 32767).astype(np.int16),
             'clipped': float(np.mean(np.abs(samples) >= 0.999))}
 
@@ -560,58 +637,13 @@ def pitch_range(values):
             round(float(np.median(values)), 1))
 
 
-# The SHA-256 of a file's bytes
-def file_sha256(path):
-    digest = hashlib.sha256()
-    with open(path, 'rb') as file:
-        for block in iter(lambda: file.read(1 << 20), b''):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-# The training package's modules a module imports, itself and transitively (its relative imports, at the top or in a
-# function) - their names
-def module_closure(name, package_dir):
-    seen, todo = set(), [name]
-    while todo:
-        module = todo.pop()
-        seen.add(module)
-        with open(os.path.join(package_dir, f'{module}.py'), encoding='utf-8') as file:
-            source = file.read()
-        imported = set(re.findall(r'^\s*from \.(\w+) import', source, re.MULTILINE))
-        for names in re.findall(r'^\s*from \. import ([\w, ]+)', source, re.MULTILINE):
-            imported.update(item.strip() for item in names.split(','))
-        todo.extend(item for item in imported if item not in seen and os.path.isfile(os.path.join(package_dir, f'{item}.py')))
-    return seen
-
-
-# The repository files a module names - its os.path.join(ROOT, ...) paths of string literals (relative to the root)
-def named_files(path):
-    with open(path, encoding='utf-8') as file:
-        source = file.read()
-    joins = re.findall(r"os\.path\.join\(ROOT, ((?:'[^']+'(?:, )?)+)\)", source)
-    return {os.path.join(*re.findall(r"'([^']+)'", parts)) for parts in joins}
-
-
 # The build's key - a hash of everything it reads: the corpus's selection, alignments, and readings, the recipe's tts
-# section, and the training package's code the build runs (this module's import closure, the package's __init__.py
-# and data files) with the repository files that code names (the G2P module - the front end's pronouncer - the book
-# pins, the context labels' spec, ...; the recipe aside - its tts section is the key's) - a change to the trainer, say,
-# or to the G2P's training data, keeps the build
+# section, and the code the build runs (code_files) - a change to the trainer, say, or to the G2P's training data, keeps
+# the build
 def build_key(settings, directory, recipe_path=RECIPE_PATH):
     recipe = read_json(recipe_path)
     files = [os.path.join(directory, f'selection-{selection_key(settings, recipe)}.json'), os.path.join(directory, 'alignments.jsonl')]
-    readings_dir = os.path.join(directory, 'readings')
-    if os.path.isdir(readings_dir):
-        files.extend(os.path.join(readings_dir, name) for name in sorted(os.listdir(readings_dir)))
-    package_dir = os.path.join(SOURCE_DIR, 'picovox_train')
-    modules = module_closure('tts', package_dir) | {'__init__'}
-    files.extend(os.path.join(package_dir, name) for name in sorted(os.listdir(package_dir))
-                 if os.path.isfile(os.path.join(package_dir, name)) and (not name.endswith('.py') or name[:-3] in modules))
-    named = set().union(*(named_files(os.path.join(package_dir, f'{module}.py')) for module in modules))
-    files.extend(os.path.join(ROOT, name) for name in sorted(named) if os.path.join(ROOT, name) != RECIPE_PATH)
-    basis = {'tts': settings, 'files': {os.path.relpath(path, ROOT): file_sha256(path) for path in files if os.path.isfile(path)}}
-    return hashlib.sha256(json.dumps(basis, sort_keys=True).encode('utf-8')).hexdigest()[:12]
+    return inputs_key({'tts': settings}, files + readings_files(directory) + code_files('tts'))
 
 
 # A directory's files hard-linked into another (copied across file systems), its previous contents removed
@@ -626,7 +658,7 @@ def link_tree(source, target):
 
 
 def build_command(args):
-    """The voices' training data - <out>/ in data.py's format (index.json, the arrays, alignment.jsonl): the corpus's
+    """The voices' training data - <out>/ in data.py's format (index.json and the arrays): the corpus's
     build-<key>/ (built if missing or unfinished - one build at a time - and a build for other inputs removed),
     hard-linked; with --limit, a sample built in <out> itself"""
     settings = load_settings(args.recipe)
@@ -657,6 +689,7 @@ def build_data(args, settings, directory, out):
     from .frontend import BOUNDARIES, TOKEN_IDS, vocabulary  # pylint: disable=import-outside-toplevel
     start_time = time.time()
     clips = [clip for clip in selection(settings, args.jobs, args.recipe) if os.path.exists(wav_path(directory, clip))]
+    current = alignment_current(directory, clips)
     if args.limit:
         clips = clips[::max(1, len(clips) // args.limit)][:args.limit]
     log(f'tts build: {len(clips)} clips to build')
@@ -664,24 +697,20 @@ def build_data(args, settings, directory, out):
     overrides = readings.overrides(directory)
     os.makedirs(out, exist_ok=True)
 
-    # The checks, and the clips' tokens against their alignments (the front end changed: align again)
+    # The checks, and (the alignment's stamp not current) the clips' tokens against their alignments (the front end
+    # changed: align again)
     checks = {}
-    fronts = clip_fronts(clips, overrides, args.jobs)
+    fronts = None if current else clip_fronts(clips, overrides, args.jobs)
     for clip in clips:
         record = records.get(clip['id'])
-        if record and record['labels'] and phone_keys(fronts[clip['id']]['tokens']) != record['keys']:
+        if fronts and record and record['labels'] and phone_keys(fronts[clip['id']]['tokens']) != record['keys']:
             raise ValueError(f'{clip["id"]}: the front end\'s phones differ from its alignment\'s - run tts align again')
         checks[clip['id']] = clip_checks(record, settings['checks'])
 
-    # Typical phone durations (align.py splits a label block by them), and each voice's pitch range
-    totals = collections.defaultdict(lambda: [0.0, 0])
-    for clip in clips:
-        for label, begin, end in (records.get(clip['id']) or {}).get('labels') or []:
-            totals[align.label_key(label)][0] += end - begin
-            totals[align.label_key(label)][1] += 1
-    mean_seconds = {key: total / count for key, (total, count) in totals.items()}
+    # The phones' mean durations (align.label_durations), and each voice's pitch range
+    mean_seconds = align.mean_durations([label for clip in clips for label in (records.get(clip['id']) or {}).get('labels') or []])
     with multiprocessing.Pool(args.jobs) as pool:
-        first_f0 = pool.map(ctc.first_pass_f0, [wav_path(directory, clip) for clip in clips], chunksize=8)
+        first_f0 = pool.map(data.first_pass_f0, [wav_path(directory, clip) for clip in clips], chunksize=8)
     pooled = collections.defaultdict(list)
     for clip, values in zip(clips, first_f0):
         pooled[clip['key']].append(values)
@@ -697,14 +726,13 @@ def build_data(args, settings, directory, out):
             tasks.append((wav_path(directory, clip), record['tokens'], record['labels'], mean_seconds,
                           (floor, ceiling, analysis['formantCeilings'][clip['sex']])))
             kept.append(clip)
-    names = ('tokens', 'durations', 'seconds', 'audio', 'frames')
-    dtypes = {'tokens': np.int16, 'durations': np.int16, 'seconds': np.float32, 'audio': np.int16, 'frames': np.float32}
+    names = ('tokens', 'durations', 'audio', 'frames')
+    dtypes = {'tokens': np.int16, 'durations': np.int16, 'audio': np.int16, 'frames': np.float32}
     raw_files = {name: open(os.path.join(out, name + '.raw'), 'wb') for name in names}  # pylint: disable=consider-using-with
     lengths = dict.fromkeys(names, 0)
     entries = []
     token_offset = frame_offset = 0
-    with open(os.path.join(out, 'alignment.jsonl'), 'w', encoding='utf-8') as alignment_file, \
-            multiprocessing.Pool(args.jobs) as pool:
+    with multiprocessing.Pool(args.jobs) as pool:
         for count, (clip, result) in enumerate(zip(kept, pool.imap(process_clip, tasks, chunksize=4)), 1):
             if count % BUILD_PROGRESS == 0:
                 log(f'  {count}/{len(tasks)} clips, {frame_offset / 100 / 3600:.1f} h, {time.time() - start_time:.0f} s')
@@ -725,16 +753,13 @@ def build_data(args, settings, directory, out):
                 'readings': overrides.get(clip['id'], {})
             })
             arrays = {'tokens': np.asarray([TOKEN_IDS[token] for token in record['tokens']], dtype=np.int16),
-                      'durations': np.asarray(result['frames'], dtype=np.int16),
-                      'seconds': np.asarray(result['seconds'], dtype=np.float32), 'audio': result['audio'],
+                      'durations': np.asarray(result['frames'], dtype=np.int16), 'audio': result['audio'],
                       'frames': result['tracks'].astype(np.float32)}
             for name in names:
                 raw_files[name].write(np.ascontiguousarray(arrays[name], dtype=dtypes[name]).tobytes())
                 lengths[name] += len(arrays[name])
             token_offset += len(record['tokens'])
             frame_offset += frame_count
-            alignment_file.write(json.dumps({'id': entries[-1]['id'], 'tokens': ' '.join(record['tokens']), 'frames': result['frames'],
-                                             'greedy': record['greedy'], 'confidences': record['confidences']}, ensure_ascii=False) + '\n')
     for name in names:
         raw_files[name].close()
         shape = (lengths[name], len(data.CHANNELS)) if name == 'frames' else (lengths[name],)
@@ -783,7 +808,7 @@ def main(argv=None):
     align_parser = commands.add_parser('align', help='the clips\' CTC alignment (the changed clips only)')
     align_parser.add_argument('--batch', type=int, default=256, help='clips at once')
     align_parser.add_argument('--device', default=None, help='torch device (default mps if available)')
-    align_parser.add_argument('-j', '--jobs', type=int, default=None, help='the selection\'s worker processes')
+    align_parser.add_argument('-j', '--jobs', type=int, default=None, help='worker processes (default: all cores)')
     align_parser.set_defaults(func=align_command)
     build_parser = commands.add_parser('build', help='the voices\' training data (data.py\'s format)')
     build_parser.add_argument('--out', required=True, help='the data directory')

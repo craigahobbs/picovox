@@ -31,13 +31,13 @@ SHA-256 (--data DIR ...), and the gate's scores (--scores, the evaluation's resu
 import argparse
 import base64
 import gzip
-import hashlib
 import json
 import os
 import subprocess
 import sys
 
 from . import ROOT, quant
+from .corpora import file_sha256
 
 
 # The longest generated line
@@ -120,12 +120,6 @@ def module_text(manifest, weights):
         '`;',
         ''
     ])
-
-
-# A file's SHA-256 (hex)
-def file_sha256(path):
-    with open(path, 'rb') as file:
-        return hashlib.sha256(file.read()).hexdigest()
 
 
 # The provenance of a packaged model - {commit, dirty, recipe, data, scores}

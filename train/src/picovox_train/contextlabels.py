@@ -86,8 +86,8 @@ MIN_ALTERNATE_SHARE = SETTINGS['minAlternateShare']
 MIN_UNMEASURED_ALTERNATE = SETTINGS['minUnmeasuredAlternate']
 
 # The books (pinned Project Gutenberg texts - books.py - fetched to the books directory), and the held-out books
-BOOKS_DIR = os.path.join(ROOT, SETTINGS['books'])
-PINS_PATH = os.path.join(ROOT, SETTINGS['pins'])
+BOOKS_DIR = books.BOOKS_DIR
+PINS_PATH = books.PINS_PATH
 HELD_OUT_BOOKS = set(SETTINGS['heldOutBooks'])
 
 # The most silver examples of a word kept (the most frequent words have thousands)
@@ -192,10 +192,11 @@ def aligned_command(args):
     """The measured readings of the candidate words in the training speech - <out>/aligned.jsonl"""
     from . import tts  # pylint: disable=import-outside-toplevel
     words = candidate_words(load_spec())
-    records = readings_module.read_readings(tts.corpus_dir(tts.load_settings()))
-    if records is None:
+    measured = readings_module.read_measured(tts.corpus_dir(tts.load_settings()))
+    if measured is None:
         print('aligned: the corpus\'s readings aren\'t measured - python -m picovox_train.measure', file=sys.stderr)
         return 1
+    records, _ = measured
     os.makedirs(args.out, exist_ok=True)
     count = 0
     with open(os.path.join(args.out, 'aligned.jsonl'), 'w', encoding='utf-8') as file:

@@ -33,7 +33,8 @@ class FakeExecutor:
         return False
 
     @staticmethod
-    def map(function, iterable):
+    def map(function, iterable, chunksize=1):
+        assert chunksize >= 1
         return map(function, iterable)
 
 
@@ -107,7 +108,7 @@ def tts_settings(**overrides):
         'engine': {'url': 'http://localhost:11434', 'model': 'phonon', 'digest': '0123456789ab', 'license': 'Phonon (Apache 2.0)'},
         'voices': {'male': {'voice': 'Trevor', 'sex': 'male'}, 'female': {'voice': 'Harper', 'sex': 'female'}},
         'hoursPerVoice': 0.001, 'wordsPerSecond': 3.0, 'workers': 2, 'seed': 1,
-        'texts': {'books': 'build/nn/books', 'pins': 'train/data/books.json', 'minWords': 3, 'maxWords': 40},
+        'texts': {'minWords': 3, 'maxWords': 40},
         'fill': ['fill.txt'],
         'coverage': {'gate': 2, 'context': 1, 'other': 1},
         'split': {'test': 5, 'val': 5},
@@ -149,8 +150,18 @@ def tts_corpus(texts, settings=None, aligned=True):
         if aligned:
             with open(os.path.join(directory, 'alignments.jsonl'), 'w', encoding='utf-8') as file:
                 file.write(''.join(json.dumps(record) + '\n' for record in records))
+            stamp(directory)
         with unittest.mock.patch.object(tts, 'selection_key', return_value=selection_key(settings, recipe)):
             yield directory, settings, clips
+
+
+# Stamp a corpus's alignment current (tts.alignment_stamp) - its clips with audio
+def stamp(directory):
+    with open(next(os.path.join(directory, name) for name in os.listdir(directory) if name.startswith('selection-')),
+              encoding='utf-8') as file:
+        clips = [clip for clip in json.load(file)['clips'] if os.path.exists(tts.wav_path(directory, clip))]
+    with open(os.path.join(directory, 'alignments.stamp'), 'w', encoding='utf-8') as file:
+        file.write(tts.alignment_stamp(directory, clips) + '\n')
 
 
 # The fixture's selection key - stands for tts.selection_key (the corpus's selection is the fixture's)

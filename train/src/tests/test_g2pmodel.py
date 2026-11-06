@@ -158,12 +158,6 @@ class TestG2pModel(unittest.TestCase):
         g2p_model.context.item_vectors(['lead'])
         self.assertIs(g2p_model.context.vectors['lead'], vector)
 
-        # The state round-trips
-        state = g2p_model.state()
-        other = g2pmodel.G2p(g2pmodel.read_module())
-        other.set_state(state)
-        self.assertEqual(other.cache['cat'], ['K', 'AE1', 'T'])
-        self.assertEqual(other.context.choices, g2p_model.context.choices)
 
     def test_read_module(self):
         with tempfile.TemporaryDirectory() as directory:

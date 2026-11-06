@@ -19,18 +19,7 @@ from picovox_train.wav import read_wav
 
 
 class FakeResponse(io.BytesIO):
-    """A urlopen response - its body, status, and Content-Length header (if length)"""
-
-    def __init__(self, body, status=200, length=True):
-        super().__init__(body)
-        self.status = status
-        self.headers = {'Content-Length': str(len(body))} if length else {}
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc_info):
-        self.close()
+    """A urlopen response - its body"""
 
 
 class FakePool:
@@ -182,7 +171,7 @@ def text_labels(text):
 def labels_audio(labels, seconds, rate, seed=0):
     samples = numpy.zeros(int(round(seconds * rate)))
     for label, start, end in labels:
-        if label.lower() not in ('pau', 'sil', 'sp', ''):
+        if label != 'pau':
             begin = int(round(start * rate))
             segment = buzz(end - start, rate, seed=seed)
             samples[begin:begin + len(segment)] = segment[:len(samples) - begin]

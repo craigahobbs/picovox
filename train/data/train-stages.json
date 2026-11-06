@@ -11,12 +11,12 @@
         {"stage": "tts-corpus", "group": "Data", "title": "The training speech - the local TTS model's clips and their CTC alignment (picovox_train.tts generate, align - once: about 40 and 26 minutes the first time, a minute cached)", "on": "gpu", "minutes": 1, "firstMinutes": 69, "needs": [],
             "progress": {"phases": [
                 {"name": "generate", "header": "^tts generate: \\d+ clips in .*, (\\d+) to generate$", "step": "^  (\\d+)/(\\d+) clips, [\\d.]+ hours, (\\d+) s$", "secondsEach": 0.078},
-                {"name": "align", "header": "^tts align: \\d+ clips, (\\d+) to align$", "step": "^  (\\d+)/(\\d+) clips, (\\d+) s$", "secondsEach": 0.047, "sameCount": true}
+                {"name": "align", "header": "^tts align: \\d+ clips, (?:(\\d+) to align|the alignment is current)$", "step": "^  (\\d+)/(\\d+) clips, (\\d+) s$", "secondsEach": 0.047, "sameCount": true}
             ]}},
         {"stage": "tts-readings", "group": "Data", "title": "The heteronym tokens' readings, measured (picovox_train.measure - once), and the clips they change aligned again", "on": "gpu", "minutes": 1, "firstMinutes": 10, "needs": ["tts-corpus"],
             "progress": {"phases": [
                 {"name": "measure", "header": "^measure: (?:\\d+ clips, (\\d+) measured tokens|.* is current)", "step": "^  ctc (\\d+)/(\\d+) tokens, (\\d+) s$", "secondsEach": 0.014},
-                {"name": "align", "header": "^tts align: \\d+ clips, (\\d+) to align$", "step": "^  (\\d+)/(\\d+) clips, (\\d+) s$", "secondsEach": 0.047}
+                {"name": "align", "header": "^tts align: \\d+ clips, (?:(\\d+) to align|the alignment is current)$", "step": "^  (\\d+)/(\\d+) clips, (\\d+) s$", "secondsEach": 0.047}
             ]}},
         {"stage": "data-tts", "group": "Data", "title": "The voices' training data (picovox_train.tts build - every core; cached with the training speech, built when its inputs change)", "on": "cpu", "minutes": 1, "firstMinutes": 9, "needs": ["tts-readings"], "progress": {"phases": [{"name": "build", "header": "^tts build: (?:(\\d+) clips to build|.* is current)", "step": "^  (\\d+)/(\\d+) clips, [\\d.]+ h, (\\d+) s$", "secondsEach": 0.018}]}},
         {"stage": "heteronyms", "group": "G2P", "title": "The heteronym relabeling from the training speech's readings, checked to reproduce train/data/g2p-relabel.json (the G2P network's input)", "on": "cpu", "minutes": 1, "needs": ["tts-readings"], "after": ["data-tts"]},
