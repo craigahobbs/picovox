@@ -13,23 +13,12 @@ from picovox_train import perceptual
 from tests import data_fixtures
 
 
-# A fake torchaudio (build/venv-train's, not the tests') - resample's kernel (its arguments, the kernels made counted),
-# and its application by linear interpolation
-KERNELS = []
-
-
-def get_sinc_resample_kernel(rate, new_rate, gcd, device, dtype):
-    KERNELS.append((rate, new_rate, gcd, device, dtype))
-    return KERNELS[-1], 6
-
-
-def apply_sinc_resample_kernel(audio, rate, new_rate, gcd, kernel, width):
-    assert kernel[:3] == (rate, new_rate, gcd) and width == 6
+# A fake torchaudio (build/venv-train's, not the tests') - resample by linear interpolation
+def resample(audio, rate, new_rate):
     return torch.nn.functional.interpolate(audio[:, None], size=audio.shape[1] * new_rate // rate, mode='linear')[:, 0]
 
 
-TORCHAUDIO = types.SimpleNamespace(functional=types.SimpleNamespace(functional=types.SimpleNamespace(
-    _get_sinc_resample_kernel=get_sinc_resample_kernel, _apply_sinc_resample_kernel=apply_sinc_resample_kernel)))
+TORCHAUDIO = types.SimpleNamespace(functional=types.SimpleNamespace(resample=resample))
 
 
 class FakeEncoder(torch.nn.Module):
@@ -74,7 +63,6 @@ class TestPerceptual(unittest.TestCase):
 
     def test_loss(self):
         # A crop against itself - 0; against another - positive, and its gradient reaches the rendered crop (not the target)
-        KERNELS.clear()
         loss, encoder = fake_loss()
         generator = torch.Generator().manual_seed(2)
         target = torch.randn(2, 24000, generator=generator)
@@ -90,8 +78,3 @@ class TestPerceptual(unittest.TestCase):
         self.assertEqual(rendered.shape, (2, 16000))
         self.assertTrue(torch.allclose(rendered.mean(1), torch.zeros(2), atol=1e-5))
         self.assertTrue(torch.allclose(rendered.std(1), torch.ones(2), atol=1e-3))
-
-        # (the resampling kernel made once a dtype, on the audio's device, 24 to 16 kHz)
-        self.assertEqual(KERNELS, [(24000, 16000, 8000, torch.device('cpu'), torch.float32)])
-        self.assertEqual(loss.resample(target.double()).dtype, torch.float64)
-        self.assertEqual(len(KERNELS), 2)
