@@ -111,6 +111,9 @@ class TestSmoke(unittest.TestCase):
         self.assertEqual(run.command('g2p-train')[3:], ['picovox_train.g2p', 'train', '--out', os.path.join(run.out, 'g2p'),
                                                         '--steps', '3'])
         self.assertEqual(run.command('context-g2p')[6], os.path.join(run.root, 'build', 'train', 'context', 'labels.json'))
+        # (the context network and its cross-validation's folds, one teacher each)
+        self.assertEqual(run.command('context-train')[9:], ['--folds', os.path.join(run.out, 'context-folds'), '--settings',
+                                                            '{"steps": 3, "quantSteps": 2, "teachers": 1}', '-j', '2'])
         self.assertIn('--adversarial-start', run.command('voice-b'))
         # The data stage's clips, and the voice stages on its data
         self.assertEqual(run.command('data-build')[3:], ['picovox_train.tts', 'build', '--out', os.path.join(run.out, 'data', 'tts'),

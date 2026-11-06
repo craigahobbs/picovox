@@ -38,8 +38,8 @@ test('trainStages', () => {
         assert.equal(typeof stage.title, 'string');
     }
 
-    // A stage's progress counts its log's finished parts - the context network's trainings: its teachers and itself,
-    // and each fold's - in a log the stage starts anew
+    // A stage's progress counts its log's finished parts - the context network's trainings: its teachers and itself (fold
+    // 0), and each other fold's - in a log the stage starts anew
     for (const stage of manifest.stages.filter((item) => item.progress && !item.progress.phases)) {
         assert.equal(typeof stage.progress.log, 'string', stage.stage);
         assert.equal(stages[stage.stage].recipe[1], `$(STAGE) -- rm -f $(TRAIN_DIR)/${stage.progress.log}`, stage.stage);
@@ -48,7 +48,7 @@ test('trainStages', () => {
     }
     const trainRecipe = JSON.parse(readFileSync(new URL('../train/data/train.json', import.meta.url), 'utf8'));
     const contextStage = manifest.stages.find((stage) => stage.stage === 'context-network');
-    assert.equal(contextStage.progress.total, (trainRecipe.context.network.teachers + 1) * (trainRecipe.context.gate.folds + 1));
+    assert.equal(contextStage.progress.total, (trainRecipe.context.network.teachers + 1) * trainRecipe.context.gate.folds);
 
     // The training speech's stages - their progress the phases of their commands' log lines (the Python sources' log
     // lines, rendered), their first run's time longer, and the first run known by the corpus stage's generate line

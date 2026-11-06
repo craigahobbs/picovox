@@ -9,11 +9,10 @@ chooses, and the G2P pronounces the word in that reading. The commands (python i
 PYTHONPATH=train/src build/venv-train/bin/python -B):
 
     python -m picovox_train.context train-g2p --labels DIR/labels.json --init G2P.pt --out DIR/g2p.pt
-    python -m picovox_train.context train-context --labels DIR/labels.json --out DIR/context.pt [-j N]
+    python -m picovox_train.context train-context --labels DIR/labels.json --out DIR/context.pt --folds DIR/folds [-j N]
+    python -m picovox_train.context folds DIR/folds --labels DIR/labels.json       # the gate - the folds' held-out results
     python -m picovox_train.context export --g2p DIR/g2p.pt --context DIR/context.pt [--out lib/models/g2pModel.js]
-    python -m picovox_train.context gate --labels DIR/labels.json [MODULE]                           # held-out accuracy (one split)
-    python -m picovox_train.context cross-validate --labels DIR/labels.json --out DIR/folds [-j N]   # the gate, 10 folds
-    python -m picovox_train.context folds DIR/folds/fold-*.json --labels DIR/labels.json             # the gate of the folds' results
+    python -m picovox_train.context gate --labels DIR/labels.json [MODULE]         # held-out accuracy (one split)
     python -m picovox_train.context check NEW.js     # make train's G2P gate: identical to lib/models/g2pModel.js,
                                                      # else the quality gate (make train-install installs it - trained.py)
 
@@ -358,8 +357,8 @@ class WeightQuantizer:
             parameter.data.copy_(saved)
 
 
-# The cross-validation folds - by book (fold 0 is the labels' held-out books - contextlabels.py; a book of the others is in
-# fold 1 + its hash's remainder by FOLDS - 1)
+# The cross-validation folds - by book (fold 0 is the labels' held-out books - contextlabels.py - so its network is the
+# context network itself; a book of the others is in fold 1 + its hash's remainder by FOLDS - 1)
 FOLDS = RECIPE['gate']['folds']
 
 
@@ -466,10 +465,14 @@ def train_context(labels, settings, log, teachers=None):
     return model
 
 
-# The labels of a fold (None - all the labels' splits as they are)
+# The labels of a fold (fold_labels)
 def labels_of(labels_path, fold):
-    labels = read_json(labels_path)
-    return labels if fold is None else fold_labels(labels, fold)
+    return fold_labels(read_json(labels_path), fold)
+
+
+# A fold's log lines' prefix (none for fold 0 - the context network itself)
+def fold_prefix(fold):
+    return f'fold {fold}: ' if fold else ''
 
 
 # The teachers' seeds - "teachers" of them, 100 * seed + 1, 2, ...
@@ -478,13 +481,12 @@ def teacher_seeds(settings):
     return [100 * int(settings['seed']) + index + 1 for index in range(int(settings['teachers']))]
 
 
-# One teacher (a worker task) - (labels path, fold or None, seed, settings, log path): the context network trained with
-# that seed (no teachers of its own) - its state, quantized as exported
+# One teacher (a worker task) - (labels path, fold, seed, settings, log path): the context network trained on the fold's
+# labels with that seed (no teachers of its own) - its state, quantized as exported
 def teacher_task(task):
     labels_path, fold, seed, settings, log = task
-    prefix = '' if fold is None else f'fold {fold}: '
     teacher = train_context(labels_of(labels_path, fold), {**settings, 'seed': seed},
-                            lambda text: log_line(log, f'{prefix}teacher {seed}: {text}'))
+                            lambda text: log_line(log, f'{fold_prefix(fold)}teacher {seed}: {text}'))
     WeightQuantizer(teacher, EXPORT).quantize()
     return teacher.state_dict()
 
@@ -497,7 +499,7 @@ def run_tasks(function, tasks, jobs):
     return [function(task) for task in tasks]
 
 
-def train_student(labels_path, fold, settings, log, states):
+def train_student(labels, fold, settings, log, states):
     """The context network trained on a fold's labels toward the teachers' mean probabilities (teachers' states - none,
     the plain training) - the model"""
     settings = {**CONTEXT_SETTINGS, **settings}
@@ -506,15 +508,7 @@ def train_student(labels_path, fold, settings, log, states):
         teacher = build_context(settings)
         teacher.load_state_dict(state)
         teachers.append(teacher)
-    prefix = '' if fold is None else f'fold {fold}: '
-    return train_context(labels_of(labels_path, fold), settings, lambda text: log_line(log, f'{prefix}{text}'), teachers)
-
-
-def train_distilled(labels_path, settings, log, jobs=1):
-    """The recipe's context network - its teachers ("teachers" of them, each its own seed; in jobs worker processes),
-    then the network distilled from them (train_student) - the model"""
-    tasks = [(labels_path, None, seed, {**CONTEXT_SETTINGS, **settings}, log) for seed in teacher_seeds(settings)]
-    return train_student(labels_path, None, settings, log, run_tasks(teacher_task, tasks, jobs))
+    return train_context(labels, settings, lambda text: log_line(log, f'{fold_prefix(fold)}{text}'), teachers)
 
 
 def evaluate_context(slot_of, labels, split='heldout'):
@@ -881,28 +875,30 @@ def command_train_g2p(args):
 
 
 def command_train_context(args):
-    """Train the context network (its teachers first - in -j worker processes) - <out> (a checkpoint)"""
-    import torch  # pylint: disable=import-outside-toplevel
-    labels = read_json(args.labels)
-    overrides = json.loads(args.settings) if args.settings else {}
-    model = train_distilled(args.labels, overrides, args.log, args.jobs)
-    torch.save({'config': model.config, 'state': model.state_dict(), 'settings': {**CONTEXT_SETTINGS, **overrides}}, args.out)
-    quantizer = WeightQuantizer(model, EXPORT)
-    quantizer.quantize()
-    result = evaluate_context(lambda windows: context_predict(model, windows), labels)
-    _, line = gate_result(result, labels)
-    log_line(args.log, f'train-context: {line}; {describe_heldout(result)}')
-    with open(os.path.splitext(args.out)[0] + '.json', 'w', encoding='utf-8') as file:
-        json.dump(result, file, indent=1)
+    """Train the context network and its cross-validation - the network (fold 0: the labels' own split, at its threads)
+    to <out> (a checkpoint), and each fold's held-out results to <folds>/fold-<k>.json (the other folds' networks one
+    thread each). Every fold's teachers at once, then every fold's network: -j trains that many at once, each in a
+    worker process (the results are the same for any -j). Resumable: a fold with results from the same labels and
+    settings (fold 0 with its checkpoint) isn't trained again"""
+    os.makedirs(args.folds, exist_ok=True)
+    network = {**CONTEXT_SETTINGS, **(json.loads(args.settings) if args.settings else {})}
+    settings = [network] + [{**network, 'threads': 1}] * (FOLDS - 1)
+    paths = [os.path.join(args.folds, f'fold-{fold}.json') for fold in range(FOLDS)]
+    digests = [fold_digest(args.labels, fold_settings) for fold_settings in settings]
+    folds = [fold for fold in range(FOLDS) if not fold_done(paths[fold], digests[fold]) or (fold == 0 and not os.path.exists(args.out))]
+    seeds = teacher_seeds(network)
+    states = run_tasks(teacher_task, [(args.labels, fold, seed, settings[fold], args.log) for fold in folds for seed in seeds], args.jobs)
+    run_tasks(fold_task, [(args.labels, fold, settings[fold], args.log, states[index * len(seeds):(index + 1) * len(seeds)],
+                           paths[fold], digests[fold], args.out if fold == 0 else None) for index, fold in enumerate(folds)], args.jobs)
     return 0
 
 
-# The digest of a cross-validation's inputs - the labels file and the context network's settings (less the threads)
-def fold_digest(labels_path):
+# The digest of a fold's inputs - the labels file and its network's settings
+def fold_digest(labels_path, settings):
     digest = hashlib.sha256()
     with open(labels_path, 'rb') as file:
         digest.update(file.read())
-    digest.update(json.dumps({key: value for key, value in CONTEXT_SETTINGS.items() if key != 'threads'}, sort_keys=True).encode('utf-8'))
+    digest.update(json.dumps(settings, sort_keys=True).encode('utf-8'))
     return digest.hexdigest()[:16]
 
 
@@ -914,45 +910,34 @@ def fold_done(path, digest):
         return json.load(file).get('digest') == digest
 
 
-# One fold of the cross-validation (a worker task) - (labels path, fold, results path, log path, settings, the fold's
-# teachers' states): the context network trained without the fold's books, and its held-out results (with the
-# inputs' digest) written to the results path
+# One fold's network (a worker task) - (labels path, fold, settings, log path, the fold's teachers' states, results path,
+# the inputs' digest, checkpoint path - fold 0's, else None): the context network trained without the fold's books
+# (fold 0: the network, its checkpoint written), and its held-out results (quantized as exported; with the digest)
+# written to the results path
 def fold_task(task):
-    labels_path, fold, path, log, settings, states = task
-    fold_set = labels_of(labels_path, fold)
-    model = train_student(labels_path, fold, settings, log, states)
+    import torch  # pylint: disable=import-outside-toplevel
+    labels_path, fold, settings, log, states, path, digest, checkpoint = task
+    labels = labels_of(labels_path, fold)
+    model = train_student(labels, fold, settings, log, states)
+    if checkpoint:
+        torch.save({'config': model.config, 'state': model.state_dict(), 'settings': settings}, checkpoint)
     WeightQuantizer(model, EXPORT).quantize()
-    result = {**evaluate_context(lambda windows: context_predict(model, windows), fold_set), 'digest': fold_digest(labels_path)}
+    result = evaluate_context(lambda windows: context_predict(model, windows), labels)
+    if checkpoint:
+        _, line = gate_result(result, labels)
+        log_line(log, f'train-context: {line}; {describe_heldout(result)}')
     with open(path + '.tmp', 'w', encoding='utf-8') as file:
-        json.dump(result, file, indent=1)
+        json.dump({**result, 'digest': digest}, file, indent=1)
     os.replace(path + '.tmp', path)
     return path
 
 
-def command_cross_validate(args):
-    """Train the context network once per fold of the books - each fold's held-out results to
-    <out>/fold-<k>.json (resumable: a fold with results from the same labels and settings is skipped - one from other
-    inputs is retrained) - then the cross-validated gate (command_folds). Every fold's teachers, then every fold's
-    network: -j trains that many at once, each in a worker process, and every training is one thread (the results are the
-    same for any -j)"""
-    os.makedirs(args.out, exist_ok=True)
-    paths = [os.path.join(args.out, f'fold-{fold}.json') for fold in range(FOLDS)]
-    digest = fold_digest(args.labels)
-    folds = [fold for fold, path in enumerate(paths) if not fold_done(path, digest)]
-    settings = {**CONTEXT_SETTINGS, 'threads': 1}
-    seeds = teacher_seeds(settings)
-    states = run_tasks(teacher_task, [(args.labels, fold, seed, settings, args.log) for fold in folds for seed in seeds], args.jobs)
-    run_tasks(fold_task, [(args.labels, fold, paths[fold], args.log, settings, states[index * len(seeds):(index + 1) * len(seeds)])
-                          for index, fold in enumerate(folds)], args.jobs)
-    return command_folds(argparse.Namespace(results=paths, labels=args.labels))
-
-
 def command_folds(args):
-    """The cross-validated gate - the held-out results of every fold's context network (cross-validate's
-    <out>/fold-<k>.json) pooled"""
+    """The cross-validated gate - the held-out results of every fold's context network (train-context's
+    <folds>/fold-<k>.json) pooled"""
     pooled = {'words': collections.defaultdict(lambda: {'right': 0, 'total': 0, 'majority': 0}), 'sources': {}}
-    for path in args.results:
-        with open(path, encoding='utf-8') as file:
+    for fold in range(FOLDS):
+        with open(os.path.join(args.folds, f'fold-{fold}.json'), encoding='utf-8') as file:
             result = json.load(file)
         for key, counts in result['words'].items():
             if key.startswith('aligned/'):
@@ -960,7 +945,7 @@ def command_folds(args):
                     pooled['words'][key][name] += counts[name]
     labels = read_json(args.labels)
     passed, line = gate_result(pooled, labels)
-    print(f'{len(args.results)} folds: {line}')
+    print(f'{FOLDS} folds: {line}')
     print(word_margins(pooled, labels))
     return 0 if passed else 1
 
@@ -975,21 +960,16 @@ def main(argv=None):
     g2p_parser.add_argument('--settings', help='JSON settings over G2P_SETTINGS')
     g2p_parser.add_argument('--log')
     g2p_parser.set_defaults(func=command_train_g2p)
-    context_parser = commands.add_parser('train-context', help='the context network')
+    context_parser = commands.add_parser('train-context', help='the context network and its cross-validation (resumable)')
     context_parser.add_argument('--labels', required=True)
-    context_parser.add_argument('--out', required=True)
+    context_parser.add_argument('--out', required=True, help='the network\'s checkpoint')
+    context_parser.add_argument('--folds', required=True, help='the folds\' results directory')
     context_parser.add_argument('--settings', help='JSON settings over CONTEXT_SETTINGS')
-    context_parser.add_argument('-j', '--jobs', type=int, default=1, help='teachers at once (worker processes)')
+    context_parser.add_argument('-j', '--jobs', type=int, default=1, help='trainings at once (worker processes)')
     context_parser.add_argument('--log')
     context_parser.set_defaults(func=command_train_context)
-    cross_parser = commands.add_parser('cross-validate', help='train every fold, then the cross-validated gate (resumable)')
-    cross_parser.add_argument('--labels', required=True)
-    cross_parser.add_argument('--out', required=True, help='the folds\' results directory')
-    cross_parser.add_argument('--log')
-    cross_parser.add_argument('-j', '--jobs', type=int, default=1, help='trainings at once (worker processes, one thread each)')
-    cross_parser.set_defaults(func=command_cross_validate)
     folds_parser = commands.add_parser('folds', help='the cross-validated gate over the folds\' held-out results')
-    folds_parser.add_argument('results', nargs='+')
+    folds_parser.add_argument('folds', help='the folds\' results directory')
     folds_parser.add_argument('--labels', required=True)
     folds_parser.set_defaults(func=command_folds)
     export_parser = commands.add_parser('export', help='the generated module')

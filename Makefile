@@ -260,9 +260,9 @@ $(TRAIN_DIR)/data-tts.done: $(TRAIN_DIR)/tts-readings.done
 # with the data build on the critical path; the G2P network itself (one core) starts at once. G2P_JOBS is the context
 # labels' worker processes - the tag workers; the outputs are the same for any count. make train runs the
 # chain beside the GPU stages, so its count is low (BESIDE) for the memory-bound context labels; the context network's
-# trainings (its four teachers, and each of cross-validate's ten folds' four teachers and network - one thread each,
-# small and compute-bound) take CONTEXT_JOBS (at 2, the folds outlasted the voice stages by 40 minutes); make train-g2p
-# runs G2P_STANDALONE_JOBS for both.
+# trainings (its four teachers and itself - fold 0 of the cross-validation - then each other fold's four teachers and
+# network, one thread each, small and compute-bound: every fold's teachers in one pool, then every fold's network) take
+# CONTEXT_JOBS (at 2, the folds outlasted the voice stages by 40 minutes); make train-g2p runs G2P_STANDALONE_JOBS for both.
 G2P_JOBS ?= 2
 CONTEXT_JOBS ?= 6
 G2P_STANDALONE_JOBS ?= 10
@@ -291,9 +291,8 @@ $(TRAIN_DIR)/context-network.done: $(TRAIN_DIR)/context-labels.done
 	@$(STAGE) start
 	$(STAGE) -- rm -f $(TRAIN_DIR)/context/train.log
 	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.context train-context --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/context.pt \
-		--log $(TRAIN_DIR)/context/train.log -j $(CONTEXT_JOBS)
-	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.context cross-validate --labels $(TRAIN_DIR)/context/labels.json --out $(TRAIN_DIR)/context/folds \
-		--log $(TRAIN_DIR)/context/train.log -j $(CONTEXT_JOBS)
+		--folds $(TRAIN_DIR)/context/folds --log $(TRAIN_DIR)/context/train.log -j $(CONTEXT_JOBS)
+	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.context folds $(TRAIN_DIR)/context/folds --labels $(TRAIN_DIR)/context/labels.json
 	@$(STAGE) end
 	touch $@
 

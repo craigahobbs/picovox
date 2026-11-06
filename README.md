@@ -507,8 +507,9 @@ fetch alone, for every pinned text: `python -m picovox_train.books fetch`.
 `make -j train-g2p` runs the G2P alone - its stages (with the training speech's readings, tts-corpus and tts-readings),
 without the voice stages or make train's ordering after the voices' data build - for G2P work. The chain's independent
 parts run in worker processes - the context labels' part-of-speech tags (by book) in `G2P_JOBS`, and the context
-network's trainings and cross-validate's ten folds (each one thread) in `CONTEXT_JOBS` - and the context network and its
-cross-validation run beside the G2P network; every output is the same for any count. Inside make train the chain runs
+network's trainings and its cross-validation's other nine folds' (each one thread) in `CONTEXT_JOBS`, every fold's
+teachers in one pool, then every fold's network - and the context network and its cross-validation run beside the G2P
+network; every output is the same for any count. Inside make train the chain runs
 beside the GPU stages, which CPU work slows (the Makefile's `BESIDE`), so `G2P_JOBS` is 2 and `CONTEXT_JOBS` 6 there;
 `make train-g2p` runs `G2P_STANDALONE_JOBS` (10) for both at the default QoS. Measured at the background QoS (the
 efficiency cores only, beside another job's load - October 2026): the context labels took 36 minutes (65 before: the
@@ -728,21 +729,23 @@ its examples and on unlabeled transfer windows (the ambiguous words' other windo
 dropped at random (`itemDropout`).
 
 ```sh
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels books                                # the recipe's books (pinned texts)
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels aligned --out build/nn/context      # the training speech's measured readings
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels tag --out build/nn/context         # part-of-speech tags (spaCy)
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels labels --out build/nn/context       # the ambiguous words and examples
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context train-g2p --labels build/nn/context/labels.json --init build/nn/g2p-train/focus.pt \
-    --out build/nn/context/g2p.pt                                                   # the reading input and ambiguity head
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context train-context --labels build/nn/context/labels.json --out build/nn/context/context.pt -j 4
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context export --g2p build/nn/context/g2p.pt --context build/nn/context/context.pt
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels books                                 # the recipe's books (pinned texts)
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels aligned --out build/train/context    # the training speech's measured readings
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels tag --out build/train/context        # part-of-speech tags (spaCy)
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels labels --out build/train/context     # the ambiguous words and examples
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context train-g2p --labels build/train/context/labels.json --init build/train/g2p/focus.pt \
+    --out build/train/context/g2p.pt                                                # the reading input and ambiguity head
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context train-context --labels build/train/context/labels.json \
+    --out build/train/context/context.pt --folds build/train/context/folds -j 10    # the context network and its cross-validation
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context folds build/train/context/folds --labels build/train/context/labels.json
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context export --g2p build/train/context/g2p.pt --context build/train/context/context.pt
 node tools/heteronyms.js                                                            # the regression set (exit 1 below the gate)
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context cross-validate --labels build/nn/context/labels.json --out build/nn/context/folds -j 10
 ```
 
-(`tag`, `train-context` - its teachers - and `cross-validate` take `-j`, their worker processes - the results
-are the same for any count. `cross-validate` keeps a fold's results only when they are from the same labels and
-settings.)
+(`tag` and `train-context` take `-j`, their worker processes - the results are the same for any count.
+`train-context` trains every fold's teachers at once, then every fold's network - fold 0, the labels' own held-out
+books, is the context network itself - and keeps a fold's results only when they are from the same labels and
+settings; `folds` is the cross-validated gate over them.)
 
 The settings are `train/data/train.json`'s `context` section. `make train-g2p` runs all of it (the voice stages use the
 committed `lib/models/g2pModel.js`) and gates its module with `picovox_train.context check`: identical to the
