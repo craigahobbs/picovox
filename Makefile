@@ -394,5 +394,6 @@ clean:
 # superclean also removes the downloads (downloads/ - the training speech, the listener models, and Whisper; about 10 GB)
 .PHONY: superclean-local
 superclean: superclean-local
-superclean-local:
+superclean-local: clean
 	rm -rf downloads
+	$(MAKE) -C train superclean
