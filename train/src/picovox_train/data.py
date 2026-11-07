@@ -4,8 +4,9 @@
 """
 The training data's featurization and format (tts.py builds it - the training speech): each utterance's tokens (our
 front end's, frontend.py), each token's duration in frames (pauses included, from its CTC alignment - ctc.py, align.py),
-the audio (24 kHz, 16-bit), and auxiliary frame tracks (Praat F0, voicing, pitch strength, harmonicity, energy,
-formants F1-F4 and their bandwidths).
+the audio (24 kHz, 16-bit), and auxiliary frame tracks (Praat F0, voicing, pitch strength, and formants F1-F3 - the
+tracks the trainer reads: the F0 target and the formant guide; the harmonicity, energy, F4, and bandwidth tracks it
+never read are in git history).
 
 A corpus directory (build/nn/data/<corpus>/) - concatenated arrays and an index of offsets into them:
 
@@ -36,16 +37,13 @@ SAMPLE_RATE = 24000
 HOP = 240                                  # samples per frame - 10 ms
 FRAME_SECONDS = HOP / SAMPLE_RATE
 MAX_EDGE_SILENCE = 0.2                     # seconds of leading and trailing silence kept
-FORMAT_VERSION = 1
-CHANNELS = ['f0', 'voiced', 'strength', 'hnr', 'energy', 'f1', 'f2', 'f3', 'f4', 'b1', 'b2', 'b3', 'b4']
+FORMAT_VERSION = 2
+CHANNELS = ['f0', 'voiced', 'strength', 'f1', 'f2', 'f3']
 CHANNEL_NOTES = {
     'f0': 'Praat autocorrelation F0 (Hz), 0 where unvoiced - the voice\'s two-pass range (index.json\'s speakers)',
     'voiced': '1 where Praat finds the frame voiced, else 0',
     'strength': 'Praat pitch strength (autocorrelation peak, 0-1) of the selected candidate, 0 where unvoiced',
-    'hnr': 'Harmonics-to-noise ratio (dB, cross-correlation), clipped to [-20, 40] (-20 in silence)',
-    'energy': 'RMS level (dB re full scale) of a 20 ms Hann window centered on the frame, floor -100',
-    'f1': 'Burg formant 1 (Hz) at the speaker\'s formant ceiling (5 formants, 25 ms window), 0 where undefined',
-    'b1': 'Bandwidth of formant 1 (Hz), 0 where undefined'
+    'f1': 'Burg formant 1 (Hz) at the speaker\'s formant ceiling (5 formants, 25 ms window), 0 where undefined'
 }
 
 
@@ -100,7 +98,8 @@ def sample_track(track_times, track_values, frame_count, tolerance=0.006):
     return np.where(valid, track_values[nearest], 0.0), valid
 
 
-# The auxiliary frame tracks of 24 kHz audio - [frames, channels]
+# The auxiliary frame tracks of 24 kHz audio - [frames, channels] (the Praat analyses as they have always been made, so a
+# clip's tracks are the same values)
 def frame_tracks(samples, frame_count, pitch_floor, pitch_ceiling, formant_ceiling):
     import parselmouth  # pylint: disable=import-outside-toplevel, import-error
     sound = parselmouth.Sound(samples.astype(np.float64), sampling_frequency=SAMPLE_RATE)
@@ -116,28 +115,15 @@ def frame_tracks(samples, frame_count, pitch_floor, pitch_ceiling, formant_ceili
     tracks[:, CHANNELS.index('voiced')] = voiced
     tracks[:, CHANNELS.index('strength')] = np.where(voiced, strength, 0.0)
 
-    # Harmonicity
-    harmonicity = sound.to_harmonicity_cc(time_step=FRAME_SECONDS, minimum_pitch=pitch_floor)
-    hnr, valid = sample_track(np.asarray(harmonicity.xs()), harmonicity.values[0], frame_count)
-    tracks[:, CHANNELS.index('hnr')] = np.clip(np.where(valid, hnr, -20.0), -20.0, 40.0)
-
-    # Energy - a 20 ms Hann window centered on each frame
-    window = np.hanning(2 * HOP)
-    padded = np.pad(samples.astype(np.float64), (HOP // 2, HOP // 2 + 2 * HOP))
-    windows = np.lib.stride_tricks.sliding_window_view(padded, 2 * HOP)[:frame_count * HOP:HOP]
-    rms = np.sqrt(np.sum((windows * window) ** 2, axis=1) / np.sum(window ** 2))
-    tracks[:, CHANNELS.index('energy')] = np.maximum(20 * np.log10(np.maximum(rms, 1e-12)), -100.0)
-
-    # Formants and bandwidths
+    # Formants F1-F3 (a formant whose bandwidth Praat leaves undefined is undefined too, as the bandwidth tracks had it)
     formant = sound.to_formant_burg(time_step=FRAME_SECONDS, max_number_of_formants=5, maximum_formant=formant_ceiling,
                                     window_length=0.025, pre_emphasis_from=50)
     centers = (np.arange(frame_count) + 0.5) * FRAME_SECONDS
-    for number in range(1, 5):
+    for number in range(1, 4):
         frequencies = np.array([formant.get_value_at_time(number, center) for center in centers])
         bandwidths = np.array([formant.get_bandwidth_at_time(number, center) for center in centers])
         defined = np.isfinite(frequencies) & np.isfinite(bandwidths)
         tracks[:, CHANNELS.index(f'f{number}')] = np.where(defined, frequencies, 0.0)
-        tracks[:, CHANNELS.index(f'b{number}')] = np.where(defined, bandwidths, 0.0)
     return tracks
 
 

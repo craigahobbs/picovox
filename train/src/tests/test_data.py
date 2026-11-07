@@ -52,8 +52,9 @@ class TestProcessing(unittest.TestCase):
         self.assertGreater(voiced[25:55].mean(), 0.9)
         f0 = tracks[25:55, data.CHANNELS.index('f0')]
         self.assertAlmostEqual(float(numpy.median(f0[f0 > 0])), 150.0, delta=3)
-        self.assertEqual(float(tracks[5, data.CHANNELS.index('energy')]), -100.0)
         self.assertGreater(tracks[40, data.CHANNELS.index('f1')], 0)
+        self.assertEqual(float(tracks[5, data.CHANNELS.index('f3')]), 0.0)
+        self.assertEqual(data.CHANNELS, ['f0', 'voiced', 'strength', 'f1', 'f2', 'f3'])
 
     def test_raw_to_npy(self):
         with tempfile.TemporaryDirectory() as directory:

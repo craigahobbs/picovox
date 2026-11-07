@@ -32,9 +32,10 @@ formant order, smoothness, frication band) plus:
   to flat static
 - a smoothness penalty on each speaker's channel equalizer (its second differences)
 
-Checkpoints and the log go to build/nn/runs/<name>/ (last.pt every --save-every steps, best.pt - the lowest
-validation score, validated every --val-every steps from --val-from and at the end, step-<n>.pt every --keep-every steps,
-log.jsonl).
+Checkpoints and the log go to build/nn/runs/<name>/ (last.pt every --save-every steps and at each validation - the
+run's model; validated every --val-every steps from --val-from and at the end, for the log - step-<n>.pt every
+--keep-every steps, log.jsonl). The validation loss doesn't pick the better voice (the paper's Sections 7.3 and 11.4), so
+no "best" checkpoint is kept: the last step's is the model.
 
 The training step (optim.py) - the lean optimizer: the gradient clip and the AdamW step in a few kernel launches (the
 global norm of one concatenation, the clip as fused AdamW's grad_scale, one shared step counter); and its learning rate
@@ -572,7 +573,7 @@ def resume_state(directory, args, init_digest, device):
         return state
     print(f'resume: {path} is of other settings ({", ".join(changed)}) - training from the start', file=sys.stderr, flush=True)
     for name in os.listdir(directory):
-        if name in ('last.pt', 'best.pt', 'log.jsonl') or re.fullmatch(r'step-\d+\.pt', name):
+        if name in ('last.pt', 'log.jsonl') or re.fullmatch(r'step-\d+\.pt', name):
             os.remove(os.path.join(directory, name))
     return None
 
@@ -629,14 +630,12 @@ def main(argv=None):
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, learning_rate)
 
     step = 0
-    best = math.inf
     state = resume_state(directory, args, init_digest, device)
     if state is not None:
         model.load_state_dict(state['model'])
         optimizer.load_state_dict(state['optimizer'])
         scheduler.load_state_dict(state['scheduler'])
         step = state['step']
-        best = state.get('best', math.inf)
         if critic is not None:
             critic.load_state_dict(state['critic'])
             # (a checkpoint saved by the unfused AdamW resumes fused: its param groups say fused, so loading moves the
@@ -653,7 +652,7 @@ def main(argv=None):
         if critic is not None:
             extra = {**(extra or {}), 'critic': critic.state_dict(), 'criticOptimizer': critic_optimizer.state_dict()}
         save_checkpoint({'model': model.state_dict(), 'optimizer': optimizer.state_dict(),
-                         'scheduler': scheduler.state_dict(), 'step': step, 'best': best, 'config': model.config,
+                         'scheduler': scheduler.state_dict(), 'step': step, 'config': model.config,
                          'priors': MULTI_PRIORS, 'speakers': speaker_keys, 'args': vars(args), 'initDigest': init_digest,
                          **(extra or {})}, path)
 
@@ -748,10 +747,10 @@ def main(argv=None):
             log.write(json.dumps({'train': row}) + '\n')
             log.flush()
             sums, sum_counts = {}, {}
-        # Validation (every --val-every steps from --val-from, and the last step) - the best checkpoint is the lowest
-        # score; last.pt every --save-every steps and at each validation; step-<n>.pt every --keep-every steps.
-        # (Validation draws from no training random state - its own rng, eval mode, the synthesizer's seeded noise - so
-        # the schedule doesn't change the training.)
+        # Validation (every --val-every steps from --val-from, and the last step) - for the log; last.pt every
+        # --save-every steps and at each validation; step-<n>.pt every --keep-every steps. (Validation draws from no
+        # training random state - its own rng, eval mode, the synthesizer's seeded noise - so the schedule doesn't change
+        # the training.)
         validating = step == stop or (step % args.val_every == 0 and step >= args.val_from)
         extra = None
         if validating:
@@ -760,9 +759,6 @@ def main(argv=None):
             log.write(json.dumps({'val': {'step': step, **result}}) + '\n')
             log.flush()
             extra = {'val': result}
-            if result['score'] < best:
-                best = result['score']
-                save(os.path.join(directory, 'best.pt'), extra)
         if validating or (args.save_every and step % args.save_every == 0):
             save(os.path.join(directory, 'last.pt'), extra)
         if args.keep_every and step % args.keep_every == 0:

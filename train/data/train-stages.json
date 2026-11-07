@@ -3,8 +3,8 @@
     "target": "train",
     "firstRun": {"stage": "tts-corpus", "pattern": "^tts generate: \\d+ clips in .*, (\\d+) to generate$"},
     "targets": {
-        "train": ["package", "voice-eval", "samples-reference", "samples-voice-a", "samples-voice-b", "g2p", "heteronyms"],
-        "train-voice": ["package", "voice-eval", "samples-reference", "samples-voice-a", "samples-voice-b"],
+        "train": ["package", "voice-eval", "samples-reference", "samples-voice-b", "g2p", "heteronyms"],
+        "train-voice": ["package", "voice-eval", "samples-reference", "samples-voice-b"],
         "train-g2p": ["g2p", "heteronyms"]
     },
     "stages": [
@@ -22,7 +22,7 @@
         {"stage": "heteronyms", "group": "G2P", "title": "The heteronym relabeling from the training speech's readings, checked to reproduce train/data/g2p-relabel.json (the G2P network's input)", "on": "cpu", "minutes": 1, "needs": ["tts-readings"], "after": ["data-tts"]},
         {"stage": "g2p-network", "group": "G2P", "title": "The G2P network's four stages (picovox_train.g2p train - one core, deterministic)", "on": "cpu", "minutes": 32, "needs": []},
         {"stage": "context-labels", "group": "G2P", "title": "The heteronym context labels (the pinned books, the training speech's measured readings, part-of-speech tags)", "on": "cpu", "minutes": 13, "needs": ["tts-readings"], "after": ["data-tts"]},
-        {"stage": "context-network", "group": "G2P", "title": "The context network and its cross-validation - fold 0 the network itself - and the cross-validated held-out gate (picovox_train.context train-context, folds)", "on": "cpu", "minutes": 32, "needs": ["context-labels"], "progress": {"log": "context/train.log", "pattern": "train-context: step (\\d+)/\\1 \\(quantized\\)", "total": 50}},
+        {"stage": "context-network", "group": "G2P", "title": "The context network (distilled from its teachers) and its cross-validation - fold 0 the network itself, the other folds plain networks - and the cross-validated held-out gate (picovox_train.context train-context, folds)", "on": "cpu", "minutes": 12, "needs": ["context-labels"], "progress": {"log": "context/train.log", "pattern": "train-context: step (\\d+)/\\1 \\(quantized\\)", "total": 14}},
         {"stage": "g2p-reading", "group": "G2P", "title": "The G2P's reading stage - the reading input and the ambiguity head (picovox_train.context train-g2p - two threads, beside the context network)", "on": "cpu", "minutes": 10, "needs": ["g2p-network", "context-labels"]},
         {"stage": "g2p", "group": "G2P", "title": "The context G2P's export and its gate (picovox_train.context export, check: identical to the committed module below its header, else within the recipe's tolerances)", "on": "cpu", "minutes": 1, "needs": ["g2p-reading", "context-network"]},
         {"stage": "voice-a", "group": "Voice", "title": "The voice's stage A (picovox_train.trainmulti --recipe voice.a - 15,000 steps)", "on": "gpu", "minutes": 46, "needs": ["data-tts"], "after": ["baseline-eval"], "run": "voice-a", "recipe": "voice.a"},
@@ -31,7 +31,6 @@
         {"stage": "voice-eval", "group": "Voice", "title": "The voice through the listener panel - its word error rate and its gap to the training speech - and the gate (picovox_train.panel gate: within the tolerance of the shipped model)", "on": "gpu", "minutes": 4, "needs": ["voice-b", "baseline-eval"]},
         {"stage": "package", "group": "Package", "title": "The voice's module, TRAIN_DIR/voiceModel.js - the export the gate scored, with its provenance (picovox_train.package)", "on": "cpu", "minutes": 1, "needs": ["voice-eval"]},
         {"stage": "samples-reference", "group": "Listening samples", "title": "The shipped model's samples - lib/models/voiceModel.js (tools/trainsamples.js)", "on": "cpu", "minutes": 1, "needs": [], "after": ["data-tts"], "samples": "reference"},
-        {"stage": "samples-voice-a", "group": "Listening samples", "title": "Stage A's samples - its final checkpoint (tools/trainsamples.js)", "on": "cpu", "minutes": 1, "needs": ["voice-a"], "samples": "voice-a"},
-        {"stage": "samples-voice-b", "group": "Listening samples", "title": "Stage B's samples - its best checkpoint, the model the package stage packages (tools/trainsamples.js)", "on": "cpu", "minutes": 1, "needs": ["voice-b"], "samples": "voice-b"}
+        {"stage": "samples-voice-b", "group": "Listening samples", "title": "The trained voice's samples - the module the gate scored (tools/trainsamples.js)", "on": "cpu", "minutes": 1, "needs": ["voice-eval"], "samples": "voice-b"}
     ]
 }

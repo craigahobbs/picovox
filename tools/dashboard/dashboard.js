@@ -259,7 +259,7 @@ const chartHelp = {
     'sonorantAf': 'A penalty on hiss (frication) inside vowels and other sonorants, where there shouldn\'t be any - in dB/10 ' +
         'above the allowed level.',
     'eqSmooth': 'A penalty on jagged channel equalizers - each speaker\'s smooth recording-channel coloring.',
-    'score': 'The validation score used to pick the best checkpoint: spectral + phone durations + pitch.',
+    'score': 'The validation score - spectral + phone durations + pitch (it doesn\'t pick the checkpoint: a stage\'s last is its model).',
     'b1': 'The median first-formant bandwidth (Hz) on the voice\'s strong frames - narrow (about 80-150 Hz) sounds clear; ' +
         'wide sounds muffled. The critic exists largely to keep these narrow.',
     'b2': 'The median second-formant bandwidth (Hz) on strong frames - lower is sharper.',
@@ -599,15 +599,13 @@ function renderLogs(allLogs) {
 // model first, every speaker's sample beside the shipped model's (the reference); a model not rendered yet is listed as
 // waiting, so nothing moves when it arrives. Rebuilt when the index or the models' states change, reusing each sample's
 // player so playback continues.
-const listenTitles = {'voice-a': 'Stage A', 'voice-b': 'Stage B', 'reference': 'The shipped model'};
-const listenNotes = {'voice-a': 'its final checkpoint, which stage B starts from',
-    'voice-b': 'the model make train packages, if it passes the gate', 'reference': 'lib/models/voiceModel.js'};
-const trainSamplesHelp = 'make train renders listening samples of each training stage\'s final model as the stage finishes ' +
-    '(its own CPU stage, beside the next GPU stage): stage A (its last checkpoint, which stage B starts from) and stage B ' +
-    '(its best - the model the package stage packages, if it passes the gate). Each speaks the recipe\'s texts ' +
-    '(train/data/train.json samples) in six of the voices, three female and three male, exactly as the ' +
-    'package speaks (exported and quantized as the package stage exports it, its G2P network, 24 kHz, its gain). Beside each ' +
-    'is the shipped model, ' +
+const listenTitles = {'voice-b': 'The trained voice', 'reference': 'The shipped model'};
+const listenNotes = {'voice-b': 'stage B\'s model as the gate scored it - make train packages it if it passes',
+    'reference': 'lib/models/voiceModel.js'};
+const trainSamplesHelp = 'make train renders listening samples of the trained voice when the gate has scored it (its own ' +
+    'CPU stage): the module the gate evaluated - stage B\'s last checkpoint, exported and quantized as the package stage ' +
+    'packages it. It speaks the recipe\'s texts (train/data/train.json samples) in six of the voices, three female and three ' +
+    'male, exactly as the package speaks (its G2P network, 24 kHz, its gain). Beside each is the shipped model, ' +
     'lib/models/voiceModel.js, rendered the same way - so the new model can be judged by ear (make train installs ' +
     'nothing: make train-check, then make train-install). A model not rendered yet is listed as waiting. The files are ' +
     'TRAIN_DIR/samples/ (index.json lists them).';
@@ -666,7 +664,7 @@ async function renderTrainSamples() {
         if (model.samples.length === 0) {
             const stageName = model.stage;
             const status = {
-                'waiting': `waiting - rendered when the ${model.key === 'reference' ? 'voices\' data' : model.key} stage finishes`,
+                'waiting': `waiting - rendered when the ${model.key === 'reference' ? 'voices\' data' : 'voice-eval'} stage finishes`,
                 'queued': 'rendering...', 'running': 'rendering...', 'stopped': 'stopped - make train isn\'t running',
                 'failed': `failed - see logs/${stageName}.log`, 'skipped': 'not in this run\'s make target'
             }[model.status] ?? model.status;
@@ -675,7 +673,7 @@ async function renderTrainSamples() {
             return element;
         }
         const [first] = model.samples;
-        const facts = [listenNotes[model.key], first.run, first.step === null ? null : `step ${first.step.toLocaleString()}`];
+        const facts = [listenNotes[model.key], first.model, first.step === null ? null : `step ${first.step.toLocaleString()}`];
         head.append(make('span', 'facts', facts.filter((fact) => fact).join(' · ')));
         for (const textKey of textKeys(model.samples)) {
             const text = texts.find((item) => item.key === textKey);

@@ -9,18 +9,18 @@ import {join} from 'node:path';
 import process from 'node:process';
 
 
-// Parse the command line - {stage, checkpoint, model, out}
+// Parse the command line - {stage, model, out}
 export function parseArgs(argv) {
-    const args = {'stage': null, 'checkpoint': null, 'model': null, 'out': null};
-    const options = {'--stage': 'stage', '--checkpoint': 'checkpoint', '--model': 'model', '--out': 'out'};
+    const args = {'stage': null, 'model': null, 'out': null};
+    const options = {'--stage': 'stage', '--model': 'model', '--out': 'out'};
     for (let ix = 0; ix < argv.length; ix++) {
         if (!(argv[ix] in options) || ix + 1 >= argv.length) {
             throw new Error(`unknown or incomplete argument ${argv[ix]}`);
         }
         args[options[argv[ix]]] = argv[++ix];
     }
-    if (args.stage === null || args.out === null || (args.checkpoint === null) === (args.model === null)) {
-        throw new Error('usage: node tools/trainsamples.js --stage STAGE (--checkpoint PATH | --model MODULE) --out DIR');
+    if (args.stage === null || args.out === null || args.model === null) {
+        throw new Error('usage: node tools/trainsamples.js --stage STAGE --model MODULE --out DIR');
     }
     return args;
 }

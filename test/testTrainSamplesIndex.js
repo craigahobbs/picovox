@@ -10,16 +10,15 @@ import {tmpdir} from 'node:os';
 
 
 test('trainsamplesindex.parseArgs', () => {
-    assert.deepEqual(parseArgs(['--stage', 'voice-a', '--checkpoint', 'build/train/runs/voice-a/last.pt', '--out', 'samples']), {
-        'stage': 'voice-a', 'checkpoint': 'build/train/runs/voice-a/last.pt', 'model': null, 'out': 'samples'
+    assert.deepEqual(parseArgs(['--stage', 'voice-b', '--model', 'build/train/eval/voice/voiceModel.js', '--out', 'samples']), {
+        'stage': 'voice-b', 'model': 'build/train/eval/voice/voiceModel.js', 'out': 'samples'
     });
     assert.deepEqual(parseArgs(['--stage', 'reference', '--model', 'lib/models/voiceModel.js', '--out', 'samples']), {
-        'stage': 'reference', 'checkpoint': null, 'model': 'lib/models/voiceModel.js', 'out': 'samples'
+        'stage': 'reference', 'model': 'lib/models/voiceModel.js', 'out': 'samples'
     });
     assert.throws(() => parseArgs(['--stage']), /incomplete argument --stage/);
     assert.throws(() => parseArgs(['--run', 'voice-b']), /unknown or incomplete argument --run/);
     assert.throws(() => parseArgs(['--stage', 'voice-b', '--out', 'samples']), /usage/);
-    assert.throws(() => parseArgs(['--stage', 'voice-b', '--model', 'a.js', '--checkpoint', 'b.pt', '--out', 'samples']), /usage/);
     assert.throws(() => parseArgs(['--model', 'a.js', '--out', 'samples']), /usage/);
 });
 

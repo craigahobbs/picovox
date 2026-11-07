@@ -340,13 +340,14 @@ class TestMain(unittest.TestCase):
         self.assertEqual(DATA.train('a', '--log-every', '2', '--val-every', '2', '--keep-every', '2', '--speaker-noise', '0',
                                     '--save-every', '0'), 0)
         files = sorted(os.listdir(DATA.run_path('a')))
-        self.assertEqual(files, ['best.pt', 'last.pt', 'log.jsonl', 'step-2.pt'])
+        self.assertEqual(files, ['last.pt', 'log.jsonl', 'step-2.pt'])
         state = torch.load(DATA.run_path('a', 'last.pt'), weights_only=False)
         self.assertEqual(state['step'], 3)
         self.assertEqual(state['speakers'], ['male', 'female'])
         self.assertEqual(state['args']['steps'], 3)
         self.assertNotIn('critic', state)
-        self.assertEqual(state['val']['score'], state['best'])
+        self.assertNotIn('best', state)
+        self.assertIn('score', state['val'])
         with open(DATA.run_path('a', 'log.jsonl'), encoding='utf-8') as file:
             rows = [json.loads(line) for line in file]
         self.assertEqual([next(iter(row)) for row in rows], ['train', 'val', 'val'])
@@ -412,15 +413,15 @@ class TestMain(unittest.TestCase):
     def test_resume_other_settings(self):
         # A run of other settings starts over - its checkpoints and log removed (other files kept)
         self.assertEqual(DATA.train('resume-other', '--stop', '1', '--resume'), 0)
-        for name in ('best.pt', 'step-7.pt', 'notes.txt'):
+        for name in ('step-7.pt', 'notes.txt'):
             with open(DATA.run_path('resume-other', name), 'w', encoding='utf-8') as file:
                 file.write('x')
         self.assertEqual(DATA.train('resume-other', '--lr', '0.002', '--stop', '1', '--resume'), 0)
         self.assertIn('is of other settings (lr) - training from the start', DATA.last_log)
         self.assertIn('resume-other: 3 steps from 0', DATA.last_log)
         self.assertEqual(sorted(name for name in os.listdir(DATA.run_path('resume-other')) if name != 'train.log'),
-                         ['best.pt', 'last.pt', 'log.jsonl', 'notes.txt'])
-        self.assertEqual(torch.load(DATA.run_path('resume-other', 'best.pt'), weights_only=False)['args']['lr'], 0.002)
+                         ['last.pt', 'log.jsonl', 'notes.txt'])
+        self.assertEqual(torch.load(DATA.run_path('resume-other', 'last.pt'), weights_only=False)['args']['lr'], 0.002)
 
         # ... and so does a run from another init checkpoint (the stage before it retrained)
         first = tiny_checkpoint()
@@ -434,17 +435,19 @@ class TestMain(unittest.TestCase):
         self.assertIn('is of other settings (the init checkpoint) - training from the start', DATA.last_log)
 
     def test_validation_schedule(self):
-        # Validated only from --val-from (and at the end); the best is kept only when the score improves
+        # Validated only from --val-from (and at the end) - the last checkpoint carries its validation; no best checkpoint
         scores = iter([2.0, 3.0])
 
         def validate(*_args):
             return {'score': next(scores)}
         with unittest.mock.patch.object(trainmulti, 'validate', side_effect=validate):
             self.assertEqual(DATA.train('schedule', '--steps', '4', '--val-every', '1', '--val-from', '3'), 0)
-        state = torch.load(DATA.run_path('schedule', 'best.pt'), weights_only=False)
-        self.assertEqual((state['step'], state['val']), (3, {'score': 2.0}))
+        self.assertEqual(sorted(os.listdir(DATA.run_path('schedule'))), ['last.pt', 'log.jsonl'])
         last = torch.load(DATA.run_path('schedule', 'last.pt'), weights_only=False)
-        self.assertEqual((last['step'], last['val'], last['best']), (4, {'score': 3.0}, 2.0))
+        self.assertEqual((last['step'], last['val']), (4, {'score': 3.0}))
+        self.assertNotIn('best', last)
+        with self.assertRaises(StopIteration):
+            next(scores)
 
     def test_nonfinite_gradient(self):
         # A step with a non-finite gradient norm is skipped on the device (the lean optimizer - its step counts unchanged)

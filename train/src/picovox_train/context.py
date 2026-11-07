@@ -43,7 +43,8 @@ seed (five seeds of the same data differed on 14% of unlabeled book windows and 
 pair). So "teachers" networks are trained first (each its own seed - 100 * seed + 1, 2, ...; quantized as exported),
 and the network (the same size - the only one exported) is trained toward their mean probabilities ("distill" of the
 loss, the rest the labels' cross entropy) on its examples and on the labels' transfer windows (unlabeled - the ambiguous
-words' other windows in the books, contextlabels.py), "transferShare" of a batch's size added to each batch.
+words' other windows in the books, contextlabels.py), "transferShare" of a batch's size added to each batch. The
+cross-validation's other folds (the gate's held-out accuracy - context.py folds) train one plain network each.
 """
 
 import argparse
@@ -844,21 +845,22 @@ def command_train_g2p(args):
 
 
 def command_train_context(args):
-    """Train the context network and its cross-validation - the network (fold 0: the labels' own split, at its threads)
-    to <out> (a checkpoint), and each fold's held-out results to <folds>/fold-<k>.json (the other folds' networks one
-    thread each). Every fold's teachers at once, then every fold's network: -j trains that many at once, each in a
-    worker process (the results are the same for any -j). Resumable: a fold with results from the same labels and
-    settings (fold 0 with its checkpoint) isn't trained again"""
+    """Train the context network and its cross-validation - the network (fold 0: the labels' own split, at its threads,
+    distilled from its teachers) to <out> (a checkpoint), and each fold's held-out results to <folds>/fold-<k>.json (the
+    other folds' networks the plain training, one thread each - they estimate the held-out accuracy and never ship, so
+    they need no teachers: 4 teachers and 10 networks, not 50 trainings). The teachers first, then every fold's network:
+    -j trains that many at once, each in a worker process (the results are the same for any -j). Resumable: a fold with
+    results from the same labels and settings (fold 0 with its checkpoint) isn't trained again"""
     os.makedirs(args.folds, exist_ok=True)
     network = {**CONTEXT_SETTINGS, **(json.loads(args.settings) if args.settings else {})}
-    settings = [network] + [{**network, 'threads': 1}] * (FOLDS - 1)
+    settings = [network] + [{**network, 'threads': 1, 'teachers': 0}] * (FOLDS - 1)
     paths = [os.path.join(args.folds, f'fold-{fold}.json') for fold in range(FOLDS)]
     digests = [fold_digest(args.labels, fold_settings) for fold_settings in settings]
     folds = [fold for fold in range(FOLDS) if not fold_done(paths[fold], digests[fold]) or (fold == 0 and not os.path.exists(args.out))]
-    seeds = teacher_seeds(network)
-    states = run_tasks(teacher_task, [(args.labels, fold, seed, settings[fold], args.log) for fold in folds for seed in seeds], args.jobs)
-    run_tasks(fold_task, [(args.labels, fold, settings[fold], args.log, states[index * len(seeds):(index + 1) * len(seeds)],
-                           paths[fold], digests[fold], args.out if fold == 0 else None) for index, fold in enumerate(folds)], args.jobs)
+    seeds = teacher_seeds(network) if 0 in folds else []
+    states = run_tasks(teacher_task, [(args.labels, 0, seed, settings[0], args.log) for seed in seeds], args.jobs)
+    run_tasks(fold_task, [(args.labels, fold, settings[fold], args.log, states if fold == 0 else [], paths[fold], digests[fold],
+                           args.out if fold == 0 else None) for fold in folds], args.jobs)
     return 0
 
 

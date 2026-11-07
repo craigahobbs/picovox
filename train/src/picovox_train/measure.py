@@ -3,24 +3,23 @@
 
 """
 The readings' measurement - the readings the training speech's voices used for its heteronym tokens (tts.py's corpus;
-readings.py's words and classes), measured with our own tools: the CTC phoneme recognizer's vote (ctc.py) where the
-readings differ in a full vowel's quality or a consonant, and the vowel's formants (Praat) where the recognizer can't
-tell them apart (a reduced vowel against a full one, the vowels it merges). The G2P's heteronym evidence
-(heteronyms.py, contextlabels.py) is these readings, and the voice's tokens (tts.py) take the measured reading where
-the CTC vote differs from the front end's.
+readings.py's words and classes), measured with our own tool: the CTC phoneme recognizer's vote (ctc.py) where the
+readings differ in a full vowel's quality or a consonant. The G2P's heteronym evidence (heteronyms.py,
+contextlabels.py) is these readings, and the voice's tokens (tts.py) take the measured reading where the vote differs
+from the front end's.
 
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.measure    # <corpus>/readings/ (GPU)
 
 The measurement of a token (a measured word in a clip, by the clip's alignment): its class (readings.pair_class)
 chooses the method - strong: each reading's CTC likelihood (its first variant, with the neighboring words' phones) on
 the word's segment, a vote when one is VOTE_MARGIN more likely; voicing: the same with S and Z each only its own token;
-weak and merger: the differing vowel's F1 and F2 (its middle third, Lobanov-normalized per voice), nearest of the
-readings' vowels' references (pooled per voice over REFERENCE_CLIPS clips' other vowels) by FORMANT_MARGIN; stress:
-none. The controls - words of one pronunciation with a phone swapped (a final S or Z, the stressed vowel for a partner
-the recognizer hears apart, a clear vowel for its formant neighbor) - are each method's false votes: a method's
-readings are used when they're at most MAX_CONTROL_ERROR of MIN_CONTROL_VOTES or more. The outputs, in
-<corpus>/readings/: words.json (the measured words, their classes, and the measurement's key), readings.jsonl (each
-clip's measured tokens), and summary.json (the controls, the classes used, the voices' reference vowels).
+weak, merger, and stress: none (the vowels' formants measured the weak and merger classes through 2.0.2, and never
+passed their controls - 54 false votes of 568, against 3% allowed - so the classes went unmeasured; the method is in git
+history). The controls - words of one pronunciation with a phone swapped (a final S or Z, the stressed vowel for a
+partner the recognizer hears apart) - are each method's false votes: a method's readings are used when they're at most
+MAX_CONTROL_ERROR of MIN_CONTROL_VOTES or more. The outputs, in <corpus>/readings/: words.json (the measured words,
+their classes, and the measurement's key), readings.jsonl (each clip's measured tokens), and summary.json (the controls
+and the classes used).
 """
 
 import argparse
@@ -30,35 +29,27 @@ import json
 import os
 import sys
 import time
-import warnings
 
 from . import RECIPE_PATH, read_json, tts
 from .tts import log
-from .readings import CLOSED_CLASS, VOWELS, base, difference, measured_words, read_variants, reading_of, token_words, word_class
+from .readings import CLOSED_CLASS, base, measured_words, read_variants, reading_of, token_words, word_class
 
 
 # The context of a word - its neighbors' phones when at most NEIGHBOR_SECONDS long, else PAD seconds of the audio; the
-# controls - CONTROL_WORDS words a method, at most CONTROL_TOKENS tokens a word; the formants' references -
-# REFERENCE_CLIPS clips a voice (their unmeasured words' vowels of at least MIN_VOWEL_SECONDS), and a vote's margin
-# (Lobanov units); a method's readings are used when its controls' false votes are at most MAX_CONTROL_ERROR of
-# MIN_CONTROL_VOTES or more
+# controls - CONTROL_WORDS words a method, at most CONTROL_TOKENS tokens a word; a method's readings are used when its
+# controls' false votes are at most MAX_CONTROL_ERROR of MIN_CONTROL_VOTES or more
 NEIGHBOR_SECONDS = 1.0
 PAD = 0.12
 CONTROL_WORDS = 150
 CONTROL_TOKENS = 6
-REFERENCE_CLIPS = 300
-MIN_VOWEL_SECONDS = 0.05
-FORMANT_MARGIN = 0.25
 MAX_CONTROL_ERROR = 0.03
 MIN_CONTROL_VOTES = 100
 
-# The method of each class
-METHODS = {'strong': 'ctc', 'voicing': 'voicing', 'weak': 'formant', 'merger': 'formant'}
+# The method of each measured class
+METHODS = {'strong': 'ctc', 'voicing': 'voicing'}
 
-# The controls' swaps - a clear stressed vowel for a partner the recognizer hears apart (ctc), and for its formant
-# neighbor (formant)
+# The controls' swaps - a clear stressed vowel for a partner the recognizer hears apart (ctc)
 CTC_PARTNERS = {'IY': 'EH', 'EH': 'IY', 'IH': 'AY', 'AY': 'IH', 'AE': 'EY', 'EY': 'AE', 'OW': 'AW', 'AW': 'OW', 'UW': 'OW'}
-FORMANT_PARTNERS = {'IH': 'IY', 'IY': 'IH', 'EH': 'AE', 'AE': 'EH', 'UH': 'UW', 'UW': 'UH', 'AA': 'AH', 'AH': 'AA'}
 
 
 # The measurement's key (another key measures again) - a hash of what the readings depend on: the method's settings,
@@ -68,8 +59,7 @@ FORMANT_PARTNERS = {'IH': 'IY', 'IY': 'IH', 'EH': 'AE', 'AE': 'EH', 'UH': 'UW', 
 # measured readings their tokens take are the measurement's own outcome.)
 def measure_key(settings, clips):
     from . import ctc  # pylint: disable=import-outside-toplevel
-    basis = {'settings': [ctc.VOTE_MARGIN, NEIGHBOR_SECONDS, PAD, CONTROL_WORDS, CONTROL_TOKENS, REFERENCE_CLIPS, MIN_VOWEL_SECONDS,
-                          FORMANT_MARGIN, CTC_PARTNERS, FORMANT_PARTNERS],
+    basis = {'settings': [ctc.VOTE_MARGIN, NEIGHBOR_SECONDS, PAD, CONTROL_WORDS, CONTROL_TOKENS, CTC_PARTNERS, METHODS],
              'aligner': tts.aligner_key(), 'checks': settings['checks'], 'clips': [clip['id'] for clip in clips]}
     return tts.inputs_key(basis, tts.code_files('readings'))
 
@@ -109,9 +99,9 @@ def voicing_positions(variant):
 
 
 # A clip's measurement tasks - its measured words' tokens ({position, word, class, frontEnd, method, segment, phones,
-# labels, candidates}) and at most two control tokens ({control: True, ...}); words, the measured words' readings and
-# classes; controls, {word: (method, candidates)}; front, the clip's front end tokens and words (its own - the
-# alignment's tokens take the measured readings, frontEnd is the front end's reading)
+# labels, candidates} - the words of a measured class, METHODS) and at most two control tokens ({control: True, ...});
+# words, the measured words' readings and classes; controls, {word: (method, candidates)}; front, the clip's front end
+# tokens and words (its own - the alignment's tokens take the measured readings, frontEnd is the front end's reading)
 def clip_tasks(record, words, classes, controls, front):
     timed = word_times(record)
     names, own = front['words'], token_words(front['tokens'])
@@ -121,7 +111,7 @@ def clip_tasks(record, words, classes, controls, front):
             continue
         name = names[position]
         segment = word_context(timed, position, record['seconds'])
-        if name in words and classes[name] != 'stress':
+        if name in words and classes[name] in METHODS:
             readings = words[name]
             tasks.append({'position': position, 'word': name, 'class': classes[name], 'frontEnd': reading_of(own[position], readings),
                           'method': METHODS[classes[name]], 'segment': segment, 'phones': phones, 'labels': labels,
@@ -136,7 +126,7 @@ def clip_tasks(record, words, classes, controls, front):
 # The control words - {word: (method, [the word's pronunciation, the swapped one])}: the corpus's words of one
 # pronunciation (not measured, not closed-class, 4+ letters, CONTROL_TOKENS+ tokens), by a hash, CONTROL_WORDS a method
 def control_words(counts, variants, measured):
-    choices = {'ctc': [], 'voicing': [], 'formant': []}
+    choices = {'ctc': [], 'voicing': []}
     for word in sorted(counts, key=lambda item: hashlib.sha1(item.encode('utf-8')).hexdigest()):
         if word in measured or word in CLOSED_CLASS or len(word) < 4 or len(variants.get(word, [])) != 1 or counts[word] < CONTROL_TOKENS:
             continue
@@ -148,8 +138,6 @@ def control_words(counts, variants, measured):
             method, swapped = 'voicing', phones[:-1] + ['Z' if base(phones[-1]) == 'S' else 'S']
         elif vowel in CTC_PARTNERS and not before_r:
             method, swapped = 'ctc', phones[:stressed] + [CTC_PARTNERS[vowel] + '1'] + phones[stressed + 1:]
-        elif vowel in FORMANT_PARTNERS and not before_r:
-            method, swapped = 'formant', phones[:stressed] + [FORMANT_PARTNERS[vowel] + '1'] + phones[stressed + 1:]
         else:
             continue
         if len(choices[method]) < CONTROL_WORDS:
@@ -193,118 +181,6 @@ def ctc_votes(model, vocab, device, items, batch, jobs):
         log(f'  ctc {done}/{len(items)} tokens, {time.time() - start_time:.0f} s')
 
 
-# A clip's formants (a worker task: (path, sex, ceilings, [(start, end)])) - [[F1, F2] or None], each interval's
-# middle third's median
-def clip_formants(task):
-    import numpy  # pylint: disable=import-outside-toplevel
-    import parselmouth  # pylint: disable=import-outside-toplevel, import-error
-    path, sex, ceilings, intervals = task
-    formant = parselmouth.Sound(path).to_formant_burg(time_step=0.005, max_number_of_formants=5, maximum_formant=ceilings[sex])
-    values = []
-    for start, end in intervals:
-        times = numpy.linspace(start + (end - start) / 3, end - (end - start) / 3, 5)
-        # (an interval without a defined formant is None - numpy's all-NaN median warns)
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore', RuntimeWarning)
-            first = numpy.nanmedian([formant.get_value_at_time(1, moment) for moment in times])
-            second = numpy.nanmedian([formant.get_value_at_time(2, moment) for moment in times])
-        values.append([round(float(first), 1), round(float(second), 1)] if numpy.isfinite(first) and numpy.isfinite(second) else None)
-    return values
-
-
-# A vowel's reference key - its base, or AH0 (schwa) when reduced
-def vowel_key(phone):
-    return 'AH0' if phone[-1:] == '0' and base(phone) in ('AH', 'IH', 'ER') else base(phone)
-
-
-# The differing vowel of a formant task - (its index in the token's phones, {candidate index: the candidate's vowel key})
-# or None: the first vowel the other candidates differ from the token's phones by
-def formant_target(task):
-    phones = task['phones'].split()
-    found, vowels = None, {}
-    own = None
-    for index, candidate in enumerate(task['candidates']):
-        if base(candidate) == base(task['phones']):
-            own = index
-            continue
-        differing = difference(phones, candidate.split())
-        if differing is None or differing[2] != 'vowel' or found not in (None, differing[0]):
-            continue
-        found = differing[0]
-        vowels[index] = vowel_key(candidate.split()[differing[1]])
-    if found is None or own is None:
-        return None
-    vowels[own] = vowel_key(phones[found])
-    return found, vowels
-
-
-# A formant task's vote - the candidate whose vowel's reference is nearest the token's normalized formants by
-# FORMANT_MARGIN, else None
-def formant_vote(task, norm, references):
-    import numpy  # pylint: disable=import-outside-toplevel
-    if task.get('target') is None or task.get('formants') is None or norm is None:
-        return None
-    normalized = (numpy.array(task['formants']) - norm[0]) / norm[1]
-    distances = {index: float(numpy.linalg.norm(normalized - references[vowel]))
-                 for index, vowel in task['target'][1].items() if vowel in references}
-    if len(set(task['target'][1].values())) < 2 or len(distances) < 2:
-        return None
-    order = sorted(distances, key=distances.get)
-    return order[0] if distances[order[1]] - distances[order[0]] >= FORMANT_MARGIN else None
-
-
-# The formants of the tasks (in place - each formant task's formants) and each voice's normalization and reference
-# vowels - {voice: ((mean, std) or None, {vowel: mean})}
-def measure_formants(plan, clips, records, words, names, directory, settings, jobs):
-    import multiprocessing  # pylint: disable=import-outside-toplevel
-    import numpy  # pylint: disable=import-outside-toplevel
-    intervals = collections.defaultdict(list)
-    for clip, task in plan:
-        if task['method'] == 'formant':
-            task['target'] = formant_target(task)
-            if task['target'] is not None:
-                label = task['labels'][task['target'][0]]
-                intervals[clip['id']].append((task, label[1], label[2]))
-
-    # (each voice's reference clips' unmeasured words' vowels)
-    by_voice = collections.defaultdict(list)
-    for clip in clips:
-        by_voice[clip['key']].append(clip)
-    for voice_clips in by_voice.values():
-        for clip in sorted(voice_clips, key=lambda item: item['id'])[:REFERENCE_CLIPS]:
-            for position, (_, _, _, labels) in enumerate(word_times(records[clip['id']])):
-                if position < len(names[clip['id']]) and names[clip['id']][position] not in words:
-                    for label in labels:
-                        if base(label[0]) in VOWELS and label[2] - label[1] >= MIN_VOWEL_SECONDS:
-                            intervals[clip['id']].append(((clip['key'], vowel_key(label[0])), label[1], label[2]))
-    by_id = {clip['id']: clip for clip in clips}
-    order = sorted(intervals)
-    ceilings = settings['analysis']['formantCeilings']
-    tasks = [(tts.wav_path(directory, by_id[clip_id]), by_id[clip_id]['sex'], ceilings,
-              [(start, end) for _, start, end in intervals[clip_id]]) for clip_id in order]
-    references = collections.defaultdict(list)
-    with multiprocessing.Pool(jobs) as pool:
-        for clip_id, values in zip(order, pool.imap(clip_formants, tasks, chunksize=8)):
-            for (owner, _, _), value in zip(intervals[clip_id], values):
-                if isinstance(owner, tuple):
-                    if value is not None:
-                        references[owner].append(value)
-                else:
-                    owner['formants'] = value
-
-    # (Lobanov normalization per voice, and its pooled reference vowels)
-    result = {}
-    for voice in by_voice:
-        values = numpy.array([value for (owner, _), items in references.items() if owner == voice for value in items])
-        if len(values) < 30:
-            result[voice] = (None, {})
-            continue
-        mean, std = values.mean(0), values.std(0)
-        result[voice] = ((mean, std), {vowel: ((numpy.array(items) - mean) / std).mean(0)
-                                       for (owner, vowel), items in references.items() if owner == voice and len(items) >= 10})
-    return result
-
-
 def measure_command(args):
     """The readings of the corpus's heteronym tokens - <corpus>/readings/ (words.json, readings.jsonl, summary.json)"""
     from . import ctc  # pylint: disable=import-outside-toplevel
@@ -342,18 +218,13 @@ def measure_command(args):
     log(f'measure: {len(clips)} clips, {sum(not task.get("control") for _, task in plan)} measured tokens, '
         f'{sum(bool(task.get("control")) for _, task in plan)} control tokens')
 
-    # The CTC votes, and the formant votes
+    # The CTC votes
     model, vocab, device = ctc.load_ctc(args.device)
-    ctc_votes(model, vocab, device, [(tts.wav_path(directory, clip), task) for clip, task in plan if task['method'] in ('ctc', 'voicing')],
-              args.batch, args.jobs)
-    voices = measure_formants(plan, clips, records, words, names, directory, settings, args.jobs)
-    for clip, task in plan:
-        if task['method'] == 'formant':
-            task['vote'] = formant_vote(task, *voices[clip['key']])
+    ctc_votes(model, vocab, device, [(tts.wav_path(directory, clip), task) for clip, task in plan], args.batch, args.jobs)
 
     # The controls - each method's false votes, and the classes whose readings are used
     control_results = {}
-    for method in ('ctc', 'voicing', 'formant'):
+    for method in sorted(set(METHODS.values())):
         votes = [task['vote'] for _, task in plan if task.get('control') and task['method'] == method and task['vote'] is not None]
         false = sum(vote != 0 for vote in votes)
         control_results[method] = {'votes': len(votes), 'false': false, 'error': round(false / max(1, len(votes)), 4),
@@ -369,8 +240,7 @@ def measure_command(args):
     with open(os.path.join(out, 'readings.jsonl'), 'w', encoding='utf-8') as file:
         for clip in clips:
             tokens = [{'position': task['position'], 'word': task['word'], 'class': task['class'], 'frontEnd': task['frontEnd'],
-                       'vote': task['vote'], 'reading': task['vote'] if used[task['class']] else None,
-                       **({'scores': task['scores']} if 'scores' in task else {'formants': task.get('formants')})}
+                       'vote': task['vote'], 'reading': task['vote'] if used[task['class']] else None, 'scores': task['scores']}
                       for task in by_clip.get(clip['id'], [])]
             if tokens:
                 file.write(json.dumps({'id': clip['id'], 'key': clip['key'], 'voice': clip['voice'], 'sex': clip['sex'],
@@ -381,9 +251,7 @@ def measure_command(args):
     summary = {'key': None if args.limit else key, 'corpus': os.path.basename(directory), 'clips': len(clips), 'tokens': len(measured),
                'byClass': dict(collections.Counter(task['class'] for task in measured)),
                'votes': dict(collections.Counter(task['class'] for task in measured if task['vote'] is not None)),
-               'controls': control_results, 'classes': used,
-               'references': {voice: {vowel: [round(float(value), 3) for value in mean] for vowel, mean in vowels.items()}
-                              for voice, (_, vowels) in voices.items()}}
+               'controls': control_results, 'classes': used}
     with open(os.path.join(out, 'summary.json'), 'w', encoding='utf-8') as file:
         json.dump(summary, file, indent=1)
     log(f'measure: {len(measured)} tokens, votes {summary["votes"]}, in {time.time() - start_time:.0f} s; controls '

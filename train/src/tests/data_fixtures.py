@@ -63,8 +63,7 @@ def fake_modules(**modules):
 
 class FakeSound:
     """A fake recording (a path or samples) and its analyses: pitch by a frame autocorrelation
-    (voiced where the signal is loud and periodic), harmonicity from its peak, and fixed formants wherever the signal
-    isn't silent"""
+    (voiced where the signal is loud and periodic), and fixed formants wherever the signal isn't silent"""
 
     def __init__(self, values, sampling_frequency=None):
         if isinstance(values, str):
@@ -98,12 +97,6 @@ class FakeSound:
         voiced = [level > 0.01 and peak > 0.5 for level, (_, peak) in zip(rms, peaks)]
         return FakePitch(times, [self.rate / lag if ok else 0.0 for ok, (lag, _) in zip(voiced, peaks)],
                          [peak if ok else 0.0 for ok, (_, peak) in zip(voiced, peaks)])
-
-    def to_harmonicity_cc(self, time_step, minimum_pitch):
-        times, rms, peaks = self.frames(time_step, minimum_pitch)
-        hnr = [10 * numpy.log10(min(peak, 0.999) / (1 - min(peak, 0.999))) if level > 0.01 and peak > 0.5 else -200.0
-               for level, (_, peak) in zip(rms, peaks)]
-        return FakeTrack(times, numpy.array([hnr]))
 
     def to_formant_burg(self, time_step, max_number_of_formants, maximum_formant, window_length=0.025, pre_emphasis_from=50):
         assert max_number_of_formants == 5 and maximum_formant > 0 and window_length > 0 and pre_emphasis_from > 0

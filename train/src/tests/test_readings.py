@@ -4,25 +4,22 @@
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
 import json
-import math
-import multiprocessing
 import os
 import tempfile
 import unittest
 import unittest.mock
-import warnings
 
 import numpy
 
 from picovox_train import corpora, ctc, measure, readings, tts
 
-from . import ctc_fixtures, data_fixtures
+from . import ctc_fixtures
 from .helpers import captured, run_module
 
 
 # The measurement's tiny dictionary - its heteronyms (read and lead strong, use voicing, record weak, dawn merger, insult
-# stress, the closed-class), its control words (went and home ctc, look formant, times and cats voicing), and words no
-# control can be made of (dark - its vowel before R, night - no primary stress)
+# stress, the closed-class), its control words (went and home ctc, times and cats voicing), and words no control can be
+# made of (look - its vowel has no CTC partner, dark - its vowel before R, night - no primary stress)
 DICTIONARY = {
     'read': [['R', 'IY1', 'D'], ['R', 'EH1', 'D']],
     'lead': [['L', 'EH1', 'D'], ['L', 'IY1', 'D']],
@@ -41,7 +38,7 @@ DICTIONARY = {
 }
 
 
-# The corpus's clips - a male voice's (enough reference vowels for the formants) and a female voice's (too few)
+# The corpus's clips
 MALE_TEXTS = [
     'I read the lead, we went home.', 'The cats use a record, the best went home.', 'Look, the dawn went dark.',
     'They insult the night, went the cats.', 'The best went home.', 'Then the best went.', 'The men went home.',
@@ -51,50 +48,11 @@ MALE_TEXTS = [
 FEMALE_TEXTS = ['I read the use.', 'Look at the record.']
 
 
-# The fake formant tracker's vowels (F1, F2 by measure.vowel_key); any other phone's, and a pause's
-FORMANTS = {
-    'AA': (750.0, 1100.0), 'AE': (700.0, 1700.0), 'AH': (600.0, 1200.0), 'AH0': (500.0, 1400.0), 'AO': (600.0, 900.0),
-    'AW': (700.0, 1200.0), 'AY': (700.0, 1300.0), 'EH': (550.0, 1900.0), 'ER': (500.0, 1300.0), 'EY': (450.0, 2100.0),
-    'IH': (400.0, 2000.0), 'IY': (300.0, 2300.0), 'OW': (500.0, 900.0), 'OY': (500.0, 1000.0), 'UH': (450.0, 1000.0),
-    'UW': (320.0, 900.0)
-}
-OTHER = (900.0, 2600.0)
-
-
-
 # The process pools in this process (the workers' code covered)
 def setUpModule():  # pylint: disable=invalid-name
     patcher = unittest.mock.patch('concurrent.futures.ProcessPoolExecutor', ctc_fixtures.FakeExecutor)
     patcher.start()
     unittest.addModuleCleanup(patcher.stop)
-
-class FakeFormantTrack:
-    """A fake Praat formant track - each phone label's formants (FORMANTS), a little modulated in time; NaN outside the labels"""
-
-    def __init__(self, labels):
-        self.labels = labels
-
-    def get_value_at_time(self, number, moment):
-        label = next((label for label in self.labels if label[1] <= moment < label[2]), None)
-        if label is None:
-            return math.nan
-        return FORMANTS.get(measure.vowel_key(label[0]), OTHER)[number - 1] + 20.0 * math.sin(997.0 * moment)
-
-
-class FakePraat:
-    """The fake parselmouth module - its sounds' phone labels by path (a test patches them)"""
-
-    labels = {}
-
-    # A fake parselmouth.Sound
-    class Sound:
-
-        def __init__(self, path):
-            self.path = path
-
-        def to_formant_burg(self, time_step, max_number_of_formants, maximum_formant):
-            assert time_step > 0 and max_number_of_formants == 5 and maximum_formant in (5000, 5500)
-            return FakeFormantTrack(FakePraat.labels[self.path])
 
 
 # A token sequence's alignment record (word_times's fields) - the phones' labels each 0.1 s, after a 0.2 s pause
@@ -205,7 +163,7 @@ class TestReadings(unittest.TestCase):
         self.assertEqual(len(key), 12)
         self.assertEqual(measure.measure_key(settings, clips), key)
         # The settings, the clips (a bigger corpus), the aligner, the checks, and the front end, the dictionary, and the spec
-        with unittest.mock.patch.object(measure, 'FORMANT_MARGIN', 0.5):
+        with unittest.mock.patch.object(measure, 'NEIGHBOR_SECONDS', 0.5):
             self.assertNotEqual(measure.measure_key(settings, clips), key)
         self.assertNotEqual(measure.measure_key(settings, clips + [{'id': 'c'}]), key)
         with unittest.mock.patch.object(tts, 'aligner_key', return_value='new'):
@@ -280,82 +238,13 @@ class TestReadings(unittest.TestCase):
         measured = {'read': [['R IY1 D'], ['R EH1 D']]}
         self.assertEqual(measure.control_words(counts, variants, measured), {
             'went': ('ctc', ['W EH1 N T', 'W IY1 N T']), 'home': ('ctc', ['HH OW1 M', 'HH AW1 M']),
-            'look': ('formant', ['L UH1 K', 'L UW1 K']), 'times': ('voicing', ['T AY1 M Z', 'T AY1 M S']),
-            'cats': ('voicing', ['K AE1 T S', 'K AE1 T Z'])
+            'times': ('voicing', ['T AY1 M Z', 'T AY1 M S']), 'cats': ('voicing', ['K AE1 T S', 'K AE1 T Z'])
         })
 
         # At most CONTROL_WORDS words a method
         with unittest.mock.patch.object(measure, 'CONTROL_WORDS', 1):
             controls = measure.control_words(counts, variants, measured)
-        self.assertEqual(sorted(method for method, _ in controls.values()), ['ctc', 'formant', 'voicing'])
-
-    def test_clip_formants(self):
-        labels = {'clip.wav': [['pau', 0.0, 0.2], ['DH', 0.2, 0.3], ['AH0', 0.3, 0.45]]}
-        with data_fixtures.fake_modules(parselmouth=FakePraat), unittest.mock.patch.object(FakePraat, 'labels', labels), \
-                warnings.catch_warnings():
-            warnings.filterwarnings('ignore', 'All-NaN slice encountered', RuntimeWarning)
-            values = measure.clip_formants(('clip.wav', 'male', {'male': 5000, 'female': 5500}, [(0.3, 0.45), (1.0, 1.2)]))
-        self.assertEqual(len(values), 2)
-        self.assertAlmostEqual(values[0][0], 500.0, delta=20.0)
-        self.assertAlmostEqual(values[0][1], 1400.0, delta=20.0)
-        self.assertIsNone(values[1])
-
-    def test_vowel_key(self):
-        self.assertEqual(measure.vowel_key('AH0'), 'AH0')
-        self.assertEqual(measure.vowel_key('IH0'), 'AH0')
-        self.assertEqual(measure.vowel_key('ER0'), 'AH0')
-        self.assertEqual(measure.vowel_key('IY0'), 'IY')
-        self.assertEqual(measure.vowel_key('AH1'), 'AH')
-
-    def test_formant_target(self):
-        self.assertEqual(measure.formant_target({'phones': 'R EH1 K ER0 D', 'candidates': ['R EH1 K ER0 D', 'R IH0 K AO1 R D']}),
-                         (1, {1: 'AH0', 0: 'EH'}))
-        # (a candidate differing elsewhere, and one by a consonant, aside)
-        self.assertEqual(measure.formant_target({'phones': 'B AE1 T IY0',
-                                                  'candidates': ['B AE1 T IY0', 'B EH1 T IY0', 'B AE1 T AH0', 'P AE1 T IY0']}),
-                         (1, {1: 'EH', 0: 'AE'}))
-        # (the token isn't a candidate; no vowel differs)
-        self.assertIsNone(measure.formant_target({'phones': 'K AE1 T', 'candidates': ['K AH0 T', 'K EH1 T']}))
-        self.assertIsNone(measure.formant_target({'phones': 'Y UW1 S', 'candidates': ['Y UW1 S', 'Y UW1 Z']}))
-
-    def test_formant_vote(self):
-        norm = (numpy.array([500.0, 1500.0]), numpy.array([100.0, 400.0]))
-        references = {'EH': numpy.array([1.0, 1.0]), 'AH0': numpy.array([-1.0, -1.0]), 'IY': numpy.array([1.2, 1.1])}
-        task = {'target': (1, {0: 'EH', 1: 'AH0'}), 'formants': [600.0, 1900.0]}
-        self.assertEqual(measure.formant_vote(task, norm, references), 0)
-        self.assertEqual(measure.formant_vote(dict(task, formants=[400.0, 1100.0]), norm, references), 1)
-        self.assertIsNone(measure.formant_vote(dict(task, target=None), norm, references))
-        self.assertIsNone(measure.formant_vote({'formants': [600.0, 1900.0]}, norm, references))
-        self.assertIsNone(measure.formant_vote(dict(task, formants=None), norm, references))
-        self.assertIsNone(measure.formant_vote(task, None, {}))
-        # (one vowel; a vowel without a reference; the nearest not by the margin)
-        self.assertIsNone(measure.formant_vote(dict(task, target=(1, {0: 'EH', 1: 'EH'})), norm, references))
-        self.assertIsNone(measure.formant_vote(dict(task, target=(1, {0: 'EH', 1: 'UW'})), norm, references))
-        self.assertIsNone(measure.formant_vote(dict(task, target=(1, {0: 'EH', 1: 'IY'})), norm, references))
-
-    def test_measure_formants(self):
-        # A clip - record (a formant task with its target, and one whose phones aren't a candidate), the (a reference
-        # vowel, too short a vowel), and a word past the front end's words; a CTC task
-        record = {'tokens': '<bos> R EH1 K ER0 D _ DH AH0 _ IH1 T <period>'.split(), 'seconds': 2.0,
-                  'labels': [['pau', 0.0, 0.2], ['R', 0.2, 0.3], ['EH1', 0.3, 0.4], ['K', 0.4, 0.5], ['ER0', 0.5, 0.6], ['D', 0.6, 0.7],
-                             ['DH', 0.7, 0.8], ['AH0', 0.8, 0.9], ['IH1', 0.9, 0.92], ['T', 0.92, 1.0], ['pau', 1.0, 2.0]]}
-        clip = {'id': 'c1', 'key': 'male', 'voice': 'Trevor', 'sex': 'male'}
-        candidates = ['R EH1 K ER0 D', 'R IH0 K AO1 R D']
-        measured = {'method': 'formant', 'phones': 'R EH1 K ER0 D', 'labels': record['labels'][1:6], 'candidates': candidates}
-        unmatched = {'method': 'formant', 'phones': 'R AA1 K', 'labels': record['labels'][1:4], 'candidates': candidates}
-        voted = {'method': 'ctc', 'phones': 'R EH1 K ER0 D', 'labels': record['labels'][1:6], 'candidates': candidates}
-        settings = {'analysis': {'formantCeilings': {'male': 5000, 'female': 5500}}}
-        with unittest.mock.patch.object(multiprocessing, 'Pool', data_fixtures.FakePool), \
-                unittest.mock.patch.object(data_fixtures.FakePool, 'results', [[[550.0, 1900.0], None]]):
-            voices = measure.measure_formants([(clip, measured), (clip, unmatched), (clip, voted)], [clip], {'c1': record},
-                                               {'record': [[candidates[0]], [candidates[1]]]}, {'c1': ['record', 'the']},
-                                               'corpus', settings, 1)
-        self.assertEqual(voices, {'male': (None, {})})
-        self.assertEqual(measured['target'], (1, {1: 'AH0', 0: 'EH'}))
-        self.assertEqual(measured['formants'], [550.0, 1900.0])
-        self.assertIsNone(unmatched['target'])
-        self.assertNotIn('formants', unmatched)
-        self.assertNotIn('target', voted)
+        self.assertEqual(sorted(method for method, _ in controls.values()), ['ctc', 'voicing'])
 
     def test_read_measured_overrides(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -381,13 +270,9 @@ class TestReadings(unittest.TestCase):
             recipe = os.path.join(temp, 'train.json')
             with open(recipe, 'w', encoding='utf-8') as file:
                 file.write('{}')
-            records = tts.read_alignments(directory)
-            labels = {tts.wav_path(directory, clip): records[clip['id']]['labels'] for clip in clips}
-            with data_fixtures.fake_modules(parselmouth=FakePraat), unittest.mock.patch.object(FakePraat, 'labels', labels), \
-                    unittest.mock.patch.object(corpora, 'read_dictionary', lambda: DICTIONARY), \
+            with unittest.mock.patch.object(corpora, 'read_dictionary', lambda: DICTIONARY), \
                     unittest.mock.patch.object(readings, 'load_spec', return_value={}), \
                     unittest.mock.patch.object(readings, 'candidate_words', return_value={}), \
-                    unittest.mock.patch.object(multiprocessing, 'Pool', data_fixtures.FakePool), \
                     unittest.mock.patch.object(ctc, 'vote', return_value=0), \
                     unittest.mock.patch.object(measure, 'CONTROL_TOKENS', 2), \
                     unittest.mock.patch.object(measure, 'MIN_CONTROL_VOTES', 1):
@@ -399,7 +284,9 @@ class TestReadings(unittest.TestCase):
                     summary = json.load(file)
                 with open(os.path.join(out, 'words.json'), encoding='utf-8') as file:
                     words = json.load(file)
+                self.assertNotIn('references', summary)
                 measured, _ = readings.read_measured(directory)
+                self.assertTrue(all('scores' in token for record in measured for token in record['tokens']))
                 overrides = readings.overrides(directory)
 
                 # Current - not measured again
@@ -420,37 +307,30 @@ class TestReadings(unittest.TestCase):
                 self.assertIn('measure: 3 clips', stderr.getvalue())
                 self.assertIsNone(readings.read_json(os.path.join(out, 'summary.json'))['key'])
 
-        # The tokens - read, lead, and use by the CTC vote (its controls pass), record and dawn by the formants (the male
-        # voice's record near its EH reference; no AA or AO reference for dawn, the female voice too few references) but not
-        # used (no formant control voted)
+        # The tokens - read, lead, and use by the CTC vote (its controls pass); record (weak), dawn (merger), and insult
+        # (stress) unmeasured
         self.assertEqual(summary['clips'], 14)
         self.assertEqual(summary['key'], words['key'])
-        self.assertEqual(summary['byClass'], {'strong': 3, 'voicing': 2, 'weak': 2, 'merger': 1})
-        self.assertEqual(summary['votes'], {'strong': 3, 'voicing': 2, 'weak': 1})
+        self.assertEqual(summary['byClass'], {'strong': 3, 'voicing': 2})
+        self.assertEqual(summary['votes'], {'strong': 3, 'voicing': 2})
         self.assertEqual(summary['controls'], {'ctc': {'votes': 4, 'false': 0, 'error': 0.0, 'used': True},
-                                               'voicing': {'votes': 4, 'false': 0, 'error': 0.0, 'used': True},
-                                               'formant': {'votes': 0, 'false': 0, 'error': 0.0, 'used': False}})
-        self.assertEqual(summary['classes'], {'strong': True, 'voicing': True, 'weak': False, 'merger': False})
-        self.assertEqual(sorted(summary['references']['male']), ['AH0', 'EH'])
-        self.assertEqual(summary['references']['female'], {})
+                                               'voicing': {'votes': 4, 'false': 0, 'error': 0.0, 'used': True}})
+        self.assertEqual(summary['classes'], {'strong': True, 'voicing': True})
         self.assertEqual(words['classes'], {'read': 'strong', 'lead': 'strong', 'use': 'voicing', 'record': 'weak', 'dawn': 'merger',
                                             'insult': 'stress'})
         self.assertEqual([(record['text'], [(token['word'], token['frontEnd'], token['vote'], token['reading'])
                                             for token in record['tokens']])
                           for record in measured], [
             ('I read the lead, we went home.', [('read', 1, 0, 0), ('lead', 1, 0, 0)]),
-            ('The cats use a record, the best went home.', [('use', 1, 0, 0), ('record', 0, 0, None)]),
-            ('Look, the dawn went dark.', [('dawn', 1, None, None)]),
-            ('I read the use.', [('read', 1, 0, 0), ('use', 0, 0, 0)]),
-            ('Look at the record.', [('record', 0, None, None)])
+            ('The cats use a record, the best went home.', [('use', 1, 0, 0)]),
+            ('I read the use.', [('read', 1, 0, 0), ('use', 0, 0, 0)])
         ])
         self.assertEqual(len(measured[0]['tokens'][0]['scores']), 2)
-        self.assertEqual(len(measured[1]['tokens'][1]['formants']), 2)
-        self.assertEqual(measured[3]['voice'], 'Harper')
+        self.assertEqual(measured[2]['voice'], 'Harper')
 
         # The voice's tokens take the CTC readings that differ from the front end's
         self.assertEqual(overrides, {measured[0]['id']: {'1': 'R IY1 D', '3': 'L EH1 D'}, measured[1]['id']: {'2': 'Y UW1 S'},
-                                     measured[3]['id']: {'1': 'R IY1 D'}})
+                                     measured[2]['id']: {'1': 'R IY1 D'}})
 
     def test_main_module(self):
         code, _, stderr = run_module('picovox_train.measure', ['--bad'])

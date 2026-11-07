@@ -603,10 +603,11 @@ class TestContext(unittest.TestCase):
         self.assertEqual(checkpoint['settings'], network)
         self.assertIn(' teacher 101: train-context: ', log)
         self.assertIn(' train-context: held-out aligned', log)
-        self.assertIn(' fold 1: teacher 101: train-context: ', log)
+        # (the other folds' networks plain - no teachers)
+        self.assertNotIn(' fold 1: teacher', log)
         self.assertIn(' fold 1: train-context: step', log)
         self.assertNotIn('fold 0:', log)
-        digests = [context.fold_digest(path, network), context.fold_digest(path, dict(network, threads=1))]
+        digests = [context.fold_digest(path, network), context.fold_digest(path, dict(network, threads=1, teachers=0))]
         for fold, digest in enumerate(digests):
             with open(self.path(os.path.join('folds', f'fold-{fold}.json')), encoding='utf-8') as file:
                 result = json.load(file)
@@ -628,14 +629,13 @@ class TestContext(unittest.TestCase):
         self.assertFalse(context.fold_done(self.path('none.json'), digests[0]))
         self.assertNotEqual(context.fold_digest(path, dict(network, lr=0.5)), digests[0])
 
-        # In worker processes (-j): every fold's teachers at once, then every fold's network - the same results
+        # In worker processes (-j): the network's teachers (one here - no pool), then every fold's network - the same results
         pools = []
         with unittest.mock.patch.object(context.multiprocessing, 'Pool', fake_pool(pools)):
             train('-j', '4', out=self.path('pooled.pt'), folds=self.path('pooled'))
-        self.assertEqual([pool.processes for pool in pools], [2, 2])
-        self.assertEqual([(fold, seed, settings['threads']) for _, fold, seed, settings, _ in pools[0].tasks], [(0, 101, 2), (1, 101, 1)])
-        self.assertEqual([(fold, len(states), checkpoint) for _, fold, _, _, states, _, _, checkpoint in pools[1].tasks],
-                         [(0, 1, self.path('pooled.pt')), (1, 1, None)])
+        self.assertEqual([pool.processes for pool in pools], [2])
+        self.assertEqual([(fold, len(states), checkpoint) for _, fold, _, _, states, _, _, checkpoint in pools[0].tasks],
+                         [(0, 1, self.path('pooled.pt')), (1, 0, None)])
         pooled = torch.load(self.path('pooled.pt'), weights_only=False)['state']
         self.assertTrue(all(torch.equal(value, checkpoint['state'][name]) for name, value in pooled.items()))
         for fold in range(2):

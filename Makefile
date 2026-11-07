@@ -138,7 +138,7 @@ TRAIN_TARGET = @mkdir -p $(TRAIN_DIR) && printf '{"event": "target", "target": "
 # The targets' final stages - the voice's (its package, gate, and listening samples) and the G2P's (its gate and the
 # heteronym relabeling's)
 TRAIN_VOICE := $(TRAIN_DIR)/package.done $(TRAIN_DIR)/voice-eval.done $(TRAIN_DIR)/samples-reference.done \
-	$(TRAIN_DIR)/samples-voice-a.done $(TRAIN_DIR)/samples-voice-b.done
+	$(TRAIN_DIR)/samples-voice-b.done
 TRAIN_G2P := $(TRAIN_DIR)/g2p.done $(TRAIN_DIR)/heteronyms.done
 TRAIN_REPORT := $(TRAIN_PYTHON) -m picovox_train.trained report $(TRAIN_DIR)
 
@@ -321,7 +321,7 @@ $(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/tts-readings.done downloads/cmudict/c
 	@$(STAGE) end
 	touch $@
 
-# The voice - stage A, then stage B with the critic (GPU; resumable) - B's best checkpoint is the voice. (Stage A after
+# The voice - stage A, then stage B with the critic (GPU; resumable) - B's last checkpoint is the voice. (Stage A after
 # the baseline's evaluation, which takes the GPU for the gap - a few minutes once per shipped model, its result cached
 # with the training speech - so the two never queue on each other with the voice's stage B waiting.)
 $(TRAIN_DIR)/voice-a.done: $(TRAIN_DIR)/data-tts.done train/data/train.json | $(TRAIN_DIR)/baseline-eval.done
@@ -349,7 +349,7 @@ $(TRAIN_DIR)/baseline-eval.done: lib/models/voiceModel.js downloads/whisper/ggml
 
 $(TRAIN_DIR)/voice-eval.done: $(TRAIN_DIR)/voice-b.done $(TRAIN_DIR)/baseline-eval.done
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(TRAIN_PYTHON) -m picovox_train.panel eval voice=$(TRAIN_RUNS)/voice-b/best.pt --whisper-workers 3
+	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(TRAIN_PYTHON) -m picovox_train.panel eval voice=$(TRAIN_RUNS)/voice-b/last.pt --whisper-workers 3
 	$(STAGE) -- $(TRAIN_ENV) $(TRAIN_PYTHON) -m picovox_train.panel gate voice --against baseline
 	@$(STAGE) end
 	touch $@
@@ -364,28 +364,22 @@ $(TRAIN_DIR)/package.done: $(TRAIN_DIR)/voice-eval.done
 	touch $@
 
 
-# The listening samples (CPU, each beside the next GPU stage - tools/trainsamples.js): each training stage's final model
-# (the checkpoint the next stage starts from, exported as the gate exports it) speaking train/data/train.json's
-# samples texts in its speakers' voices as the package speaks them, scored with UTMOS, in $(TRAIN_DIR)/samples/ (index.json)
-# for the training dashboard's Listen tab - and the reference, the shipped lib/models/voiceModel.js (in the voice's
-# GPU-bound hours, after the voices' data build; again when the shipped model changes)
+# The listening samples (CPU - tools/trainsamples.js): the trained voice - the module the gate scored,
+# $(TRAIN_DIR)/eval/voice/voiceModel.js - speaking train/data/train.json's samples texts in its speakers' voices as the
+# package speaks them, in $(TRAIN_DIR)/samples/ (index.json) for the training dashboard's Listen tab, and the reference,
+# the shipped lib/models/voiceModel.js (in the voice's GPU-bound hours, after the voices' data build; again when the
+# shipped model changes)
 SAMPLES := OMP_NUM_THREADS=2 $(BESIDE) node tools/trainsamples.js --out $(TRAIN_DIR)/samples
 
-$(TRAIN_DIR)/samples-reference.done: lib/models/voiceModel.js | build/venv-train.build $(TRAIN_DIR)/data-tts.done
+$(TRAIN_DIR)/samples-reference.done: lib/models/voiceModel.js | $(TRAIN_DIR)/data-tts.done
 	@$(STAGE) start
 	$(STAGE) -- $(SAMPLES) --stage reference --model lib/models/voiceModel.js
 	@$(STAGE) end
 	touch $@
 
-$(TRAIN_DIR)/samples-voice-a.done: $(TRAIN_DIR)/voice-a.done | build/venv-train.build
+$(TRAIN_DIR)/samples-voice-b.done: $(TRAIN_DIR)/voice-eval.done
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(SAMPLES) --stage voice-a --checkpoint $(TRAIN_RUNS)/voice-a/last.pt
-	@$(STAGE) end
-	touch $@
-
-$(TRAIN_DIR)/samples-voice-b.done: $(TRAIN_DIR)/voice-b.done | build/venv-train.build
-	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(SAMPLES) --stage voice-b --checkpoint $(TRAIN_RUNS)/voice-b/best.pt
+	$(STAGE) -- $(SAMPLES) --stage voice-b --model $(TRAIN_DIR)/eval/voice/voiceModel.js
 	@$(STAGE) end
 	touch $@
 

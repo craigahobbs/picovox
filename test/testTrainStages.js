@@ -39,7 +39,7 @@ test('trainStages', () => {
     }
 
     // A stage's progress counts its log's finished parts - the context network's trainings: its teachers and itself (fold
-    // 0), and each other fold's - in a log the stage starts anew
+    // 0), and each other fold's plain network - in a log the stage starts anew
     for (const stage of manifest.stages.filter((item) => item.progress && !item.progress.phases)) {
         assert.equal(typeof stage.progress.log, 'string', stage.stage);
         assert.equal(stages[stage.stage].recipe[1], `$(STAGE) -- rm -f $(TRAIN_DIR)/${stage.progress.log}`, stage.stage);
@@ -48,7 +48,7 @@ test('trainStages', () => {
     }
     const trainRecipe = JSON.parse(readFileSync(new URL('../train/data/train.json', import.meta.url), 'utf8'));
     const contextStage = manifest.stages.find((stage) => stage.stage === 'context-network');
-    assert.equal(contextStage.progress.total, (trainRecipe.context.network.teachers + 1) * trainRecipe.context.gate.folds);
+    assert.equal(contextStage.progress.total, trainRecipe.context.network.teachers + trainRecipe.context.gate.folds);
 
     // The training speech's stages - their progress the phases of their commands' log lines (the Python sources' log
     // lines, rendered), their first run's time longer, and the first run known by the corpus stage's generate line
@@ -111,10 +111,11 @@ test('trainStages', () => {
     // The listening samples stages each render their stage's model (tools/trainsamples.js --stage), the reference the
     // shipped model
     const samplesStages = manifest.stages.filter((stage) => stage.samples);
-    assert.deepEqual(samplesStages.map((stage) => stage.samples), ['reference', 'voice-a', 'voice-b']);
+    assert.deepEqual(samplesStages.map((stage) => stage.samples), ['reference', 'voice-b']);
     for (const stage of samplesStages) {
         assert(stages[stage.stage].recipe.some((line) => line.includes(`--stage ${stage.samples} `)), stage.stage);
-        assert(stage.samples === 'reference' || stage.needs.includes(stage.samples), stage.stage);
+        // (the trained voice's samples are the module the gate scored - after its evaluation)
+        assert(stage.samples === 'reference' || stage.needs.includes('voice-eval'), stage.stage);
     }
 
     // The manifest's targets are the Makefile's - make train (both models), make train-voice and train-g2p (each model) -

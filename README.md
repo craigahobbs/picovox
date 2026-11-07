@@ -438,7 +438,7 @@ time (`picovox_train/gpulock.py` - two at once each run at about half speed) whi
 | package - the voice's module, `build/train/voiceModel.js`, with its provenance | CPU | voice-eval |
 | heteronyms - the relabeled words from the measured readings, checked to reproduce `train/data/g2p-relabel.json` (the G2P network's input) | CPU, ~1 min | tts-readings (after data-tts) |
 | g2p-network, context-labels, context-network, g2p-reading, g2p - the G2P (the network; the heteronym labels from the pinned books; the context network and its cross-validation; beside it, the reading stage; the export and the gate) | CPU - the network one core, ~30 min | the labels: tts-readings (after data-tts) |
-| samples-reference, samples-voice-a, -voice-b - the listening samples | CPU, under a minute each | the shipped model (after data-tts); each stage's model |
+| samples-reference, samples-voice-b - the listening samples | CPU, under a minute each | the shipped model (after data-tts); the voice's evaluation |
 
 The critical path - the training speech (generated and aligned once - about an hour and a half the first time, a minute
 or two cached), the voices' data (9 minutes), stage A (30) and B (23), the gate, the package - took 69 minutes on
@@ -452,13 +452,12 @@ corpora, it took 71 minutes.) The package's manifest records its provenance: the
 data's hashes, and the gate's scores. `python -m picovox_train.smoke` runs every stage's entry point for a few steps on
 the CPU.
 
-Each training stage's final model - stage A's last checkpoint (which stage B starts from) and stage B's best (the model
-the package stage ships) - is rendered
-for listening as the stage finishes, in its own CPU stage beside the next GPU stage (`tools/trainsamples.js`): exported
-as the gate exports it (the export the package stage packages), it speaks `train/data/train.json`'s `samples` texts (Moby-Dick's opening, a dialogue,
-and heteronyms) in six of the package's voices (three female, three male) exactly as the package speaks a
-sentence (`lib/synthesis.js`, every word pronounced by the G2P network). The shipped `lib/models/voiceModel.js` is
-rendered the same way, as the reference. The WAV files are
+The trained voice - the module the gate scored, stage B's last checkpoint exported and packaged as the package stage
+ships it - is rendered for listening when its evaluation finishes, in its own CPU stage (`tools/trainsamples.js`): it
+speaks `train/data/train.json`'s `samples` texts (Moby-Dick's opening, a dialogue, and heteronyms) in six of the
+package's voices (three female, three male) exactly as the package speaks a sentence (`lib/synthesis.js`, every word
+pronounced by the G2P network). The shipped `lib/models/voiceModel.js` is rendered the same way, as the reference. The
+WAV files are
 `TRAIN_DIR/samples/STAGE-SPEAKER-TEXT.wav`, listed in `TRAIN_DIR/samples/index.json`; the dashboard's Listen tab plays
 them, each beside the shipped model's.
 
@@ -524,7 +523,8 @@ decoder of 4 (282,627 parameters, 311 KB gzipped). make train trains it directly
    the shipped voice, and the blind A/B leaned to it).
 2. **Stage B** - from A's last checkpoint, with the adversarial critic and feature matching against the over-smoothing,
    10,000 steps of a warmup-stable-decay schedule (constant, then the last 25% cooled down by 1 - sqrt -
-   `picovox_train/optim.py`); its best validation checkpoint is the voice.
+   `picovox_train/optim.py`); its last checkpoint is the voice (the validation loss doesn't pick the better voice -
+   the paper's Sections 7.3 and 11.4 - so no best checkpoint is kept).
 
 Both stages add the perceptual loss (`picovox_train/perceptual.py`, weight 5): each step's first 4 rendered crops
 against their recordings in the pinned wav2vec2 phoneme recognizer's layers 3 and 6 (frozen), the mean cosine distance

@@ -120,7 +120,7 @@ def write_corpus(directory, speakers=None, count=4, seed=0, frames_per_token=3):
             tracks[:, data.CHANNELS.index('f0')] = numpy.where(voiced, f0, 0.0)
             tracks[:, data.CHANNELS.index('voiced')] = voiced
             tracks[:, data.CHANNELS.index('strength')] = numpy.where(voiced, 0.8, 0.1)
-            for formant, value in zip(('f1', 'f2', 'f3', 'f4'), (500.0, 1500.0, 2500.0, 3500.0)):
+            for formant, value in zip(('f1', 'f2', 'f3'), (500.0, 1500.0, 2500.0)):
                 tracks[:, data.CHANNELS.index(formant)] = value
             entry = {
                 'id': f'{key}/{number:04d}', 'speaker': key, 'sentence': f'{number:04d}', 'split': splits[number % 4],
