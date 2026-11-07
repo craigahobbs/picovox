@@ -210,7 +210,7 @@ that runs its own synthesis loop (PicoShelf's worker does):
 | `lib/model.js` | The voice network - text to parameter frames (`speakFrames`, `streamFrames`) in a speaker's voice |
 | `lib/render.js` | The source-filter synthesizer - parameter frames to samples, streaming (`createRenderer`, `render`) |
 | `lib/lf.js`, `lib/rng.js`, `lib/fft.js`, `lib/params.js` | The LF glottal pulse, the counter-based noise, the FFT, the parameter set |
-| `lib/transforms.js` | Voice and style transforms of parameter frames (pitch, tract length, bandwidths, whisper, effort, pulse softness, source shelf) |
+| `lib/transforms.js` | Voice and style transforms of parameter frames (pitch, pitch range, whisper, press, level, source shelf, frication) |
 | `lib/package.js` | The generated model modules' loader (`loadPackagedModel`) |
 | `lib/wav.js` | WAV encoding (`encodeWav`) |
 | `lib/models/g2pModel.js`, `lib/models/voiceModel.js` | The generated models (`make train`) |
