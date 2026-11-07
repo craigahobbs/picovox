@@ -328,11 +328,12 @@ class TestContext(unittest.TestCase):
 
         # A teacher - its seed's network, quantized
         settings = dict(context.CONTEXT_SETTINGS, **CONTEXT_TINY)
-        state = context.teacher_task((path, 0, 301, settings, log_path))
+        with captured():
+            state = context.teacher_task((path, 0, 301, settings, log_path))
+            fold_state = context.teacher_task((path, 1, 301, settings, log_path))
         teacher = context.train_context(tiny_labels(), dict(settings, seed=301), lambda text: None)
         context.WeightQuantizer(teacher, context.EXPORT).quantize()
         self.assertTrue(all(torch.equal(value, teacher.state_dict()[name]) for name, value in state.items()))
-        fold_state = context.teacher_task((path, 1, 301, settings, log_path))
         fold_teacher = context.train_context(context.fold_labels(tiny_labels(), 1), dict(settings, seed=301), lambda text: None)
         context.WeightQuantizer(fold_teacher, context.EXPORT).quantize()
         self.assertTrue(all(torch.equal(value, fold_teacher.state_dict()[name]) for name, value in fold_state.items()))
@@ -344,10 +345,11 @@ class TestContext(unittest.TestCase):
         self.assertIn(' fold 1: teacher 301: train-context: ', log)
 
         # The student - no teachers: the plain training; teachers: toward them
-        plain = context.train_student(tiny_labels(), 0, dict(CONTEXT_TINY, teachers=0), log_path, [])
-        self.assertTrue(same_weights(plain, context.train_context(tiny_labels(), CONTEXT_TINY, lambda text: None)))
         fold_set = context.fold_labels(tiny_labels(), 1)
-        student = context.train_student(fold_set, 1, dict(CONTEXT_TINY, distill=0.5, transferShare=0.5), log_path, [fold_state])
+        with captured():
+            plain = context.train_student(tiny_labels(), 0, dict(CONTEXT_TINY, teachers=0), log_path, [])
+            student = context.train_student(fold_set, 1, dict(CONTEXT_TINY, distill=0.5, transferShare=0.5), log_path, [fold_state])
+        self.assertTrue(same_weights(plain, context.train_context(tiny_labels(), CONTEXT_TINY, lambda text: None)))
         built = context.build_context(settings)
         built.load_state_dict(fold_state)
         expected = context.train_context(fold_set, dict(CONTEXT_TINY, distill=0.5, transferShare=0.5), lambda text: None, [built])

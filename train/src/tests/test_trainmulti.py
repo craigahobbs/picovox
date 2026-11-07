@@ -107,7 +107,7 @@ def tearDownModule():  # pylint: disable=invalid-name
     DATA.cleanup()
 
 
-# A tiny trained stage-A checkpoint (trained once) - its path; for the other tests (stepcheck, synthesize)
+# A tiny trained stage-A checkpoint (trained once) - its path (the --init tests')
 @functools.cache
 def tiny_checkpoint():
     DATA.train('shared', '--steps', '2')

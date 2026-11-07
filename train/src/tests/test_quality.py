@@ -20,7 +20,6 @@ from tests import ctc_fixtures, data_fixtures, helpers
 from tests.helpers import write_wav
 
 
-# A clean harmonic tone (harmonics below 2 kHz, no noise)
 class FakeFeatures:
     """A fake wav2vec2 recognizer's features - each 20 ms frame's level statistics, a layer's a different mix of them"""
 
@@ -34,6 +33,7 @@ class FakeFeatures:
         return types.SimpleNamespace(extract_features=base, hidden_states=tuple(base * (index + 1) + index for index in range(25)))
 
 
+# A clean harmonic tone (harmonics below 2 kHz, no noise)
 def tone(seconds, rate, f0=150.0):
     times = numpy.arange(int(seconds * rate)) / rate
     return 0.2 * sum(numpy.sin(2 * numpy.pi * f0 * harmonic * times) / harmonic for harmonic in range(1, 11))
