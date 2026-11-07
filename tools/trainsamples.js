@@ -30,8 +30,9 @@ import process from 'node:process';
 import {setPronouncer} from '../lib/lexicon.js';
 
 
-// The repository
+// The repository, and make train's Python
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const python = join(repository, 'build/venv-train/bin/python');
 
 
 // Render the samples
@@ -53,7 +54,6 @@ async function main() {
     if (args.checkpoint !== null) {
         // (its path relative to the samples' parent - TRAIN_DIR)
         checkpoint = relative(dirname(out), resolve(args.checkpoint));
-        const python = join(repository, 'build/venv-train/bin/python');
         execFileSync(python, ['-B', '-m', 'picovox_train.export', resolve(args.checkpoint), '--voice', 'model', '--out', work],
             {'cwd': repository, 'env': {...process.env, 'PYTHONPATH': join(repository, 'train/src')},
                 'stdio': ['ignore', 'ignore', 'inherit']});
@@ -75,19 +75,17 @@ async function main() {
         }
         for (const text of settings.texts) {
             const blocks = [...sentenceBlocks(model, text.text, {'speaker': entry.id, 'seed': 1, 'pause': sentencePause})];
-            const sampleRate = defaultSampleRate;
             const audio = concatBlocks(blocks);
             const file = sampleFile(args.stage, speaker.key, text.key);
-            writeFileSync(join(work, file), encodeWav(audio, sampleRate));
+            writeFileSync(join(work, file), encodeWav(audio, defaultSampleRate));
             samples.push({'stage': args.stage, run, checkpoint, step, 'label': speaker.label, 'sex': speaker.sex,
-                'speaker': speaker.key, 'text': text.key, file, 'seconds': Math.round(audio.length / sampleRate * 100) / 100});
+                'speaker': speaker.key, 'text': text.key, file, 'seconds': Math.round(audio.length / defaultSampleRate * 100) / 100});
         }
     }
     log(`${samples.length} samples rendered`);
 
     // UTMOS on the CPU
-    const listeners = join(repository, 'build/venv-train/bin/python');
-    const output = execFileSync(listeners, ['-I', 'train/src/picovox_train/listeners.py', '--no-embedding',
+    const output = execFileSync(python, ['-I', 'train/src/picovox_train/listeners.py', '--no-embedding',
         ...samples.map((sample) => join(work, sample.file))], {'cwd': repository, 'encoding': 'utf8',
         'maxBuffer': 16 * 1024 * 1024, 'stdio': ['ignore', 'pipe', 'inherit']});
     const scores = parseScores(output);
