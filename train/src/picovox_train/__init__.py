@@ -26,17 +26,19 @@ The data:
   local TTS model through Ollama (the recipe's tts section - its model pinned by digest, a voice for each of the
   package's voices), cached in downloads/tts/<model>-<digest>/, CTC-aligned, checked, and built in data.py's format
   (build/nn/data/tts/)
-- ctc.py - our speech measurement: a wav2vec2 phoneme recognizer's CTC posteriors - the forced alignment, the greedy
+- ctc.py - our speech measurement: a wav2vec2 phoneme recognizer's CTC posteriors (the network in plain PyTorch -
+  wav2vec2.py - from its pinned checkpoint) - the forced alignment, the greedy
   phone checks, and the candidate vote between pronunciations; measure.py - the training speech's heteronym tokens'
   readings, by the CTC vote or the vowels' formants, with each method's controls
 - data.py - the training data's featurization and format (tokens, durations from the alignment - align.py - 24 kHz
   audio, and Praat's auxiliary tracks), and its loader (CorpusData)
-- wav.py - WAV files (16-bit PCM) read with the standard library, exactly as libsndfile reads them
+- wav.py - WAV files (16-bit PCM) read with the standard library, exactly as libsndfile reads them, and resampling (a
+  windowed sinc in torch - the corpora's long filter, the perceptual loss's short one)
 - books.py - the pinned book texts (train/data/books.json): the Project Gutenberg books the training speech and the
   heteronym labels read, each fetched once and verified by its SHA-256 - a revised text is never
   used
-- corpora.py - the pinned downloads: the CMU Pronouncing Dictionary and the listener panel's Whisper model (and
-  hf_snapshot - the Hugging Face models, from their cache)
+- corpora.py - the pinned downloads: the CMU Pronouncing Dictionary, the wav2vec2 phoneme recognizer, and the listener
+  panel's Whisper model
 
 The synthesizer:
 

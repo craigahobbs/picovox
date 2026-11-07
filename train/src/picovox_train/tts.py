@@ -480,10 +480,11 @@ def inputs_key(basis, files):
 # The alignment
 #
 
-# The aligner's identity - a hash of its settings (a new aligner realigns every clip)
+# The aligner's identity - a hash of its settings and its recognizer's implementation and resampler (a new aligner
+# realigns every clip)
 def aligner_key():
-    from . import ctc  # pylint: disable=import-outside-toplevel
-    basis = [ctc.CTC_REPO, ctc.CTC_SHIFT, ctc.EDGE_EXTEND, ctc.IPA_TOKENS]
+    from . import ctc, wav  # pylint: disable=import-outside-toplevel
+    basis = [ctc.CTC_REPO, ctc.CTC_SHIFT, ctc.EDGE_EXTEND, ctc.IPA_TOKENS, 'picovox_train.wav2vec2', wav.READ_ZEROS, wav.RESAMPLE_ROLLOFF]
     return hashlib.sha256(json.dumps(basis, sort_keys=True).encode('utf-8')).hexdigest()[:12]
 
 

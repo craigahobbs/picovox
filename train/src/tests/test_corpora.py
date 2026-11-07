@@ -4,47 +4,19 @@
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
 import hashlib
-import logging
 import os
 import sys
 import tempfile
-import types
 import unittest
 import unittest.mock
 import urllib.error
 
 from picovox_train import corpora
-from tests import data_fixtures, helpers
+from tests import helpers
 from tests.data_fixtures import FakeResponse
 
 
 class TestDownload(unittest.TestCase):
-
-    def test_hf_snapshot(self):
-        def snapshot_download(repo, local_files_only=False, **options):
-            if local_files_only and not cached:
-                raise OSError('not cached')
-            return f'/snapshots/{repo}{options}'
-        hub = types.ModuleType('huggingface_hub')
-        hub.snapshot_download = unittest.mock.Mock(side_effect=snapshot_download)
-        hub_logger = logging.getLogger('huggingface_hub.utils._http')
-        with data_fixtures.fake_modules(huggingface_hub=hub), unittest.mock.patch.object(hub_logger, 'filters', []):
-            # From the cache, without network access, when it's there
-            cached = True
-            self.assertEqual(corpora.hf_snapshot('a/b', allow_patterns=['*.json']), "/snapshots/a/b{'allow_patterns': ['*.json']}")
-            self.assertEqual(hub.snapshot_download.call_args_list,
-                             [unittest.mock.call('a/b', local_files_only=True, allow_patterns=['*.json'])])
-            self.assertEqual(hub_logger.filters, [])
-            # Else downloaded - the Hub's unauthenticated-requests note filtered out, its other messages kept
-            cached = False
-            self.assertEqual(corpora.hf_snapshot('a/b'), '/snapshots/a/b{}')
-            self.assertEqual(hub.snapshot_download.call_args_list[1:], [unittest.mock.call('a/b', local_files_only=True),
-                                                                        unittest.mock.call('a/b')])
-
-            def record(message):
-                return logging.LogRecord(hub_logger.name, logging.WARNING, __file__, 0, message, None, None)
-            self.assertFalse(hub_logger.filter(record('Warning: You are sending unauthenticated requests to the HF Hub.')))
-            self.assertTrue(hub_logger.filter(record('Another note')))
 
     def test_file_sha256(self):
         with tempfile.TemporaryDirectory() as directory:

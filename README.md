@@ -276,7 +276,7 @@ package of its own: its unit tests (`train/src/tests/`) run on the CPU in a few 
 network, in python-build's environment (`train/build/venv/`), which installs the package with the training's pinned
 PyTorch and numpy (`train/pyproject.toml`, the same versions as `train/requirements.txt`). `make train` runs the package
 from its source (`PYTHONPATH=train/src`) in its environment, `build/venv-train` from `train/requirements.txt` - the
-training (PyTorch, soxr, Praat, and the phoneme recognizer's transformers), the listener models, and spaCy
+training (PyTorch, numpy, and Praat) and spaCy
 (`picovox_train/corpora.py`'s downloads need only the standard library). A training module runs the same way by hand:
 
 ```sh
@@ -337,7 +337,7 @@ package has no dependencies.
 
 | Measure | Model | Measures |
 | --- | --- | --- |
-| The gap to the source | The pinned wav2vec2 phoneme recognizer (`facebook/wav2vec2-lv-60-espeak-cv-ft` - the training speech's aligner, `picovox_train/ctc.py`) | fdL12 - each voice's Frechet distance between its synthesized clips' frames and its source clips' in the recognizer's layer 12; lower is closer |
+| The gap to the source | The pinned wav2vec2 phoneme recognizer (`facebook/wav2vec2-lv-60-espeak-cv-ft` at a fixed revision, its weights' SHA-256 checked - the training speech's aligner, `picovox_train/ctc.py`, run by `picovox_train/wav2vec2.py` in plain PyTorch) | fdL12 - each voice's Frechet distance between its synthesized clips' frames and its source clips' in the recognizer's layer 12; lower is closer |
 | Intelligibility | Whisper `base.en` (whisper.cpp's `whisper-cli` - installed separately, e.g. `brew install whisper-cpp`; the model downloaded, pinned, into `downloads/whisper/` - `picovox_train/corpora.py`) | Word error rate against the text |
 
 **The gap to the source** (`picovox_train.quality gap [--model MODULE]`) speaks 40 held-out clips a voice with the
@@ -358,11 +358,11 @@ are in git history: UTMOS rated voices level with their source that listening he
 shipped voices stood in the way of a voice moving toward its source.)
 
 The environment is built with `python3` (3.14 here; 3.12 also works - `make build/venv-train.build
-PYTHON_VENV=python3.12`). Its packages are pinned in `train/requirements.txt`: PyTorch 2.14, transformers 5.20 (the
-phoneme recognizer's wav2vec2 - `picovox_train/ctc.py`; the model downloads on first use, about 1.3 GB, into
-`downloads/listeners/hf` - like the training speech, `make clean` keeps it, `make superclean` removes it), soxr for
-resampling audio (WAV files are read with the standard library - `picovox_train/wav.py`), and Praat (parselmouth) for the
-training data's pitch and formant tracks.
+PYTHON_VENV=python3.12`). Its packages are pinned in `train/requirements.txt`: PyTorch 2.14 and numpy (the networks,
+the differentiable synthesizer, the recognizer - `picovox_train/wav2vec2.py`, its 1.3 GB checkpoint downloaded once and
+pinned into `downloads/wav2vec2/` by `picovox_train/corpora.py` - and resampling, `picovox_train/wav.py`; WAV files are
+read with the standard library), Praat (parselmouth) for the training data's pitch and formant tracks, and spaCy for
+the heteronym labels' part-of-speech tags.
 
 Calibration of Whisper's word error rate (the evaluation set, or 16 recordings of each human speaker - measured in
 October 2026, on the human corpora the voice model trained on before 2.0):
@@ -394,7 +394,8 @@ spoken by a local TTS model (`train/data/train.json`'s `tts.engine` - `phonon`, 
 digest fails the stage (a new model is a new corpus). Once the corpus is generated (`downloads/tts/`), later runs -
 `make train-clean` too - need no Ollama. The listener panel needs whisper.cpp's `whisper-cli` (`brew install
 whisper-cpp`); everything else is downloaded, pinned - the CMU Pronouncing Dictionary and the panel's Whisper model by
-their own rules (`picovox_train/corpora.py`), the listener models and the phoneme recognizer on first use.
+their own rules (`picovox_train/corpora.py` - the CMU Pronouncing Dictionary, the wav2vec2 phoneme recognizer, and
+the panel's Whisper model, each at a fixed revision and checked against its SHA-256).
 
 The flow:
 
@@ -429,7 +430,7 @@ time (`picovox_train/gpulock.py` - two at once each run at about half speed) whi
 
 | Stage | Runs on | Needs |
 | --- | --- | --- |
-| tts-corpus - the training speech: the local TTS model's clips (`picovox_train.tts generate` - Ollama) and their CTC alignment (`tts align`), in `downloads/tts/` | GPU - about 40 and 26 minutes the first time, a minute cached | `lib/models/g2pModel.js`, the dictionary |
+| tts-corpus - the training speech: the local TTS model's clips (`picovox_train.tts generate` - Ollama) and their CTC alignment (`tts align`), in `downloads/tts/` | GPU - about 40 and 26 minutes the first time, a minute cached | `lib/models/g2pModel.js`, the dictionary, the recognizer |
 | tts-readings - the heteronym tokens' readings measured (`picovox_train.measure`), and the clips whose tokens they change aligned again | GPU - a minute cached | tts-corpus |
 | data-tts - the voices' training data (`picovox_train.tts build`, `build/train/data/tts/` - the clips' checks): built once for its inputs and cached with the training speech (`downloads/tts/.../build-KEY/` - the key a hash of the selection, the alignments, the readings, the recipe's `tts`, the G2P module, and the build's own code - not the trainer's), hard-linked into the run | CPU (every core) - ~9 min to build, seconds cached | tts-readings |
 | voice-a, voice-b - the voice's two training stages (`picovox_train.trainmulti --recipe voice.a`, `voice.b`) | GPU | data-tts (after baseline-eval) |

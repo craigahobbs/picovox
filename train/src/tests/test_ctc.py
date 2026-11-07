@@ -4,7 +4,6 @@
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
 import math
-import os
 import unittest
 import unittest.mock
 
@@ -38,20 +37,12 @@ def run_posteriors(tokens, runs, frames):
 class TestRecognizer(unittest.TestCase):
 
     def test_load_ctc(self):
-        with fake_recognizer() as (model, hub):
+        # The pinned recognizer (wav2vec2.load - corpora.WAV2VEC2_DIR) and its vocabulary, on the GPU if there is one
+        with fake_recognizer() as model:
             self.assertEqual(ctc.load_ctc(), (model, VOCAB, 'cpu'))
             self.assertEqual(model.device, 'cpu')
-            self.assertEqual(os.environ['HF_HOME'], ctc.HF_HOME)
             self.assertEqual(ctc.load_ctc('mps')[2], 'mps')
-            # From the cache, without network access, when it's there - else downloaded
-            patterns = ['*.json', 'pytorch_model.bin', 'README.md']
-            cached = unittest.mock.call(ctc.CTC_REPO, allow_patterns=patterns, local_files_only=True)
-            self.assertEqual(hub.snapshot_download.call_args, cached)
-            directory = hub.snapshot_download.return_value
-            hub.snapshot_download.reset_mock()
-            hub.snapshot_download.side_effect = [OSError('not cached'), directory]
-            self.assertEqual(ctc.load_ctc()[1], VOCAB)
-            self.assertEqual(hub.snapshot_download.call_args_list, [cached, unittest.mock.call(ctc.CTC_REPO, allow_patterns=patterns)])
+            self.assertEqual(model.device, 'mps')
 
     def test_ctc_log_posteriors(self):
         # Sorted by length, batched to max_batch_seconds - each clip's frames, normalized posteriors

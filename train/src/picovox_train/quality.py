@@ -33,10 +33,10 @@ import subprocess
 import sys
 
 import numpy
-import soxr
+import torch
 
 from . import ROOT
-from .wav import read_wav
+from .wav import read_wav, resample, READ_ZEROS
 
 
 # The gap measure's clips (seconds), its layers (the transformer's), and the trim's silence (dB below the loudest 20 ms
@@ -74,12 +74,11 @@ def trim(samples, rate):
 
 # A WAV file's features - {layer: [frames, dims] float64}: trimmed, at 16 kHz, normalized as the recognizer expects
 def gap_features(model, device, path):
-    import torch  # pylint: disable=import-outside-toplevel
-    samples, rate = read_wav(path, dtype='float32')
-    samples = soxr.resample(trim(samples.mean(axis=1), rate), rate, 16000).astype(numpy.float32)
-    samples = (samples - samples.mean()) / numpy.sqrt(samples.var() + 1e-7)
+    samples, rate = read_wav(path)
+    samples = resample(torch.from_numpy(numpy.ascontiguousarray(trim(samples.mean(axis=1), rate))[None]), rate, 16000, READ_ZEROS)[0]
+    samples = ((samples - samples.mean()) / torch.sqrt(samples.var(unbiased=False) + 1e-7)).float()
     with torch.no_grad():
-        outputs = model.wav2vec2(torch.from_numpy(samples)[None].to(device), output_hidden_states=True)
+        outputs = model.wav2vec2(samples[None].to(device), output_hidden_states=True)
     return {name: outputs.hidden_states[index][0].cpu().double().numpy() for name, index in GAP_LAYERS.items()}
 
 

@@ -31,16 +31,17 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   heteronym evidence), the data (`tts.py` - the training speech: book sentences, the heteronyms' coverage first,
   spoken by a local TTS model through Ollama - the recipe's `tts`, its model pinned by digest, a voice of it for each of
   the package's voices - cached, CTC-aligned, checked, and built in `data.py`'s format; `ctc.py` - our speech
-  measurement, a wav2vec2 phoneme recognizer: the forced alignment, the greedy phone checks, and the candidate vote;
+  measurement, a wav2vec2 phoneme recognizer (`wav2vec2.py` - its network in plain PyTorch, from the pinned
+  checkpoint): the forced alignment, the greedy phone checks, and the candidate vote;
   `data.py`, `align.py`, `wav.py`, `books.py` - the pinned book texts, `corpora.py` - the pinned downloads: the
-  dictionary and the Whisper model), the differentiable synthesizer (`params.py`, `dsynth.py`, `lf.py`,
+  dictionary, the recognizer, and the Whisper model), the differentiable synthesizer (`params.py`, `dsynth.py`, `lf.py`,
   `rng.py`, `spectral.py`), the model and its training (`model.py`, `trainmulti.py`, `losses.py`, `perceptual.py`,
   `discriminator.py`, `quant.py`, `optim.py` - the training step's options), export (`export.py`, `package.py`),
   the listener panel and make train's gate (`panel.py` - Whisper's word error rate, and the gap - `quality.py`: each
   voice's distance from its TTS source clips in the recognizer's features, fdL12), and the pipeline's tools
   (`gpulock.py`, `smoke.py`, `stepcheck.py`, `trained.py` - make train's report and make train-install).
   `picovox_train/__init__.py` documents each module. `make train` runs it from its source (`PYTHONPATH=train/src`) in
-  its environment (`build/venv-train` - `train/requirements.txt`: the training, the recognizer's transformers, and spaCy). Its
+  its environment (`build/venv-train` - `train/requirements.txt`: PyTorch, numpy, Praat, and spaCy). Its
   data, `train/data/`: the recipe `train.json` (its `tts` section - the TTS engine and its voices), the stage graph
   `train-stages.json`, the pinned book texts `books.json`, and the G2P and heteronym data (the CMU Pronouncing
   Dictionary is downloaded - `downloads/`; the training speech is generated - `downloads/tts/`).
@@ -64,10 +65,10 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   `parity-inputs.json` - the parity checks' inputs (below); `voices.json` - the voices' design record (each a TTS voice's
   archetype; the styles' transforms) of `lib/synthesis.js`'s voice and style tables (`testSynthesis.js` checks them).
 - `downloads/` - gitignored: make train's downloads and its training speech - the pinned files
-  (`picovox_train/corpora.py`: the CMU Pronouncing Dictionary, `downloads/cmudict/`, and the Whisper model,
-  `downloads/whisper/`), the training speech's corpus (`downloads/tts/<model>-<digest>/` - the TTS model's clips, their
+  (`picovox_train/corpora.py`: the CMU Pronouncing Dictionary, `downloads/cmudict/`, the wav2vec2 phoneme recognizer,
+  `downloads/wav2vec2/`, and the Whisper model, `downloads/whisper/`), the training speech's corpus (`downloads/tts/<model>-<digest>/` - the TTS model's clips, their
   alignments, the measured readings, and the shipped model's cached panel result; generated once - the engine isn't
-  deterministic), and the phoneme recognizer (on first use, `downloads/listeners/hf`); `make clean` keeps it
+  deterministic); `make clean` keeps it
 - `paper/` - the paper (`paper.md`; `index.html` renders it with MarkdownUp).
 
 ## javascript-build

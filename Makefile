@@ -220,13 +220,18 @@ downloads/cmudict/cmudict.dict: | build/venv-train.build
 downloads/whisper/ggml-base.en.bin: | build/venv-train.build
 	build/venv-train/bin/python -I train/src/picovox_train/corpora.py whisper
 
+# The wav2vec2 phoneme recognizer - the training speech's aligner, the perceptual loss's and the gap's features - pinned
+# (picovox_train/corpora.py - its revision and SHA-256s; downloaded once, 1.3 GB)
+downloads/wav2vec2/pytorch_model.bin: | build/venv-train.build
+	build/venv-train/bin/python -I train/src/picovox_train/corpora.py wav2vec2-model wav2vec2-config wav2vec2-vocab
+
 # The training speech (picovox_train/tts.py - the recipe's tts section): the corpus the local TTS model speaks (Ollama -
 # under the GPU lock, its model on the GPU) and its CTC alignment, in downloads/tts/<model>-<digest>/ (once - with the
 # corpus there, nothing is generated or aligned again); the readings of its heteronym tokens (picovox_train/measure.py
 # - the G2P's evidence), and the clips whose measured readings change their tokens aligned again; then the voices'
 # training data
 $(TRAIN_DIR)/tts-corpus.done: train/data/train.json train/data/books.json lib/models/g2pModel.js \
-		| build/venv-train.build downloads/cmudict/cmudict.dict
+		| build/venv-train.build downloads/cmudict/cmudict.dict downloads/wav2vec2/pytorch_model.bin
 	@$(STAGE) start
 	$(STAGE) -- $(GPU) $(TRAIN_PYTHON) -m picovox_train.tts generate
 	$(STAGE) -- $(GPU) $(TRAIN_PYTHON) -m picovox_train.tts align

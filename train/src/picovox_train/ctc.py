@@ -20,22 +20,16 @@ IPA, 20 ms frames), for the training speech's alignment and checks (tts.py) and 
   candidates differ by them); a vote when one is VOTE_MARGIN more likely than every other.
 """
 
-import json
-import logging
 import math
-import os
 
-from . import ROOT
-from .corpora import hf_snapshot
+from . import wav2vec2
+from .corpora import WAV2VEC2_DIR
 from .frontend import base
 
 
-# (the recognizer's download, with the listener models' - downloads/listeners/, kept by make clean)
-HF_HOME = os.path.join(ROOT, 'downloads', 'listeners', 'hf')
-
-
 # The phoneme recognizer - wav2vec2 large (LibriLight 60k h pretraining) fine-tuned on CommonVoice to espeak IPA
-# phonemes (Xu, Baevski, and Auli, 2021; Apache 2.0); its frames are 20 ms
+# phonemes (Xu, Baevski, and Auli, 2021; Apache 2.0), pinned (corpora.py) and run by wav2vec2.py (its name here is the
+# alignments' - tts.aligner_key); its frames are 20 ms
 CTC_REPO = 'facebook/wav2vec2-lv-60-espeak-cv-ft'
 CTC_SAMPLE_RATE = 16000
 CTC_FRAME_SECONDS = 0.02
@@ -94,22 +88,12 @@ CTC_SHIFT = -0.005
 EDGE_EXTEND = 0.15
 
 
-# Load the phoneme recognizer - (model, vocab {token: id}, device)
+# Load the phoneme recognizer (its pinned files - corpora.py) - (model, vocab {token: id}, device)
 def load_ctc(device=None):
-    os.environ.setdefault('HF_HOME', HF_HOME)
     import torch  # pylint: disable=import-outside-toplevel
-    # (transformers imports torch's distributed launcher, which notes on macOS that it can't redirect its workers'
-    # output - silenced, harmless: nothing here launches distributed workers)
-    logging.getLogger('torch.distributed.elastic.multiprocessing.redirects').setLevel(logging.ERROR)
-    # (transformers is build/venv-train's)
-    from transformers import Wav2Vec2ForCTC  # pylint: disable=import-outside-toplevel,import-error
     if device is None:
         device = 'mps' if torch.backends.mps.is_available() else 'cpu'
-    directory = hf_snapshot(CTC_REPO, allow_patterns=['*.json', 'pytorch_model.bin', 'README.md'])
-    with open(os.path.join(directory, 'vocab.json'), encoding='utf-8') as file:
-        vocab = json.load(file)
-    model = Wav2Vec2ForCTC.from_pretrained(directory).to(device).eval()
-    return model, vocab, device
+    return wav2vec2.load(WAV2VEC2_DIR, device), wav2vec2.vocabulary(WAV2VEC2_DIR), device
 
 
 # The CTC log posteriors of 16 kHz clips (float32 arrays), batched - a list of [frames, vocab] arrays
@@ -131,7 +115,7 @@ def ctc_log_posteriors(model, device, samples_list, max_batch_seconds=80.0):
         with torch.no_grad():
             logits = model(torch.from_numpy(inputs).to(device), attention_mask=torch.from_numpy(mask).to(device)).logits
             log_posteriors = torch.log_softmax(logits.float(), dim=-1).cpu().numpy()
-            lengths = model._get_feat_extract_output_lengths(torch.tensor([len(samples_list[index]) for index in indices]))  # pylint: disable=protected-access
+            lengths = model.output_lengths(torch.tensor([len(samples_list[index]) for index in indices]))
         for row, index in enumerate(indices):
             results[index] = log_posteriors[row, :int(lengths[row])]
 

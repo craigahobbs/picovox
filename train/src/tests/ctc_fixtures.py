@@ -15,7 +15,7 @@ import unittest.mock
 
 import torch
 
-from picovox_train import ctc, frontend, tts
+from picovox_train import corpora, ctc, frontend, tts, wav2vec2
 from tests import data_fixtures
 from tests.helpers import write_wav
 
@@ -70,9 +70,6 @@ class FakeCtc:
         self.device = device
         return self
 
-    def eval(self):
-        return self
-
     def __call__(self, inputs, attention_mask):
         self.calls.append(tuple(inputs.shape))
         generator = torch.Generator().manual_seed(inputs.shape[1])
@@ -81,25 +78,22 @@ class FakeCtc:
         return types.SimpleNamespace(logits=logits)
 
     @staticmethod
-    def _get_feat_extract_output_lengths(lengths):
+    def output_lengths(lengths):
         return lengths // 320
 
 
-# The fake recognizer's modules (transformers, huggingface_hub) and a snapshot directory with its vocabulary
+# The fake recognizer (wav2vec2.load's model and vocabulary, on the CPU) - yields the model
 @contextlib.contextmanager
 def fake_recognizer():
-    with tempfile.TemporaryDirectory() as directory:
-        with open(os.path.join(directory, 'vocab.json'), 'w', encoding='utf-8') as file:
-            json.dump(VOCAB, file)
-        model = FakeCtc()
-        transformers = types.ModuleType('transformers')
-        transformers.Wav2Vec2ForCTC = types.SimpleNamespace(from_pretrained=unittest.mock.Mock(return_value=model))
-        hub = types.ModuleType('huggingface_hub')
-        hub.snapshot_download = unittest.mock.Mock(return_value=directory)
-        with data_fixtures.fake_modules(transformers=transformers, huggingface_hub=hub), \
-                unittest.mock.patch.dict(os.environ), \
-                unittest.mock.patch.object(torch.backends.mps, 'is_available', return_value=False):
-            yield model, hub
+    model = FakeCtc()
+
+    def load(directory, device):
+        assert directory == corpora.WAV2VEC2_DIR
+        return model.to(device)
+    with unittest.mock.patch.object(wav2vec2, 'load', side_effect=load), \
+            unittest.mock.patch.object(wav2vec2, 'vocabulary', return_value=dict(VOCAB)), \
+            unittest.mock.patch.object(torch.backends.mps, 'is_available', return_value=False):
+        yield model
 
 
 # A tiny recipe's tts section - two voices (male, female)
