@@ -4,10 +4,9 @@
 // make train's listening samples - a training stage's final model (a checkpoint, exported by picovox_train.export as the gate
 // exports the voice) or a packaged model (the shipped lib/models/voiceModel.js, the reference) speaking
 // train/data/train.json's samples texts in its speakers' voices exactly as the package speaks a sentence (lib/synthesis.js
-// sentenceBlocks, every word pronounced by the G2P network), each scored with UTMOS on the CPU
-// (picovox_train/listeners.py - the GPU is left to training). The WAV files are OUT/<stage>-<speaker>-<text>.wav, and
+// sentenceBlocks, every word pronounced by the G2P network). The WAV files are OUT/<stage>-<speaker>-<text>.wav, and
 // OUT/index.json lists every stage's samples - [{stage, run (a checkpoint's - its training stage's), checkpoint, step,
-// label, sex, speaker, text, file, seconds, mos}] - updated under a lock and replaced atomically, so sample stages
+// label, sex, speaker, text, file, seconds}] - updated under a lock and replaced atomically, so sample stages
 // finishing at once keep each other's entries.
 //
 //     node tools/trainsamples.js --stage voice-a --checkpoint build/train/runs/voice-a/last.pt --out build/train/samples
@@ -18,7 +17,7 @@
 import {defaultSampleRate, sentenceBlocks, sentencePause} from '../lib/synthesis.js';
 import {dirname, join, relative, resolve} from 'node:path';
 import {mkdirSync, readFileSync, renameSync, rmSync, writeFileSync} from 'node:fs';
-import {parseArgs, parseScores, sampleFile, updateIndex} from './trainsamplesindex.js';
+import {parseArgs, sampleFile, updateIndex} from './trainsamplesindex.js';
 import {concatBlocks} from '../lib/render.js';
 import {encodeWav} from '../lib/wav.js';
 import {execFileSync} from 'node:child_process';
@@ -82,16 +81,6 @@ async function main() {
                 'speaker': speaker.key, 'text': text.key, file, 'seconds': Math.round(audio.length / defaultSampleRate * 100) / 100});
         }
     }
-    log(`${samples.length} samples rendered`);
-
-    // UTMOS on the CPU
-    const output = execFileSync(python, ['-I', 'train/src/picovox_train/listeners.py', '--no-embedding',
-        ...samples.map((sample) => join(work, sample.file))], {'cwd': repository, 'encoding': 'utf8',
-        'maxBuffer': 16 * 1024 * 1024, 'stdio': ['ignore', 'pipe', 'inherit']});
-    const scores = parseScores(output);
-    for (const sample of samples) {
-        sample.mos = Number.isFinite(scores[sample.file]) ? Math.round(scores[sample.file] * 1000) / 1000 : null;
-    }
 
     // The samples in place, then the index
     for (const sample of samples) {
@@ -99,10 +88,6 @@ async function main() {
     }
     rmSync(work, {'recursive': true, 'force': true});
     updateIndex(out, args.stage, samples);
-    const mean = (sex) => {
-        const values = samples.filter((sample) => sample.sex === sex && sample.mos !== null).map((sample) => sample.mos);
-        return values.length === 0 ? '-' : (values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(3);
-    };
-    log(`${args.stage}: UTMOS female ${mean('female')}, male ${mean('male')} - ${join(args.out, 'index.json')}`);
+    log(`${args.stage}: ${samples.length} samples rendered - ${join(args.out, 'index.json')}`);
 }
 await main();

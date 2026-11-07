@@ -236,7 +236,7 @@ const chartHelp = {
         'only within one run; the spectral loss is the cleaner yardstick.',
     'spectral': 'How far the synthesized voice\'s spectrum is from the real recording\'s - multi-resolution STFT and log-mel ' +
         'differences. The main training loss and the best progress gauge, but blind to some of what sounds synthetic: the ' +
-        'critic stage raises naturalness (UTMOS) far more than it lowers this.',
+        'critic and the perceptual loss close the gap to the source far more than they lower this.',
     'durations': 'How well the model predicts timing - phone lengths (durPhone) and how long the pauses are (durPaused); ' +
         'whether a pause happens at all is its own chart (durPause). Errors are in log-duration units.',
     'f0Cents': 'Pitch error on held-out recordings - the average difference between the voice\'s pitch (F0) and the ' +
@@ -595,13 +595,6 @@ function renderLogs(allLogs) {
 }
 
 
-// The mean of the scores of a sex's samples, formatted
-function meanScore(samples, sex) {
-    const scores = samples.filter((sample) => sample.sex === sex && Number.isFinite(sample.mos)).map((sample) => sample.mos);
-    return scores.length === 0 ? '-' : (scores.reduce((sum, score) => sum + score, 0) / scores.length).toFixed(2);
-}
-
-
 // make train's listening samples (TRAIN_DIR/samples/index.json, tools/trainsamples.js) - each model's samples, newest
 // model first, every speaker's sample beside the shipped model's (the reference); a model not rendered yet is listed as
 // waiting, so nothing moves when it arrives. Rebuilt when the index or the models' states change, reusing each sample's
@@ -616,9 +609,8 @@ const trainSamplesHelp = 'make train renders listening samples of each training 
     'package speaks (exported and quantized as the package stage exports it, its G2P network, 24 kHz, its gain). Beside each ' +
     'is the shipped model, ' +
     'lib/models/voiceModel.js, rendered the same way - so the new model can be judged by ear (make train installs ' +
-    'nothing: make train-check, then make train-install). The numbers are UTMOS (1-5, a neural predictor of naturalness; ' +
-    'real recordings score about 4.1-4.3), scored on the CPU - green when above the shipped model\'s, red when below by 0.1 ' +
-    'or more. A model not rendered yet is listed as waiting. The files are TRAIN_DIR/samples/ (index.json lists them).';
+    'nothing: make train-check, then make train-install). A model not rendered yet is listed as waiting. The files are ' +
+    'TRAIN_DIR/samples/ (index.json lists them).';
 document.getElementById('trainSamplesTitle').append(' ', helpTip('trainSamples', trainSamplesHelp));
 let trainSamplesKey = null;
 const trainSampleTiles = new Map();
@@ -660,8 +652,6 @@ async function renderTrainSamples() {
         }
         return trainSampleTiles.get(id);
     };
-    const mosText = (sample) => (Number.isFinite(sample?.mos) ? sample.mos.toFixed(2) : '-');
-
     // A model's samples by text, each speaker's tile with the shipped model's sample of the same text below it
     const reference = models.find((model) => model.key === 'reference');
     const referenceOf = (sample) => reference?.samples.find((item) => item.speaker === sample.speaker && item.text === sample.text);
@@ -685,11 +675,7 @@ async function renderTrainSamples() {
             return element;
         }
         const [first] = model.samples;
-        const facts = [listenNotes[model.key], first.run, first.step === null ? null : `step ${first.step.toLocaleString()}`,
-            `UTMOS female ${meanScore(model.samples, 'female')} · male ${meanScore(model.samples, 'male')}`];
-        if (model.key !== 'reference' && reference && reference.samples.length !== 0) {
-            facts.push(`shipped ${meanScore(reference.samples, 'female')} · ${meanScore(reference.samples, 'male')}`);
-        }
+        const facts = [listenNotes[model.key], first.run, first.step === null ? null : `step ${first.step.toLocaleString()}`];
         head.append(make('span', 'facts', facts.filter((fact) => fact).join(' · ')));
         for (const textKey of textKeys(model.samples)) {
             const text = texts.find((item) => item.key === textKey);
@@ -704,16 +690,11 @@ async function renderTrainSamples() {
                 tile.append(voiceHead);
                 const shipped = model.key === 'reference' ? null : referenceOf(sample);
                 const take = make('div', 'voice-take');
-                const mos = make('span', 'mos', mosText(sample));
-                if (shipped && Number.isFinite(sample.mos) && Number.isFinite(shipped.mos)) {
-                    mos.classList.toggle('better', sample.mos > shipped.mos);
-                    mos.classList.toggle('worse', sample.mos <= shipped.mos - 0.1);
-                }
-                take.append(make('span', '', model.key === 'reference' ? 'shipped' : 'new'), mos);
+                take.append(make('span', '', model.key === 'reference' ? 'shipped' : 'new'));
                 tile.append(take, player(sample, model.key));
                 if (shipped) {
                     const shippedTake = make('div', 'voice-take');
-                    shippedTake.append(make('span', '', 'shipped'), make('span', 'mos', mosText(shipped)));
+                    shippedTake.append(make('span', '', 'shipped'));
                     tile.append(shippedTake, player(shipped, model.key));
                 }
                 voices.append(tile);
@@ -962,8 +943,8 @@ const trainHelp = {
         'Select one for its curves - every measurement it logs.',
     'gates': 'The checks make train must pass: the heteronym relabeling reproduces train/data/g2p-relabel.json; the ' +
         'retrained G2P is identical to the committed lib/models/g2pModel.js (else within the recipe\'s tolerances) with ' +
-        'its held-out context accuracy; the shipped model and the voice through the listener panel (UTMOS - naturalness, ' +
-        '1-5; Whisper\'s word error rate; the voice\'s speaker similarity to the shipped voices); and the gate, ' +
+        'its held-out context accuracy; the shipped model and the voice through the listener panel (Whisper\'s word error ' +
+        'rate, and the gap to the training speech - fdL12, lower closer); and the gate, ' +
         'picovox_train.panel gate - the voice within the tolerance of the shipped model.'
 };
 for (const [id, key] of [['trainTitle', 'summary'], ['utilTitle', 'util'], ['stagesTitle', 'stages'], ['trainRunsTitle', 'runs'],
@@ -1129,9 +1110,9 @@ function gateState(gate, data) {
         'not in this run' : 'waiting', 'line': `when the ${gate.stage} stage is done (${stageState.status})`};
     const panel = (result) => {
         const measures = result.panel || {};
-        const similarity = Number.isFinite(measures.similarity) ? `similarity ${fixed3(measures.similarity)} · ` : '';
-        return `UTMOS ${fixed3(measures.mos)} · WER ${Number.isFinite(measures.wer) ? measures.wer.toFixed(2) : '-'}% · ` +
-            `${similarity}${result.parameters?.toLocaleString()} parameters · module ` +
+        return `WER ${Number.isFinite(measures.wer) ? measures.wer.toFixed(2) : '-'}% · ` +
+            `gap ${Number.isFinite(measures.gap) ? measures.gap.toFixed(0) : '-'} · ` +
+            `${result.parameters?.toLocaleString()} parameters · module ` +
             `${Math.round((result.size?.moduleBytes ?? 0) / 1024)} KB (${Math.round((result.size?.moduleGzipBytes ?? 0) / 1024)} KB gzip)`;
     };
     const {gates} = data;
@@ -1154,8 +1135,7 @@ function gateState(gate, data) {
     }
     const row = (summary.rows || []).find((item) => item.name === summary.name);
     const within = row?.within ? Object.entries(row.within).map(([key, value]) => `${key} ${value ? '✓' : '✕'}`).join(' · ') : '';
-    const tolerance = summary.tolerance ? `tolerance: UTMOS -${summary.tolerance.mos}, WER +${summary.tolerance.wer}, similarity ` +
-        `≥ ${summary.tolerance.similarity}` : '';
+    const tolerance = summary.tolerance ? `tolerance: WER +${summary.tolerance.wer}, gap +${100 * summary.tolerance.gap}%` : '';
     return {'status': summary.passed ? 'done' : 'failed', 'label': summary.passed ? 'passed' : 'failed',
         'line': `${within} · ${tolerance}`};
 }

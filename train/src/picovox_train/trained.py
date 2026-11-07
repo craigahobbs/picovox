@@ -89,13 +89,12 @@ def voice_lines(train_dir, path):
         rows = {row['name']: row for row in summary['rows']}
         voice, shipped = rows.get(summary['name']), rows.get(summary['against'])
         if voice and shipped:
-            lines.append(f'the listener panel: UTMOS {voice["mos"]:.3f} (shipped {shipped["mos"]:.3f}, '
-                         f'{voice["mos"] - shipped["mos"]:+.3f}), WER {voice["wer"]:.2f}% (shipped {shipped["wer"]:.2f}%, '
-                         f'{voice["wer"] - shipped["wer"]:+.2f}), similarity to the shipped voice {voice["similarity"]:.3f}')
+            lines.append(f'the listener panel: WER {voice["wer"]:.2f}% (shipped {shipped["wer"]:.2f}%, '
+                         f'{voice["wer"] - shipped["wer"]:+.2f}), gap to the source {voice["gap"]:.0f} (shipped {shipped["gap"]:.0f}, '
+                         f'{100 * (voice["gap"] / shipped["gap"] - 1):+.1f}%)')
             tolerance = summary['tolerance']
-            lines.append(f'the gate: {"passed" if summary["passed"] else "FAILED"} (UTMOS at most {tolerance["mos"]} '
-                         f'below the shipped model\'s, WER at most {tolerance["wer"]} points above, similarity at least '
-                         f'{tolerance["similarity"]})')
+            lines.append(f'the gate: {"passed" if summary["passed"] else "FAILED"} (WER at most {tolerance["wer"]} points '
+                         f'above the shipped model\'s, the gap at most {100 * tolerance["gap"]:g}% above)')
     return lines
 
 

@@ -90,13 +90,13 @@
               "adversarial": 0.1, "guide-steps": 0.001, "val-from": 7500}
     },
     "panel": {
-        "description": "The listener panel (picovox_train/panel.py eval and gate): a voice model spoken through the browser path (tools/speak.js, at rate Hz) on the panel texts (tools/panel-texts.json) in each of the training speech's voices (tts voices), scored with UTMOS, Whisper's WER, and the speaker similarity to a reference's renderings of the same speakers and texts (make train's: the shipped lib/models/voiceModel.js, evaluated as packaged - the baseline)",
+        "description": "The listener panel (picovox_train/panel.py eval and gate): a voice model spoken through the browser path (tools/speak.js, at rate Hz) on the panel texts (tools/panel-texts.json) in each of the training speech's voices (tts voices), scored with Whisper's word error rate - and the model's gap to its source (picovox_train/quality.py: each voice's Frechet distance to the training speech's held-out clips in the pinned wav2vec2 recognizer's layer 12, over gap perVoice clips a voice, the package speaking - fdL12, lower closer). make train's baseline is the shipped lib/models/voiceModel.js, evaluated as packaged",
         "rate": 16000,
+        "gap": {"perVoice": 40},
         "tolerance": {
-            "description": "The gate (panel.py gate --against: make train's baseline): the voice passes if its mean UTMOS is within mos of the basis's, its Whisper WER at most wer points worse, and its speaker similarity to the basis at least similarity - the per-speaker cosine of the mean ECAPA embedding of the voice's panel renderings with the mean of the basis's renderings of the same texts, averaged over the voices",
-            "mos": 0.05,
+            "description": "The gate (panel.py gate --against: make train's baseline): the voice passes if its Whisper WER is at most wer points worse than the basis's and its mean gap at most gap (a share) above the basis's - the seeds' spread of the gap is about 1.3% of it (paper Section 13.10)",
             "wer": 1.0,
-            "similarity": 0.85
+            "gap": 0.02
         }
     },
     "samples": {

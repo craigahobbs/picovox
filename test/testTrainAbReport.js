@@ -209,14 +209,14 @@ test('trainabreport.formatReport', () => {
             'female': {'trained': 1, 'shipped': 1, 'same': 0}},
         'recommendation': {'action': 'install', 'text': 'Install it'}
     };
-    const panel = {'trained': {'mos': 4.131, 'wer': 1.36}, 'shipped': {'mos': 4.146, 'wer': 1.01}};
+    const panel = {'trained': {'wer': 1.36, 'gap': 2051.4}, 'shipped': {'wer': 1.01, 'gap': 2070.2}};
     assert.deepEqual(formatReport(report, panel), [
         'The blind A/B - 30 of 30 trials answered',
         '  preferred: the trained voice 15, the shipped voice 5, Same 10',
         '  the trained voice\'s win rate: 75% of 20 decided (95% interval 53%-89%; sign test p = 0.041)',
         '  the repeats: the same choice in 2 of 6 - the voices may be hard to tell apart',
         '  by voice (trained-shipped): male 2-0 (1 Same), female 1-1',
-        '  the listener panel: UTMOS 4.131 (shipped 4.146), WER 1.36% (shipped 1.01%)',
+        '  the listener panel: WER 1.36% (shipped 1.01%), gap to the source 2051 (shipped 2070)',
         'Recommendation: Install it'
     ]);
 

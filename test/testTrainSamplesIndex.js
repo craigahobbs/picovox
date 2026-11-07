@@ -1,7 +1,7 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-import {mergeIndex, parseArgs, parseScores, sampleFile, updateIndex, withLock} from '../tools/trainsamplesindex.js';
+import {mergeIndex, parseArgs, sampleFile, updateIndex, withLock} from '../tools/trainsamplesindex.js';
 import {mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync} from 'node:fs';
 import {strict as assert} from 'node:assert';
 import {join} from 'node:path';
@@ -26,12 +26,6 @@ test('trainsamplesindex.parseArgs', () => {
 
 test('trainsamplesindex.sampleFile', () => {
     assert.equal(sampleFile('voice-a', 'female', 'ishmael'), 'voice-a-female-ishmael.wav');
-});
-
-
-test('trainsamplesindex.parseScores', () => {
-    const output = '{"file": "/tmp/samples/a.wav", "seconds": 2.0, "mos": 3.5}\nnot JSON\nnull\n{"file": "b.wav"}\n';
-    assert.deepEqual(parseScores(output), {'a.wav': 3.5, 'b.wav': null});
 });
 
 

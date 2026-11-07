@@ -69,15 +69,13 @@ The network:
 
 The pipeline's tools:
 
-- panel.py - the listener panel's scoring (UTMOS, Whisper's WER, speaker similarity) of an exported model or a packaged
-  module, and make train's gate (the trained voice within the recipe's tolerance of the shipped one); listeners.py -
-  its listener models (UTMOS and the speaker embedding, run in build/venv-train)
+- panel.py - the listener panel's scoring of an exported model or a packaged module (Whisper's word error rate on the
+  panel texts, and the gap to its source - quality.py), and make train's gate (the trained voice within the recipe's
+  tolerance of the shipped one)
 - smoke.py - every training entry point for a few steps on the CPU (the pipeline's smoke test)
-- quality.py - voice quality measures (spectral balance, band harmonicity, upper-band crest, pitch flutter and wobble,
-  and the spectrum's movement - its bands' variance, flux, and onsets) of the package's voices synthesized - or any
-  voice model module's (--model) - against their source clips (the training speech) - guides for listening
-  (tools/voicelab/); and gap - the voices' distance from their source clips in the pinned wav2vec2 recognizer's features
-  (fdL12, the Frechet distance of its layer 12's frames - voice training's quality measure)
+- quality.py - the gap: each voice's distance from its source clips (the training speech) in the pinned wav2vec2
+  recognizer's features (fdL12, the Frechet distance of its layer 12's frames, the package speaking - voice training's
+  quality measure, and the gate's)
 - stepcheck.py - the trainer's step-0 losses on fixed batches, exactly, to check a change leaves training unchanged
 - gpulock.py - a command run holding the GPU lock (make train's GPU stages one at a time)
 - trained.py - make train's trained models: its report (each model's size and scores, and whether it differs from the

@@ -96,9 +96,10 @@ build/venv-train.build: train/requirements.txt
 # relabeling, CPU) and make train-voice (the voice - its data and its two training stages, GPU) at once, then the report (each
 # model's size and scores, and whether it differs from the committed module - picovox_train.trained report). The gates:
 # the G2P - identical to the committed module below its header, else within the recipe's tolerances; the voice - no
-# worse than the shipped model on the listener panel. Each stage is a stamp in TRAIN_DIR; make -j train runs the
+# worse than the shipped model on the listener panel (Whisper's word error rate, and the gap to the training speech).
+# Each stage is a stamp in TRAIN_DIR; make -j train runs the
 # independent stages at once - the GPU stages one at a time (picovox_train/gpulock.py: two at once each run at about
-# half speed), the CPU stages beside them (the G2P, the data builds, the evaluations, and the listening samples). The
+# half speed), the CPU stages beside them (the G2P, the data builds, the voice's word error rates, and the listening samples). The
 # voice data is built with the committed G2P (the G2P is deterministic, so its training reproduces it; a G2P installed
 # that differs makes the next make train rebuild the voice).
 #
@@ -320,8 +321,10 @@ $(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/tts-readings.done downloads/cmudict/c
 	@$(STAGE) end
 	touch $@
 
-# The voice - stage A, then stage B with the critic (GPU; resumable) - B's best checkpoint is the voice
-$(TRAIN_DIR)/voice-a.done: $(TRAIN_DIR)/data-tts.done train/data/train.json
+# The voice - stage A, then stage B with the critic (GPU; resumable) - B's best checkpoint is the voice. (Stage A after
+# the baseline's evaluation, which takes the GPU for the gap - a few minutes once per shipped model, its result cached
+# with the training speech - so the two never queue on each other with the voice's stage B waiting.)
+$(TRAIN_DIR)/voice-a.done: $(TRAIN_DIR)/data-tts.done train/data/train.json | $(TRAIN_DIR)/baseline-eval.done
 	@$(STAGE) start
 	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(TRAIN_PYTHON) -m picovox_train.trainmulti --name voice-a --recipe voice.a --resume
 	@$(STAGE) end
@@ -334,18 +337,19 @@ $(TRAIN_DIR)/voice-b.done: $(TRAIN_DIR)/voice-a.done
 	@$(STAGE) end
 	touch $@
 
-# The gate (CPU - picovox_train.panel): the shipped lib/models/voiceModel.js through the listener panel as packaged (the
-# baseline - beside stage A, after the voices' data build), then the voice, its similarity to the baseline's voices, and
-# the voice no worse than the baseline within the recipe's tolerance
-$(TRAIN_DIR)/baseline-eval.done: lib/models/voiceModel.js downloads/whisper/ggml-base.en.bin | $(TRAIN_DIR)/data-tts.done
+# The gate (picovox_train.panel): the shipped lib/models/voiceModel.js through the listener panel as packaged (the
+# baseline - Whisper's word error rate on the panel texts, and its gap to the training speech on the GPU: once per
+# shipped model, its result cached with the training speech), then the voice (after stage B), and the voice no worse
+# than the baseline within the recipe's tolerance
+$(TRAIN_DIR)/baseline-eval.done: lib/models/voiceModel.js downloads/whisper/ggml-base.en.bin $(TRAIN_DIR)/data-tts.done
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.panel eval baseline=lib/models/voiceModel.js --whisper-workers 3
+	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(TRAIN_PYTHON) -m picovox_train.panel eval baseline=lib/models/voiceModel.js --whisper-workers 3
 	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/voice-eval.done: $(TRAIN_DIR)/voice-b.done $(TRAIN_DIR)/baseline-eval.done
 	@$(STAGE) start
-	$(STAGE) -- $(TRAIN_ENV) $(TRAIN_PYTHON) -m picovox_train.panel eval voice=$(TRAIN_RUNS)/voice-b/best.pt --reference baseline --whisper-workers 3
+	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(TRAIN_PYTHON) -m picovox_train.panel eval voice=$(TRAIN_RUNS)/voice-b/best.pt --whisper-workers 3
 	$(STAGE) -- $(TRAIN_ENV) $(TRAIN_PYTHON) -m picovox_train.panel gate voice --against baseline
 	@$(STAGE) end
 	touch $@

@@ -1,11 +1,11 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-// make train's listening samples (tools/trainsamples.js) - its command line, its file names, the UTMOS scores, and
+// make train's listening samples (tools/trainsamples.js) - its command line, its file names, and
 // TRAIN_DIR/samples/index.json, updated under a lock and replaced atomically
 
-import {basename, join} from 'node:path';
 import {mkdirSync, readFileSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
 import process from 'node:process';
 
 
@@ -29,24 +29,6 @@ export function parseArgs(argv) {
 // A sample's WAV file name
 export function sampleFile(stage, speaker, text) {
     return `${stage}-${speaker}-${text}.wav`;
-}
-
-
-// UTMOS scores from picovox_train/listeners.py's output (JSON lines) - {file name: mos}
-export function parseScores(output) {
-    const scores = {};
-    for (const line of output.split('\n')) {
-        let record;
-        try {
-            record = JSON.parse(line);
-        } catch {
-            continue;
-        }
-        if (record !== null && typeof record.file === 'string') {
-            scores[basename(record.file)] = record.mos ?? null;
-        }
-    }
-    return scores;
 }
 
 

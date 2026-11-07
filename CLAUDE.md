@@ -36,11 +36,11 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   dictionary and the Whisper model), the differentiable synthesizer (`params.py`, `dsynth.py`, `lf.py`,
   `rng.py`, `spectral.py`), the model and its training (`model.py`, `trainmulti.py`, `losses.py`, `perceptual.py`,
   `discriminator.py`, `quant.py`, `optim.py` - the training step's options), export (`export.py`, `package.py`),
-  the listener panel and make train's gate (`panel.py`, and the listener models, `listeners.py` - `build/venv-train`),
-  and the pipeline's tools (`gpulock.py`, `smoke.py`, `stepcheck.py`, `trained.py` - make train's report and make
-  train-install - and `quality.py` - the voices' quality measures against their TTS source clips).
+  the listener panel and make train's gate (`panel.py` - Whisper's word error rate, and the gap - `quality.py`: each
+  voice's distance from its TTS source clips in the recognizer's features, fdL12), and the pipeline's tools
+  (`gpulock.py`, `smoke.py`, `stepcheck.py`, `trained.py` - make train's report and make train-install).
   `picovox_train/__init__.py` documents each module. `make train` runs it from its source (`PYTHONPATH=train/src`) in
-  its environment (`build/venv-train` - `train/requirements.txt`: the training, the listener models, and spaCy). Its
+  its environment (`build/venv-train` - `train/requirements.txt`: the training, the recognizer's transformers, and spaCy). Its
   data, `train/data/`: the recipe `train.json` (its `tts` section - the TTS engine and its voices), the stage graph
   `train-stages.json`, the pinned book texts `books.json`, and the G2P and heteronym data (the CMU Pronouncing
   Dictionary is downloaded - `downloads/`; the training speech is generated - `downloads/tts/`).
@@ -66,8 +66,8 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
 - `downloads/` - gitignored: make train's downloads and its training speech - the pinned files
   (`picovox_train/corpora.py`: the CMU Pronouncing Dictionary, `downloads/cmudict/`, and the Whisper model,
   `downloads/whisper/`), the training speech's corpus (`downloads/tts/<model>-<digest>/` - the TTS model's clips, their
-  alignments, and the measured readings; generated once - the engine isn't deterministic), and the listener models and
-  the phoneme recognizer (on first use, `downloads/listeners/`); `make clean` keeps it
+  alignments, the measured readings, and the shipped model's cached panel result; generated once - the engine isn't
+  deterministic), and the phoneme recognizer (on first use, `downloads/listeners/hf`); `make clean` keeps it
 - `paper/` - the paper (`paper.md`; `index.html` renders it with MarkdownUp).
 
 ## javascript-build
@@ -83,7 +83,7 @@ Local Makefile overrides:
 
 - `commit` - also runs the training package's gate (`commit-train`: `make -C train commit`, after `make parity`); `make
   clean` cleans it too
-- `superclean` - also the downloads (`downloads/` - the training speech, the listener models, and Whisper; about 10 GB)
+- `superclean` - also the downloads (`downloads/` - the training speech, the phoneme recognizer, and Whisper; about 10 GB)
 
 `make commit` (test, lint, doc, cover, and the training's gate) is the gate before committing. `npm pack --dry-run`
 lists the package's files (`package.json` `files`: `lib/`). `make -j train` trains both generated models from the recipe
@@ -114,7 +114,7 @@ the python-build skill before running its tests, lint, or coverage, or changing 
   through 3.14); `DOCKER_ENV` - `PARITY_WRITE` into the containers; `PYLINT_ARGS` - `missing-function-docstring`
   disabled (a comment above each function is the code's documentation)
 - The tests run on the CPU only, fast, with no network: tiny synthetic corpora and models
-  (`train/src/tests/helpers.py`), temp directories, and mocks for the downloads, the GPU, the listener models, and the
+  (`train/src/tests/helpers.py`), temp directories, and mocks for the downloads, the GPU, the recognizer, and the
   subprocesses - the repository's Node tools too (the tests never run node). The parity checks
   (`train/src/tests/parity.py`) test the Python port against `lib/`'s outputs of their inputs: `make parity`
   (`tools/parity.js`) builds the outputs (`build/parity-outputs.json`) of the committed inputs
@@ -132,10 +132,10 @@ the python-build skill before running its tests, lint, or coverage, or changing 
   120). The API's exports have JSDoc comments (`make doc`).
 - The package is NN-only at runtime: every word is pronounced by the G2P network - no dictionary, no rules - and it
   imports nothing but its own modules (`test/testIndex.js` checks).
-- Voice changes are judged by measurement: blind A/B listening in the voice lab (`tools/voicelab/` - forced choices,
-  with repeats; the measures in `picovox_train.quality` guide, they don't decide), and the listener panel as the
-  guardrail (`picovox_train/panel.py` - UTMOS, Whisper's WER, speaker similarity; `picovox_train.panel eval`) over the
-  panel texts; compare averages over several seeds.
+- Voice changes are judged by measurement: the gap to the source (`picovox_train.quality gap` - fdL12, each voice's
+  distance from its TTS source clips in the pinned recognizer's layer 12; the paper's Section 13.9 chose it) decides,
+  Whisper's word error rate (`picovox_train.panel eval`) is the guardrail, and blind A/B listening in the voice lab
+  (`tools/voicelab/` - forced choices, with repeats) is the human check; compare averages over several seeds.
 - Refactors must leave the audio bit-identical - compare a hash of the package's audio (`lib/synthesis.js`
   `sentenceBlocks` over `tools/panel-texts.json`, both voices, and `synthesize` over multi-paragraph texts) before and
   after - and the trainer exact (`picovox_train/stepcheck.py` before and after). The generated models must still

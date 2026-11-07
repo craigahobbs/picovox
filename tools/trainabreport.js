@@ -217,8 +217,8 @@ export function formatReport(report, panel = null) {
         lines.push(`  by voice (trained-shipped): ${voices.join(', ')}`);
     }
     if (panel !== null) {
-        lines.push(`  the listener panel: UTMOS ${panel.trained.mos.toFixed(3)} (shipped ${panel.shipped.mos.toFixed(3)}), ` +
-            `WER ${panel.trained.wer.toFixed(2)}% (shipped ${panel.shipped.wer.toFixed(2)}%)`);
+        lines.push(`  the listener panel: WER ${panel.trained.wer.toFixed(2)}% (shipped ${panel.shipped.wer.toFixed(2)}%), ` +
+            `gap to the source ${panel.trained.gap.toFixed(0)} (shipped ${panel.shipped.gap.toFixed(0)})`);
     }
     lines.push(`Recommendation: ${report.recommendation.text}`);
     return lines;
