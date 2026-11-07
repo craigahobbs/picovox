@@ -11,7 +11,8 @@ the network (the paper's Section 13.9), and not the layer the gap is judged on (
 simply learn the measure.
 
 trainmulti.py adds it to the training step's loss (--perceptual-weight - the recipe's 5, on the first
---perceptual-crops crops of each step).
+--perceptual-crops crops of each step; --perceptual-precision bfloat16 runs the recognizer under autocast, as the critic's
+convolutions run - the features compared in float32).
 """
 
 import torch
@@ -29,9 +30,11 @@ class PerceptualLoss:
     """The perceptual loss on a device - __call__(audio, target) of crops [batch, samples] at the corpus's rate
     (data.py SAMPLE_RATE)"""
 
-    def __init__(self, device, layers=LAYERS):
+    def __init__(self, device, layers=LAYERS, dtype=None):
         model, _, _ = ctc.load_ctc(device)
         self.layers = tuple(layers)
+        self.dtype = dtype
+        self.device_type = torch.device(device).type
         self.encoder = model.wav2vec2
         # (the transformer cut after the deepest layer used - the rest is never run)
         self.encoder.encoder.layers = self.encoder.encoder.layers[:max(self.layers)]
@@ -39,12 +42,13 @@ class PerceptualLoss:
         for parameter in self.encoder.parameters():
             parameter.requires_grad_(False)
 
-    # A batch's features - [layer features [batch, frames, dims]]
+    # A batch's features - [layer features [batch, frames, dims]] (float32; the recognizer under autocast in dtype, if any)
     def features(self, audio):
         audio = resample(audio, SAMPLE_RATE, ctc.CTC_SAMPLE_RATE)
         audio = (audio - audio.mean(1, keepdim=True)) / (audio.var(1, keepdim=True) + 1e-7).sqrt()
-        hidden = self.encoder(audio, output_hidden_states=True).hidden_states
-        return [hidden[layer] for layer in self.layers]
+        with torch.autocast(self.device_type, dtype=self.dtype or torch.bfloat16, enabled=self.dtype is not None):
+            hidden = self.encoder(audio, output_hidden_states=True).hidden_states
+        return [hidden[layer].float() for layer in self.layers]
 
     def __call__(self, audio, target):
         with torch.no_grad():
