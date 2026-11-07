@@ -1,10 +1,8 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-import {FLOOR_DB, NAMES, PARAMETERS, TRACT_FREQUENCIES} from '../lib/params.js';
-import {
-    applyTransforms, effort, frication, level, pitchRange, pitchScale, press, rdScale, shelf, tractScale, whisper
-} from '../lib/transforms.js';
+import {FLOOR_DB, NAMES, PARAMETERS} from '../lib/params.js';
+import {applyTransforms, frication, level, pitchRange, pitchScale, press, shelf, whisper} from '../lib/transforms.js';
 import {strict as assert} from 'node:assert';
 import test from 'node:test';
 
@@ -30,17 +28,6 @@ function changes(before, after) {
     }
     return out;
 }
-
-
-test('transforms.tractScale', () => {
-    const input = frame();
-    const [output] = tractScale([input], 1.1);
-    assert.notEqual(output, input);
-    assert.deepEqual(Object.keys(changes(input, output)).sort(), [...TRACT_FREQUENCIES].sort());
-    for (const name of TRACT_FREQUENCIES) {
-        assert.equal(output[IX[name]], input[IX[name]] * 1.1);
-    }
-});
 
 
 test('transforms.pitchScale', () => {
@@ -86,21 +73,8 @@ test('transforms.whisper', () => {
 });
 
 
-test('transforms.effort', () => {
-    // Louder, brighter, more pressed
-    const [louder] = effort([frame()], 6);
-    assert.equal(louder[IX.av], 0);
-    assert.equal(louder[IX.shelf], 3);
-    assert.equal(louder[IX.rd], 0.98 ** 6);
-
-    // Rd stays in 0.3 - 2.7
-    assert.equal(effort([frame({'rd': 0.31})], 30)[0][IX.rd], 0.3);
-    assert.equal(effort([frame({'rd': 2.6})], -30)[0][IX.rd], 2.7);
-});
-
-
 test('transforms.press', () => {
-    // Effort's voice quality without its loudness - brighter and more pressed, the levels unchanged
+    // Vocal effort's voice quality without its loudness - brighter and more pressed, the levels unchanged
     const [pressed] = press([frame()], 6);
     assert.deepEqual(changes(frame(), pressed), {'shelf': [0, 3], 'rd': [1, 0.98 ** 6]});
 
@@ -129,15 +103,6 @@ test('transforms.frication', () => {
 });
 
 
-test('transforms.rdScale', () => {
-    // The pulse's Rd scaled, within its range, nothing else
-    const before = frame({'rd': 1.5});
-    assert.deepEqual(changes(before, rdScale([before], 1.2)[0]), {'rd': [1.5, 1.5 * 1.2]});
-    assert.equal(rdScale([frame({'rd': 2.5})], 1.2)[0][IX.rd], 2.7);
-    assert.equal(rdScale([frame({'rd': 0.35})], 0.5)[0][IX.rd], 0.3);
-});
-
-
 test('transforms.shelf', () => {
     // The source shelf raised or lowered, nothing else
     const before = frame({'shelf': 12});
@@ -153,12 +118,11 @@ test('transforms.applyTransforms', () => {
     assert.equal(applyTransforms(frames), frames);
     assert.equal(applyTransforms(frames, []), frames);
 
-    // Each in turn, in a transform's fixed order (pitch, tract, whisper, effort, press, level, frication, Rd, shelf)
-    const shaped = whisper(tractScale(pitchScale(frames, 1.1), 0.9), {'intensity': 0.5});
-    const expected = shelf(rdScale(frication(level(press(effort(shaped, 3), 2), -4), 1), 1.1), -5);
+    // Each in turn, in a transform's fixed order (pitch, whisper, press, level, frication, shelf)
+    const shaped = whisper(pitchScale(frames, 1.1), {'intensity': 0.5});
+    const expected = shelf(frication(level(press(shaped, 2), -4), 1), -5);
     const applied = applyTransforms(frames, [
-        {'shelf': -5, 'rdScale': 1.1, 'frication': 1, 'level': -4, 'press': 2, 'effort': 3, 'whisper': 0.5, 'tractScale': 0.9,
-            'pitchScale': 1.1}
+        {'shelf': -5, 'frication': 1, 'level': -4, 'press': 2, 'whisper': 0.5, 'pitchScale': 1.1}
     ]);
     assert.deepEqual(applied.map((item) => Array.from(item)), expected.map((item) => Array.from(item)));
     assert.deepEqual(applyTransforms(frames, [{'pitchRange': 1.5}]).map((item) => Array.from(item)),

@@ -148,9 +148,6 @@ DEFAULTS = {parameter[0]: parameter[6] for parameter in PARAMETERS}
 # The level parameters (dB) - converted to linear amplitudes before interpolation
 DB_NAMES = [parameter[0] for parameter in PARAMETERS if parameter[2] == 'dB' and parameter[0] != 'shelf']
 
-# The frequency parameters that the vocal tract length scales (the former lib/speak.js's tractScale list)
-TRACT_FREQUENCIES = ['f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'fnp', 'fnz', 'fp1', 'fp2', 'fhp']
-
 
 # Normalize parameter values (a torch tensor or numpy array [..., COUNT]) to 0-1 - the inverse of denormalize
 def normalize(values):
@@ -239,9 +236,6 @@ def javascript():
     lines.append('')
     lines.append('// The level parameters (dB), converted to linear amplitudes before interpolation')
     lines.append(f'export const DB_NAMES = {_js(DB_NAMES)};')
-    lines.append('')
-    lines.append('// The frequency parameters the vocal tract length scales')
-    lines.append(f'export const TRACT_FREQUENCIES = {_js(TRACT_FREQUENCIES)};')
     lines.append('')
     return '\n'.join(lines)
 
