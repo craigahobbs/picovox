@@ -44,18 +44,7 @@ function speak(lib, text, voice) {
 
 // A lib's render of frames (24 kHz, seed 1) - Float32Array
 function renderFrames(lib, frames, eq) {
-    const blocks = [];
-    const onBlock = (block) => blocks.push(Float32Array.from(block));
-    const renderer = lib.render.createRenderer({'sampleRate': 24000, 'seed': 1, eq, onBlock});
-    renderer.push(frames);
-    const total = renderer.end();
-    const out = new Float32Array(total);
-    let offset = 0;
-    for (const block of blocks) {
-        out.set(block, offset);
-        offset += block.length;
-    }
-    return out;
+    return lib.render.render(frames, {'sampleRate': 24000, 'seed': 1, eq});
 }
 
 

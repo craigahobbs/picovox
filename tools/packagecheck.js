@@ -6,35 +6,17 @@
 // process.getBuiltinModule is hidden while they load, as in a browser), every tensor loads bit-identically, the model
 // speaks the same frames, and the same import works in a worker thread (as in a Web Worker).
 //
-//     node tools/packagecheck.js lib/models/voiceModel.js build/train/eval/voice/multi
+//     node tools/packagecheck.js build/train/voiceModel.js build/train/eval/voice/multi  # make train's module and its export
 //
 // It prints one JSON line - the tensors and frames compared, and the load times.
 
 /* eslint-disable no-console */
 
-import {Worker} from 'node:worker_threads';
+import {Worker, isMainThread, parentPort, workerData} from 'node:worker_threads';
 import {createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import process from 'node:process';
-import {readFileSync} from 'node:fs';
 import {registerHooks} from 'node:module';
-
-
-const [modulePath, exportPath] = process.argv.slice(2);
-const moduleUrl = pathToFileURL(modulePath).href;
-
-// Fail any node: or bare import from the package (lib/) and the model module
-const browserRoots = [new URL('../lib/', import.meta.url).href];
-registerHooks({
-    resolve(specifier, context, nextResolve) {
-        const parent = context.parentURL ?? '';
-        if ((browserRoots.some((root) => parent.startsWith(root)) || parent === moduleUrl) &&
-            (specifier.startsWith('node:') || !/^[./]/u.test(specifier))) {
-            throw new Error(`${parent} imports ${specifier}`);
-        }
-        return nextResolve(specifier, context);
-    }
-});
 
 
 // A hash of a model's tensors (names, shapes, and float64 data)
@@ -49,24 +31,30 @@ function modelHash(model) {
 }
 
 
-// The worker - import the package and the loader, and post the model's hash
-const workerSource = `
-import {parentPort, workerData} from 'node:worker_threads';
-const {loadPackagedModel} = await import(workerData.loader);
-const voice = await import(workerData.module);
-const model = await loadPackagedModel(voice);
-const {createHash} = await import('node:crypto');
-const hash = createHash('sha256');
-for (const name of Object.keys(model.tensors).sort()) {
-    const {data, shape} = model.tensors[name];
-    hash.update(name + ':' + shape.join(',') + ';');
-    hash.update(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+// The worker (this script in a worker thread) - import the package and the loader, and post the model's hash
+async function worker() {
+    const {loadPackagedModel} = await import('../lib/package.js');
+    parentPort.postMessage(modelHash(await loadPackagedModel(await import(workerData.module))));
 }
-parentPort.postMessage(hash.digest('hex'));
-`;
 
 
 async function main() {
+    const [modulePath, exportPath] = process.argv.slice(2);
+    const moduleUrl = pathToFileURL(modulePath).href;
+
+    // Fail any node: or bare import from the package (lib/) and the model module
+    const browserRoots = [new URL('../lib/', import.meta.url).href];
+    registerHooks({
+        resolve(specifier, context, nextResolve) {
+            const parent = context.parentURL ?? '';
+            if ((browserRoots.some((root) => parent.startsWith(root)) || parent === moduleUrl) &&
+                (specifier.startsWith('node:') || !/^[./]/u.test(specifier))) {
+                throw new Error(`${parent} imports ${specifier}`);
+            }
+            return nextResolve(specifier, context);
+        }
+    });
+
     // The package and the loader, as a browser would load them
     const {getBuiltinModule} = process;
     process.getBuiltinModule = undefined;
@@ -85,11 +73,11 @@ async function main() {
     const {g2pModel} = await import('../lib/models/g2pModel.js');
     setPronouncer(await loadG2p(g2pModel));
 
-    // The export, loaded from its files
-    const {loadModel, speakFrames} = await import('../lib/model.js');
-    const buffer = readFileSync(`${exportPath}.bin`);
-    const exported = loadModel(JSON.parse(readFileSync(`${exportPath}.json`, 'utf8')),
-        buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
+    // The export, loaded from its files (tools/loadVoice.js - imported here, not statically: its imports of lib/ would load
+    // the package before the browser-safety hooks and checks above)
+    const {loadVoice} = await import('./loadVoice.js');
+    const {speakFrames} = await import('../lib/model.js');
+    const exported = await loadVoice(exportPath);
 
     // Every tensor bit-identical
     let tensors = 0;
@@ -123,13 +111,12 @@ async function main() {
     }
 
     // The same model in a worker thread
-    const worker = new Worker(new URL(`data:text/javascript,${encodeURIComponent(workerSource)}`),
-        {'workerData': {'loader': new URL('../lib/package.js', import.meta.url).href, 'module': moduleUrl}});
+    const thread = new Worker(new URL(import.meta.url), {'workerData': {'module': moduleUrl}});
     const workerHash = await new Promise((resolve, reject) => {
-        worker.once('message', resolve);
-        worker.once('error', reject);
+        thread.once('message', resolve);
+        thread.once('error', reject);
     });
-    await worker.terminate();
+    await thread.terminate();
     if (workerHash !== modelHash(exported)) {
         throw new Error('the worker\'s model differs');
     }
@@ -137,4 +124,4 @@ async function main() {
         importSeconds, loadSeconds}));
 }
 
-await main();
+await (isMainThread ? main() : worker());

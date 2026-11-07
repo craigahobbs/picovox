@@ -8,9 +8,9 @@
 
 /* eslint-disable no-console */
 
+import {fileURLToPath, pathToFileURL} from 'node:url';
 import {execFileSync} from 'node:child_process';
 import {existsSync} from 'node:fs';
-import {fileURLToPath} from 'node:url';
 import process from 'node:process';
 import {resolve} from 'node:path';
 import {runTiming} from './timing.js';
@@ -18,7 +18,6 @@ import {runTiming} from './timing.js';
 
 // Time one lib (in this process) - print its result's JSON
 async function timeOne(directory, voices) {
-    const {pathToFileURL} = await import('node:url');
     const result = await runTiming({'lib': pathToFileURL(resolve(directory)).href, voices, 'passes': 2, 'stream': false});
     const last = result.runs.filter((run) => run.pass === 1);
     const audio = last.reduce((sum, run) => sum + run.stages.audio, 0);

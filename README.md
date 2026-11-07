@@ -289,7 +289,7 @@ PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.smoke   # e
 ```sh
 node tools/unpack.js lib/models/voiceModel.js build/voice                 # a packaged model back to its export
 node tools/speak.js -m build/voice "Hello, world." -o build/hello.wav     # an exported model (<voice>.json and .bin)
-node tools/packagecheck.js lib/models/voiceModel.js build/voice           # check a packaged model against its export
+node tools/packagecheck.js build/train/voiceModel.js build/train/eval/voice/multi  # a packaged model against its export (make train's)
 node tools/heteronyms.js                                                # the heteronym and names regression sets
 ```
 
@@ -306,7 +306,7 @@ NAME` times each under Node without a JIT (`--jitless` - the phone's speed withi
 another app (PicoShelf, with its `?timing&log=URL` timeline posted to `build/perf/devlog.jsonl`).
 
 `tools/speak.js` speaks with an exported model (`picovox_train.export CHECKPOINT --voice NAME` writes
-`train/data/NAME.json` and `.bin`; `tools/unpack.js` makes one of the package's multi-speaker model), every word pronounced by the
+`build/export/NAME.json` and `.bin`, or in `--out DIR`; `tools/unpack.js` makes one of the package's multi-speaker model), every word pronounced by the
 G2P network as the package pronounces (`-r` rate, `-s` seed, `--params` the parameter frames, `--rate` the duration
 multiplier, `--batch` a list of items); `-m` also takes a packaged module (`lib/models/voiceModel.js`). The
 multi-speaker model takes a speaker (`--speaker`, an id of its manifest's speakers - one per voice, in `voices()`'s

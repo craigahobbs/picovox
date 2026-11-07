@@ -16,6 +16,7 @@ import {
 import {speechText, splitSentences} from '../lib/sentences.js';
 import {Buffer} from 'node:buffer';
 import {NAMES} from '../lib/params.js';
+import {concatBlocks} from '../lib/render.js';
 import {pathToFileURL} from 'node:url';
 import process from 'node:process';
 import {resolve} from 'node:path';
@@ -102,10 +103,5 @@ const lines = Buffer.concat(chunks).toString('utf8').split('\n').filter((line) =
 for (const line of lines) {
     const {text, wav, voice, edits} = JSON.parse(line);
     const blocks = edits ? editedBlocks(text, voice, edits) : [...textBlocks(model, text, {voice, seed})];
-    const samples = new Float32Array(blocks.reduce((sum, block) => sum + block.length, 0));
-    blocks.reduce((offset, block) => {
-        samples.set(block, offset);
-        return offset + block.length;
-    }, 0);
-    writeFileSync(wav, toWav(samples, defaultSampleRate));
+    writeFileSync(wav, toWav(concatBlocks(blocks), defaultSampleRate));
 }
