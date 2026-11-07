@@ -203,7 +203,7 @@ class TestExportParity(unittest.TestCase):
         with open(os.path.join(out_dir, 'model.bin'), 'rb') as file:
             binary = base64.b64encode(file.read()).decode('ascii')
         parity.inputs(self, name, {'manifest': manifest, 'bin': binary, 'speaker': speaker, 'texts': texts})
-        voice = Voice(self.checkpoint, speaker=speaker)
+        voice = Voice(self.checkpoint, speaker)
         for text, expected in zip(texts, parity.outputs(name), strict=True):
             values, parts = voice.frames(text)
             self.assertEqual(expected['durations'], [duration for part in parts for duration in part['durations']])

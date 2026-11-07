@@ -13,7 +13,6 @@ import io
 import json
 import os
 import re
-import time
 import unittest.mock
 import wave
 
@@ -157,17 +156,6 @@ def captured():
     stdout, stderr = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
         yield stdout, stderr
-
-
-# Wait (polling) until predicate() is true - True, or False at the timeout (s). Tests of threads wait with this, not
-# their own loops, so their coverage doesn't depend on the timing.
-def wait_until(predicate, timeout=120):
-    deadline = time.time() + timeout
-    while not predicate():
-        if time.time() >= deadline:
-            return False
-        time.sleep(0.01)
-    return True
 
 
 # A JavaScript literal of JSON tokens and concatenated string literals (package.py's manifest) - its value

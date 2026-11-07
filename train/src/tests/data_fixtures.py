@@ -73,7 +73,8 @@ class FakeSound:
         self.samples = numpy.asarray(values, dtype=numpy.float64)
         self.rate = sampling_frequency
 
-    # The frames' center times, each frame's RMS, and its autocorrelation peak (lag, normalized) within the pitch range
+    # The frames' center times, each frame's RMS, and its autocorrelation peak (lag, normalized) within the pitch range -
+    # the autocorrelation by FFT (zero-padded to twice the window, so it's the linear one)
     def frames(self, time_step, pitch_floor=75.0, pitch_ceiling=600.0):
         half = int(0.02 * self.rate)
         times = (numpy.arange(int(len(self.samples) / self.rate / time_step)) + 0.5) * time_step
@@ -85,9 +86,11 @@ class FakeSound:
             rms.append(float(numpy.sqrt(numpy.mean(window ** 2))) if len(window) else 0.0)
             lags = numpy.arange(int(self.rate / pitch_ceiling), min(int(self.rate / pitch_floor), len(window) - 1))
             energy = float(numpy.dot(window, window))
-            correlations = [float(numpy.dot(window[:-lag], window[lag:])) / energy for lag in lags] if energy > 0 and len(lags) else [0.0]
+            correlations = [0.0]
+            if energy > 0 and len(lags):
+                correlations = numpy.fft.irfft(numpy.abs(numpy.fft.rfft(window, 2 * len(window))) ** 2)[lags] / energy
             best = int(numpy.argmax(correlations))
-            peaks.append((int(lags[best]) if len(lags) else 1, correlations[best]))
+            peaks.append((int(lags[best]) if len(lags) else 1, float(correlations[best])))
         return times, numpy.array(rms), peaks
 
     def to_pitch_ac(self, time_step, pitch_floor, pitch_ceiling):
