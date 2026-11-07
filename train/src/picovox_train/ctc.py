@@ -21,10 +21,12 @@ IPA, 20 ms frames), for the training speech's alignment and checks (tts.py) and 
 """
 
 import json
+import logging
 import math
 import os
 
 from . import ROOT
+from .corpora import hf_snapshot
 from .frontend import base
 
 
@@ -96,12 +98,14 @@ EDGE_EXTEND = 0.15
 def load_ctc(device=None):
     os.environ.setdefault('HF_HOME', HF_HOME)
     import torch  # pylint: disable=import-outside-toplevel
-    # (huggingface_hub and transformers are build/venv-train's)
-    from huggingface_hub import snapshot_download  # pylint: disable=import-outside-toplevel,import-error
+    # (transformers imports torch's distributed launcher, which notes on macOS that it can't redirect its workers'
+    # output - silenced, harmless: nothing here launches distributed workers)
+    logging.getLogger('torch.distributed.elastic.multiprocessing.redirects').setLevel(logging.ERROR)
+    # (transformers is build/venv-train's)
     from transformers import Wav2Vec2ForCTC  # pylint: disable=import-outside-toplevel,import-error
     if device is None:
         device = 'mps' if torch.backends.mps.is_available() else 'cpu'
-    directory = snapshot_download(CTC_REPO, allow_patterns=['*.json', 'pytorch_model.bin', 'README.md'])
+    directory = hf_snapshot(CTC_REPO, allow_patterns=['*.json', 'pytorch_model.bin', 'README.md'])
     with open(os.path.join(directory, 'vocab.json'), encoding='utf-8') as file:
         vocab = json.load(file)
     model = Wav2Vec2ForCTC.from_pretrained(directory).to(device).eval()

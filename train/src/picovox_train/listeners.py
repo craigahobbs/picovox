@@ -25,7 +25,6 @@ import argparse
 import contextlib
 import io
 import json
-import logging
 import math
 import os
 import sys
@@ -70,10 +69,11 @@ def parse_args(argv):
     return args
 
 
-# Quiet the model libraries' logging, warnings, and progress output (stdout is reserved for the JSON lines)
+# Quiet the model libraries' progress output (stdout is reserved for the JSON lines) and their one warning - UTMOS's
+# code (the pinned SpeechMOS) calls torch.nn.utils.weight_norm, deprecated for its parametrizations version: silenced,
+# harmless (it still works - the pinned torch's)
 def quiet_libraries():
-    warnings.filterwarnings('ignore')
-    logging.disable(logging.WARNING)
+    warnings.filterwarnings('ignore', message=r'`torch\.nn\.utils\.weight_norm` is deprecated', category=FutureWarning)
     os.environ.setdefault('TQDM_DISABLE', '1')
 
 
@@ -83,14 +83,10 @@ def to_stderr(function, *args, **kwargs):
         return function(*args, **kwargs)
 
 
-# Download a Hugging Face model snapshot, or find it in the cache without network access - returns its local directory
-# (the listener models' libraries - huggingface_hub, speechbrain - are build/venv-train's)
+# A Hugging Face model snapshot's local directory - corpora.hf_snapshot's (its output to stderr)
 def hf_snapshot(repo):
-    import huggingface_hub  # pylint: disable=import-outside-toplevel,import-error
-    try:
-        return huggingface_hub.snapshot_download(repo, local_files_only=True)
-    except Exception:  # pylint: disable=broad-exception-caught
-        return to_stderr(huggingface_hub.snapshot_download, repo)
+    from picovox_train.corpora import hf_snapshot as snapshot  # pylint: disable=import-outside-toplevel
+    return to_stderr(snapshot, repo)
 
 
 # Load UTMOS22 strong (torch.hub) - from the hub cache when present, so no network access is needed

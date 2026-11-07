@@ -45,9 +45,10 @@ def f0_track(f0, voiced, frame_count, floor, ceiling):
     return numpy.clip(numpy.exp(log_f0), floor, ceiling).astype(numpy.float32)
 
 
-# The spectral loss's STFT sizes, and its log-mel terms' magnitude epsilon (a magnitude of exactly zero - the
-# band-limited audio's - has an infinite gradient)
+# The spectral loss's STFT sizes, its log-mel terms' sizes, and their magnitude epsilon (a magnitude of exactly zero -
+# the band-limited audio's - has an infinite gradient)
 FFT_SIZES = (2048, 1024, 512, 256, 128)
+MEL_FFT_SIZES = (1024, 256)
 MEL_EPS = 1e-9
 
 
@@ -72,7 +73,7 @@ def spectral_loss(predicted, target, rate, max_hz):
         total = total + convergence.mean() + log_distance.mean()
     total = total / len(FFT_SIZES)
     mel_total = 0
-    for fft_size in (1024, 256):
+    for fft_size in MEL_FFT_SIZES:
         bank = mel_bank(rate, fft_size, max_hz, predicted.device)
         spectrum_predicted, spectrum_target = spectra_of(fft_size)
         mel_predicted = torch.log(spectral.spectrum_magnitude(spectrum_predicted, eps=MEL_EPS) ** 2 @ bank.T + 1e-5)
@@ -81,6 +82,7 @@ def spectral_loss(predicted, target, rate, max_hz):
     return total + mel_total / 2 * 0.25
 
 
+# The log-mel terms' mel banks, cached per rate, size, band, and device
 _MEL_BANKS = {}
 
 
@@ -90,6 +92,16 @@ def mel_bank(rate, fft_size, max_hz, device):
         _MEL_BANKS[key] = torch.tensor(spectral.mel_filterbank(rate, fft_size, 64 if fft_size >= 512 else 32, high=max_hz),
                                        dtype=torch.float32, device=device)
     return _MEL_BANKS[key]
+
+
+# Make (cache) the spectral loss's constants on a device - its STFT windows and mel banks - before its compiled calls
+# (trainmulti.py): the graph then reads them as inputs (traced, they'd be made in the graph - the mel bank's numpy as
+# float64 torch ops, off the eager bank - and the caches' fill would compile it again)
+def spectral_loss_constants(rate, max_hz, device):
+    for fft_size in FFT_SIZES:
+        spectral.hann(fft_size, device)
+    for fft_size in MEL_FFT_SIZES:
+        mel_bank(rate, fft_size, max_hz, device)
 
 
 # The duration loss - phones: MSE of log(d + 1); boundary tokens: pause BCE and the paused duration's MSE; <bos> and the

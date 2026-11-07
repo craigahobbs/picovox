@@ -35,7 +35,8 @@ The data:
 - books.py - the pinned book texts (train/data/books.json): the Project Gutenberg books the training speech and the
   heteronym labels read, each fetched once and verified by its SHA-256 - a revised text is never
   used
-- corpora.py - the pinned downloads: the CMU Pronouncing Dictionary and the listener panel's Whisper model
+- corpora.py - the pinned downloads: the CMU Pronouncing Dictionary and the listener panel's Whisper model (and
+  hf_snapshot - the Hugging Face models, from their cache)
 
 The synthesizer:
 

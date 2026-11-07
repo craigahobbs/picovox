@@ -47,6 +47,7 @@ schedule:
 import argparse
 import collections
 import json
+import logging
 import math
 import os
 import queue
@@ -54,6 +55,7 @@ import re
 import sys
 import threading
 import time
+import warnings
 
 import numpy
 import torch
@@ -62,7 +64,7 @@ from . import RECIPE_PATH, ROOT, discriminator, dsynth, optim, params, perceptua
 from .corpora import file_sha256
 from .data import DATA_DIR, SAMPLE_RATE, CorpusData
 from .model import FIRST_PHONE, MultiModel, core_parameter_count, parameter_count, save_checkpoint
-from .losses import F_INDEX, PRIORS, duration_loss, f0_track, render_values, spectral_loss
+from .losses import F_INDEX, PRIORS, duration_loss, f0_track, render_values, spectral_loss, spectral_loss_constants
 
 # The runs' directory (checkpoints and logs)
 RUNS_DIR = os.environ.get('NN_RUNS_DIR', os.path.join(ROOT, 'build', 'nn', 'runs'))
@@ -248,6 +250,13 @@ def crop(values, batch, crop_frames, rng):
 # gradient within rounding of the eager loss's, 143 dB)
 compiled_spectral_loss = torch.compile(spectral_loss)
 
+# (inductor's two notes compiling it - on a cold compile cache - silenced, both verified harmless: the STFTs' complex
+# outputs and their real and imaginary parts are left to eager kernels, the rest fused (that's the 8-13%); and the mel
+# banks' matmuls use the eager matmul, not its Triton template - MPS hasn't the 68 cores the template requires)
+warnings.filterwarnings('ignore', message='Torchinductor does not support code generation for complex operators')
+logging.getLogger('torch._inductor.utils').addFilter(
+    lambda record: record.getMessage() != 'Not enough SMs to use max_autotune_gemm mode')
+
 
 # Low-pass audio [B, N] at a cutoff per item (Hz) - zeroing the FFT bins above it (so the magnitude spectra of the
 # losses and the critic take a small epsilon - a magnitude of exactly zero has an infinite gradient); cutoff_tensor is
@@ -427,6 +436,7 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
         # (torch's API for a dynamic dimension is torch._dynamo's)
         torch._dynamo.mark_dynamic(audio, 0)  # pylint: disable=protected-access
         torch._dynamo.mark_dynamic(target, 0)  # pylint: disable=protected-access
+        spectral_loss_constants(SAMPLE_RATE, args.max_hz, audio.device)
         losses['spectral'] = compiled_spectral_loss(audio, target, SAMPLE_RATE, args.max_hz)
     else:
         losses['spectral'] = spectral_loss(audio, target, SAMPLE_RATE, args.max_hz)

@@ -9,7 +9,7 @@ import unittest
 import numpy
 import torch
 
-from picovox_train import losses, model, params
+from picovox_train import losses, model, params, spectral
 
 from .helpers import tiny_config
 
@@ -51,6 +51,10 @@ class TestLosses(unittest.TestCase):
         # The mel banks are cached per rate, size, band, and device
         self.assertIs(losses.mel_bank(16000, 1024, 7000.0, 'cpu'), losses.mel_bank(16000, 1024, 7000.0, 'cpu'))
         self.assertEqual(losses.mel_bank(16000, 256, 7000.0, 'cpu').shape, (32, 129))
+        # The loss's constants made ahead of its compiled calls - the windows and mel banks it reads
+        losses.spectral_loss_constants(16000, 6000.0, torch.device('cpu'))
+        self.assertIs(losses.mel_bank(16000, 1024, 6000.0, 'cpu'), losses.mel_bank(16000, 1024, 6000.0, torch.device('cpu')))
+        self.assertIs(spectral.hann(2048, 'cpu'), spectral.hann(2048, torch.device('cpu')))
 
     def test_duration_loss(self):
         tokens = torch.tensor([[model.BOS, 20, model.WORD, 21, 5, model.PAD]])

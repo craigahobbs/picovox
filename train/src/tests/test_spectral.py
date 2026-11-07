@@ -28,6 +28,9 @@ class TestSpectral(unittest.TestCase):
         # Without the epsilon, silence is exactly zero
         silence = spectral.stft_magnitude(torch.zeros(1, 1024), 256, 64, eps=0)
         self.assertEqual(float(silence.abs().max()), 0.0)
+        # The windows are cached per size and device
+        self.assertIs(spectral.hann(512, 'cpu'), spectral.hann(512, torch.device('cpu')))
+        self.assertTrue(torch.equal(spectral.hann(512, 'cpu'), torch.hann_window(512)))
 
     def test_mel_filterbank(self):
         bank = spectral.mel_filterbank(16000, 512)

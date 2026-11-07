@@ -11,10 +11,13 @@ The files (names): cmudict, whisper. With no names, all of them are fetched. A f
 downloaded whole (an interrupted download starts over) and checked against its pinned SHA-256 (a revised file fails the
 fetch, never trains). Downloads are sequential (one connection at a time) with a descriptive User-Agent. (The human speech corpora it once
 fetched - CMU ARCTIC, LibriTTS-R, LibriTTSLabel - are in git history; the training speech is tts.py's.)
+
+hf_snapshot finds a Hugging Face model (the phoneme recognizer, ctc.py's, and the listeners') in its cache, else downloads it.
 """
 
 import argparse
 import hashlib
+import logging
 import os
 import re
 import shutil
@@ -78,6 +81,23 @@ def file_sha256(path):
 # Print a progress line to stderr
 def log(message):
     print(message, file=sys.stderr, flush=True)
+
+
+# A Hugging Face model snapshot's local directory - from the cache without network access when it's there, else
+# downloaded (huggingface_hub is build/venv-train's)
+def hf_snapshot(repo, **options):
+    import huggingface_hub  # pylint: disable=import-outside-toplevel,import-error
+    try:
+        return huggingface_hub.snapshot_download(repo, local_files_only=True, **options)
+    except Exception:  # pylint: disable=broad-exception-caught
+        # (the Hub's note that the requests are unauthenticated - set an HF_TOKEN for higher rate limits - silenced,
+        # harmless: public models, a few files once, nowhere near the limits)
+        logging.getLogger('huggingface_hub.utils._http').addFilter(_hub_unauthenticated_filter)
+        return huggingface_hub.snapshot_download(repo, **options)
+
+
+def _hub_unauthenticated_filter(record):
+    return 'unauthenticated requests' not in record.getMessage()
 
 
 # Download a URL to a path (by way of path + '.part', so an interrupted download is never the file)

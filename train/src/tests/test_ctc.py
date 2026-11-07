@@ -43,7 +43,15 @@ class TestRecognizer(unittest.TestCase):
             self.assertEqual(model.device, 'cpu')
             self.assertEqual(os.environ['HF_HOME'], ctc.HF_HOME)
             self.assertEqual(ctc.load_ctc('mps')[2], 'mps')
-        self.assertEqual(hub.snapshot_download.call_args.args, (ctc.CTC_REPO,))
+            # From the cache, without network access, when it's there - else downloaded
+            patterns = ['*.json', 'pytorch_model.bin', 'README.md']
+            cached = unittest.mock.call(ctc.CTC_REPO, allow_patterns=patterns, local_files_only=True)
+            self.assertEqual(hub.snapshot_download.call_args, cached)
+            directory = hub.snapshot_download.return_value
+            hub.snapshot_download.reset_mock()
+            hub.snapshot_download.side_effect = [OSError('not cached'), directory]
+            self.assertEqual(ctc.load_ctc()[1], VOCAB)
+            self.assertEqual(hub.snapshot_download.call_args_list, [cached, unittest.mock.call(ctc.CTC_REPO, allow_patterns=patterns)])
 
     def test_ctc_log_posteriors(self):
         # Sorted by length, batched to max_batch_seconds - each clip's frames, normalized posteriors

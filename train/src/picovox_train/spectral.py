@@ -12,15 +12,21 @@ import numpy
 import torch
 
 
-# A Hann window, cached per size and device
-@functools.lru_cache(maxsize=32)
-def _hann(size, device):
-    return torch.hann_window(size, device=device)
+# A Hann window, cached per size and device (a dict, not functools.lru_cache - torch.compile traces through an
+# lru_cache, making the window in its graph; it reads a dict's cached window as a graph input)
+_HANN_WINDOWS = {}
+
+
+def hann(size, device):
+    key = (size, str(device))
+    if key not in _HANN_WINDOWS:
+        _HANN_WINDOWS[key] = torch.hann_window(size, device=device)
+    return _HANN_WINDOWS[key]
 
 
 # The complex STFT [B, bins, frames] of audio [B, N] (Hann window, centered)
 def stft(audio, fft_size, hop):
-    return torch.stft(audio, fft_size, hop_length=hop, window=_hann(fft_size, str(audio.device)), center=True,
+    return torch.stft(audio, fft_size, hop_length=hop, window=hann(fft_size, audio.device), center=True,
                       return_complex=True)
 
 

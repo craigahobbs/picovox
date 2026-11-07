@@ -7,7 +7,6 @@ import contextlib
 import importlib
 import io
 import json
-import logging
 import os
 import sys
 import tempfile
@@ -87,15 +86,15 @@ class TestArguments(unittest.TestCase):
         self.assertIn('no WAV files', stderr.getvalue())
 
     def test_quiet_libraries(self):
-        with warnings.catch_warnings(), unittest.mock.patch.dict(os.environ):
+        with warnings.catch_warnings(record=True) as caught, unittest.mock.patch.dict(os.environ):
             os.environ.pop('TQDM_DISABLE', None)
-            try:
-                listeners.quiet_libraries()
-                warnings.warn('hidden')
-                self.assertEqual(os.environ['TQDM_DISABLE'], '1')
-                self.assertTrue(logging.getLogger('x').manager.disable >= logging.WARNING)
-            finally:
-                logging.disable(logging.NOTSET)
+            warnings.simplefilter('always')
+            listeners.quiet_libraries()
+            # (only UTMOS's weight_norm deprecation is silenced)
+            warnings.warn('`torch.nn.utils.weight_norm` is deprecated in favor of ...', FutureWarning)
+            warnings.warn('shown', FutureWarning)
+            self.assertEqual(os.environ['TQDM_DISABLE'], '1')
+        self.assertEqual([str(warning.message) for warning in caught], ['shown'])
 
     def test_to_stderr(self):
         with helpers.captured() as (stdout, stderr):
