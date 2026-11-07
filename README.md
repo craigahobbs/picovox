@@ -706,8 +706,8 @@ the shipped module's score when it was added (63/73), so it can only go up.
 The probes (kind `probe` in `train/data/heteronyms-test.json`): both readings of the context network's thin words -
 polish, contract, winds, bass, minute, and invalid - in 38 sentences written apart from the labels' seeds and
 collocations, so the context set's few sentences aren't the only measure of how the network generalizes (the regression
-set's sentences, the probes too, are never training examples). 1.6.8's module scores 26 of 38, 2.0's 34; the minimum is
-0.85.
+set's sentences, the probes too, are never training examples). 1.6.8's module scores 26 of 38, 2.0's 34, 2.0.1's 32; the minimum is
+0.8 (the thin words' scores vary a few sentences between trainings).
 
 ### Heteronyms
 
