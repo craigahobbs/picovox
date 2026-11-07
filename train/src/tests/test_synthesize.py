@@ -50,15 +50,8 @@ class TestSynthesize(unittest.TestCase):
                          [[2] + ids[1:5] + [vocab.index('<period>')]])
         self.assertEqual(synthesize.sentences([2], vocab), [])
 
-    def test_speaker_id(self):
-        state = {'speakers': ['male', 'female']}
-        self.assertEqual(synthesize.speaker_id(state, 1), 1)
-        self.assertEqual(synthesize.speaker_id(state, '1'), 1)
-        self.assertEqual(synthesize.speaker_id(state, 'female'), 1)
-
     def test_voice(self):
-        voice = synthesize.Voice(self.checkpoint, speaker='female')
-        self.assertEqual(voice.speaker, 1)
+        voice = synthesize.Voice(self.checkpoint, 1)
         self.assertFalse(voice.model.training)
         self.assertEqual(voice.speaker_input.tolist(), [1])
         self.assertEqual(voice.eq.shape, (params.EQ_BAND_COUNT,))
@@ -75,10 +68,3 @@ class TestSynthesize(unittest.TestCase):
         self.assertTrue(numpy.array_equal(values[-1], values[-2]))
         empty, parts = voice.frames('')
         self.assertEqual((empty.shape, parts), ((0, params.COUNT), []))
-
-    def test_voice_default(self):
-        voice = synthesize.Voice(self.checkpoint)
-        self.assertEqual(voice.speaker, 0)
-        values, _ = voice.frames('Hello.')
-        other, _ = synthesize.Voice(self.checkpoint, speaker=1).frames('Hello.')
-        self.assertFalse(numpy.array_equal(values, other))

@@ -7,7 +7,7 @@ same steps as lib/model.js: tokens (frontend.py), split into sentences (each wit
 (the export manifest's remap), durations, frames. The export's parity check (tests/test_export.py) compares
 lib/model.js with it - the reference, a test module.
 
-The voice is a speaker (a key or an id of the speaker table).
+The voice is a speaker (its row of the speaker table).
 """
 
 import numpy
@@ -41,18 +41,16 @@ class Voice:
     """An exported model ready for inference - the model (its weights quantized as exported), its remap, and its channel
     equalizer"""
 
-    def __init__(self, checkpoint, device='cpu', speaker=0):
-        model, state = load_model(checkpoint, device)
+    def __init__(self, checkpoint, speaker):
+        model, _ = load_model(checkpoint)
         data = training_data()
         self.model = quantized_model(model, data).eval()
         counts, self.vocab = training_token_counts(data)
         remap = token_remap(self.vocab, counts)
         self.remap = {self.vocab.index(source): self.vocab.index(target) for source, target in remap.items()}
-        self.device = device
-        self.speaker = speaker_id(state, speaker)
-        self.speaker_input = torch.tensor([self.speaker], device=device)
+        self.speaker_input = torch.tensor([speaker])
         with torch.no_grad():
-            self.eq = self.model.eq(self.speaker_input)[0].cpu().numpy()
+            self.eq = self.model.eq(self.speaker_input)[0].numpy()
 
     def frames(self, text):
         """Text to parameter frames [T, COUNT] (numpy, the end frame included) and the sentences' token ids and
@@ -62,19 +60,12 @@ class Voice:
         parts = []
         for sentence in sentences(ids, self.vocab):
             mapped = [self.remap.get(token_id, token_id) for token_id in sentence]
-            tokens = torch.tensor([mapped], device=self.device)
+            tokens = torch.tensor([mapped])
             with torch.no_grad():
                 result = self.model.infer(tokens, speaker=self.speaker_input)
-            parts.append({'ids': sentence, 'durations': result['durations'][0].cpu().numpy().tolist()})
-            chunks.append(result['values'][0, :-1].cpu().numpy())
+            parts.append({'ids': sentence, 'durations': result['durations'][0].numpy().tolist()})
+            chunks.append(result['values'][0, :-1].numpy())
         if not chunks:
             return numpy.zeros((0, params.COUNT)), parts
         values = numpy.concatenate(chunks)
         return numpy.concatenate([values, values[-1:]]), parts
-
-
-# A speaker's row in a checkpoint's speaker table - from an id (int or numeric string) or a key
-def speaker_id(state, speaker):
-    if isinstance(speaker, int) or (isinstance(speaker, str) and speaker.isdigit()):
-        return int(speaker)
-    return state['speakers'].index(speaker)

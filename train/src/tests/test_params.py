@@ -4,8 +4,6 @@
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
 import os
-import runpy
-import sys
 import tempfile
 import unittest
 import unittest.mock
@@ -15,7 +13,7 @@ import torch
 
 from picovox_train import params
 
-from .helpers import captured
+from .helpers import captured, run_module
 
 
 class TestParams(unittest.TestCase):
@@ -72,11 +70,8 @@ class TestParams(unittest.TestCase):
 
     def test_main_module(self):
         # python -m picovox_train.params (without --write-js - the usage error)
-        with unittest.mock.patch.dict(sys.modules), unittest.mock.patch('sys.argv', ['params']), captured(), \
-                self.assertRaises(SystemExit) as context:
-            del sys.modules['picovox_train.params']
-            runpy.run_module('picovox_train.params', run_name='__main__')
-        self.assertEqual(context.exception.code, 2)
+        code, _, _ = run_module('picovox_train.params')
+        self.assertEqual(code, 2)
 
     def test_main_usage(self):
         with captured() as (_, stderr), self.assertRaises(SystemExit) as context:

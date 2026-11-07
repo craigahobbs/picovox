@@ -5,14 +5,12 @@
 
 import fcntl
 import os
-import runpy
 import subprocess
 import sys
 import tempfile
 import threading
 import unittest
 import unittest.mock
-import warnings
 
 from picovox_train import gpulock
 
@@ -82,9 +80,6 @@ class TestGpulock(unittest.TestCase):
         self.assertRegex(lines[1], f'^gpulock: acquired {path} after [0-9]+ s$')
 
     def test_module_main(self):
-        with unittest.mock.patch('sys.argv', ['gpulock']), helpers.captured() as (_, stderr), warnings.catch_warnings():
-            warnings.filterwarnings('ignore', message='.*found in sys.modules', category=RuntimeWarning)
-            with self.assertRaises(SystemExit) as context:
-                runpy.run_module('picovox_train.gpulock', run_name='__main__')
-        self.assertEqual(context.exception.code, 2)
-        self.assertIn('usage:', stderr.getvalue())
+        code, _, stderr = helpers.run_module('picovox_train.gpulock')
+        self.assertEqual(code, 2)
+        self.assertIn('usage:', stderr)

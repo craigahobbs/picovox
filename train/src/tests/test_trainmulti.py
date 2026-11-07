@@ -8,7 +8,6 @@ import functools
 import json
 import math
 import os
-import runpy
 import shutil
 import tempfile
 import threading
@@ -108,7 +107,7 @@ def tearDownModule():  # pylint: disable=invalid-name
     DATA.cleanup()
 
 
-# A tiny trained stage-A checkpoint (trained once) - its path; for the other tests (stepcheck, synthesize)
+# A tiny trained stage-A checkpoint (trained once) - its path (the --init tests')
 @functools.cache
 def tiny_checkpoint():
     DATA.train('shared', '--steps', '2')
@@ -472,12 +471,9 @@ class TestMain(unittest.TestCase):
 
     def test_module_main(self):
         # python -m picovox_train.trainmulti (the usage error - no --name)
-        with unittest.mock.patch('sys.argv', ['trainmulti']), helpers.captured() as (_, stderr), warnings.catch_warnings():
-            warnings.filterwarnings('ignore', message=".*found in sys.modules", category=RuntimeWarning)
-            with self.assertRaises(SystemExit) as context:
-                runpy.run_module('picovox_train.trainmulti', run_name='__main__')
-        self.assertEqual(context.exception.code, 2)
-        self.assertIn('the following arguments are required: --name', stderr.getvalue())
+        code, _, stderr = helpers.run_module('picovox_train.trainmulti')
+        self.assertEqual(code, 2)
+        self.assertIn('the following arguments are required: --name', stderr)
 
 
 class TestStepOptions(unittest.TestCase):

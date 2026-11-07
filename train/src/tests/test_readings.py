@@ -7,8 +7,6 @@ import json
 import math
 import multiprocessing
 import os
-import runpy
-import sys
 import tempfile
 import unittest
 import unittest.mock
@@ -19,7 +17,7 @@ import numpy
 from picovox_train import corpora, ctc, measure, readings, tts
 
 from . import ctc_fixtures, data_fixtures
-from .helpers import captured
+from .helpers import captured, run_module
 
 
 # The measurement's tiny dictionary - its heteronyms (read and lead strong, use voicing, record weak, dawn merger, insult
@@ -455,9 +453,6 @@ class TestReadings(unittest.TestCase):
                                      measured[3]['id']: {'1': 'R IY1 D'}})
 
     def test_main_module(self):
-        with unittest.mock.patch.object(sys, 'argv', ['measure', '--bad']), captured() as (_, stderr), warnings.catch_warnings():
-            warnings.simplefilter('ignore', RuntimeWarning)
-            with self.assertRaises(SystemExit) as context:
-                runpy.run_module('picovox_train.measure', run_name='__main__')
-        self.assertEqual(context.exception.code, 2)
-        self.assertIn('unrecognized arguments: --bad', stderr.getvalue())
+        code, _, stderr = run_module('picovox_train.measure', ['--bad'])
+        self.assertEqual(code, 2)
+        self.assertIn('unrecognized arguments: --bad', stderr)

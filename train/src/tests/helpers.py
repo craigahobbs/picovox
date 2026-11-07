@@ -3,7 +3,7 @@
 
 """
 The unit tests' shared helpers - tiny synthetic corpora (data.py's format), tiny model configurations, output capture,
-and packaged model modules' contents
+a module run as a script, and packaged model modules' contents
 """
 
 import base64
@@ -13,8 +13,10 @@ import io
 import json
 import os
 import re
-import time
+import runpy
+import sys
 import unittest.mock
+import warnings
 import wave
 
 import numpy
@@ -159,15 +161,17 @@ def captured():
         yield stdout, stderr
 
 
-# Wait (polling) until predicate() is true - True, or False at the timeout (s). Tests of threads wait with this, not
-# their own loops, so their coverage doesn't depend on the timing.
-def wait_until(predicate, timeout=120):
-    deadline = time.time() + timeout
-    while not predicate():
-        if time.time() >= deadline:
-            return False
-        time.sleep(0.01)
-    return True
+# Run a module as a script (python -m name args...) - its exit code (SystemExit's; None if it returns), stdout, and
+# stderr. (runpy warns that the module is imported already - the tests imported it; it runs a fresh copy as __main__.)
+def run_module(name, args=()):
+    code = None
+    with unittest.mock.patch.object(sys, 'argv', [name, *args]), captured() as (stdout, stderr), warnings.catch_warnings():
+        warnings.filterwarnings('ignore', re.escape(f"'{name}' found in sys.modules"), RuntimeWarning)
+        try:
+            runpy.run_module(name, run_name='__main__')
+        except SystemExit as exit_:
+            code = exit_.code
+    return code, stdout.getvalue(), stderr.getvalue()
 
 
 # A JavaScript literal of JSON tokens and concatenated string literals (package.py's manifest) - its value

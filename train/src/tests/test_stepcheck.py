@@ -5,11 +5,9 @@
 
 import json
 import os
-import runpy
 import tempfile
 import unittest
 import unittest.mock
-import warnings
 
 from picovox_train import stepcheck
 
@@ -65,9 +63,6 @@ class TestStepcheck(unittest.TestCase):
         self.assertEqual(json.loads(stderr.splitlines()[0])['corpus'], 'tts')
 
     def test_module_main(self):
-        with unittest.mock.patch('sys.argv', ['stepcheck.py']), helpers.captured() as (_, stderr), warnings.catch_warnings():
-            warnings.filterwarnings('ignore', message='.*found in sys.modules', category=RuntimeWarning)
-            with self.assertRaises(SystemExit) as context:
-                runpy.run_module('picovox_train.stepcheck', run_name='__main__')
-        self.assertEqual(context.exception.code, 2)
-        self.assertIn('--init', stderr.getvalue())
+        code, _, stderr = helpers.run_module('picovox_train.stepcheck')
+        self.assertEqual(code, 2)
+        self.assertIn('--init', stderr)

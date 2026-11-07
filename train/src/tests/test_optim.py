@@ -61,20 +61,20 @@ class TestSchedule(unittest.TestCase):
 class TestLeanOptimizer(unittest.TestCase):
 
     def test_matches_adamw(self):
-        # The lean step and the default (clip_grad_norm_, then AdamW) agree up to rounding - the clip binding or not
+        # The lean step and its reference (torch's clip_grad_norm_, then AdamW) agree up to rounding - the clip binding or not
         for scale in (100.0, 0.001):
-            lean_model, default_model = Small(), Small()
+            lean_model, reference_model = Small(), Small()
             lean = optim.LeanOptimizer([{'params': list(lean_model.parameters())}], lr=0.01, weight_decay=0.1)
-            default = torch.optim.AdamW(default_model.parameters(), lr=0.01, weight_decay=0.1, betas=(0.9, 0.98))
+            reference = torch.optim.AdamW(reference_model.parameters(), lr=0.01, weight_decay=0.1, betas=(0.9, 0.98))
             for seed in range(3):
                 backward(lean_model, scale, seed)
-                backward(default_model, scale, seed)
+                backward(reference_model, scale, seed)
                 norm = lean.step()
-                default_norm = torch.nn.utils.clip_grad_norm_(default_model.parameters(), 1.0)
-                default.step()
-                self.assertTrue(torch.allclose(norm, default_norm, rtol=1e-6))
-            for lean_parameter, default_parameter in zip(lean_model.parameters(), default_model.parameters()):
-                self.assertTrue(torch.allclose(lean_parameter, default_parameter, rtol=1e-5, atol=1e-7))
+                reference_norm = torch.nn.utils.clip_grad_norm_(reference_model.parameters(), 1.0)
+                reference.step()
+                self.assertTrue(torch.allclose(norm, reference_norm, rtol=1e-6))
+            for lean_parameter, reference_parameter in zip(lean_model.parameters(), reference_model.parameters()):
+                self.assertTrue(torch.allclose(lean_parameter, reference_parameter, rtol=1e-5, atol=1e-7))
             # (one step counter shared by the group's parameters)
             steps = {id(lean.state[parameter]['step']) for parameter in lean_model.parameters()}
             self.assertEqual(len(steps), 1)

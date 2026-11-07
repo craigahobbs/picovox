@@ -6,13 +6,10 @@
 import argparse
 import json
 import os
-import runpy
-import sys
 import tempfile
 import types
 import unittest
 import unittest.mock
-import warnings
 
 import numpy
 import torch
@@ -23,7 +20,6 @@ from tests import ctc_fixtures, data_fixtures, helpers
 from tests.helpers import write_wav
 
 
-# A clean harmonic tone (harmonics below 2 kHz, no noise)
 class FakeFeatures:
     """A fake wav2vec2 recognizer's features - each 20 ms frame's level statistics, a layer's a different mix of them"""
 
@@ -37,6 +33,7 @@ class FakeFeatures:
         return types.SimpleNamespace(extract_features=base, hidden_states=tuple(base * (index + 1) + index for index in range(25)))
 
 
+# A clean harmonic tone (harmonics below 2 kHz, no noise)
 def tone(seconds, rate, f0=150.0):
     times = numpy.arange(int(seconds * rate)) / rate
     return 0.2 * sum(numpy.sin(2 * numpy.pi * f0 * harmonic * times) / harmonic for harmonic in range(1, 11))
@@ -301,7 +298,6 @@ class TestMeasure(unittest.TestCase):
         with unittest.mock.patch.object(quality, 'gap_command', return_value=0) as gap:
             self.assertEqual(quality.main(['gap', '--out', 'x', '--per-voice', '5', '--model', 'm.js', '-j', '2']), 0)
         self.assertEqual(gap.call_args.args[0], argparse.Namespace(command='gap', out='x', per_voice=5, model='m.js', jobs=2))
-        with unittest.mock.patch.object(sys, 'argv', ['quality']), self.assertRaises(SystemExit), helpers.captured(), \
-                warnings.catch_warnings():
-            warnings.filterwarnings('ignore', message='.*found in sys.modules', category=RuntimeWarning)
-            runpy.run_module('picovox_train.quality', run_name='__main__')
+        code, _, stderr = helpers.run_module('picovox_train.quality')
+        self.assertEqual(code, 2)
+        self.assertIn('the following arguments are required', stderr)

@@ -8,13 +8,10 @@ import contextlib
 import io
 import json
 import os
-import runpy
-import sys
 import tempfile
 import unittest
 import unittest.mock
 import urllib.error
-import warnings
 
 import numpy
 
@@ -42,15 +39,15 @@ def wav_bytes(samples, rate=24000):
             return file.read()
 
 
-# A fake Ollama - urlopen answering the model list (the model at digest), a pull, the speech endpoint (the WAV
-# bytes of speech), and the unload; its requests [(path, body)]
-
 # The process pools in this process (the workers' code covered)
 def setUpModule():  # pylint: disable=invalid-name
     patcher = unittest.mock.patch('concurrent.futures.ProcessPoolExecutor', ctc_fixtures.FakeExecutor)
     patcher.start()
     unittest.addModuleCleanup(patcher.stop)
 
+
+# A fake Ollama - urlopen answering the model list (the model at digest), a pull, the speech endpoint (the WAV
+# bytes of speech), and the unload; its requests [(path, body)]
 class FakeOllama:
 
     def __init__(self, digest='0123456789abcdef', speech=None, models=None):
@@ -181,8 +178,7 @@ class TestSelection(unittest.TestCase):
 
     def test_checked(self):
         settings = tts_settings()
-        with unittest.mock.patch('concurrent.futures.ProcessPoolExecutor', ctc_fixtures.FakeExecutor), \
-                unittest.mock.patch.object(tts, 'CHECK_BATCH', 2):
+        with unittest.mock.patch.object(tts, 'CHECK_BATCH', 2):
             self.assertEqual(tts.checked(['Call me Ishmael.', 'Go.', 'Call me Ishmael.', 'The cat sat on the mat.'], settings, 1),
                              {'Call me Ishmael.': 'Call me ishmael.', 'Go.': None, 'The cat sat on the mat.': 'The cat sat on the mat.'})
             self.assertEqual(tts.checked([], settings, None), {})
@@ -192,8 +188,9 @@ class TestSelection(unittest.TestCase):
                  tts.RECIPE_PATH: {'samples': {'texts': [{'text': 'Call me, Ishmael!'}, {'text': 'Don\'t go.'}]}}}
         with helpers.json_files(tts, files):
             self.assertEqual(tts.excluded_texts(), ['mister smith is here', 'call me ishmael', 'don\'t go'])
-        # The repository's texts
-        self.assertTrue(tts.excluded_texts())
+        # The repository's files have the texts it reads
+        texts = tts.read_json(tts.PANEL_TEXTS_PATH)['texts'] + tts.read_json(tts.RECIPE_PATH)['samples']['texts']
+        self.assertTrue(texts and all(item['text'] for item in texts))
 
     def test_book_paths(self):
         with unittest.mock.patch.object(books, 'pinned_paths', return_value=['a.txt']) as pinned:
@@ -249,7 +246,6 @@ class TestSelectSentences(unittest.TestCase):
                                            lambda books_dir, names, pins: [os.path.join(directory, name) for name in names]), \
                 unittest.mock.patch.object(readings, 'coverage_quotas', return_value=self.QUOTAS) as quotas, \
                 unittest.mock.patch.object(tts, 'excluded_texts', return_value=['they will lead the dogs home tonight']), \
-                unittest.mock.patch('concurrent.futures.ProcessPoolExecutor', ctc_fixtures.FakeExecutor), \
                 unittest.mock.patch.object(tts, 'CHECK_BATCH', 1), \
                 helpers.captured() as (_, stderr):
             write_book(os.path.join(directory, 'cov.txt'), COVERAGE_BOOK)
@@ -851,8 +847,6 @@ class TestMain(unittest.TestCase):
         self.assertEqual(stderr.getvalue(), 'tts: no engine\n')
 
     def test_module_main(self):
-        with unittest.mock.patch.object(sys, 'argv', ['tts']), self.assertRaises(SystemExit), helpers.captured(), \
-                warnings.catch_warnings():
-            # (runpy warns that the module is already imported - it runs a fresh copy as __main__)
-            warnings.filterwarnings('ignore', message='.*found in sys.modules', category=RuntimeWarning)
-            runpy.run_module('picovox_train.tts', run_name='__main__', alter_sys=False)
+        code, _, stderr = helpers.run_module('picovox_train.tts')
+        self.assertEqual(code, 2)
+        self.assertIn('the following arguments are required', stderr)
