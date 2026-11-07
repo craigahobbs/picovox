@@ -47,7 +47,7 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
 - `tools/` - Node development tools on the package's modules (not part of the package): `speak.js` (text to WAV with an
   exported or packaged model - the listener panel's renderer), `loadVoice.js` (a model's loader, for `speak.js` and
   `trainsamples.js`), `unpack.js`, `packagecheck.js`, `pronounceLines.js` (for the Python checks), and `renderLines.js`
-  (`picovox_train.quality`'s renderer); the training dashboard (`dashboard/`), the performance lab (`perf/` - the playback pipeline timed on a
+  (`picovox_train.quality`'s renderer), `serve.js` (the local servers' static files); the training dashboard (`dashboard/`), the performance lab (`perf/` - the playback pipeline timed on a
   phone, and under Node without a JIT), the voice lab (`voicelab/` - the package synthesizing in a page with adjustable
   frame edits, for Claude's blind A/B questions in an artifact; `make voicelab` stages it with `lib/` in
   `build/voicelab/`, and `make train-check` with the trained voice too - a version's `model`, shipped or trained),

@@ -14,8 +14,9 @@
 // - GET /api/clients - the clients and when each last polled
 // - POST /log - an app's log (PicoShelf's ?timing&log=URL timeline), appended to build/perf/devlog.jsonl
 
-import {appendFileSync, createReadStream, existsSync, mkdirSync, statSync} from 'node:fs';
-import {dirname, extname, join, normalize, resolve, sep} from 'node:path';
+import {appendFileSync, mkdirSync} from 'node:fs';
+import {contentTypes, sendFile} from '../serve.js';
+import {dirname, join, resolve} from 'node:path';
 import {Buffer} from 'node:buffer';
 import {createServer} from 'node:http';
 import {fileURLToPath} from 'node:url';
@@ -29,17 +30,6 @@ const resultsPath = join(repository, 'build/perf/results.jsonl');
 const devlogPath = join(repository, 'build/perf/devlog.jsonl');
 let servedRoot = repository;
 const waitMs = 20000;
-
-
-// The served files' content types
-const contentTypes = {
-    '.html': 'text/html; charset=utf-8',
-    '.js': 'text/javascript; charset=utf-8',
-    '.json': 'application/json; charset=utf-8',
-    '.css': 'text/css; charset=utf-8',
-    '.svg': 'image/svg+xml',
-    '.wav': 'audio/wav'
-};
 
 
 // The queue - commands by id, each client's pending command ids, the clients' last polls, the results by command id, and
@@ -78,7 +68,7 @@ function sendJson(response, value, status = 200) {
 
 
 // Queue a command for one client or every known client - its id
-export function queueCommand(command) {
+function queueCommand(command) {
     const id = nextId++;
     const entry = {...command, id};
     commands.set(id, entry);
@@ -141,20 +131,6 @@ function recordResult(result) {
 }
 
 
-// Serve a repository file (no caching - a reload picks up every change) - only a file under the served root (not a
-// sibling directory whose name starts with the root's)
-function serveFile(response, urlPath) {
-    const path = normalize(join(servedRoot, decodeURIComponent(urlPath)));
-    if (!path.startsWith(servedRoot + sep) || !existsSync(path) || !statSync(path).isFile()) {
-        response.writeHead(404, {'Content-Type': 'text/plain'});
-        response.end('not found');
-        return;
-    }
-    response.writeHead(200, {'Content-Type': contentTypes[extname(path)] ?? 'application/octet-stream', 'Cache-Control': 'no-store'});
-    createReadStream(path).pipe(response);
-}
-
-
 // Handle a request
 async function handle(request, response) {
     const url = new URL(request.url, 'http://localhost');
@@ -163,7 +139,7 @@ async function handle(request, response) {
         response.writeHead(302, {'Location': '/tools/perf/index.html'});
         response.end();
     } else if (url.pathname === '/' || url.pathname.endsWith('/')) {
-        serveFile(response, `${url.pathname}index.html`);
+        sendFile(response, servedRoot, `${url.pathname}index.html`);
     } else if (url.pathname === '/log' && request.method === 'POST') {
         const body = await new Promise((resolveBody) => {
             const chunks = [];
@@ -193,7 +169,7 @@ async function handle(request, response) {
     } else if (url.pathname === '/api/clients') {
         sendJson(response, Object.fromEntries([...clients].map(([key, value]) => [key, {...value, 'ago': Date.now() - value.lastPoll}])));
     } else {
-        serveFile(response, url.pathname);
+        sendFile(response, servedRoot, url.pathname);
     }
 }
 
@@ -224,6 +200,4 @@ function main(argv) {
 }
 
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-    main(process.argv.slice(2));
-}
+main(process.argv.slice(2));

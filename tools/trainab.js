@@ -13,7 +13,7 @@
 //         [--port 8770] [--open false - the browser not opened]
 
 import {abReport, alignedDistance, chooseTrials, formatReport, frameFeatures, makeQuestions} from './trainabreport.js';
-import {dirname, extname, join, normalize, resolve} from 'node:path';
+import {dirname, join, resolve} from 'node:path';
 import {existsSync, mkdirSync, readFileSync, renameSync, writeFileSync} from 'node:fs';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {sentenceFrames, voiceTable} from '../lib/synthesis.js';
@@ -23,6 +23,7 @@ import {createServer} from 'node:http';
 import {loadG2p} from '../lib/g2p.js';
 import {loadPackagedModel} from '../lib/package.js';
 import process from 'node:process';
+import {sendFile} from './serve.js';
 import {setPronouncer} from '../lib/lexicon.js';
 import {spawn} from 'node:child_process';
 
@@ -120,7 +121,6 @@ function report() {
 
 // The server - the voice lab's files, and the A/B's API: the questions, the answers, an answer's post, and the round
 // finished early (no audible difference - its unanswered trials dropped, so a rerun starts the next round)
-const types = {'.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.css': 'text/css', '.svg': 'image/svg+xml'};
 const labDir = resolve(args.lab);
 const server = createServer((request, response) => {
     const send = (status, body, type = 'application/json') => {
@@ -160,12 +160,7 @@ const server = createServer((request, response) => {
             }
         });
     } else if (request.method === 'GET') {
-        const path = normalize(join(labDir, url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname)));
-        if (!path.startsWith(labDir) || !existsSync(path)) {
-            send(404, 'Not found', 'text/plain');
-            return;
-        }
-        send(200, readFileSync(path), types[extname(path)] ?? 'application/octet-stream');
+        sendFile(response, labDir, url.pathname === '/' ? '/index.html' : url.pathname);
     } else {
         send(405, '{}');
     }
