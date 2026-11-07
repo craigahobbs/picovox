@@ -30,7 +30,7 @@ function now() {
 
 
 // A checksum of samples (FNV-1a over their float32 bits)
-export function checksum(blocks) {
+function checksum(blocks) {
     let hash = 0x811c9dc5;
     for (const block of blocks) {
         const bytes = new Uint8Array(Float32Array.from(block).buffer);

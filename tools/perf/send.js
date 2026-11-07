@@ -2,8 +2,8 @@
 //
 //     node tools/perf/send.js TYPE ['{"option": ...}'] [--client ID] [--timeout SECONDS] [--port 8090]
 //
-// TYPE is a front-end command (tools/perf/lab.js): timing, reload, info. With no client, the command goes to every
-// client that has polled.
+// TYPE is a front-end command (tools/perf/lab.js): timing, pipeline, parallel, bench, info, or reload. With no client,
+// the command goes to every client that has polled.
 
 /* eslint-disable no-console */
 

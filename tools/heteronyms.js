@@ -1,3 +1,6 @@
+// Licensed under the MIT License
+// https://github.com/craigahobbs/picovox/blob/main/LICENSE
+
 // Heteronym and names regression check - the sentences of train/data/heteronyms-test.json and train/data/names-test.json through
 // the package's front end (lib/lexicon.js textToPhrases with the G2P network as the pronouncer), each expected reading
 // scored: right when the word's phones are one of the reading's variants (or match one without stress and no rejected
@@ -26,7 +29,7 @@ function unstressed(phones) {
 
 
 // Whether a word's phones are the expected reading
-export function isReading(phones, {accept, reject}) {
+function isReading(phones, {accept, reject}) {
     if (accept.includes(phones)) {
         return true;
     }
@@ -36,7 +39,7 @@ export function isReading(phones, {accept, reject}) {
 
 
 // The phones of a word's nth occurrence in a text, through the front end (null if the word isn't found)
-export function wordPhones(text, word, occurrence = 1) {
+function wordPhones(text, word, occurrence = 1) {
     const words = textToPhrases(text).flatMap((phrase) => phrase.words).filter((item) => item.text === word);
     const found = words[occurrence - 1];
     return found ? found.phones.map(({ph, stress}) => (stress === null ? ph : `${ph}${stress}`)).join(' ') : null;
@@ -44,7 +47,7 @@ export function wordPhones(text, word, occurrence = 1) {
 
 
 // Score the regression set with the current pronouncer - {kinds: {kind: {right, total}}, misses: [...]}
-export function scoreHeteronyms(items) {
+function scoreHeteronyms(items) {
     const kinds = {};
     const misses = [];
     for (const item of items) {
@@ -63,12 +66,12 @@ export function scoreHeteronyms(items) {
 
 // The gate's minimums - the default reading, the context-dependent readings and the probes, and the names (the shipped
 // module's score - raised to 0.91 with the dictionary fixes, 67/73, and to 0.93 with Don Quixote's names, 80/86)
-export const minimums = {'default': 0.9, 'context': 0.85, 'probe': 0.85, 'missing': 0, 'names': 0.93};
+const minimums = {'default': 0.9, 'context': 0.85, 'probe': 0.85, 'missing': 0, 'names': 0.93};
 
 
 // The one-line result - kinds' scores against their minimums, and whether any is below (or has no minimum - a kind
 // without one, or a minimum that isn't a number, fails)
-export function resultLine(kinds, kindMinimums) {
+function resultLine(kinds, kindMinimums) {
     const parts = [];
     const below = [];
     for (const [kind, {right, total}] of Object.entries(kinds)) {
@@ -114,7 +117,4 @@ async function main() {
 }
 
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-    const failed = await main();
-    process.exitCode = failed ? 1 : 0;
-}
+process.exitCode = await main() ? 1 : 0;

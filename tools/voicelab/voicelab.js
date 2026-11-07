@@ -20,6 +20,7 @@ import {
 } from './picovox/lib/synthesis.js';
 import {speechText, splitSentences} from './picovox/lib/sentences.js';
 import {NAMES} from './picovox/lib/params.js';
+import {concatBlocks} from './picovox/lib/render.js';
 import {loadG2p} from './picovox/lib/g2p.js';
 import {loadPackagedModel} from './picovox/lib/package.js';
 import {setPronouncer} from './picovox/lib/lexicon.js';
@@ -154,19 +155,14 @@ async function render(voice, modelName, text, settings, seed = 1000) {
             const {chunks, eq} = sentenceFrames(model, speechText(sentence.text), {voice});
             const frames = editFrames([...chunks].flat(), settings);
             const pause = sentence.paragraphStart ? paragraphPause : sentencePause;
-            const onBlock = (block) => blocks.push(block.slice());
+            const onBlock = (block) => blocks.push(block);
             const renderer = createSentenceRenderer({onBlock, eq, 'seed': seed + sentence.index, pause, sampleRate});
             if (frames.length !== 0) {
                 renderer.push(frames);
             }
             renderer.end();
         }
-        const samples = new Float32Array(blocks.reduce((sum, block) => sum + block.length, 0));
-        blocks.reduce((offset, block) => {
-            samples.set(block, offset);
-            return offset + block.length;
-        }, 0);
-        renders.set(key, {samples, sampleRate});
+        renders.set(key, {'samples': concatBlocks(blocks), sampleRate});
     }
     return renders.get(key);
 }
