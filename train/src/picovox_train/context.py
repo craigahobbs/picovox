@@ -47,21 +47,27 @@ words' other windows in the books, contextlabels.py), "transferShare" of a batch
 """
 
 import argparse
+import base64
 import collections
 import gzip
 import hashlib
 import json
 import multiprocessing
 import os
+import re
+import subprocess
 import sys
 import time
+import zlib
 
 import numpy
 
-from . import RECIPE_PATH, ROOT, g2pmodel, read_json
+from . import RECIPE_PATH, ROOT, g2p, g2pmodel, read_json
+from .corpora import file_sha256
 from .trained import module_body
 from .g2p import (EOS, LETTERS, MAX_WORD, MODULE_LINE_LENGTH, PHONES, UPSAMPLE, build_model, learning_rate, log_line, make_batch,
                   model_config, predict, quantize_array, quantize_state, weight_bytes)
+from .readings import sz_only
 
 
 # The recipe's settings - train/data/train.json's "context" (labels, g2p, network, export, gate)
@@ -583,8 +589,6 @@ def g2p_covariances(model, calibration):
 
 # The smallest encoding of a quantized state - (manifest fields {layout, deflate}, base64 text)
 def encode_weights(quantized):
-    import base64  # pylint: disable=import-outside-toplevel
-    import zlib  # pylint: disable=import-outside-toplevel
     candidates = []
     for layout in ('packed', 'bytes'):
         data = weight_bytes(quantized, layout)
@@ -684,10 +688,7 @@ def command_export(args):
     context_quantized = quantize_state(context_checkpoint['state'], EXPORT)
     g2p_parameters = sum(item['integers'].size for item in g2p_quantized)
     context_parameters = sum(item['integers'].size for item in context_quantized)
-    digests = []
-    for path in (args.g2p, args.context):
-        with open(path, 'rb') as file:
-            digests.append(hashlib.sha256(file.read()).hexdigest()[:16])
+    digests = [file_sha256(path)[:16] for path in (args.g2p, args.context)]
     config = g2p_checkpoint['config']
     comment = [
         f'The neural grapheme-to-phoneme model run by lib/g2p.js (and picovox_train/g2pmodel.py) - {config["design"]} design,',
@@ -735,7 +736,6 @@ def describe_heldout(result):
 
 def gate_words(labels):
     """The gate's words - GATE_WORDS less the S/Z-only pairs (by the labels' readings)"""
-    from .readings import sz_only  # pylint: disable=import-outside-toplevel
     return [word for word in GATE_WORDS
             if word in labels['words'] and not sz_only(*(reading[0] for reading in labels['words'][word]['readings'][:2]))]
 
@@ -757,7 +757,6 @@ def gate_result(result, labels):
 
 def word_margins(result, labels, least=20):
     """The held-out aligned accuracy against the majority of every word with least tokens, S/Z-only pairs apart - a line"""
-    from .readings import sz_only  # pylint: disable=import-outside-toplevel
     parts = []
     for key, counts in sorted(result['words'].items(), key=lambda item: -item[1]['total']):
         word = key.split('/', 1)[1]
@@ -775,7 +774,6 @@ def word_margins(result, labels, least=20):
 
 def js_pronouncer(module_path):
     """A pronouncer of word lists by a module as the app runs it (lib/g2p.js - tools/pronounceLines.js)"""
-    import subprocess  # pylint: disable=import-outside-toplevel
 
     def pronounce(words):
         process = subprocess.run(['node', os.path.join(ROOT, 'tools', 'pronounceLines.js'),
@@ -788,8 +786,6 @@ def js_pronouncer(module_path):
 
 def heteronym_scores(module_path):
     """The regression set's scores of a module (tools/heteronyms.js) - ({kind: (right, total)}, its exit status)"""
-    import re  # pylint: disable=import-outside-toplevel
-    import subprocess  # pylint: disable=import-outside-toplevel
     process = subprocess.run(['node', os.path.join(ROOT, 'tools', 'heteronyms.js'), '-m', os.path.abspath(module_path)],
                              capture_output=True, text=True, check=False)
     kinds = {kind: (int(right), int(total)) for kind, right, total in re.findall(r'(\w+) (\d+)/(\d+)', process.stdout)}
@@ -800,7 +796,6 @@ def command_check(args):
     """make train's G2P gate - the retrained module against the committed one: identical (below the comment
     header), else the quality gate (the regression set - tools/heteronyms.js's minimums, and no kind more than
     heteronymKindDrop below the committed module's - and g2p.py's book measures within the recipe's tolerances)"""
-    from . import g2p  # pylint: disable=import-outside-toplevel
     if module_body(args.model) == module_body(args.committed):
         print(f'check: {args.model} is identical to {args.committed} (below the comment header)')
         return 0
@@ -834,7 +829,6 @@ def command_check(args):
 def command_train_g2p(args):
     """Train the reading heads from a G2P checkpoint on g2p.py's data and recipe settings - <out> (a checkpoint)"""
     import torch  # pylint: disable=import-outside-toplevel
-    from . import g2p  # pylint: disable=import-outside-toplevel
     labels = read_json(args.labels)
     settings, data = g2p.final_data()
     items, probabilities = g2p.training_items(data, settings)
@@ -881,8 +875,7 @@ def fold_digest(labels_path, settings):
 def fold_done(path, digest):
     if not os.path.exists(path):
         return False
-    with open(path, encoding='utf-8') as file:
-        return json.load(file).get('digest') == digest
+    return read_json(path).get('digest') == digest
 
 
 # One fold's network (a worker task) - (labels path, fold, settings, log path, the fold's teachers' states, results path,
@@ -912,8 +905,7 @@ def command_folds(args):
     <folds>/fold-<k>.json) pooled"""
     pooled = {'words': collections.defaultdict(lambda: {'right': 0, 'total': 0, 'majority': 0})}
     for fold in range(FOLDS):
-        with open(os.path.join(args.folds, f'fold-{fold}.json'), encoding='utf-8') as file:
-            result = json.load(file)
+        result = read_json(os.path.join(args.folds, f'fold-{fold}.json'))
         for key, counts in result['words'].items():
             if key.startswith('aligned/'):
                 for name in ('right', 'total', 'majority'):

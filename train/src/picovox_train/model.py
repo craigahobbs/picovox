@@ -26,7 +26,7 @@ doesn't differentiate in it).
 Conditioning: MultiModel's condition vector - a speaker embedding (a row of the speaker table: one voice) - is added
 to the token features, the duration predictor's input, and the decoder's input, and modulates every conv-FFN block
 (FiLM). (The first, single-speaker model and its trainer, nn/train.py, and the style table and speaker blends of the
-models trained on human recordings, before 1.7, are in git history.)
+models trained on human recordings, before 2.0.0, are in git history.)
 
 No absolute positional encoding - order comes from the convolutions - so any length works; lib/model.js (and the
 export's parity reference, tests/synthesize.py) speaks long texts a sentence at a time, like the training data.

@@ -36,7 +36,7 @@ import os
 import subprocess
 import sys
 
-from . import ROOT, quant
+from . import ROOT, quant, read_json
 from .corpora import file_sha256
 
 
@@ -135,8 +135,7 @@ def provenance(recipe=None, data_dirs=(), scores=None):
         result['data'] = {os.path.basename(os.path.normpath(directory)): file_sha256(os.path.join(directory, 'index.json'))
                           for directory in data_dirs}
     if scores:
-        with open(scores, encoding='utf-8') as file:
-            panel = json.load(file)['panel']
+        panel = read_json(scores)['panel']
         result['scores'] = {key: round(value, 4) for key, value in panel.items()}
     return result
 
@@ -149,8 +148,7 @@ def module_size(text):
 
 # Package an export (its path without extension) - the module's text
 def package(model_path, provenance_info=None):
-    with open(f'{model_path}.json', encoding='utf-8') as file:
-        manifest = json.load(file)
+    manifest = read_json(f'{model_path}.json')
     if provenance_info:
         manifest['provenance'] = provenance_info
     with open(f'{model_path}.bin', 'rb') as file:

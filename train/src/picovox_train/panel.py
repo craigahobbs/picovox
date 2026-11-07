@@ -28,7 +28,6 @@ model is spoken by the browser path, tools/speak.js):
 
 import argparse
 import concurrent.futures
-import datetime
 import json
 import os
 import re
@@ -41,13 +40,13 @@ import numpy
 
 from .export import export, load_model
 from .package import module_size, package
-from . import RECIPE_PATH, ROOT, corpora
+from . import RECIPE_PATH, ROOT, corpora, g2p, read_json
+from .tts import PANEL_TEXTS_PATH
 
 
 LISTENERS_PYTHON = os.path.join(ROOT, 'build', 'venv-train', 'bin', 'python')
 LISTENERS_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'listeners.py')
 WHISPER_MODEL = corpora.WHISPER_MODEL
-TEXTS_PATH = os.path.join(ROOT, 'tools', 'panel-texts.json')
 EVAL_DIR = os.environ.get('NN_EVAL_DIR', os.path.join(ROOT, 'build', 'nn', 'eval'))
 
 # The export's name - the voice make train's package stage packages (its manifest's voice)
@@ -67,8 +66,7 @@ def transcribe(path):
     if not os.path.exists(base + '.json') or os.path.getmtime(base + '.json') < os.path.getmtime(path):
         subprocess.run(['whisper-cli', '-m', WHISPER_MODEL, '-t', '2', '-f', path, '-np', '-ojf', '-of', base], check=True,
                        capture_output=True, cwd=ROOT)
-    with open(base + '.json', encoding='utf-8') as file:
-        result = json.load(file)
+    result = read_json(base + '.json')
     return ''.join(segment['text'] for segment in result['transcription']).strip()
 
 
@@ -102,8 +100,7 @@ def cosine(first, second):
 
 # The panel texts - [{id, text}]
 def panel_texts():
-    with open(TEXTS_PATH, encoding='utf-8') as file:
-        return json.load(file)['texts']
+    return read_json(PANEL_TEXTS_PATH)['texts']
 
 
 # Speak a batch ([{text, wav, seed, speaker}]) with an export (tools/speak.js) - its speed report
@@ -119,8 +116,7 @@ def score_model(model_path, out_dir, settings, reference=None, whisper_workers=6
     """Speak and score an export (model_path - its manifest and weights without the extension) - {panelSpeed, speakers,
     utterances, panel}; settings - load_config's ({speakers: [key], rate}); reference - another model's result (the
     similarity)"""
-    with open(model_path + '.json', encoding='utf-8') as file:
-        keys = [speaker['key'] for speaker in json.load(file)['speakers']]
+    keys = [speaker['key'] for speaker in read_json(model_path + '.json')['speakers']]
     items = []
     for speaker in settings['speakers']:
         for number, text in enumerate(panel_texts()):
@@ -158,8 +154,7 @@ def score_model(model_path, out_dir, settings, reference=None, whisper_workers=6
 
 # The settings - the recipe's (train/data/train.json) panel, and its speakers: the training speech's voices' keys (tts voices)
 def load_config(path=RECIPE_PATH):
-    with open(path, encoding='utf-8') as file:
-        recipe = json.load(file)
+    recipe = read_json(path)
     return {**recipe['panel'], 'speakers': list(recipe['tts']['voices'])}
 
 
@@ -171,10 +166,7 @@ def root_path(path):
 # Append a progress line to EVAL_DIR/eval.log (and stderr)
 def log_line(text):
     os.makedirs(EVAL_DIR, exist_ok=True)
-    line = f'{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} {text}'
-    with open(os.path.join(EVAL_DIR, 'eval.log'), 'a', encoding='utf-8') as file:
-        file.write(line + '\n')
-    print(line, file=sys.stderr, flush=True)
+    g2p.log_line(os.path.join(EVAL_DIR, 'eval.log'), text)
 
 
 def evaluate_model(name, checkpoint, settings, reference=None, whisper_workers=6):
@@ -195,8 +187,7 @@ def evaluate_model(name, checkpoint, settings, reference=None, whisper_workers=6
         model, state = load_model(checkpoint)
         export(model, state, EXPORT_VOICE, out_dir)
         module = package(model_path)
-    with open(model_path + '.json', encoding='utf-8') as file:
-        parameters = json.load(file)['parameterCount']
+    parameters = read_json(model_path + '.json')['parameterCount']
     size = module_size(module)
     result = {'name': name, 'checkpoint': checkpoint, 'parameters': parameters,
               'size': {'moduleBytes': size['bytes'], 'moduleGzipBytes': size['gzipBytes']}}
@@ -209,8 +200,7 @@ def evaluate_model(name, checkpoint, settings, reference=None, whisper_workers=6
 
 # An evaluated model's result (EVAL_DIR/<name>/result.json)
 def load_result(name):
-    with open(os.path.join(EVAL_DIR, name, 'result.json'), encoding='utf-8') as file:
-        return json.load(file)
+    return read_json(os.path.join(EVAL_DIR, name, 'result.json'))
 
 
 # The eval subcommand - a model (NAME=CHECKPOINT) through the panel, against a reference's result

@@ -965,6 +965,12 @@ def _row_draws(seeds, stream, counts):
     return draws
 
 
+# Frames' values at the samples [B, N] (numpy or torch) - each sample's frame (frames[:, index], of a column if given)
+# and the next, mixed by its weight
+def _at_samples(frames, index, weight, *column):
+    return frames[(slice(None), index, *column)] * (1 - weight) + frames[(slice(None), index + 1, *column)] * weight
+
+
 class DSynth(torch.nn.Module):
     """The differentiable synthesizer - see the module documentation"""
 
@@ -996,15 +1002,9 @@ class DSynth(torch.nn.Module):
         sample_rate = self.sample_rate
         batch, frame_count = f0_frames.shape
         count = sample_count(frame_count, sample_rate)
-        positions = numpy.arange(count) * params.FRAME_RATE / sample_rate
-        index = numpy.clip(numpy.floor(positions).astype(numpy.int64), 0, frame_count - 2)
-        weight = positions - index
-
-        def per_sample(columns):
-            return columns[:, index] * (1 - weight) + columns[:, index + 1] * weight
-
-        f0 = numpy.maximum(params.F0_MIN, per_sample(f0_frames))
-        jitter = per_sample(jitter_frames)
+        _, _, _, (index, weight) = self._sample_grid(count, frame_count)
+        f0 = numpy.maximum(params.F0_MIN, _at_samples(f0_frames, index, weight))
+        jitter = _at_samples(jitter_frames, index, weight)
 
         # The unperturbed glottal phase (cycles), the jitter of each of its cycles, and the perturbed phase
         start = numpy.zeros((batch, 1))
@@ -1026,8 +1026,7 @@ class DSynth(torch.nn.Module):
     def finish_plan(self, plan, av_frames, rd_frames):
         """Complete a cycle plan with the frames' voicing and Rd [B, T] (float64) - the glottis's open phase per sample
         and the harmonic count"""
-        index, weight = plan['index'], plan['weight']
-        rd = rd_frames[:, index] * (1 - weight) + rd_frames[:, index + 1] * weight
+        rd = _at_samples(rd_frames, plan['index'], plan['weight'])
         plan['open'] = plan['fraction'] < lf.open_fraction(rd)
         plan['harmonics'] = self._harmonic_count(plan['f0'], av_frames)
         return plan
@@ -1073,8 +1072,7 @@ class DSynth(torch.nn.Module):
 
         # The open phase - the cycle fraction below lf.open_fraction of the per-sample Rd
         batch = values.shape[0]
-        index, weight = grid['index'], grid['weight']
-        rd = values[:, index, params.INDEX['rd']] * (1 - weight) + values[:, index + 1, params.INDEX['rd']] * weight
+        rd = _at_samples(values, grid['index'], grid['weight'], params.INDEX['rd'])
         fraction = tensors['fraction'].reshape(batch, -1).index_select(1, grid['cells'])
         tensors['open'] = fraction < torch.clamp(0.45 + 0.17 * rd, max=0.95)
 
@@ -1215,9 +1213,8 @@ class DSynth(torch.nn.Module):
 
         # The noise levels per sample (so onsets are as sharp as the frames), and the aspiration's glottal modulation -
         # full while open, reduced by the voicing while closed
-        index, weight = grid['index'], grid['weight']
         def per_sample(name):
-            return linear[:, index, params.INDEX[name]] * (1 - weight) + linear[:, index + 1, params.INDEX[name]] * weight
+            return _at_samples(linear, grid['index'], grid['weight'], params.INDEX[name])
         av = per_sample('av')
         modulation = torch.where(tensors['open'], torch.ones_like(av), 1 - params.NOISE_MODULATION * torch.clamp(2 * av, max=1))
         aspiration = tensors['aspiration'] * per_sample('ah') * modulation
@@ -1318,8 +1315,7 @@ class DSynth(torch.nn.Module):
 
         # The voicing, with shimmer, and the noise
         voicing = self._voicing(values, linear, tensors, grid, harmonics, eq)
-        index, weight = grid['index'], grid['weight']
-        shimmer_amount = linear[:, index, params.INDEX['shimmer']] * (1 - weight) + linear[:, index + 1, params.INDEX['shimmer']] * weight
+        shimmer_amount = _at_samples(linear, grid['index'], grid['weight'], params.INDEX['shimmer'])
         voicing = voicing * torch.relu(1 + shimmer_amount * tensors['shimmer'])
         noise = self._noise_signal(values, linear, tensors, grid, count, eq)
         audio = voicing + noise
