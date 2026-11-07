@@ -5,6 +5,7 @@
 
 import argparse
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -548,7 +549,7 @@ class TestAlign(unittest.TestCase):
             self.assertFalse(tts.alignment_current(directory, clips[:1]))
             with unittest.mock.patch.object(tts, 'aligner_key', return_value='new'):
                 self.assertNotEqual(tts.alignment_stamp(directory, clips), stamp)
-            with unittest.mock.patch.object(tts, 'file_sha256', side_effect=lambda path: 'x' if path.endswith('g2pModel.js') else 'y'):
+            with unittest.mock.patch.object(tts, 'file_key', side_effect=lambda path: 'x' if path.endswith('g2pModel.js') else 'y'):
                 self.assertNotEqual(tts.alignment_stamp(directory, clips), stamp)
             edit_alignments(directory, {clips[0]['id']: {'score': -2.0}})
             self.assertNotEqual(tts.alignment_stamp(directory, clips), stamp)
@@ -777,16 +778,16 @@ class TestBuild(unittest.TestCase):
             key = tts.build_key(settings, directory)
             self.assertEqual(tts.build_key(settings, directory), key)
             self.assertNotEqual(tts.build_key(dict(settings, checks={}), directory), key)
-            with unittest.mock.patch.object(tts, 'file_sha256', side_effect=lambda path: 'x' if path.endswith('g2pModel.js') else 'y'):
+            with unittest.mock.patch.object(tts, 'file_key', side_effect=lambda path: 'x' if path.endswith('g2pModel.js') else 'y'):
                 changed = tts.build_key(settings, directory)
             self.assertNotEqual(changed, key)
             # (the build's code - its modules and the package's data files - but not the rest of the package)
-            with unittest.mock.patch.object(tts, 'file_sha256', return_value='y'):
+            with unittest.mock.patch.object(tts, 'file_key', return_value='y'):
                 base = tts.build_key(settings, directory)
             for name, same in (('tts.py', False), ('data.py', False), ('vocab.json', False), ('__init__.py', False),
                                ('context-labels.json', False), ('books.json', False), ('trainmulti.py', True), ('losses.py', True),
                                ('g2p-relabel.json', True), ('train.json', True)):
-                with unittest.mock.patch.object(tts, 'file_sha256', side_effect=lambda path, end=name: 'z' if path.endswith(end) else 'y'):
+                with unittest.mock.patch.object(tts, 'file_key', side_effect=lambda path, end=name: 'z' if path.endswith(end) else 'y'):
                     self.assertEqual(tts.build_key(settings, directory) == base, same, name)
 
     def test_named_files(self):
@@ -796,6 +797,33 @@ class TestBuild(unittest.TestCase):
                 file.write("A = os.path.join(ROOT, 'train', 'data', 'a.json')\nB = os.path.join(ROOT, 'lib')\n"
                            "C = os.path.join(other, 'x')\n")
             self.assertEqual(tts.named_files(path), {os.path.join('train', 'data', 'a.json'), 'lib'})
+
+    def test_file_key(self):
+        # A module's key - its code's: a comment, a docstring, a blank line, or a statement's line breaks the same;
+        # its code another key (and a file not a module, its bytes')
+        sources = {
+            'base': '"""Module."""\n\nimport os\n\n\n# A function\ndef run(path):\n    """Run."""\n    return os.path.join(path,\n'
+                    '                        \'x\')\n',
+            'same': '# A comment\n"""Another\ndocstring."""\nimport os\n\n# Another\ndef run(path):  # (an end comment)\n'
+                    '    return os.path.join(path, \'x\')\n',
+            'code': '"""Module."""\n\nimport os\n\n\n# A function\ndef run(path):\n    """Run."""\n    return os.path.join(path, \'y\')\n',
+            'indent': '"""Module."""\nimport os\ndef run(path):\n    """Run."""\n    if path:\n        return os.path.join(path, \'x\')\n'
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            keys = {}
+            for name, source in sources.items():
+                path = os.path.join(directory, f'{name}.py')
+                with open(path, 'w', encoding='utf-8') as file:
+                    file.write(source)
+                keys[name] = tts.file_key(path)
+            self.assertEqual(keys['same'], keys['base'])
+            self.assertNotEqual(keys['code'], keys['base'])
+            self.assertNotEqual(keys['indent'], keys['base'])
+            self.assertEqual(tts.code_tokens(os.path.join(directory, 'indent.py'))[-6:], [',', "'x'", ')', 'NEWLINE', 'DEDENT', 'DEDENT'])
+            path = os.path.join(directory, 'data.json')
+            with open(path, 'w', encoding='utf-8') as file:
+                file.write('{}\n')
+            self.assertEqual(tts.file_key(path), hashlib.sha256(b'{}\n').hexdigest())
 
     def test_module_closure(self):
         package_dir = os.path.join(tts.SOURCE_DIR, 'picovox_train')
