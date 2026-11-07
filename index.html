@@ -396,7 +396,7 @@ that runs its own synthesis loop (PicoShelf's worker does):</p>
 </tr>
 <tr>
 <td><code>lib/transforms.js</code></td>
-<td>Voice and style transforms of parameter frames (pitch, tract length, bandwidths, whisper, effort, pulse softness, source shelf)</td>
+<td>Voice and style transforms of parameter frames (pitch, pitch range, whisper, press, level, source shelf, frication)</td>
 </tr>
 <tr>
 <td><code>lib/package.js</code></td>
@@ -491,7 +491,7 @@ training (PyTorch, soxr, Praat, and the phoneme recognizer's transformers), the 
 <h2>Command-line tools</h2>
 <pre class="prettyprint source lang-sh"><code>node tools/unpack.js lib/models/voiceModel.js build/voice                 # a packaged model back to its export
 node tools/speak.js -m build/voice &quot;Hello, world.&quot; -o build/hello.wav     # an exported model (&lt;voice>.json and .bin)
-node tools/packagecheck.js lib/models/voiceModel.js build/voice           # check a packaged model against its export
+node tools/packagecheck.js build/train/voiceModel.js build/train/eval/voice/multi  # a packaged model against its export (make train's)
 node tools/heteronyms.js                                                # the heteronym and names regression sets
 </code></pre>
 <p>The performance lab, <code>tools/perf/</code>, times the playback pipeline on a phone: <code>node tools/perf/server.js</code> serves the
@@ -504,7 +504,7 @@ case; over https it compiles), and <code>reload</code>. A variant of <code>lib/<
 <code>tools/perf/compare.js NAME</code> compares its output with <code>lib/</code>'s (identical, else the SNR), and <code>tools/perf/speed.js lib NAME</code> times each under Node without a JIT (<code>--jitless</code> - the phone's speed within about 20%). <code>--root DIR</code> serves
 another app (PicoShelf, with its <code>?timing&amp;log=URL</code> timeline posted to <code>build/perf/devlog.jsonl</code>).</p>
 <p><code>tools/speak.js</code> speaks with an exported model (<code>picovox_train.export CHECKPOINT --voice NAME</code> writes
-<code>train/data/NAME.json</code> and <code>.bin</code>; <code>tools/unpack.js</code> makes one of the package's multi-speaker model), every word pronounced by the
+<code>build/export/NAME.json</code> and <code>.bin</code>, or in <code>--out DIR</code>; <code>tools/unpack.js</code> makes one of the package's multi-speaker model), every word pronounced by the
 G2P network as the package pronounces (<code>-r</code> rate, <code>-s</code> seed, <code>--params</code> the parameter frames, <code>--rate</code> the duration
 multiplier, <code>--batch</code> a list of items); <code>-m</code> also takes a packaged module (<code>lib/models/voiceModel.js</code>). The
 multi-speaker model takes a speaker (<code>--speaker</code>, an id of its manifest's speakers - one per voice, in <code>voices()</code>'s
@@ -516,8 +516,8 @@ path; the CPU and GPU utilization over the run with each stage as a band (the GP
 the forecast faded); every stage of <code>train/data/train-stages.json</code> in collapsible groups - its state (waiting, queued for
 the GPU, running, done, failed, stopped, or not in the run's make target, from <code>TRAIN_DIR/stages.jsonl</code>), its start,
 end, and time against the expected time, and its mean CPU and GPU use; the training runs (<code>TRAIN_DIR/runs/</code>, their
-<code>log.jsonl</code> and <code>train.log</code>) with charts of all their measurements - losses, validation, pitch error, and step times;
-and the gates (the heteronym and G2P checks, the listener panel's scores, and the pick). Listen plays the <code>make train</code>
+<code>log.jsonl</code>, and their stages' logs) with charts of all their measurements - losses, validation, pitch error, and step
+times; and the gates (the heteronym and G2P checks, the listener panel's scores, and the pick). Listen plays the <code>make train</code>
 run's listening samples (each training stage's final model beside the shipped model - see make train, below; the
 stages not rendered yet listed as waiting), and marks new samples until they're heard. Logs has the tails of <code>make train</code>'s 12 most recently updated logs (all of them with &quot;Show older logs&quot;, only those updated in the last 3 minutes
 with &quot;Active only&quot;; &quot;Expand&quot; shows a log's last 500 lines, the full width). It refreshes every second, read-only,
@@ -559,14 +559,13 @@ the renderings are scored with UTMOS, Whisper's WER, and the ECAPA speaker simil
 <p><code>picovox_train/listeners.py</code> is the scoring tool itself - WAV files (16-bit PCM) of any sample rate in, one JSON line per
 file out:</p>
 <pre class="prettyprint source lang-sh"><code>make build/venv-train.build                                 # build/venv-train from train/requirements.txt
-build/venv-train/bin/python -I train/src/picovox_train/listeners.py [--no-mos] [--no-embedding] [--device auto|cpu|mps] \
-    [--files-from list.txt|-] file.wav ...
+build/venv-train/bin/python -I train/src/picovox_train/listeners.py [--no-embedding] [--files-from list.txt|-] file.wav ...
 </code></pre>
 <pre class="prettyprint source lang-json"><code>{&quot;file&quot;: &quot;a.wav&quot;, &quot;seconds&quot;: 2.63, &quot;mos&quot;: 3.33, &quot;embedding&quot;: [31.48, ...]}
 </code></pre>
-<p>The models load once per run (4-7 s) and then score about 35 seconds of speech a second (6 sentences) on an M3 Max's
-GPU (MPS, the default on Apple silicon - about 3x the CPU, with the same scores). Files longer than 20 s are scored in
-chunks. The models download on first use - about 1.5 GB, into <code>downloads/listeners/</code> (torch.hub, Hugging Face - the
+<p>The models load once per run (4-7 s) and score on the CPU (make train leaves the GPU to training - on an M3 Max's GPU,
+MPS, they scored about 3x as fast, with the same scores). Files longer than 20 s are scored in chunks. The models
+download on first use - about 1.5 GB, into <code>downloads/listeners/</code> (torch.hub, Hugging Face - the
 training speech's phoneme recognizer, <code>picovox_train/ctc.py</code>'s, downloads there too; like the training speech, <code>make clean</code> keeps them - <code>make superclean</code> removes them) - and later runs need no network.</p>
 <p>The environment is built with <code>python3</code> (3.14 here; 3.12 also works - <code>make build/venv-train.build PYTHON_VENV=python3.12</code>). Its packages are pinned in <code>train/requirements.txt</code>: PyTorch 2.14, torchaudio 2.11 (UTMOS's),
 SpeechBrain 1.1, transformers 5.20 (the phoneme recognizer's wav2vec2 - <code>picovox_train/ctc.py</code>), and soxr for resampling
@@ -672,7 +671,7 @@ installing changes nothing you can hear), keep the shipped voice when it's signi
 trained voice when it's preferred at least as often, else too close to call. A retrain of an unchanged recipe is
 usually no audible difference - the A/B is its guardrail against a bad run; a recipe change is where it decides.</li>
 <li><code>make train-install</code> - the trained modules that differ into <code>lib/models/</code> (the G2P when it differs below its
-comment header; <code>picovox_train.trained install</code>) - or one model, <code>make train-install-voice</code> or <code>make train-install-g2p</code>; then <code>make commit</code> and commit them.</li>
+comment header, the voice but its manifest's provenance; <code>picovox_train.trained install</code>) - or one model, <code>make train-install-voice</code> or <code>make train-install-g2p</code>; then <code>make commit</code> and commit them.</li>
 </ol>
 <p>The <code>train-*</code> targets run their commands - none decides on another's results. <code>make train-check</code> and <code>make train-install</code> fail until <code>make train</code> has trained both models (<code>train-install-voice</code> and <code>-g2p</code>, their
 model). Each stage is a
@@ -689,7 +688,7 @@ time (<code>picovox_train/gpulock.py</code> - two at once each run at about half
 <tbody>
 <tr>
 <td>tts-corpus - the training speech: the local TTS model's clips (<code>picovox_train.tts generate</code> - Ollama) and their CTC alignment (<code>tts align</code>), in <code>downloads/tts/</code></td>
-<td>GPU - about 45 and 15 minutes the first time, a minute cached</td>
+<td>GPU - about 40 and 26 minutes the first time, a minute cached</td>
 <td><code>lib/models/g2pModel.js</code>, the dictionary</td>
 </tr>
 <tr>
@@ -728,7 +727,7 @@ time (<code>picovox_train/gpulock.py</code> - two at once each run at about half
 <td>tts-readings (after data-tts)</td>
 </tr>
 <tr>
-<td>g2p-network, context-labels, context-network, g2p - the G2P (the network; the heteronym labels from the pinned books; the context network and its cross-validation; the reading stage, the export, and the gate)</td>
+<td>g2p-network, context-labels, context-network, g2p-reading, g2p - the G2P (the network; the heteronym labels from the pinned books; the context network and its cross-validation; beside it, the reading stage; the export and the gate)</td>
 <td>CPU - the network one core, ~30 min</td>
 <td>the labels: tts-readings (after data-tts)</td>
 </tr>
@@ -753,19 +752,18 @@ the CPU.</p>
 <p>Each training stage's final model - stage A's last checkpoint (which stage B starts from) and stage B's best (the model
 the package stage ships) - is rendered
 for listening as the stage finishes, in its own CPU stage beside the next GPU stage (<code>tools/trainsamples.js</code>): exported
-as the package stage exports it, it speaks <code>train/data/train.json</code>'s <code>samples</code> texts (Moby-Dick's opening, a dialogue,
+as the gate exports it (the export the package stage packages), it speaks <code>train/data/train.json</code>'s <code>samples</code> texts (Moby-Dick's opening, a dialogue,
 and heteronyms) in six of the package's voices (three female, three male) exactly as the package speaks a
 sentence (<code>lib/synthesis.js</code>, every word pronounced by the G2P network), and each sample is scored with UTMOS on the
 CPU. The shipped <code>lib/models/voiceModel.js</code> is rendered the same way, as the reference. The WAV files are
 <code>TRAIN_DIR/samples/STAGE-SPEAKER-TEXT.wav</code>, listed in <code>TRAIN_DIR/samples/index.json</code>; the dashboard's Listen tab plays
 them, each beside the shipped model's.</p>
 <p><code>make train</code> keeps a record for the training dashboard (<code>tools/dashboard/</code>): each stage's start, end, and failure in
-<code>TRAIN_DIR/stages.jsonl</code> and each command's output also in <code>TRAIN_DIR/logs/STAGE.log</code> (<code>tools/trainstage.sh</code> - the
-training stages' also in their runs' <code>train.log</code>), and every 20 seconds, for the life of <code>make train</code>, the CPU busy %, the GPU
-utilization %, the memory used %, and the running stages in <code>TRAIN_DIR/util.log</code> (<code>tools/trainutil.sh</code>). The stages,
-their dependencies, and their expected times are <code>train/data/train-stages.json</code> (<code>test/testTrainStages.js</code> keeps it in
-step with the Makefile). <code>make train</code> never removes anything; <code>make train-clean</code> removes <code>TRAIN_DIR</code> for a run from
-scratch.</p>
+<code>TRAIN_DIR/stages.jsonl</code> and each command's output also in <code>TRAIN_DIR/logs/STAGE.log</code> (<code>tools/trainstage.sh</code>), and
+every 20 seconds, for the life of <code>make train</code>, the CPU busy %, the GPU utilization %, the memory used %, and the
+running stages in <code>TRAIN_DIR/util.log</code> (<code>tools/trainutil.sh</code>). The stages, their dependencies, and their expected
+times are <code>train/data/train-stages.json</code> (<code>test/testTrainStages.js</code> keeps it in step with the Makefile). <code>make train</code>
+never removes anything; <code>make train-clean</code> removes <code>TRAIN_DIR</code> for a run from scratch.</p>
 <p>The books make train reads - the heteronym labels' 132 Project Gutenberg books and the training speech's fill, 22 more
 (the recipe's <code>tts</code> <code>fill</code>) - are pinned:
 <code>train/data/books.json</code> records each text (by its name in <code>build/nn/books/</code>, the recipe's <code>texts</code>) with its Gutenberg id
@@ -784,8 +782,9 @@ fetch alone, for every pinned text: <code>python -m picovox_train.books fetch</c
 <p><code>make -j train-g2p</code> runs the G2P alone - its stages (with the training speech's readings, tts-corpus and tts-readings),
 without the voice stages or make train's ordering after the voices' data build - for G2P work. The chain's independent
 parts run in worker processes - the context labels' part-of-speech tags (by book) in <code>G2P_JOBS</code>, and the context
-network's trainings and cross-validate's ten folds (each one thread) in <code>CONTEXT_JOBS</code> - and the context network and its
-cross-validation run beside the G2P network; every output is the same for any count. Inside make train the chain runs
+network's trainings and its cross-validation's other nine folds' (each one thread) in <code>CONTEXT_JOBS</code>, every fold's
+teachers in one pool, then every fold's network - and the context network and its cross-validation run beside the G2P
+network; every output is the same for any count. Inside make train the chain runs
 beside the GPU stages, which CPU work slows (the Makefile's <code>BESIDE</code>), so <code>G2P_JOBS</code> is 2 and <code>CONTEXT_JOBS</code> 6 there;
 <code>make train-g2p</code> runs <code>G2P_STANDALONE_JOBS</code> (10) for both at the default QoS. Measured at the background QoS (the
 efficiency cores only, beside another job's load - October 2026): the context labels took 36 minutes (65 before: the
@@ -1095,35 +1094,27 @@ against a full one, the vowels it merges), the vowel's formants (F1 and F2, norm
 voice's own reference vowels); the noun/verb stress pairs aren't measured. Each method is gated by controls - words of
 one pronunciation with a phone swapped, whose votes are the method's false votes: a method's readings are used only
 when at most 3% of 100 or more control votes are wrong. The measured readings are the G2P's heteronym evidence - the
-relabeled words, the context labels (below), and the dictionary audit - and the voice's training tokens take the
-measured reading where the recognizer's vote differs from the front end's.</p>
+relabeled words and the context labels (below) - and the voice's training tokens take the measured reading where the
+recognizer's vote differs from the front end's.</p>
 <h3>The dictionary audit</h3>
 <p>The network learns the dictionary's errors too (HOBBES HH AA1 B IY0 Z - &quot;hobbies&quot; - and, from it, &quot;mobbes&quot; M AA1 B
 IY2 Z), so <code>train/data/g2p-fixes.json</code> corrects the dictionary's labels where the evidence says they're wrong; <code>g2p.py</code>
 applies it in every stage, before the relabeled words (the rule-labeled words derived from a fixed word follow - HOBBES'S
-HH AA1 B Z IH0 Z). <code>picovox_train/g2paudit.py</code> finds them:</p>
-<pre class="prettyprint source lang-sh"><code>PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2paudit folds --out build/nn/g2paudit -j 5     # 10 screening models (resumable)
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2paudit suspects --out build/nn/g2paudit \
-    --books build/nn/books --catalog ../picoshelf/data/catalog.json --heteronyms build/nn/context/labels.json
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2paudit audio --out build/nn/g2paudit [--speak]
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2paudit adjudicate --out build/nn/g2paudit
-</code></pre>
-<p>Two partitions of the dictionary into five folds (a word's possessives in its fold) train ten screening models (the
-recipe's network and sampling, 6,000 steps, no rule- or teacher-labeled words), so every word is held out by two of
-them (held-out accuracy 62% - any pronunciation, stress included; the dictionary is mostly names). A word is a suspect
-when both its models' phones differ from its label (not by stress alone) by a log-probability margin of 3, or both prefer
-another of its variants by that margin: 12,750 of 124,101 words - mostly legitimate irregulars (of, colonel) and
-foreign names. Where the training speech's voices spoke a suspect (with <code>--speak</code>, a word of too few tokens has
-sentences of the books with it spoken by the TTS model, in turn by the voices, and aligned), the CTC phoneme recognizer
-(<code>picovox_train/ctc.py</code>) scores the label and each alternative (the models' predictions, the dictionary's variants -
-those that would be a lexical correction: not stress or reduction alone, not a consonant dropped, not a merger's vowels,
-not a function word or a one- or two-letter word) on up to 12 of its aligned tokens with their neighbors; a token votes
-for a candidate 2 (log) more likely than the rest, and a confirmed error needs the votes' Wilson 95% lower bound above
-one half from 3 or more books. Control words (both models agree with the label, against a model's second guess)
-measure the method. The TTS model's pronunciation of a rare word or a name is its own G2P's guess, so a verdict is the
-engine and the fold models together. (The committed fixes were found before 2.0 with the LibriTTS-R readers'
-recordings: 140 control words, no false errors and 1.5% of the tokens' votes for the wrong candidate; the audio
-confirmed 13 errors and 143 labels, the rest without audio evidence.)</p>
+HH AA1 B Z IH0 Z). The fixes are committed data, from a one-off audit before 2.0 (its tool, <code>picovox_train/g2paudit.py</code>,
+is in git history - commits 1e86148 and 6cec8e3).</p>
+<p>Two partitions of the dictionary into five folds (a word's possessives in its fold) trained ten screening models (the
+recipe's network and sampling, 6,000 steps, no rule- or teacher-labeled words), so every word was held out by two of
+them (held-out accuracy 62% - any pronunciation, stress included; the dictionary is mostly names). A word was a suspect
+when both its models' phones differed from its label (not by stress alone) by a log-probability margin of 3, or both
+preferred another of its variants by that margin: 12,750 of 124,101 words - mostly legitimate irregulars (of, colonel)
+and foreign names. Where the LibriTTS-R readers spoke a suspect, the CTC phoneme recognizer (<code>picovox_train/ctc.py</code>)
+scored the label and each alternative (the models' predictions, the dictionary's variants - those that would be a
+lexical correction: not stress or reduction alone, not a consonant dropped, not a merger's vowels, not a function word
+or a one- or two-letter word) on up to 12 of its aligned tokens with their neighbors; a token voted for a candidate 2
+(log) more likely than the rest, and a confirmed error needed the votes' Wilson 95% lower bound above one half from 3
+or more speakers. Control words (both models agree with the label, against a model's second guess) measured the method:
+140 control words, no false errors and 1.5% of the tokens' votes for the wrong candidate. The audio confirmed 13 errors
+and 143 labels, the rest without audio evidence.</p>
 <p>The names regression set (<code>train/data/names-test.json</code>, run by <code>tools/heteronyms.js</code> as kind <code>names</code>): surnames, first
 names, and place names with verified pronunciations - HOBBES first (the dictionary's own evidence: its second variant,
 HOBBS, and every other -bes word), the audio's confirmed errors and labels, and well-established names. Its minimum is
@@ -1131,8 +1122,8 @@ the shipped module's score when it was added (63/73), so it can only go up.</p>
 <p>The probes (kind <code>probe</code> in <code>train/data/heteronyms-test.json</code>): both readings of the context network's thin words -
 polish, contract, winds, bass, minute, and invalid - in 38 sentences written apart from the labels' seeds and
 collocations, so the context set's few sentences aren't the only measure of how the network generalizes (the regression
-set's sentences, the probes too, are never training examples). 1.6.8's module scores 26 of 38, 2.0's 34; the minimum is
-0.85.</p>
+set's sentences, the probes too, are never training examples). 1.6.8's module scores 26 of 38, 2.0's 34, 2.0.1's 32; the minimum is
+0.8 (the thin words' scores vary a few sentences between trainings).</p>
 <h3>Heteronyms</h3>
 <p>Some words have readings their neighbors decide - &quot;I read it yesterday&quot; and &quot;I will read it&quot;, &quot;their lives&quot; and &quot;she
 lives&quot;, &quot;a lead pipe&quot;, the noun/verb stress pairs. The G2P module also holds two small pieces for them (no word list or
@@ -1148,20 +1139,22 @@ regression set's cases a pair, and adding a few seeds for one word flipped other
 own seeds) are trained first, and the shipped network - the same size - is trained toward their mean probabilities on
 its examples and on unlabeled transfer windows (the ambiguous words' other windows in the books), with context words
 dropped at random (<code>itemDropout</code>).</p>
-<pre class="prettyprint source lang-sh"><code>PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels books                                # the recipe's books (pinned texts)
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels aligned --out build/nn/context      # the training speech's measured readings
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels tag --out build/nn/context         # part-of-speech tags (spaCy)
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels labels --out build/nn/context       # the ambiguous words and examples
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context train-g2p --labels build/nn/context/labels.json --init build/nn/g2p-train/focus.pt \
-    --out build/nn/context/g2p.pt                                                   # the reading input and ambiguity head
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context train-context --labels build/nn/context/labels.json --out build/nn/context/context.pt -j 4
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context export --g2p build/nn/context/g2p.pt --context build/nn/context/context.pt
+<pre class="prettyprint source lang-sh"><code>PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels books                                 # the recipe's books (pinned texts)
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels aligned --out build/train/context    # the training speech's measured readings
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels tag --out build/train/context        # part-of-speech tags (spaCy)
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.contextlabels labels --out build/train/context     # the ambiguous words and examples
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context train-g2p --labels build/train/context/labels.json --init build/train/g2p/focus.pt \
+    --out build/train/context/g2p.pt                                                # the reading input and ambiguity head
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context train-context --labels build/train/context/labels.json \
+    --out build/train/context/context.pt --folds build/train/context/folds -j 10    # the context network and its cross-validation
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context folds build/train/context/folds --labels build/train/context/labels.json
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context export --g2p build/train/context/g2p.pt --context build/train/context/context.pt
 node tools/heteronyms.js                                                            # the regression set (exit 1 below the gate)
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.context cross-validate --labels build/nn/context/labels.json --out build/nn/context/folds -j 10
 </code></pre>
-<p>(<code>tag</code>, <code>train-context</code> - its teachers - and <code>cross-validate</code> take <code>-j</code>, their worker processes - the results
-are the same for any count. <code>cross-validate</code> keeps a fold's results only when they are from the same labels and
-settings.)</p>
+<p>(<code>tag</code> and <code>train-context</code> take <code>-j</code>, their worker processes - the results are the same for any count.
+<code>train-context</code> trains every fold's teachers at once, then every fold's network - fold 0, the labels' own held-out
+books, is the context network itself - and keeps a fold's results only when they are from the same labels and
+settings; <code>folds</code> is the cross-validated gate over them.)</p>
 <p>The settings are <code>train/data/train.json</code>'s <code>context</code> section. <code>make train-g2p</code> runs all of it (the voice stages use the
 committed <code>lib/models/g2pModel.js</code>) and gates its module with <code>picovox_train.context check</code>: identical to the
 committed module below the comment header (the stages are deterministic on the same inputs), else within the recipe's
@@ -1176,8 +1169,8 @@ on 200 or more); and hand-written seed sentences and reviewed collocations for t
 (lead the metal, bass, bow, row, does the deer, house the verb) and the pairs the audio doesn't validate - a
 collocation's token is its example, not a measured one, and the corpus's disagreements with the collocations (the TTS
 model's own reading errors) are reported. Two books and the regression set's sentences are held out - every source's
-examples of them, the book the independent unit - and the held-out accuracy gate (<code>picovox_train.context gate</code>,
-<code>folds</code>) is cross-validated by book.</p>
+examples of them, the book the independent unit - and the held-out accuracy gate (<code>picovox_train.context folds</code>)
+is cross-validated by book.</p>
 <h2>The training speech</h2>
 <p>The voice network's training speech isn't downloaded - make train makes it: <code>picovox_train/tts.py</code> has a local TTS
 model speak sentences of the pinned Project Gutenberg books through Ollama's speech endpoint (<code>POST /v1/audio/speech</code> -
@@ -1230,8 +1223,8 @@ endpoint (a model, a voice, and text in; a WAV out).</p>
 undocumented. The training speech is used locally, at train time - it isn't distributed; the package holds only the
 voice network trained on it.</p>
 <p>make train's other downloads are pinned files, fetched by <code>picovox_train/corpora.py</code> - idempotently and sequentially,
-resuming interrupted downloads, each checked against its SHA-256 (<code>--list</code> shows them): the CMU Pronouncing Dictionary
-(<code>downloads/cmudict/</code>) and the listener panel's Whisper model (<code>downloads/whisper/</code>):</p>
+each checked against its SHA-256: the CMU Pronouncing Dictionary (<code>downloads/cmudict/</code>) and the listener panel's Whisper
+model (<code>downloads/whisper/</code>):</p>
 <pre class="prettyprint source lang-sh"><code>make build/venv-train.build                                         # build/venv-train (corpora.py needs only the standard library)
 build/venv-train/bin/python -I train/src/picovox_train/corpora.py   # the dictionary and the Whisper model into downloads/
 </code></pre>
