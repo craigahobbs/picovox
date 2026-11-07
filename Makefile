@@ -121,17 +121,17 @@ GPU := OMP_NUM_THREADS=2 $(TRAIN_PYTHON) -m picovox_train.gpulock build/gpu.lock
 TRAIN_RUNS := $(TRAIN_DIR)/runs
 
 # The bookkeeping, for the training dashboard (tools/dashboard/): each stage's start, end, and failure in
-# $(TRAIN_DIR)/stages.jsonl and each command's output also in $(TRAIN_DIR)/logs/<stage>.log (tools/trainstage.sh - the
-# training stages' output also in their runs' train.log), and the CPU, GPU, and memory use with the running stages every 20 seconds
-# in $(TRAIN_DIR)/util.log (tools/trainutil.sh, for the life of make - a stage's start starts it if none runs: $$PPID,
-# expanded by the recipe line's shell, is make's pid). The stages, their dependencies, and their expected times are
-# train/data/train-stages.json's (test/testTrainStages.js checks it against these targets).
+# $(TRAIN_DIR)/stages.jsonl and each command's output also in $(TRAIN_DIR)/logs/<stage>.log (tools/trainstage.sh), and the
+# CPU, GPU, and memory use with the running stages every 20 seconds in $(TRAIN_DIR)/util.log (tools/trainutil.sh, for the
+# life of make - a stage's start starts it if none runs: $$PPID, expanded by the recipe line's shell, is make's pid). The
+# stages, their dependencies, and their expected times are train/data/train-stages.json's (test/testTrainStages.js checks
+# it against these targets).
 STAGE = tools/trainstage.sh $(TRAIN_DIR) $(basename $(@F)) $$PPID
 
 # Record a make target's run in stages.jsonl (the training dashboard shows its stages), and keep the Mac awake while make
 # runs: macOS's caffeinate until make exits - finished, failed, or interrupted - on AC power with the lid closed too (-s;
 # idle sleep paused one run's stage B for 28 minutes); elsewhere, nothing
-TRAIN_TARGET = @mkdir -p $(TRAIN_DIR) && printf '{"event": "target", "target": "%s", "time": %s}\n' $(1) "$$(date +%s)" >> $(TRAIN_DIR)/stages.jsonl; \
+TRAIN_TARGET = @mkdir -p $(TRAIN_DIR) && printf '{"event": "target", "target": "%s", "time": %s}\n' $@ "$$(date +%s)" >> $(TRAIN_DIR)/stages.jsonl; \
 	if command -v caffeinate >/dev/null; then nohup caffeinate -i -s -w $$PPID >/dev/null 2>&1 & fi
 
 # The targets' final stages - the voice's (its package, gate, and listening samples) and the G2P's (its gate and the
@@ -149,13 +149,13 @@ TRAINED = @for stamp in $(1); do test -f $(TRAIN_DIR)/$$stamp || \
 # (the power check first, alone - its prompt has the terminal - then the stages, in parallel with make -j, then the report)
 .PHONY: train train-voice train-g2p train-check train-install train-clean
 train:
-	$(call TRAIN_TARGET,train)
+	$(TRAIN_TARGET)
 	@tools/trainpower.sh
 	@$(MAKE) --no-print-directory $(TRAIN_VOICE) $(TRAIN_G2P)
 	@$(TRAIN_REPORT)
 
 train-voice:
-	$(call TRAIN_TARGET,train-voice)
+	$(TRAIN_TARGET)
 	@tools/trainpower.sh
 	@$(MAKE) --no-print-directory $(TRAIN_VOICE)
 	@$(TRAIN_REPORT)
@@ -163,7 +163,7 @@ train-voice:
 # make train-g2p - the G2P alone, on every core (G2P_STANDALONE_JOBS workers at the default QoS, not after the voices'
 # data build)
 train-g2p:
-	$(call TRAIN_TARGET,train-g2p)
+	$(TRAIN_TARGET)
 	@$(MAKE) --no-print-directory G2P_STANDALONE=1 G2P_JOBS=$(G2P_STANDALONE_JOBS) CONTEXT_JOBS=$(G2P_STANDALONE_JOBS) BESIDE= $(TRAIN_G2P)
 	@$(TRAIN_REPORT)
 
@@ -230,7 +230,7 @@ $(TRAIN_DIR)/tts-corpus.done: train/data/train.json train/data/books.json lib/mo
 	$(STAGE) -- $(GPU) $(TRAIN_PYTHON) -m picovox_train.tts generate
 	$(STAGE) -- $(GPU) $(TRAIN_PYTHON) -m picovox_train.tts align
 	@$(STAGE) end
-	@mkdir -p $(@D) && touch $@
+	touch $@
 
 $(TRAIN_DIR)/tts-readings.done: $(TRAIN_DIR)/tts-corpus.done
 	@$(STAGE) start
@@ -270,7 +270,7 @@ $(TRAIN_DIR)/g2p-network.done: train/data/train.json train/data/g2p-words.json t
 	@$(STAGE) start
 	$(STAGE) -- $(TRAIN_PYTHON) -m picovox_train.g2p train --out $(TRAIN_DIR)/g2p
 	@$(STAGE) end
-	@mkdir -p $(@D) && touch $@
+	touch $@
 
 $(TRAIN_DIR)/context-labels.done: $(TRAIN_DIR)/tts-readings.done train/data/train.json train/data/books.json train/data/context-labels.json \
 		train/data/g2p-fixes.json train/data/g2p-books.json train/data/g2p-relabel.json \
@@ -323,15 +323,14 @@ $(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/tts-readings.done downloads/cmudict/c
 # The voice - stage A, then stage B with the critic (GPU; resumable) - B's best checkpoint is the voice
 $(TRAIN_DIR)/voice-a.done: $(TRAIN_DIR)/data-tts.done train/data/train.json
 	@$(STAGE) start
-	$(STAGE) --log $(TRAIN_RUNS)/voice-a/train.log -- \
-		$(TRAIN_ENV) $(GPU) $(TRAIN_PYTHON) -m picovox_train.trainmulti --name voice-a --recipe voice.a --resume
+	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(TRAIN_PYTHON) -m picovox_train.trainmulti --name voice-a --recipe voice.a --resume
 	@$(STAGE) end
 	touch $@
 
 $(TRAIN_DIR)/voice-b.done: $(TRAIN_DIR)/voice-a.done
 	@$(STAGE) start
-	$(STAGE) --log $(TRAIN_RUNS)/voice-b/train.log -- \
-		$(TRAIN_ENV) $(GPU) $(TRAIN_PYTHON) -m picovox_train.trainmulti --name voice-b --recipe voice.b --init $(TRAIN_RUNS)/voice-a/last.pt --resume
+	$(STAGE) -- $(TRAIN_ENV) $(GPU) $(TRAIN_PYTHON) -m picovox_train.trainmulti --name voice-b --recipe voice.b \
+		--init $(TRAIN_RUNS)/voice-a/last.pt --resume
 	@$(STAGE) end
 	touch $@
 

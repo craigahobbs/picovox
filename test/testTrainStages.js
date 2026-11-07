@@ -132,7 +132,7 @@ test('trainStages', () => {
     assert.deepEqual(manifest.targets, Object.fromEntries(expected));
     for (const [target, stamps] of Object.entries(targetStamps)) {
         const [, body] = joinedMakefile.match(new RegExp(`^${target}:\\n((?:\\t[^\\n]*\\n)*)`, 'm'));
-        assert(body.startsWith(`\t$(call TRAIN_TARGET,${target})\n`), target);
+        assert(body.startsWith('\t$(TRAIN_TARGET)\n'), target);
         const [make, report] = body.trimEnd().split('\n').slice(-2);
         assert(make.endsWith(` --no-print-directory ${stamps}`) || make.endsWith(` BESIDE= ${stamps}`), target);
         assert.equal(report, '\t@$(TRAIN_REPORT)', target);
@@ -154,7 +154,7 @@ test('trainStages', () => {
         assert.equal(recipe[recipe.length - 2], '@$(STAGE) end', stage);
         assert.match(recipe[recipe.length - 1], /touch \$@$/, stage);
         for (const line of recipe.slice(1, -2)) {
-            assert.match(line, /^\$\(STAGE\) (?:--log \S+ )?-- /, stage);
+            assert.match(line, /^\$\(STAGE\) -- /, stage);
         }
     }
 });

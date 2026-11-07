@@ -97,22 +97,17 @@ function parseJsonLog(text) {
 }
 
 
-// Parse a run's text log for its header facts - the target steps, the parameter count, and the data size
+// Parse a run's text log for its header facts - the target steps and the parameter count
 function parseTextLog(text) {
     const info = {};
     // The target from the latest launch's header (a resumed run may have changed it)
-    const target = [...text.matchAll(/(\d+) steps from (\d+)/g)].pop();
+    const target = [...text.matchAll(/(\d+) steps from \d+/g)].pop();
     if (target) {
         info.targetSteps = Number(target[1]);
-        info.startStep = Number(target[2]);
     }
     const parameters = text.match(/model: (\d+) parameters/);
     if (parameters) {
         info.parameters = Number(parameters[1]);
-    }
-    const data = text.match(/data: ([^\n]+)/);
-    if (data) {
-        info.data = data[1].replace(/\s*\(.*\)$/, '');
     }
     // An error counts only in the latest launch (after the last header) - a resumed run's log keeps earlier failures
     const launches = text.split(/^.*steps from \d+.*$/m);
@@ -170,8 +165,7 @@ function runStatus(run) {
     if (run.waiting) {
         return 'waiting';
     }
-    const train = run.entries.train || [];
-    const last = train[train.length - 1];
+    const {last} = run.pace;
     if (run.info.error) {
         return 'failed';
     }
@@ -194,8 +188,7 @@ function runList() {
 
 // A run's card
 function runCard(run, onSelect, selected) {
-    const train = run.entries.train || [];
-    const last = train[train.length - 1];
+    const {last, secondsPerStep, fraction, secondsLeft} = run.pace;
     const status = runStatus(run);
     const card = make('button', 'run');
     card.type = 'button';
@@ -204,18 +197,14 @@ function runCard(run, onSelect, selected) {
     head.append(make('span', 'run-name', run.name), make('span', `pill ${status}`, status));
     const bar = make('div', 'bar');
     const fill = make('div');
-    const fraction = last && run.info.targetSteps ? Math.min(1, last.step / run.info.targetSteps) : 0;
-    fill.style.width = `${(100 * fraction).toFixed(1)}%`;
+    fill.style.width = `${(100 * (fraction ?? 0)).toFixed(1)}%`;
     bar.append(fill);
     card.addEventListener('click', () => onSelect(run.name));
     if (run.waiting) {
         card.append(head, bar, make('div', 'facts', run.note || 'not started'));
         return card;
     }
-    const recent = train.slice(-20).map((entry) => entry.secondsPerStep).filter(Number.isFinite);
-    const secondsPerStep = median(recent);
-    const remaining = last && run.info.targetSteps ? (run.info.targetSteps - last.step) * secondsPerStep : NaN;
-    const timeLeft = status === 'live' ? `${formatDuration(remaining)} left` : '-';
+    const timeLeft = status === 'live' ? `${formatDuration(secondsLeft)} left` : '-';
     const val = run.entries.val || [];
     const lastVal = val[val.length - 1];
     const facts = [
@@ -248,19 +237,16 @@ const chartHelp = {
     'spectral': 'How far the synthesized voice\'s spectrum is from the real recording\'s - multi-resolution STFT and log-mel ' +
         'differences. The main training loss and the best progress gauge, but blind to some of what sounds synthetic: the ' +
         'critic stage raises naturalness (UTMOS) far more than it lowers this.',
-    'durations': 'How well the model predicts timing - phone lengths (durPhone), whether a pause happens at a word or phrase ' +
-        'boundary (durPause), and how long the pauses are (durPaused). Errors are in log-duration units.',
+    'durations': 'How well the model predicts timing - phone lengths (durPhone) and how long the pauses are (durPaused); ' +
+        'whether a pause happens at all is its own chart (durPause). Errors are in log-duration units.',
     'f0Cents': 'Pitch error on held-out recordings - the average difference between the voice\'s pitch (F0) and the ' +
         'recording\'s, in cents (100 cents = one semitone).',
     'secondsPerStep': 'Wall-clock seconds per training step (one batch). Spikes are stalls - the GPU shared with other jobs, ' +
         'or new batch shapes compiling.',
     'lr': 'The learning rate - how big each update is. It warms up, then decays - stage A on a cosine schedule, stage B ' +
         'held constant, then cooled down over its last steps (warmup-stable-decay).',
-    'durPhone': 'Phone-duration error (log units) - how far the predicted length of each speech sound is from the ' +
-        'recording\'s.',
     'durPause': 'Pause-placement error - whether the model puts a pause at each word or phrase boundary where the voice ' +
         'did (a classification loss).',
-    'durPaused': 'Pause-length error (log units), at the boundaries where the voice paused.',
     'f0': 'Pitch (F0) error in log units on voiced frames - the training loss behind the cents chart.',
     'formant': 'The formant guide - how far the first three formants (F1-F3, the vocal-tract resonances that make vowels) ' +
         'are from Praat\'s measurements of the recording. Weighted heavily early, then faded (guide), so the spectral loss ' +
@@ -290,12 +276,6 @@ const chartHelp = {
         'recognizer\'s features (the wav2vec2 phoneme recognizer\'s layers 3 and 6, frame by frame) - what a listener ' +
         'hears as the same speech, beyond the spectrum. Lower is closer.'
 };
-
-
-// The explanation of a measurement, or null
-function measureHelp(key) {
-    return chartHelp[key] ?? null;
-}
 
 
 // A (?) button that shows an explanation - on hover (its title) and, tapped or clicked, beside it (remembered by key
@@ -453,7 +433,7 @@ function drawRunCharts(element, titleElement, run, force = false) {
     ];
 
     // Any other numeric training or validation keys become extra charts (e.g. adversarial losses)
-    const known = new Set(['step', 'lr', 'secondsPerStep', 'total', 'spectral', 'durPhone', 'durPause', 'durPaused', 'f0Cents', 'guide']);
+    const known = new Set(['step', 'lr', 'secondsPerStep', 'total', 'spectral', 'durPhone', 'durPaused', 'f0Cents']);
     const extraKeys = [...new Set([...train, ...val].flatMap((entry) => Object.keys(entry)))].filter((key) => !known.has(key));
     for (const key of extraKeys) {
         charts.push({'title': key, 'help': key, 'logScale': false, 'series': [
@@ -479,7 +459,7 @@ function drawRunCharts(element, titleElement, run, force = false) {
             legend.append(swatch);
         }
         const title = make('h3', '', chart.title);
-        const help = measureHelp(chart.help);
+        const help = chartHelp[chart.help] ?? null;
         if (help !== null) {
             title.append(' ', helpTip(`chart:${chart.help}`, help));
         }
@@ -496,10 +476,9 @@ function logHeading(file, result) {
 }
 
 
-// Fetch make train's logs - [{file, result, lines}], the most recently updated first
-async function loadLogs(files) {
-    const logs = (await Promise.all(files.map(async (file) => ({file, 'result': await fetchText(file.url)})))).
-        filter((item) => item.result !== null).sort((first, second) => second.result.modified - first.result.modified);
+// make train's logs (loadTrain's) - [{file, result, lines}], the most recently updated first
+function loadLogs(logFiles) {
+    const logs = [...logFiles].sort((first, second) => second.result.modified - first.result.modified);
     for (const log of logs) {
         log.lines = log.result.text.replace(/\r/g, '\n').split('\n').filter((line) => line.trim() !== '');
     }
@@ -652,19 +631,17 @@ async function renderTrainSamples() {
         return;
     }
     const samplesUrl = new URL(`${trainData.dir}/samples/`, rootUrl);
-    const [result, recipeResult] = await Promise.all([fetchText(new URL('index.json', samplesUrl)),
-        fetchText(new URL('train/data/train.json', rootUrl))]);
+    const result = await fetchText(new URL('index.json', samplesUrl));
+    const texts = trainData.recipe?.samples?.texts ?? [];
     let index;
-    let texts;
     try {
         index = result === null ? null : JSON.parse(result.text);
-        texts = JSON.parse(recipeResult?.text ?? '{}').samples?.texts ?? [];
     } catch {
         // Being written - the last rendering stays
         return;
     }
     const models = trainModel.listenModels(trainData.manifest, trainData.states, index);
-    const key = JSON.stringify([samplesUrl.href, result?.text ?? null, recipeResult?.text ?? null,
+    const key = JSON.stringify([samplesUrl.href, result?.text ?? null, texts,
         models.map((model) => [model.key, model.status])]);
     if (key === trainSamplesKey) {
         return;
@@ -784,20 +761,15 @@ function recipeStop(recipe, path) {
 }
 
 
-// The last line of texts matching a pattern (the later texts first) - or null
-function lastMatch(texts, pattern) {
-    for (const text of texts) {
-        const lines = (text || '').split('\n').filter((line) => pattern.test(line));
-        if (lines.length !== 0) {
-            return lines[lines.length - 1].trim();
-        }
-    }
-    return null;
+// The last line of a text matching a pattern - or null
+function lastMatch(text, pattern) {
+    const lines = (text || '').split('\n').filter((line) => pattern.test(line));
+    return lines.length === 0 ? null : lines[lines.length - 1].trim();
 }
 
 
-// Load make train's state - {dir, manifest, states, plan, samples, alive, start, end, status, gates, logFiles, now,
-// progress} or null (no stage manifest)
+// Load make train's state - {dir, manifest, recipe, states, plan, samples, alive, start, end, status, gates, logFiles,
+// now, progress} or null (no stage manifest)
 async function loadTrain() {
     const dir = (new URLSearchParams(window.location.search).get('train') || 'build/train').replace(/\/$/, '');
     const dirUrl = new URL(`${dir}/`, rootUrl);
@@ -855,7 +827,7 @@ async function loadTrain() {
     }));
     // (a GPU stage waiting for the GPU lock - its last gpulock line is "waiting")
     const queued = new Set([...stageLogs].filter(([, result]) => (
-        /^gpulock: waiting/.test(lastMatch([result.text], /^gpulock: /) || '')
+        /^gpulock: waiting/.test(lastMatch(result.text, /^gpulock: /) || '')
     )).map(([name]) => name));
     // (make runs while its utilization sampler writes - make train starts it, and so does any stage's start)
     const alive = utilResult !== null && Date.now() - utilResult.modified < 90000;
@@ -868,19 +840,27 @@ async function loadTrain() {
     const states = trainModel.stageStates(manifest, {events, alive, queued, 'target': runTarget?.target, 'started': runStart});
     document.getElementById('trainTitle').firstChild.nodeValue = `make ${runTarget?.target ?? manifest.target}`;
 
-    // The training runs (TRAIN_DIR/runs/<run>/), each stopped at its recipe's stop
+    // The training runs (TRAIN_DIR/runs/<run>/ - their structured logs; their text, their stages' logs), each stopped at
+    // its recipe's stop, and each one's pace - its last step, its recent seconds per step (the median of its last 20), the
+    // fraction of its target done, and the seconds left at that pace
     for (const stage of manifest.stages.filter((item) => item.run)) {
-        const base = new URL(`runs/${encodeURIComponent(stage.run)}/`, dirUrl);
-        const [jsonLog, textLog] = await Promise.all([fetchText(new URL('log.jsonl', base)), fetchText(new URL('train.log', base))]);
+        const jsonLog = await fetchText(new URL(`runs/${encodeURIComponent(stage.run)}/log.jsonl`, dirUrl));
+        const textLog = stageLogs.get(stage.stage) ?? null;
         const info = textLog === null ? {} : parseTextLog(textLog.text);
         const stop = stage.recipe ? recipeStop(recipe, stage.recipe) : null;
         if (stop !== null) {
             info.targetSteps = Math.min(stop, info.targetSteps ?? Infinity);
         }
         const waiting = jsonLog === null && textLog === null;
+        const entries = jsonLog === null ? {'train': [], 'val': []} : parseJsonLog(jsonLog.text);
+        const train = entries.train || [];
+        const last = train[train.length - 1] ?? null;
+        const secondsPerStep = median(train.slice(-20).map((entry) => entry.secondsPerStep).filter(Number.isFinite));
+        const targeted = last !== null && Boolean(info.targetSteps);
+        const pace = {last, secondsPerStep, 'fraction': targeted ? Math.min(1, last.step / info.targetSteps) : null,
+            'secondsLeft': targeted ? (info.targetSteps - last.step) * secondsPerStep : NaN};
         trainRuns.set(stage.run, {
-            'name': stage.run, 'stage': stage.stage, info, waiting,
-            'entries': jsonLog === null ? {'train': [], 'val': []} : parseJsonLog(jsonLog.text),
+            'name': stage.run, 'stage': stage.stage, info, waiting, entries, pace,
             'modified': Math.max(jsonLog?.modified || 0, textLog?.modified || 0),
             'note': `not started - the ${stage.stage} stage is ${states.get(stage.stage).status}`
         });
@@ -892,13 +872,8 @@ async function loadTrain() {
     const remaining = (stage, state) => {
         const run = stage.run ? trainRuns.get(stage.run) : null;
         const started = ['running', 'stopped', 'queued'].includes(state.status);
-        if (started && run && !run.waiting) {
-            const entries = run.entries.train || [];
-            const last = entries[entries.length - 1];
-            const secondsPerStep = median(entries.slice(-20).map((entry) => entry.secondsPerStep).filter(Number.isFinite));
-            if (last && run.info.targetSteps && Number.isFinite(secondsPerStep)) {
-                return Math.max(0, run.info.targetSteps - last.step) * secondsPerStep / 60 + 0.5;
-            }
+        if (started && run && !run.waiting && Number.isFinite(run.pace.secondsLeft)) {
+            return Math.max(0, run.pace.secondsLeft) / 60 + 0.5;
         }
         if (started && state.start !== null) {
             return trainModel.stageMinutesLeft(stage, state, now, progress.get(stage.stage));
@@ -947,24 +922,22 @@ async function loadTrain() {
             return null;
         }
     };
-    const texts = (stage) => [stageLogs.get(stage)?.text];
+    const logText = (stage) => stageLogs.get(stage)?.text;
     const gates = {
-        'heteronyms': lastMatch(texts('heteronyms'), /^check: (?:the \d+ relabeled|the relabeled)/),
-        'g2pCheck': lastMatch(texts('g2p'), /^check: .*g2pModel/),
-        'g2pFolds': lastMatch(texts('context-network'), /^\d+ folds: /),
+        'heteronyms': lastMatch(logText('heteronyms'), /^check: (?:the \d+ relabeled|the relabeled)/),
+        'g2pCheck': lastMatch(logText('g2p'), /^check: .*g2pModel/),
+        'g2pFolds': lastMatch(logText('context-network'), /^\d+ folds: /),
         'baseline': parse(baselineResult),
         'voice': parse(voiceResult),
         'summary': parse(summaryResult)
     };
 
-    // make train's logs (for the Logs tab)
-    const logFiles = [];
-    const addLog = (label, url) => logFiles.push({'path': `make train: ${label}`, url});
-    for (const name of stageLogs.keys()) {
-        addLog(`logs/${name}.log`, new URL(`logs/${encodeURIComponent(name)}.log`, dirUrl));
+    // make train's logs (for the Logs tab) - the stages' and the utilization samples', as fetched above
+    const logFiles = [...stageLogs].map(([name, result]) => ({'file': {'path': `make train: logs/${name}.log`}, result}));
+    if (utilResult !== null) {
+        logFiles.push({'file': {'path': 'make train: util.log'}, 'result': utilResult});
     }
-    addLog('util.log', new URL('util.log', dirUrl));
-    return {dir, manifest, states, plan, samples, alive, start, end, status, gates, logFiles, now, progress};
+    return {dir, manifest, recipe, states, plan, samples, alive, start, end, status, gates, logFiles, now, progress};
 }
 
 
@@ -1011,11 +984,10 @@ function stageProgress(stage, state, data) {
     const run = stage.run ? trainRuns.get(stage.run) : null;
     if (state.status === 'running' || state.status === 'stopped') {
         let fraction = null;
-        const entries = run && !run.waiting ? run.entries.train || [] : [];
         const counted = data.progress.get(stage.stage);
         let over = false;
-        if (entries.length !== 0 && run.info.targetSteps) {
-            fraction = Math.min(1, entries[entries.length - 1].step / run.info.targetSteps);
+        if (run && !run.waiting && run.pace.fraction !== null) {
+            ({fraction} = run.pace);
         } else if (counted && counted.minutesLeft !== undefined) {
             // (its phases' rest - the share of its time so far in its time so far and to come)
             const elapsed = (data.now - state.start) / 60000;
@@ -1146,7 +1118,7 @@ function buildTrain(manifest) {
         gates.set(spec.key, {...spec, item, icon, percent, line});
         return item;
     }));
-    trainElements = {groups, rows, gates, 'cards': null};
+    trainElements = {groups, rows, gates};
 }
 
 
@@ -1618,7 +1590,7 @@ async function refresh() {
         }
         firstRefresh = false;
         renderTrain();
-        const logs = await loadLogs(trainData?.logFiles ?? []);
+        const logs = loadLogs(trainData?.logFiles ?? []);
         lastLogs = logs;
         renderLogs(logs);
         await renderTrainSamples();

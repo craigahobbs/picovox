@@ -2,8 +2,8 @@
 # Licensed under the MIT License
 # https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-# make train's utilization sampler (the training dashboard charts it): every PERIOD seconds (default 20) while the make
-# process MAKE_PID runs, a line of TRAIN_DIR/util.log - the time, the CPU busy % (top), the GPU utilization % (ioreg's
+# make train's utilization sampler (the training dashboard charts it): every 20 seconds while the make process MAKE_PID
+# runs, a line of TRAIN_DIR/util.log - the time, the CPU busy % (top), the GPU utilization % (ioreg's
 # IOAccelerator "Device Utilization %" - no sudo), the memory used %, the system's power and the power it takes in, in
 # watts (a laptop's - ioreg's AppleSmartBattery telemetry, its SystemLoad and SystemPowerIn: power in above the system's
 # charges the battery, below it drains it; - without a battery), macOS's thermal pressure level (0 nominal, 1 moderate,
@@ -12,12 +12,11 @@
 # and the running stages (TRAIN_DIR/stages.jsonl). It exits when make does (finished, failed, or interrupted); one
 # sampler per TRAIN_DIR.
 #
-# tools/trainutil.sh TRAIN_DIR MAKE_PID [PERIOD]
+# tools/trainutil.sh TRAIN_DIR MAKE_PID
 
 set -u
 dir=$1
 make_pid=$2
-period=${3:-20}
 log=$dir/util.log
 pid_file=$dir/util.pid
 mkdir -p "$dir"
@@ -60,7 +59,7 @@ while kill -0 "$make_pid" 2>/dev/null; do
     stages=$(running_stages)
     set -- $stats
     echo "$(date '+%Y-%m-%dT%H:%M:%S') $1 ${gpu:-0} $2 ${power:-- -} ${thermal:--} ${stages:--}" >> "$log"
-    for _ in $(seq "$period"); do
+    for _ in $(seq 20); do
         kill -0 "$make_pid" 2>/dev/null || break
         sleep 1
     done

@@ -320,8 +320,8 @@ path; the CPU and GPU utilization over the run with each stage as a band (the GP
 the forecast faded); every stage of `train/data/train-stages.json` in collapsible groups - its state (waiting, queued for
 the GPU, running, done, failed, stopped, or not in the run's make target, from `TRAIN_DIR/stages.jsonl`), its start,
 end, and time against the expected time, and its mean CPU and GPU use; the training runs (`TRAIN_DIR/runs/`, their
-`log.jsonl` and `train.log`) with charts of all their measurements - losses, validation, pitch error, and step times;
-and the gates (the heteronym and G2P checks, the listener panel's scores, and the pick). Listen plays the `make train`
+`log.jsonl`, and their stages' logs) with charts of all their measurements - losses, validation, pitch error, and step
+times; and the gates (the heteronym and G2P checks, the listener panel's scores, and the pick). Listen plays the `make train`
 run's listening samples (each training stage's final model beside the shipped model - see make train, below; the
 stages not rendered yet listed as waiting), and marks new samples until they're heard. Logs has the tails of `make
 train`'s 12 most recently updated logs (all of them with "Show older logs", only those updated in the last 3 minutes
@@ -480,12 +480,11 @@ CPU. The shipped `lib/models/voiceModel.js` is rendered the same way, as the ref
 them, each beside the shipped model's.
 
 `make train` keeps a record for the training dashboard (`tools/dashboard/`): each stage's start, end, and failure in
-`TRAIN_DIR/stages.jsonl` and each command's output also in `TRAIN_DIR/logs/STAGE.log` (`tools/trainstage.sh` - the
-training stages' also in their runs' `train.log`), and every 20 seconds, for the life of `make train`, the CPU busy %, the GPU
-utilization %, the memory used %, and the running stages in `TRAIN_DIR/util.log` (`tools/trainutil.sh`). The stages,
-their dependencies, and their expected times are `train/data/train-stages.json` (`test/testTrainStages.js` keeps it in
-step with the Makefile). `make train` never removes anything; `make train-clean` removes `TRAIN_DIR` for a run from
-scratch.
+`TRAIN_DIR/stages.jsonl` and each command's output also in `TRAIN_DIR/logs/STAGE.log` (`tools/trainstage.sh`), and
+every 20 seconds, for the life of `make train`, the CPU busy %, the GPU utilization %, the memory used %, and the
+running stages in `TRAIN_DIR/util.log` (`tools/trainutil.sh`). The stages, their dependencies, and their expected
+times are `train/data/train-stages.json` (`test/testTrainStages.js` keeps it in step with the Makefile). `make train`
+never removes anything; `make train-clean` removes `TRAIN_DIR` for a run from scratch.
 
 The books make train reads - the heteronym labels' 132 Project Gutenberg books and the training speech's fill, 22 more
 (the recipe's `tts` `fill`) - are pinned:
