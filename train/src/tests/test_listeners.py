@@ -9,7 +9,6 @@ import io
 import json
 import logging
 import os
-import runpy
 import sys
 import tempfile
 import types
@@ -202,8 +201,7 @@ class TestMain(unittest.TestCase):
         self.assertEqual(bare, [{'file': paths[0], 'seconds': 0.5, 'mos': lines[0]['mos']}])
 
     def test_module_main(self):
-        with unittest.mock.patch.object(sys, 'argv', ['listeners.py']), self.assertRaises(SystemExit), helpers.captured(), \
-                unittest.mock.patch.dict(os.environ), warnings.catch_warnings():
-            # (runpy warns that the module is already imported - it runs a fresh copy as __main__)
-            warnings.filterwarnings('ignore', message='.*found in sys.modules', category=RuntimeWarning)
-            runpy.run_module('picovox_train.listeners', run_name='__main__', alter_sys=False)
+        with unittest.mock.patch.dict(os.environ):
+            code, _, stderr = helpers.run_module('picovox_train.listeners')
+        self.assertEqual(code, 2)
+        self.assertIn('usage:', stderr)

@@ -8,13 +8,10 @@ import contextlib
 import io
 import json
 import os
-import runpy
-import sys
 import tempfile
 import unittest
 import unittest.mock
 import urllib.error
-import warnings
 
 import numpy
 
@@ -850,8 +847,6 @@ class TestMain(unittest.TestCase):
         self.assertEqual(stderr.getvalue(), 'tts: no engine\n')
 
     def test_module_main(self):
-        with unittest.mock.patch.object(sys, 'argv', ['tts']), self.assertRaises(SystemExit), helpers.captured(), \
-                warnings.catch_warnings():
-            # (runpy warns that the module is already imported - it runs a fresh copy as __main__)
-            warnings.filterwarnings('ignore', message='.*found in sys.modules', category=RuntimeWarning)
-            runpy.run_module('picovox_train.tts', run_name='__main__', alter_sys=False)
+        code, _, stderr = helpers.run_module('picovox_train.tts')
+        self.assertEqual(code, 2)
+        self.assertIn('the following arguments are required', stderr)

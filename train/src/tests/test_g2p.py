@@ -5,12 +5,9 @@
 
 import json
 import os
-import runpy
-import sys
 import tempfile
 import unittest
 import unittest.mock
-import warnings
 
 import numpy
 import torch
@@ -365,9 +362,6 @@ class TestG2p(unittest.TestCase):
         self.assertIn('focus.pt: book err ', stderr.getvalue())
 
     def test_main_module(self):
-        with unittest.mock.patch.object(sys, 'argv', ['g2p']), captured() as (_, stderr), warnings.catch_warnings():
-            warnings.simplefilter('ignore', RuntimeWarning)
-            with self.assertRaises(SystemExit) as context:
-                runpy.run_module('picovox_train.g2p', run_name='__main__')
-        self.assertEqual(context.exception.code, 2)
-        self.assertIn('the following arguments are required', stderr.getvalue())
+        code, _, stderr = helpers.run_module('picovox_train.g2p')
+        self.assertEqual(code, 2)
+        self.assertIn('the following arguments are required', stderr)

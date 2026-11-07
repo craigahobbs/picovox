@@ -5,17 +5,14 @@
 
 import json
 import os
-import runpy
-import sys
 import tempfile
 import unittest
 import unittest.mock
-import warnings
 
 from picovox_train import frontend
 
 from . import parity
-from .helpers import captured
+from .helpers import captured, run_module
 
 
 # Texts for the front end - numbers, decimals, abbreviations, quotes, every phrase end, heteronyms
@@ -64,12 +61,9 @@ class TestFrontend(unittest.TestCase):
         self.assertEqual(stderr.getvalue(), 'usage: python -m picovox_train.frontend vocab\n')
 
     def test_main_module(self):
-        with unittest.mock.patch.object(sys, 'argv', ['frontend']), captured() as (_, stderr), warnings.catch_warnings():
-            warnings.simplefilter('ignore', RuntimeWarning)
-            with self.assertRaises(SystemExit) as context:
-                runpy.run_module('picovox_train.frontend', run_name='__main__')
-        self.assertEqual(context.exception.code, 2)
-        self.assertIn('usage', stderr.getvalue())
+        code, _, stderr = run_module('picovox_train.frontend')
+        self.assertEqual(code, 2)
+        self.assertIn('usage', stderr)
 
     def test_get_g2p(self):
         g2p = frontend.get_g2p()

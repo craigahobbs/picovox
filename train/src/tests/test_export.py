@@ -6,11 +6,9 @@
 import base64
 import json
 import os
-import runpy
 import tempfile
 import unittest
 import unittest.mock
-import warnings
 
 import numpy
 import torch
@@ -168,13 +166,9 @@ class TestExport(unittest.TestCase):
         self.assertEqual(default['defaultSpeaker'], 0)
 
     def test_module_main(self):
-        with unittest.mock.patch('sys.argv', ['export', '--help']), helpers.captured() as (stdout, _), \
-                self.assertRaises(SystemExit) as raised, warnings.catch_warnings():
-            # (runpy's warning that the module is imported already - the tests imported it)
-            warnings.filterwarnings('ignore', "'picovox_train.export' found in sys.modules", RuntimeWarning)
-            runpy.run_module('picovox_train.export', run_name='__main__')
-        self.assertEqual(raised.exception.code, 0)
-        self.assertIn('usage:', stdout.getvalue())
+        code, stdout, _ = helpers.run_module('picovox_train.export', ['--help'])
+        self.assertEqual(code, 0)
+        self.assertIn('usage:', stdout)
 
 
 class TestExportParity(unittest.TestCase):

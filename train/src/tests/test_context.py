@@ -7,10 +7,8 @@ import collections
 import hashlib
 import json
 import os
-import runpy
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 import unittest.mock
@@ -21,7 +19,7 @@ import torch
 from picovox_train import RECIPE_PATH, ROOT, context, g2p, g2pmodel
 
 from . import data_fixtures, helpers
-from .helpers import captured
+from .helpers import captured, run_module
 
 
 # The tiny context network's and reading stage's settings
@@ -666,10 +664,6 @@ class TestContext(unittest.TestCase):
 
     def test_main_module(self):
         # The module run as a script (python -m)
-        with unittest.mock.patch.dict(sys.modules), unittest.mock.patch.object(sys, 'argv', ['context', '--help']), \
-                captured() as (stdout, _):
-            sys.modules.pop('picovox_train.context')
-            with self.assertRaises(SystemExit) as raised:
-                runpy.run_module('picovox_train.context', run_name='__main__')
-        self.assertEqual(raised.exception.code, 0)
-        self.assertIn('The heteronym models', stdout.getvalue())
+        code, stdout, _ = run_module('picovox_train.context', ['--help'])
+        self.assertEqual(code, 0)
+        self.assertIn('The heteronym models', stdout)

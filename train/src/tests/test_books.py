@@ -10,9 +10,7 @@ import io
 import json
 import lzma
 import os
-import runpy
 import shutil
-import sys
 import tarfile
 import tempfile
 import unittest
@@ -21,7 +19,7 @@ import urllib.error
 
 from picovox_train import ROOT, books
 
-from .helpers import captured
+from .helpers import captured, run_module
 
 
 # The texts of two revisions of a book
@@ -282,14 +280,10 @@ class TestCommands(BooksCase):
 
     def test_main_module(self):
         urls = FakeUrls({'https://www.gutenberg.org/cache/epub/7/pg7.txt': PINNED})
-        with unittest.mock.patch.dict(sys.modules), \
-                unittest.mock.patch.object(sys, 'argv', ['books', '--pins', self.pins_path, '--books', self.books, 'fetch']), \
-                unittest.mock.patch('urllib.request.urlopen', urls), captured() as (stdout, _):
-            sys.modules.pop('picovox_train.books')
-            with self.assertRaises(SystemExit) as raised:
-                runpy.run_module('picovox_train.books', run_name='__main__')
-        self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(stdout.getvalue(), f'books: 1 pinned texts in {self.books}\n')
+        with unittest.mock.patch('urllib.request.urlopen', urls):
+            code, stdout, _ = run_module('picovox_train.books', ['--pins', self.pins_path, '--books', self.books, 'fetch'])
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout, f'books: 1 pinned texts in {self.books}\n')
 
 
 # An xz-compressed tar of texts ({name: bytes} - name.txt, or a file name with its extension) - a hand-made bundle

@@ -4,13 +4,11 @@
 # pylint: disable=missing-class-docstring, missing-function-docstring, missing-module-docstring
 
 import os
-import runpy
 import shutil
 import subprocess
 import tempfile
 import unittest
 import unittest.mock
-import warnings
 
 from picovox_train import ROOT, SOURCE_DIR, smoke
 
@@ -192,9 +190,6 @@ class TestSmoke(unittest.TestCase):
         makedirs.assert_called_once_with(parser_default, exist_ok=True)
 
     def test_module_main(self):
-        with unittest.mock.patch('sys.argv', ['smoke', '--bad']), helpers.captured() as (_, stderr), warnings.catch_warnings():
-            warnings.filterwarnings('ignore', message='.*found in sys.modules', category=RuntimeWarning)
-            with self.assertRaises(SystemExit) as context:
-                runpy.run_module('picovox_train.smoke', run_name='__main__')
-        self.assertEqual(context.exception.code, 2)
-        self.assertIn('unrecognized arguments: --bad', stderr.getvalue())
+        code, _, stderr = helpers.run_module('picovox_train.smoke', ['--bad'])
+        self.assertEqual(code, 2)
+        self.assertIn('unrecognized arguments: --bad', stderr)

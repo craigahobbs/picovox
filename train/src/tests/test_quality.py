@@ -6,13 +6,10 @@
 import argparse
 import json
 import os
-import runpy
-import sys
 import tempfile
 import types
 import unittest
 import unittest.mock
-import warnings
 
 import numpy
 import torch
@@ -301,7 +298,6 @@ class TestMeasure(unittest.TestCase):
         with unittest.mock.patch.object(quality, 'gap_command', return_value=0) as gap:
             self.assertEqual(quality.main(['gap', '--out', 'x', '--per-voice', '5', '--model', 'm.js', '-j', '2']), 0)
         self.assertEqual(gap.call_args.args[0], argparse.Namespace(command='gap', out='x', per_voice=5, model='m.js', jobs=2))
-        with unittest.mock.patch.object(sys, 'argv', ['quality']), self.assertRaises(SystemExit), helpers.captured(), \
-                warnings.catch_warnings():
-            warnings.filterwarnings('ignore', message='.*found in sys.modules', category=RuntimeWarning)
-            runpy.run_module('picovox_train.quality', run_name='__main__')
+        code, _, stderr = helpers.run_module('picovox_train.quality')
+        self.assertEqual(code, 2)
+        self.assertIn('the following arguments are required', stderr)

@@ -5,14 +5,12 @@
 
 import json
 import os
-import runpy
 import shutil
 import subprocess
 import tempfile
 import time
 import unittest
 import unittest.mock
-import warnings
 
 import numpy
 
@@ -337,10 +335,6 @@ class TestEvaluation(unittest.TestCase):
         self.assertIn('similarity 0.000 (tolerance', output)
 
     def test_module_main(self):
-        with unittest.mock.patch('sys.argv', ['panel', '--help']), captured() as (stdout, _), \
-                self.assertRaises(SystemExit) as raised, warnings.catch_warnings():
-            # (runpy's warning that the module is imported already - the tests imported it)
-            warnings.filterwarnings('ignore', "'picovox_train.panel' found in sys.modules", RuntimeWarning)
-            runpy.run_module('picovox_train.panel', run_name='__main__')
-        self.assertEqual(raised.exception.code, 0)
-        self.assertIn('usage:', stdout.getvalue())
+        code, stdout, _ = helpers.run_module('picovox_train.panel', ['--help'])
+        self.assertEqual(code, 0)
+        self.assertIn('usage:', stdout)

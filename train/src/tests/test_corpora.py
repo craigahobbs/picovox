@@ -5,13 +5,11 @@
 
 import hashlib
 import os
-import runpy
 import sys
 import tempfile
 import unittest
 import unittest.mock
 import urllib.error
-import warnings
 
 from picovox_train import corpora
 from tests import helpers
@@ -106,8 +104,6 @@ class TestMain(unittest.TestCase):
         self.assertIn('unknown files: nope', stderr.getvalue())
 
     def test_module_main(self):
-        with unittest.mock.patch.object(sys, 'argv', ['corpora.py', 'nope']), self.assertRaises(SystemExit), \
-                helpers.captured(), warnings.catch_warnings():
-            # (runpy warns that the module is already imported - it runs a fresh copy as __main__)
-            warnings.filterwarnings('ignore', message='.*found in sys.modules', category=RuntimeWarning)
-            runpy.run_module('picovox_train.corpora', run_name='__main__', alter_sys=False)
+        code, _, stderr = helpers.run_module('picovox_train.corpora', ['nope'])
+        self.assertEqual(code, 2)
+        self.assertIn('unknown files: nope', stderr)

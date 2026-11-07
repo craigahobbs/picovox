@@ -7,7 +7,6 @@ import hashlib
 import json
 import os
 import re
-import runpy
 import shutil
 import sys
 import tempfile
@@ -19,7 +18,7 @@ from picovox_train import contextlabels, corpora, g2p, readings, tts
 from picovox_train.books import load_pins
 
 from . import ctc_fixtures, data_fixtures, helpers
-from .helpers import captured
+from .helpers import captured, run_module
 
 
 # A fake spaCy (build/venv-train only): the tagger tags "read" VBD after "had" or "I", else VB, "lives" NNS, other words NN
@@ -507,10 +506,6 @@ class TestContextLabels(unittest.TestCase):
         self.assertEqual(lines[2], 'families (aligned agreement): stress 1/1')
 
     def test_main_module(self):
-        with unittest.mock.patch.dict(sys.modules), unittest.mock.patch.object(sys, 'argv', ['contextlabels', '--help']), \
-                captured() as (stdout, _):
-            sys.modules.pop('picovox_train.contextlabels')
-            with self.assertRaises(SystemExit) as raised:
-                runpy.run_module('picovox_train.contextlabels', run_name='__main__')
-        self.assertEqual(raised.exception.code, 0)
-        self.assertIn('The heteronym labels', stdout.getvalue())
+        code, stdout, _ = run_module('picovox_train.contextlabels', ['--help'])
+        self.assertEqual(code, 0)
+        self.assertIn('The heteronym labels', stdout)

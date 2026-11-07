@@ -6,16 +6,14 @@
 import datetime
 import json
 import os
-import runpy
 import shutil
-import sys
 import tempfile
 import unittest
 import unittest.mock
 
 from picovox_train import heteronyms, readings, tts
 
-from .helpers import captured
+from .helpers import captured, run_module
 
 
 # The measured words' readings (readings.py's words.json) - lead (relabeled), the (a function word, reduction), use (its
@@ -272,10 +270,6 @@ class TestHeteronyms(unittest.TestCase):
             self.assertEqual(self.read_out('relabel.json')['relabel'], {'lead': 'L EH1 D'})
 
     def test_main_module(self):
-        with unittest.mock.patch.dict(sys.modules), unittest.mock.patch.object(sys, 'argv', ['heteronyms', '--help']), \
-                captured() as (stdout, _):
-            sys.modules.pop('picovox_train.heteronyms')
-            with self.assertRaises(SystemExit) as raised:
-                runpy.run_module('picovox_train.heteronyms', run_name='__main__')
-        self.assertEqual(raised.exception.code, 0)
-        self.assertIn('relabeled words', stdout.getvalue())
+        code, stdout, _ = run_module('picovox_train.heteronyms', ['--help'])
+        self.assertEqual(code, 0)
+        self.assertIn('relabeled words', stdout)

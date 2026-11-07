@@ -5,17 +5,14 @@
 
 import json
 import os
-import runpy
 import shutil
-import sys
 import tempfile
 import unittest
 import unittest.mock
-import warnings
 
 from picovox_train import ROOT, trained
 
-from .helpers import captured
+from .helpers import captured, run_module
 
 
 # A G2P module and a voice module, as generated
@@ -197,10 +194,6 @@ class TestTrained(unittest.TestCase):
         self.assertNotIn('make commit', stdout.getvalue())
 
     def test_main(self):
-        with unittest.mock.patch.object(sys, 'argv', ['trained', 'report', self.train_dir]), captured() as (stdout, _), \
-                warnings.catch_warnings():
-            warnings.filterwarnings('ignore', message='.*found in sys.modules', category=RuntimeWarning)
-            with self.assertRaises(SystemExit) as context:
-                runpy.run_module('picovox_train.trained', run_name='__main__')
-        self.assertEqual(context.exception.code, 0)
-        self.assertIn('None', stdout.getvalue())
+        code, stdout, _ = run_module('picovox_train.trained', ['report', self.train_dir])
+        self.assertEqual(code, 0)
+        self.assertIn('None', stdout)
