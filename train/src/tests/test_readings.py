@@ -213,9 +213,9 @@ class TestReadings(unittest.TestCase):
         self.assertNotEqual(measure.measure_key(dict(settings, checks={}), clips), key)
         self.assertIn(corpora.CMUDICT_PATH, tts.code_files('readings'))
         for name in ('g2pModel.js', 'context-labels.json', 'readings.py', 'frontend.py'):
-            with unittest.mock.patch.object(tts, 'file_sha256', side_effect=lambda path, end=name: 'z' if path.endswith(end) else 'y'):
+            with unittest.mock.patch.object(tts, 'file_key', side_effect=lambda path, end=name: 'z' if path.endswith(end) else 'y'):
                 changed = measure.measure_key(settings, clips)
-            with unittest.mock.patch.object(tts, 'file_sha256', return_value='y'):
+            with unittest.mock.patch.object(tts, 'file_key', return_value='y'):
                 self.assertNotEqual(changed, measure.measure_key(settings, clips), name)
 
     def test_word_times(self):

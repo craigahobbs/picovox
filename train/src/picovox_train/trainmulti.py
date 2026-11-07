@@ -46,7 +46,6 @@ schedule:
 
 import argparse
 import collections
-import hashlib
 import json
 import math
 import os
@@ -59,7 +58,8 @@ import time
 import numpy
 import torch
 
-from . import RECIPE_PATH, ROOT, discriminator, dsynth, optim, params, perceptual
+from . import RECIPE_PATH, ROOT, discriminator, dsynth, optim, params, perceptual, read_json
+from .corpora import file_sha256
 from .data import DATA_DIR, SAMPLE_RATE, CorpusData
 from .model import FIRST_PHONE, MultiModel, core_parameter_count, parameter_count, save_checkpoint
 from .losses import F_INDEX, PRIORS, duration_loss, f0_track, render_values, spectral_loss
@@ -477,8 +477,7 @@ def validate(model, synth, corpus, args, device, sonorants):
 
 # The settings of a section of the recipe (train/data/train.json; "voice.a" - a dotted path) as argparse defaults
 def recipe_defaults(section, path=RECIPE_PATH):
-    with open(path, encoding='utf-8') as file:
-        settings = json.load(file)
+    settings = read_json(path)
     for key in section.split('.'):
         settings = settings[key]
     return {key.replace('-', '_'): value for key, value in settings.items() if key != 'description'}
@@ -599,8 +598,7 @@ def main(argv=None):
     model = MultiModel(config, priors=MULTI_PRIORS, dropout=args.dropout).to(device)
     init_digest = None
     if args.init:
-        with open(args.init, 'rb') as file:
-            init_digest = hashlib.sha256(file.read()).hexdigest()
+        init_digest = file_sha256(args.init)
         state = torch.load(args.init, map_location=device, weights_only=False)
         missing, unexpected = model.load_state_dict(state['model'], strict=False)
         print(f'init from {args.init}: missing {missing}, unexpected {unexpected}', file=sys.stderr)

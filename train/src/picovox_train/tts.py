@@ -47,6 +47,7 @@ import re
 import shutil
 import sys
 import time
+import tokenize as python_tokenize
 import urllib.error
 import urllib.request
 
@@ -438,9 +439,40 @@ def readings_files(directory):
     return [os.path.join(readings_dir, name) for name in sorted(os.listdir(readings_dir))] if os.path.isdir(readings_dir) else []
 
 
-# A cache key - a hash of a basis and of files' contents (by their paths from the root; a missing file aside)
+# The tokens of a module's code - its tokens' strings, with its comments, its line breaks within a statement, and its
+# statements of a string alone (its docstrings) left out, and its layout as the statements' ends and the indentation's
+# steps (not its spaces). The tokens, not the syntax tree: ast.dump's text differs between the Python versions make
+# train may run (3.13 omits the empty fields 3.12 prints, and a version may add a node's field), while the tokens of
+# the same source are the same from 3.12 (PEP 701's f-string tokens) through 3.14.
+def code_tokens(path):
+    layout = {python_tokenize.NEWLINE: 'NEWLINE', python_tokenize.INDENT: 'INDENT', python_tokenize.DEDENT: 'DEDENT'}
+    tokens, statement = [], []
+    with open(path, 'rb') as file:
+        for token in python_tokenize.tokenize(file.readline):
+            if token.type in (python_tokenize.ENCODING, python_tokenize.COMMENT, python_tokenize.NL, python_tokenize.ENDMARKER):
+                continue
+            statement.append(token)
+            if token.type == python_tokenize.NEWLINE:
+                code = [item for item in statement if item.type not in layout]
+                if all(item.type == python_tokenize.STRING for item in code):
+                    statement = [item for item in statement if item.type in (python_tokenize.INDENT, python_tokenize.DEDENT)]
+                tokens.extend(layout.get(item.type, item.string) for item in statement)
+                statement = []
+    return tokens + [layout[item.type] for item in statement]
+
+
+# A file's part of a cache key - the SHA-256 of a module's code (code_tokens - a comment or a docstring edited, the
+# same), of another file's bytes
+def file_key(path):
+    if path.endswith('.py'):
+        return hashlib.sha256(json.dumps(code_tokens(path)).encode('utf-8')).hexdigest()
+    return file_sha256(path)
+
+
+# A cache key - a hash of a basis and of files' contents (file_key's - a module's code; by their paths from the root; a missing
+# file aside)
 def inputs_key(basis, files):
-    basis = dict(basis, files={os.path.relpath(path, ROOT): file_sha256(path) for path in files if os.path.isfile(path)})
+    basis = dict(basis, files={os.path.relpath(path, ROOT): file_key(path) for path in files if os.path.isfile(path)})
     return hashlib.sha256(json.dumps(basis, sort_keys=True).encode('utf-8')).hexdigest()[:12]
 
 

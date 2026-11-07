@@ -14,14 +14,14 @@ model.
 """
 
 import argparse
-import gzip
 import json
 import os
 import re
 import shutil
 import sys
 
-from . import ROOT
+from . import ROOT, package, read_json
+from .books import display_path
 
 
 # The committed modules
@@ -65,23 +65,17 @@ def differs(name, path, committed):
 IDENTICAL = {'G2P': ' (below its header)', 'voice': ' (but its provenance)'}
 
 
-# A path for display - relative to the repository when it's in it
-def display_path(path):
-    relative = os.path.relpath(path, ROOT)
-    return path if relative.startswith('..') else relative
-
-
 # The trained models present in TRAIN_DIR - [(name, path, committed path)]
 def trained_models(train_dir):
     return [(name, os.path.join(train_dir, module), os.path.join(MODELS_DIR, module))
             for name, stamp, module in MODELS if os.path.exists(os.path.join(train_dir, stamp))]
 
 
-# A model module's size - "N bytes (N KB gzipped)"
+# A model module's size - "N bytes (N KB gzipped)" (package.py's sizes)
 def module_size(path):
-    with open(path, 'rb') as file:
-        data = file.read()
-    return f'{len(data):,} bytes ({len(gzip.compress(data, compresslevel=9, mtime=0)) / 1000:.0f} KB gzipped)'
+    with open(path, encoding='utf-8', newline='') as file:
+        size = package.module_size(file.read())
+    return f'{size["bytes"]:,} bytes ({size["gzipBytes"] / 1000:.0f} KB gzipped)'
 
 
 # The voice's lines - its size and the gate's panel scores against the shipped model (TRAIN_DIR/eval/summary.json)
@@ -91,8 +85,7 @@ def voice_lines(train_dir, path):
     lines = [f'{int(parameters.group(1)):,} parameters, {module_size(path)}' if parameters else module_size(path)]
     summary_path = os.path.join(train_dir, 'eval', 'summary.json')
     if os.path.exists(summary_path):
-        with open(summary_path, encoding='utf-8') as file:
-            summary = json.load(file)
+        summary = read_json(summary_path)
         rows = {row['name']: row for row in summary['rows']}
         voice, shipped = rows.get(summary['name']), rows.get(summary['against'])
         if voice and shipped:

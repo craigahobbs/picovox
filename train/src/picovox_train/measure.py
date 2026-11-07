@@ -32,7 +32,8 @@ import sys
 import time
 import warnings
 
-from . import RECIPE_PATH, read_json
+from . import RECIPE_PATH, read_json, tts
+from .tts import log
 from .readings import CLOSED_CLASS, VOWELS, base, difference, measured_words, read_variants, reading_of, token_words, word_class
 
 
@@ -60,18 +61,13 @@ CTC_PARTNERS = {'IY': 'EH', 'EH': 'IY', 'IH': 'AY', 'AY': 'IH', 'AE': 'EY', 'EY'
 FORMANT_PARTNERS = {'IH': 'IY', 'IY': 'IH', 'EH': 'AE', 'AE': 'EH', 'UH': 'UW', 'UW': 'UH', 'AA': 'AH', 'AH': 'AA'}
 
 
-# Print a progress line to stderr
-def log(message):
-    print(message, file=sys.stderr, flush=True)
-
-
 # The measurement's key (another key measures again) - a hash of what the readings depend on: the method's settings,
 # the clips (the selection's with audio) and their alignment (the aligner and the checks, and the front end), and the
 # measured words (the dictionary, the context labels' spec, and readings.py) - code_files('readings') is the front end
 # with the G2P module, the dictionary, and the spec. (Not the alignments themselves: the clips realigned with the
 # measured readings their tokens take are the measurement's own outcome.)
 def measure_key(settings, clips):
-    from . import ctc, tts  # pylint: disable=import-outside-toplevel
+    from . import ctc  # pylint: disable=import-outside-toplevel
     basis = {'settings': [ctc.VOTE_MARGIN, NEIGHBOR_SECONDS, PAD, CONTROL_WORDS, CONTROL_TOKENS, REFERENCE_CLIPS, MIN_VOWEL_SECONDS,
                           FORMANT_MARGIN, CTC_PARTNERS, FORMANT_PARTNERS],
              'aligner': tts.aligner_key(), 'checks': settings['checks'], 'clips': [clip['id'] for clip in clips]}
@@ -262,7 +258,6 @@ def formant_vote(task, norm, references):
 def measure_formants(plan, clips, records, words, names, directory, settings, jobs):
     import multiprocessing  # pylint: disable=import-outside-toplevel
     import numpy  # pylint: disable=import-outside-toplevel
-    from . import tts  # pylint: disable=import-outside-toplevel
     intervals = collections.defaultdict(list)
     for clip, task in plan:
         if task['method'] == 'formant':
@@ -312,7 +307,7 @@ def measure_formants(plan, clips, records, words, names, directory, settings, jo
 
 def measure_command(args):
     """The readings of the corpus's heteronym tokens - <corpus>/readings/ (words.json, readings.jsonl, summary.json)"""
-    from . import ctc, tts  # pylint: disable=import-outside-toplevel
+    from . import ctc  # pylint: disable=import-outside-toplevel
     start_time = time.time()
     settings = tts.load_settings(args.recipe)
     directory = tts.corpus_dir(settings)

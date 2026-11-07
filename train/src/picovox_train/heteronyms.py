@@ -220,8 +220,7 @@ def main(argv=None):
     directory = tts.corpus_dir(tts.load_settings())
     keep = None
     if args.keep:
-        with open(args.keep, encoding='utf-8') as file:
-            keep = json.load(file)
+        keep = read_json(args.keep)
     counts = votes(directory)
     write_json(os.path.join(args.out, 'votes.json'), {'corpus': os.path.basename(directory), 'words': counts})
     print(f'votes: {len(counts)} measured words, {sum(entry["tokens"] for entry in counts.values())} tokens', file=sys.stderr, flush=True)
@@ -241,8 +240,7 @@ def main(argv=None):
         with open(args.write, 'w', encoding='utf-8') as file:
             file.write(committed_text(committed(result, os.path.basename(directory))))
     if args.check:
-        with open(args.check, encoding='utf-8') as file:
-            expected = json.load(file)
+        expected = read_json(args.check)
         relabel = result['relabel']
         if relabel != expected['relabel']:
             print(f'check: the relabeled words differ from {args.check}\'s (corpus {os.path.basename(directory)}, theirs '

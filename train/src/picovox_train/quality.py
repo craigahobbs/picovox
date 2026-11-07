@@ -60,7 +60,11 @@ import os
 import subprocess
 import sys
 
-from . import ROOT
+import numpy
+import soxr
+
+from . import ROOT, read_json
+from .wav import read_wav
 
 
 # The measures' names (report's columns), and the third-octave band centers (Hz)
@@ -90,7 +94,6 @@ ONSET_REACH = 3
 
 # A centered moving average of a track (its length - the edges averaged over what's there)
 def moving_average(values, width):
-    import numpy  # pylint: disable=import-outside-toplevel
     padded = numpy.pad(values, width // 2, mode='edge')
     return numpy.convolve(padded, numpy.ones(width) / width, mode='same')[width // 2:width // 2 + len(values)]
 
@@ -111,7 +114,6 @@ def voiced_runs(mask, minimum):
 # The RMS of a track's band (its fast moving average less its slow one, in seconds) over voiced runs of 250 ms or more -
 # None without one
 def band_rms(track, voiced, rate, fast, slow):
-    import numpy  # pylint: disable=import-outside-toplevel
     fast_width, slow_width = max(1, round(fast * rate)), max(1, round(slow * rate))
     parts = []
     for start, end in voiced_runs(voiced, int(0.25 * rate)):
@@ -123,7 +125,6 @@ def band_rms(track, voiced, rate, fast, slow):
 
 # Samples band-passed (FFT bins outside [low, high) zeroed)
 def band_pass(samples, rate, low, high):
-    import numpy  # pylint: disable=import-outside-toplevel
     spectrum = numpy.fft.rfft(samples)
     frequencies = numpy.fft.rfftfreq(len(samples), 1 / rate)
     spectrum[(frequencies < low) | (frequencies >= high)] = 0
@@ -132,7 +133,6 @@ def band_pass(samples, rate, low, high):
 
 # A signal's envelope (the analytic signal's magnitude)
 def envelope(signal):
-    import numpy  # pylint: disable=import-outside-toplevel
     count = len(signal)
     gain = numpy.zeros(count)
     gain[0] = 1
@@ -145,7 +145,6 @@ def envelope(signal):
 # The voiced frames' spectral balance - {bands: {center: dB}, tilt, alpha, hammarberg, presence, air} (None without
 # voiced frames)
 def spectral_balance(samples, rate, times, voiced, bandwidth):
-    import numpy  # pylint: disable=import-outside-toplevel
     window = numpy.hanning(FFT_SIZE)
     starts = numpy.arange(0, max(0, len(samples) - FFT_SIZE), FFT_HOP)
     nearest = numpy.clip(numpy.searchsorted(times, (starts + FFT_SIZE / 2) / rate), 0, len(times) - 1)
@@ -173,7 +172,6 @@ def spectral_balance(samples, rate, times, voiced, bandwidth):
 # The spectrum's movement over time - {variance, flux, onset} (each None for silence or under 40 ms; onset None
 # without one)
 def temporal(samples, rate):
-    import numpy  # pylint: disable=import-outside-toplevel
     size, hop = round(TEMPORAL_WINDOW * rate), round(TEMPORAL_HOP * rate)
     if len(samples) < size + 4 * hop or not numpy.any(samples):
         return {'variance': None, 'flux': None, 'onset': None}
@@ -207,9 +205,7 @@ def temporal(samples, rate):
 
 # Analyze a WAV file - (path, pitch floor, pitch ceiling, bandwidth) -> {path, the measures, bands}
 def analyze(task):
-    import numpy  # pylint: disable=import-outside-toplevel
     import parselmouth  # pylint: disable=import-outside-toplevel, import-error
-    from .wav import read_wav  # pylint: disable=import-outside-toplevel
     path, floor, ceiling, bandwidth = task
     samples, rate = read_wav(path)
     samples = samples.mean(axis=1)
@@ -289,8 +285,7 @@ def measure_command(args):
         for clip in tts.selection(settings):
             if clip['split'] == split and os.path.exists(tts.wav_path(directory, clip)):
                 clips.setdefault(clip['key'], []).append({**clip, 'wav': tts.wav_path(directory, clip)})
-    with open(os.path.join(ROOT, 'tools', 'panel-texts.json'), encoding='utf-8') as file:
-        panel_texts = json.load(file)['texts']
+    panel_texts = read_json(tts.PANEL_TEXTS_PATH)['texts']
     edits = json.loads(args.edits) if args.edits else None
     jobs, tasks = plan(args.out, args.per_voice, edits, speakers, clips, panel_texts)
     for name in ('voices', 'synth'):
@@ -317,7 +312,6 @@ TRIM_MARGIN = 0.05
 
 # Samples trimmed of leading and trailing silence (20 ms frames TRIM_DB below the loudest), TRIM_MARGIN kept
 def trim(samples, rate):
-    import numpy  # pylint: disable=import-outside-toplevel
     size = rate // 50
     energy = numpy.array([numpy.mean(samples[index:index + size] ** 2) + 1e-12 for index in range(0, len(samples), size)])
     loud = numpy.nonzero(10 * numpy.log10(energy / energy.max()) > -TRIM_DB)[0]
@@ -327,10 +321,7 @@ def trim(samples, rate):
 
 # A WAV file's features - {layer: [frames, dims] float64}: trimmed, at 16 kHz, normalized as the recognizer expects
 def gap_features(model, device, path):
-    import numpy  # pylint: disable=import-outside-toplevel
-    import soxr  # pylint: disable=import-outside-toplevel
     import torch  # pylint: disable=import-outside-toplevel
-    from .wav import read_wav  # pylint: disable=import-outside-toplevel
     samples, rate = read_wav(path, dtype='float32')
     samples = soxr.resample(trim(samples.mean(axis=1), rate), rate, 16000).astype(numpy.float32)
     samples = (samples - samples.mean()) / numpy.sqrt(samples.var() + 1e-7)
@@ -342,13 +333,11 @@ def gap_features(model, device, path):
 
 # Rows scaled to unit length
 def unit_rows(rows):
-    import numpy  # pylint: disable=import-outside-toplevel
     return rows / (numpy.linalg.norm(rows, axis=1, keepdims=True) + 1e-9)
 
 
 # The DTW alignment of two feature sequences by cosine distance - (first's frames, second's frames) along the path
 def dtw_path(first, second):
-    import numpy  # pylint: disable=import-outside-toplevel
     cost = 1 - unit_rows(first) @ unit_rows(second).T
     rows, columns = cost.shape
     total = numpy.full((rows + 1, columns + 1), numpy.inf)
@@ -371,14 +360,12 @@ def dtw_path(first, second):
 
 # A clip's paired distance to its source clip in a layer - the mean cosine distance along their DTW alignment
 def paired_distance(features, source, layer):
-    import numpy  # pylint: disable=import-outside-toplevel
     first, second = dtw_path(features['conv'], source['conv'])
     return float(numpy.mean(1 - numpy.sum(unit_rows(features[layer][first]) * unit_rows(source[layer][second]), axis=1)))
 
 
 # The Frechet distance of two sets of frames [count, dims]
 def frechet(first, second):
-    import numpy  # pylint: disable=import-outside-toplevel
     cov_first, cov_second = numpy.cov(first, rowvar=False), numpy.cov(second, rowvar=False)
     values, vectors = numpy.linalg.eigh(cov_first)
     root = (vectors * numpy.sqrt(numpy.clip(values, 0, None))) @ vectors.T
@@ -389,7 +376,6 @@ def frechet(first, second):
 
 # A voice's gap measures - its synthesized clips' features against their source clips' ([(synth, source)])
 def gap_measures(pairs):
-    import numpy  # pylint: disable=import-outside-toplevel
     result = {}
     for layer in ('L12', 'L6'):
         result[f'fd{layer}'] = frechet(numpy.concatenate([synth[layer] for synth, _ in pairs]),
@@ -401,7 +387,6 @@ def gap_measures(pairs):
 
 def gap_command(args):
     from . import ctc, tts  # pylint: disable=import-outside-toplevel
-    from .wav import read_wav  # pylint: disable=import-outside-toplevel
     settings = tts.load_settings()
     directory = tts.corpus_dir(settings)
     clips = {}
@@ -440,8 +425,7 @@ def mean(rows, name):
 
 # Print each voice's synthesized measures (its held-out texts, then the panel texts) less its source clips'
 def report(path):
-    with open(path, encoding='utf-8') as file:
-        results = json.load(file)
+    results = read_json(path)
     groups = {}
     for row in results['rows']:
         groups.setdefault((row['kind'], row['who']), []).append(row)
