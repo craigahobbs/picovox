@@ -724,7 +724,13 @@ def build_data(args, settings, directory, out):
     clips = [clip for clip in selection(settings, args.jobs, args.recipe) if os.path.exists(wav_path(directory, clip))]
     current = alignment_current(directory, clips)
     if args.limit:
-        clips = clips[::max(1, len(clips) // args.limit)][:args.limit]
+        # (the sample spread over the voices - limit // voices of each, at least one - so the speaker table has every voice)
+        by_voice = {}
+        for clip in clips:
+            by_voice.setdefault(clip['key'], []).append(clip)
+        per_voice = max(1, args.limit // len(by_voice))
+        chosen = {clip['id'] for group in by_voice.values() for clip in group[::max(1, len(group) // per_voice)][:per_voice]}
+        clips = [clip for clip in clips if clip['id'] in chosen]
     log(f'tts build: {len(clips)} clips to build')
     records = read_alignments(directory)
     overrides = readings.overrides(directory)
@@ -756,8 +762,7 @@ def build_data(args, settings, directory, out):
         record = records.get(clip['id'])
         if record and record['labels']:
             floor, ceiling, _ = ranges[clip['key']]
-            tasks.append((wav_path(directory, clip), record['tokens'], record['labels'], mean_seconds,
-                          (floor, ceiling, analysis['formantCeilings'][clip['sex']])))
+            tasks.append((wav_path(directory, clip), record['tokens'], record['labels'], mean_seconds, (floor, ceiling)))
             kept.append(clip)
     names = ('tokens', 'durations', 'audio', 'frames')
     dtypes = {'tokens': np.int16, 'durations': np.int16, 'audio': np.int16, 'frames': np.float32}
@@ -807,7 +812,7 @@ def build_data(args, settings, directory, out):
             speakers[key] = {'index': row, 'sex': voice['sex'], 'corpus': 'tts',
                              'engine': {'model': engine['model'], 'digest': engine['digest'], 'voice': voice['voice']},
                              'sourceSampleRate': data.SAMPLE_RATE, 'bandwidth': analysis['bandwidth'], 'pitchFloor': floor,
-                             'pitchCeiling': ceiling, 'formantCeiling': analysis['formantCeilings'][voice['sex']], 'medianF0': median}
+                             'pitchCeiling': ceiling, 'medianF0': median}
     index = {
         'version': data.FORMAT_VERSION, 'corpus': f'tts ({engine["model"]} {engine["digest"]})', 'license': engine['license'],
         'sampleRate': data.SAMPLE_RATE, 'hop': data.HOP, 'frameRate': data.SAMPLE_RATE / data.HOP, 'channels': data.CHANNELS,
@@ -845,7 +850,7 @@ def main(argv=None):
     align_parser.set_defaults(func=align_command)
     build_parser = commands.add_parser('build', help='the voices\' training data (data.py\'s format)')
     build_parser.add_argument('--out', required=True, help='the data directory')
-    build_parser.add_argument('--limit', type=int, help='a sample of this many clips (a quick test)')
+    build_parser.add_argument('--limit', type=int, help='a sample of about this many clips, spread over the voices (a quick test)')
     build_parser.add_argument('-j', '--jobs', type=int, default=None, help='worker processes (default: all cores)')
     build_parser.set_defaults(func=build_command)
     args = parser.parse_args(argv)

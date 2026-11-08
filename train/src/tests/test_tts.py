@@ -623,7 +623,7 @@ class TestBuild(unittest.TestCase):
             path = os.path.join(directory, 'a.wav')
             # A 16 kHz clip - resampled to 24 kHz; its edge silences (0.25 s) cut to MAX_EDGE_SILENCE
             write_wav(path, data_fixtures.labels_audio(labels, seconds, 16000), 16000)
-            result = tts.process_clip((path, tokens, rows, align.mean_durations(rows), (75.0, 300.0, 5000)))
+            result = tts.process_clip((path, tokens, rows, align.mean_durations(rows), (75.0, 300.0)))
         self.assertAlmostEqual(result['cutStart'], data_fixtures.EDGE_SECONDS - data.MAX_EDGE_SILENCE, places=3)
         self.assertEqual(result['frames'][0], round(data.MAX_EDGE_SILENCE / data.FRAME_SECONDS))
         self.assertEqual(len(result['frames']), len(tokens))
@@ -708,11 +708,10 @@ class TestBuild(unittest.TestCase):
         # The index - the voices with clips, keyed by voice key, their rows the recipe's order
         speakers = index['speakers']
         self.assertEqual(list(speakers), ['male', 'female'])
-        self.assertEqual({key: speakers['female'][key] for key in ('index', 'sex', 'corpus', 'engine', 'sourceSampleRate', 'bandwidth',
-                                                                     'formantCeiling')},
+        self.assertEqual({key: speakers['female'][key] for key in ('index', 'sex', 'corpus', 'engine', 'sourceSampleRate', 'bandwidth')},
                          {'index': 1, 'sex': 'female', 'corpus': 'tts',
                           'engine': {'model': 'phonon', 'digest': '0123456789ab', 'voice': 'Harper'}, 'sourceSampleRate': 24000,
-                          'bandwidth': 12000, 'formantCeiling': 5500})
+                          'bandwidth': 12000})
         self.assertTrue(speakers['male']['pitchFloor'] < speakers['male']['medianF0'] < speakers['male']['pitchCeiling'])
         self.assertAlmostEqual(speakers['male']['medianF0'], 150.0, delta=5.0)
         self.assertEqual((index['corpus'], index['license'], index['version']),
@@ -831,8 +830,8 @@ class TestBuild(unittest.TestCase):
         with self.corpus() as (_, _, clips), tempfile.TemporaryDirectory() as out:
             self.run_build(build_args(os.path.join(out, 'data'), limit=3))
             index = data.CorpusData(os.path.join(out, 'data')).index
-        # Every other of the 7 generated clips, the first 3 - the third not aligned
-        self.assertEqual([entry['sentence'] for entry in index['utterances']], [clips[0]['id'], clips[2]['id']])
+        # The sample spread over the voices - 3 // 2 voices, one of each: the first male and the first female clip
+        self.assertEqual([entry['sentence'] for entry in index['utterances']], [clips[0]['id'], clips[1]['id']])
 
     def test_build_stale_alignment(self):
         # The stamp not current (the readings measured since the alignment) - the clips' phones checked: unchanged (the
