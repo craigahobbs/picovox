@@ -367,17 +367,11 @@ class TestMain(unittest.TestCase):
             self.assertEqual(DATA.train('perceptual', '--perceptual-weight', '2.0', '--perceptual-crops', '1', '--steps', '2',
                                         '--log-every', '1'), 0)
             self.assertEqual(loader.call_count, 1)
-            self.assertEqual(loader.call_args, unittest.mock.call(torch.device('cpu'), dtype=None))
             self.assertEqual(set(calls), {1})
             self.assertIn('perceptual', DATA.last_log)
             calls.clear()
             self.assertEqual(DATA.train('perceptual-all', '--perceptual-weight', '2.0', '--steps', '1'), 0)
             self.assertGreater(max(calls), 1)
-            # (the recognizer in bfloat16 - another loss, loaded once)
-            self.assertEqual(DATA.train('perceptual-bf16', '--perceptual-weight', '2.0', '--perceptual-precision', 'bfloat16',
-                                        '--steps', '1'), 0)
-            self.assertEqual(loader.call_count, 2)
-            self.assertEqual(loader.call_args, unittest.mock.call(torch.device('cpu'), dtype=torch.bfloat16))
             # (off - weight 0)
             calls.clear()
             self.assertEqual(DATA.train('perceptual-off', '--perceptual-weight', '0', '--steps', '1', '--log-every', '1'), 0)
