@@ -1546,6 +1546,80 @@ listening against the 2.0.0 voice, the listener heard no difference (6 of 6 tria
 differ most). The second-take floor of Section 13.9 shows a gap remains, and the per-clip fit shows the synthesizer can
 close more of it.
 
+### 13.11 The pipeline reviewed
+
+In November 2026 the training pipeline was reviewed as a whole - every stage, tool, and dependency asked what it paid
+for - and each change was made in its own verified step: a refactor had to leave the trainer exact and the audio
+bit-identical, and a recipe change had to earn its place by the gap of Section 13.9 against seed controls, never by ear
+or by the validation loss.
+
+**The gate measured the wrong thing.** make train's gate required the voice's UTMOS within 0.05 of the shipped
+model's and its ECAPA speaker similarity to the shipped voices at least 0.85 - both from the distillation era, when the
+shipped voice was the target. UTMOS had rated voices level with their source that listening heard behind (Section
+13.9), and a similarity floor to the shipped voices stands in the way of a voice moving toward its source. The gate is
+now Whisper's word error rate, at most 1 point above the shipped model's, and the mean gap to the source (fd L12) at
+most 2% above it - about one and a half seed spreads. The shipped model's result is cached with the training speech, so
+it is measured once.
+
+**Dependencies.** The training package needed ten Python packages; it needs four: PyTorch and numpy, Praat
+(parselmouth) for the pitch tracks, and spaCy for the heteronym labels' part-of-speech tags. The listener models went
+with the gate (speechbrain, torchaudio). The phoneme recognizer is 240 lines of plain PyTorch
+(`picovox_train/wav2vec2.py` - the feature encoder, the weight-normed positional convolution, 24 pre-norm transformer
+layers, the CTC head), loaded from its pinned checkpoint (each file's SHA-256 checked) and bit-identical to the
+transformers library's logits and hidden states on the CPU and the GPU, so transformers and huggingface_hub went too;
+and soxr's resampling is the perceptual loss's windowed sinc (64 zero crossings offline). Re-aligning the training
+speech with the new recognizer and resampler left 98.6% of 40,960 sampled phone boundaries identical and the greedy
+phone error unchanged (0.0653 against 0.0654). spaCy stayed on evidence: without its silver labels, 48 of the 86
+context words have no training examples.
+
+**Work off the critical path.** The context network's cross-validation trained 50 networks (five teachers and a
+student in each of ten folds); it trains 14 - the teachers distill fold 0's network alone, the one that ships, and the
+other nine folds estimate the held-out accuracy with one plain network each (the gate's margin 34 points against 20
+required). The readings' formant method never passed its controls (62 false votes of 564 against 3% allowed) and is
+gone. The data build computed 13 Praat tracks a frame over 16.6 million frames and the trainer read 6. Stage B kept a
+best checkpoint by validation loss that never shipped. Stage A's listening samples were rendered for nothing.
+
+**Three ablations** of the recipe, each retrained against seed controls through the new panel. First, stage B from
+one stage A checkpoint (two controls, seeds 1 and 2):
+
+| Stage B change | fd L12 | WER | Seconds a step |
+| --- | --- | --- | --- |
+| None (the controls) | 2,067, 2,093 | 1.23%, 1.13% | 0.193 |
+| The perceptual loss's recognizer in bfloat16 | 2,064 | 1.21% | 0.205 |
+| No critic (two seeds) | 2,104, 2,135 | 1.21%, 1.26% | 0.134 |
+
+The critic earns its time: without it the gap lands above both controls in both seeds (nine of twelve voices worse
+than both), for a step 31% faster. Autocast in bfloat16 gained nothing and ran slower on the Apple GPU, so its option
+was removed. Then the formant guide - stage A's log F1-F3 against Praat's, faded from 1 to 0.1 over the first 30% of
+the schedule - which needed both stages retrained (two seeds each):
+
+| Both stages | fd L12 | WER |
+| --- | --- | --- |
+| The recipe (the controls) | 2,067, 2,068 | 1.23%, 1.08% |
+| No formant guide | 2,046, 2,082 | 1.13%, 1.13% |
+
+The same within the seeds' spread, so the guide is gone, with its three recipe settings and Praat's formant analysis of
+the training speech - the data's auxiliary tracks are F0 and voicing (format version 3). The formant order loss stays.
+
+**The run.** From scratch on the reviewed pipeline, both gates passed: the voice's gap 2,069 against the shipped
+model's 2,074 (-0.3%), WER 1.28% against 0.98%; the G2P within its tolerances (the regression set's default sentences
+52 of 52, book words mispronounced 0.049%). The stages, against the run the day before on the previous pipeline:
+
+| Stage | Before | After |
+| --- | --- | --- |
+| The readings measured | 9.8 min | 7.7 |
+| The data built | 6.0 | 1.9 |
+| The context network (its cross-validation) | 54.6 | 20.1 |
+| The G2P's reading stage | 10.9 | 1.8 |
+| The shipped model's evaluation | 2.9 | 1.6 |
+| Stage A, stage B | 36.8, 36.8 | 38.0, 33.4 |
+
+The critical path is the voice's two training stages, which the ablations confirmed cannot be shortened without
+paying in the gap; the G2P's chain, which had run as long, now finishes with half an hour to spare, and the machine's
+other work - the listener models, the formant analyses, 36 context networks, a second export - is gone. The smoke
+test, which the regenerated training speech had broken (a 48-clip sample that skipped a voice), runs every entry point
+again.
+
 ## 14. Limitations and future work
 
 - One human listener has rated the voices; the human results are indicative only. The shipped voices' listening is
@@ -1596,8 +1670,8 @@ PicoVox is distributed under the MIT License.
 ```sh
 npm install picovox                                             # the package
 make commit                                                     # tests, lint, docs, 100% coverage of lib/ and train/
-make build/venv-train.build                                     # make train's Python environment (the listener panel's too)
-make -j train                                                   # both models from scratch: the training speech (Ollama running, the first time), the G2P, and the voice - the teacher, the student, the gate
+make build/venv-train.build                                     # make train's Python environment (torch, numpy, Praat, spaCy)
+make -j train                                                   # both models from scratch: the training speech (Ollama running, the first time), the G2P, and the voice, each gated
 make -j train-g2p                                               # reproduce the G2P chain and check it against the committed module
 make train-check                                                # the package's tests with the trained models, and the voice lab staged to listen
 make train-install                                              # the trained models that differ into lib/models/

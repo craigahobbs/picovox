@@ -239,7 +239,7 @@ generates: Project Gutenberg sentences spoken by a local TTS model (Gradium's Ph
 for each of the package's twelve), aligned and checked with our own phoneme recognizer, then the small model that ships
 trained through a differentiable copy of the synthesizer. The G2P network
 learns from the CMU Pronouncing Dictionary (downloaded, pinned; it is not used at runtime), its heteronyms' readings
-measured in the training speech. The whole run takes about 70 minutes on an M3 Max (the training speech generated once,
+measured in the training speech. The whole run takes about 85 minutes on an M3 Max (the training speech generated once,
 then cached - generating and aligning it the first time adds about an hour and a half). See [make train](#make-train)
 below, and the paper, [PicoVox: Realistic Neural Speech Synthesis in Under 1 MB of
 JavaScript](paper/paper.md), for the methods and results.
@@ -448,7 +448,9 @@ stages 63 minutes from the data build to the gate, against the distillation's 71
 model](#training-the-voice-model); a GPU step's time varies with the machine's heat - stage A's steps took 0.112-0.120 s
 that day, the teacher A's 0.086 the day before); the voices' data is now cached - built only when its inputs change -
 which takes its 9 minutes off the next run. With the perceptual loss (2.0.1), stage A takes about 46 minutes and B 37
-(2026-11-05). (Before 2.0, on the human
+(2026-11-05). On the reviewed pipeline (2026-11-08 - the paper's Section 13.11), the path from the readings to the
+gate took 84 minutes: the readings 8, the data 2, the shipped model's evaluation 2, stage A 38 and B 33, the gate 2 -
+the voice's stages beside the whole G2P chain (its cross-validation 20 minutes, from 55). (Before 2.0, on the human
 corpora, it took 71 minutes.) The package's manifest records its provenance: the commit, the recipe's and the training
 data's hashes, and the gate's scores. `python -m picovox_train.smoke` runs every stage's entry point for a few steps on
 the CPU.
@@ -534,6 +536,13 @@ trained against, it brought the voices a fifth closer to their source (fd L12 2,
 2,522 and 2,700-2,730 without it), as close in the speaker embedding (0.278 against 0.277), and the panel's UTMOS from
 4.31 to 4.42 - two seeds alike (paper Section 13.10). It makes a step about 1.6 times as long; in blind A/B listening
 against 2.0.0's voice, no audible difference (6 of 6 trials Same).
+
+The recipe's other parts were put to the same test in November 2026 (the paper's Section 13.11), each retrained against
+seed controls and judged by the gap: the critic earns its time (stage B without it measured 2,104 and 2,135 against the
+controls' 2,067 and 2,093, for a step 31% faster); the perceptual loss's recognizer in bfloat16 gained nothing and ran
+slower; and the formant guide - log F1-F3 against Praat's, faded over stage A - made no difference (both stages without
+it 2,046 and 2,082 against 2,067 and 2,068), so it is gone, and with it Praat's formant analysis of the training speech
+(the data's tracks are F0 and voicing).
 
 The gate (`picovox_train/panel.py`): the shipped model (`panel eval baseline=lib/models/voiceModel.js` - the packaged
 module spoken as the package loads it, `tools/unpack.js`; evaluated once per shipped model, its result cached with the
