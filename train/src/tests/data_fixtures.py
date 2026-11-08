@@ -62,8 +62,8 @@ def fake_modules(**modules):
 
 
 class FakeSound:
-    """A fake recording (a path or samples) and its analyses: pitch by a frame autocorrelation
-    (voiced where the signal is loud and periodic), and fixed formants wherever the signal isn't silent"""
+    """A fake recording (a path or samples) and its pitch analysis - a frame autocorrelation (voiced where the signal
+    is loud and periodic)"""
 
     def __init__(self, values, sampling_frequency=None):
         if isinstance(values, str):
@@ -98,44 +98,16 @@ class FakeSound:
         return FakePitch(times, [self.rate / lag if ok else 0.0 for ok, (lag, _) in zip(voiced, peaks)],
                          [peak if ok else 0.0 for ok, (_, peak) in zip(voiced, peaks)])
 
-    def to_formant_burg(self, time_step, max_number_of_formants, maximum_formant, window_length=0.025, pre_emphasis_from=50):
-        assert max_number_of_formants == 5 and maximum_formant > 0 and window_length > 0 and pre_emphasis_from > 0
-        times, rms, _ = self.frames(time_step)
-        return FakeFormant(times, rms > 0.001)
 
+class FakePitch:
+    """A fake pitch track - its frames' times and selected candidates (frequency, strength; 0 Hz unvoiced)"""
 
-class FakeTrack:
-    """A fake analysis's frames - their times and values"""
-
-    def __init__(self, times, values):
+    def __init__(self, times, frequency, strength):
         self.times = times
-        self.values = values
+        self.selected_array = numpy.array(list(zip(frequency, strength)), dtype=[('frequency', float), ('strength', float)])
 
     def xs(self):
         return self.times
-
-    # The frame nearest a time
-    def frame(self, time):
-        return int(numpy.clip(numpy.round(time / (self.times[1] - self.times[0]) - 0.5), 0, len(self.times) - 1))
-
-
-class FakePitch(FakeTrack):
-    """A fake pitch track - its selected candidates (frequency, strength; 0 Hz unvoiced) and the value at a time (NaN
-    unvoiced)"""
-
-    def __init__(self, times, frequency, strength):
-        super().__init__(times, None)
-        self.selected_array = numpy.array(list(zip(frequency, strength)), dtype=[('frequency', float), ('strength', float)])
-
-
-class FakeFormant(FakeTrack):
-    """A fake formant track - formant n at 1000n - 500 Hz with an 80n Hz bandwidth where the signal isn't silent (else NaN)"""
-
-    def get_value_at_time(self, number, time):
-        return 1000.0 * number - 500.0 if self.values[self.frame(time)] else float('nan')
-
-    def get_bandwidth_at_time(self, number, time):
-        return 80.0 * number if self.values[self.frame(time)] else float('nan')
 
 
 # The fake acoustic analysis module, for fake_modules

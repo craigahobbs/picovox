@@ -119,9 +119,6 @@ def write_corpus(directory, speakers=None, count=4, seed=0, frames_per_token=3):
             voiced = (numpy.arange(frame_count) % 7) != 0
             tracks[:, data.CHANNELS.index('f0')] = numpy.where(voiced, f0, 0.0)
             tracks[:, data.CHANNELS.index('voiced')] = voiced
-            tracks[:, data.CHANNELS.index('strength')] = numpy.where(voiced, 0.8, 0.1)
-            for formant, value in zip(('f1', 'f2', 'f3'), (500.0, 1500.0, 2500.0)):
-                tracks[:, data.CHANNELS.index(formant)] = value
             entry = {
                 'id': f'{key}/{number:04d}', 'speaker': key, 'sentence': f'{number:04d}', 'split': splits[number % 4],
                 'text': text, 'include': number != count - 1 or count == 1, 'reason': '' if number != count - 1 else 'excluded',
@@ -138,7 +135,7 @@ def write_corpus(directory, speakers=None, count=4, seed=0, frames_per_token=3):
     index = {
         'version': data.FORMAT_VERSION, 'sampleRate': data.SAMPLE_RATE, 'hop': data.HOP, 'frameRate': data.SAMPLE_RATE / data.HOP,
         'channels': data.CHANNELS, 'vocab': frontend.vocabulary(), 'license': 'Phonon (Apache 2.0)',
-        'speakers': {key: {'pitchFloor': 60.0, 'pitchCeiling': 400.0, 'formantCeiling': 5000, 'bandwidth': 12000,
+        'speakers': {key: {'pitchFloor': 60.0, 'pitchCeiling': 400.0, 'bandwidth': 12000,
                            'sourceSampleRate': 24000, 'medianF0': 150.0,
                            'engine': {'model': 'phonon', 'digest': '0123456789ab', 'voice': key.title()}, **info}
                      for key, info in speakers.items()},

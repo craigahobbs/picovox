@@ -139,7 +139,6 @@ class TestHelpers(unittest.TestCase):
         self.assertTrue(numpy.all(angry['f0'] >= 60) and numpy.all(angry['f0'] <= 400))
         self.assertEqual(len(angry['f0']), 2 * angry['frameCount'] + 1)
         self.assertEqual(len(angry['voiced']), 2 * angry['frameCount'])
-        self.assertEqual(angry['formants'].shape, (angry['frameCount'], 3))
         # The audio, zero-padded past the end
         count = angry['sampleCount']
         audio = corpus.audio(angry, count - 10, count + 10)
@@ -244,19 +243,19 @@ class TestHelpers(unittest.TestCase):
         sonorants = torch.tensor(trainmulti.sonorant_mask(corpus.data.index['vocab']))
         batch = trainmulti.collate(corpus, [0, 1], 'cpu')
         rng = numpy.random.default_rng(1)
-        losses, audio, target, stats = trainmulti.batch_losses(model, synth, batch, settings, rng, 5, 1.0, sonorants)
+        losses, audio, target, stats = trainmulti.batch_losses(model, synth, batch, settings, rng, 5, sonorants)
         self.assertEqual(audio.shape, target.shape)
         self.assertEqual(set(stats), {'b1', 'b2', 'b3', 'ahRel', 'afRel'})
         expected = (losses['spectral'] + losses['durPhone'] + losses['durPause'] + losses['durPaused'] + 2 * losses['f0'] +
-                    losses['formant'] + losses['order'] + 0.05 * losses['smooth'] + losses['band'] + losses['sonorantAf'] +
+                    losses['order'] + 0.05 * losses['smooth'] + losses['band'] + losses['sonorantAf'] +
                     losses['eqSmooth'] + 5 * losses['perceptual'])
         self.assertAlmostEqual(float(losses['total'].detach()), float(expected.detach()), places=4)
         self.assertTrue(all(torch.isfinite(value) for value in losses.values()))
         # (the same again - dropout's draws reseeded)
         torch.manual_seed(2)
-        losses = trainmulti.batch_losses(model, synth, batch, settings, numpy.random.default_rng(1), 5, 1.0, sonorants)[0]
+        losses = trainmulti.batch_losses(model, synth, batch, settings, numpy.random.default_rng(1), 5, sonorants)[0]
         torch.manual_seed(2)
-        result = trainmulti.batch_losses(model, synth, batch, settings, numpy.random.default_rng(1), 5, 1.0, sonorants,
+        result = trainmulti.batch_losses(model, synth, batch, settings, numpy.random.default_rng(1), 5, sonorants,
                                          with_values=True)
         self.assertEqual(float(result[0]['total'].detach()), float(losses['total'].detach()))
         self.assertEqual(result[4].shape[-1], params.COUNT)

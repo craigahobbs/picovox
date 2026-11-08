@@ -248,10 +248,6 @@ const chartHelp = {
     'durPause': 'Pause-placement error - whether the model puts a pause at each word or phrase boundary where the voice ' +
         'did (a classification loss).',
     'f0': 'Pitch (F0) error in log units on voiced frames - the training loss behind the cents chart.',
-    'formant': 'The formant guide - how far the first three formants (F1-F3, the vocal-tract resonances that make vowels) ' +
-        'are from Praat\'s measurements of the recording. Weighted heavily early, then faded (guide), so the spectral loss ' +
-        'takes over.',
-    'guide': 'The formant guide\'s weight - starts high to steer the vocal tract into place, then fades toward its floor.',
     'order': 'A penalty when formants come out of order or closer than 150 Hz apart (F1 below F2 below F3...), which a real ' +
         'vocal tract can\'t do.',
     'smooth': 'A penalty on frame-to-frame jumps in the synthesizer parameters - keeps the voice from buzzing or warbling.',

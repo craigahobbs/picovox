@@ -29,7 +29,7 @@ The data:
 - ctc.py - our speech measurement: a wav2vec2 phoneme recognizer's CTC posteriors (the network in plain PyTorch -
   wav2vec2.py - from its pinned checkpoint) - the forced alignment, the greedy
   phone checks, and the candidate vote between pronunciations; measure.py - the training speech's heteronym tokens'
-  readings, by the CTC vote or the vowels' formants, with each method's controls
+  readings, by the CTC vote, gated by its controls
 - data.py - the training data's featurization and format (tokens, durations from the alignment - align.py - 24 kHz
   audio, and Praat's auxiliary tracks), and its loader (CorpusData)
 - wav.py - WAV files (16-bit PCM) read with the standard library, exactly as libsndfile reads them, and resampling (a

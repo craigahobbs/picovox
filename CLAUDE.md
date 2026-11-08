@@ -27,7 +27,7 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   package - its unit tests in `train/src/tests/`), trained on speech it generates (no human recordings): the front
   end's port (`frontend.py`, `g2pmodel.py`, `vocab.json`), the G2P and heteronym models (`g2p.py`,
   `heteronyms.py`, `context.py`, `contextlabels.py`, `readings.py`, `measure.py` - the heteronym tokens' readings
-  measured in the training speech, by the CTC vote or the vowels' formants, each method gated by controls - the G2P's
+  measured in the training speech, by the CTC vote, gated by its controls - the G2P's
   heteronym evidence), the data (`tts.py` - the training speech: book sentences, the heteronyms' coverage first,
   spoken by a local TTS model through Ollama - the recipe's `tts`, its model pinned by digest, a voice of it for each of
   the package's voices - cached, CTC-aligned, checked, and built in `data.py`'s format; `ctc.py` - our speech

@@ -4,9 +4,9 @@
 """
 The training data's featurization and format (tts.py builds it - the training speech): each utterance's tokens (our
 front end's, frontend.py), each token's duration in frames (pauses included, from its CTC alignment - ctc.py, align.py),
-the audio (24 kHz, 16-bit), and auxiliary frame tracks (Praat F0, voicing, pitch strength, and formants F1-F3 - the
-tracks the trainer reads: the F0 target and the formant guide; the harmonicity, energy, F4, and bandwidth tracks it
-never read are in git history).
+the audio (24 kHz, 16-bit), and auxiliary frame tracks (Praat F0 and voicing - the trainer's F0 target; the pitch
+strength and formant tracks, which fed the formant guide the voice trains the same without, and the harmonicity, energy,
+and bandwidth tracks it never read are in git history).
 
 A corpus directory (build/nn/data/<corpus>/) - concatenated arrays and an index of offsets into them:
 
@@ -37,13 +37,11 @@ SAMPLE_RATE = 24000
 HOP = 240                                  # samples per frame - 10 ms
 FRAME_SECONDS = HOP / SAMPLE_RATE
 MAX_EDGE_SILENCE = 0.2                     # seconds of leading and trailing silence kept
-FORMAT_VERSION = 2
-CHANNELS = ['f0', 'voiced', 'strength', 'f1', 'f2', 'f3']
+FORMAT_VERSION = 3
+CHANNELS = ['f0', 'voiced']
 CHANNEL_NOTES = {
     'f0': 'Praat autocorrelation F0 (Hz), 0 where unvoiced - the voice\'s two-pass range (index.json\'s speakers)',
-    'voiced': '1 where Praat finds the frame voiced, else 0',
-    'strength': 'Praat pitch strength (autocorrelation peak, 0-1) of the selected candidate, 0 where unvoiced',
-    'f1': 'Burg formant 1 (Hz) at the speaker\'s formant ceiling (5 formants, 25 ms window), 0 where undefined'
+    'voiced': '1 where Praat finds the frame voiced, else 0'
 }
 
 
@@ -98,32 +96,19 @@ def sample_track(track_times, track_values, frame_count, tolerance=0.006):
     return np.where(valid, track_values[nearest], 0.0), valid
 
 
-# The auxiliary frame tracks of 24 kHz audio - [frames, channels] (the Praat analyses as they have always been made, so a
+# The auxiliary frame tracks of 24 kHz audio - [frames, channels] (the Praat pitch analysis as it has always been made, so a
 # clip's tracks are the same values)
-def frame_tracks(samples, frame_count, pitch_floor, pitch_ceiling, formant_ceiling):
+def frame_tracks(samples, frame_count, pitch_floor, pitch_ceiling):
     import parselmouth  # pylint: disable=import-outside-toplevel, import-error
     sound = parselmouth.Sound(samples.astype(np.float64), sampling_frequency=SAMPLE_RATE)
     tracks = np.zeros((frame_count, len(CHANNELS)), dtype=np.float32)
 
-    # F0, voicing, and pitch strength
+    # F0 and voicing
     pitch = sound.to_pitch_ac(time_step=FRAME_SECONDS, pitch_floor=pitch_floor, pitch_ceiling=pitch_ceiling)
-    selected = pitch.selected_array
-    f0, valid = sample_track(np.asarray(pitch.xs()), selected['frequency'], frame_count)
-    strength, _ = sample_track(np.asarray(pitch.xs()), selected['strength'], frame_count)
+    f0, valid = sample_track(np.asarray(pitch.xs()), pitch.selected_array['frequency'], frame_count)
     voiced = valid & (f0 > 0)
     tracks[:, CHANNELS.index('f0')] = np.where(voiced, f0, 0.0)
     tracks[:, CHANNELS.index('voiced')] = voiced
-    tracks[:, CHANNELS.index('strength')] = np.where(voiced, strength, 0.0)
-
-    # Formants F1-F3 (a formant whose bandwidth Praat leaves undefined is undefined too, as the bandwidth tracks had it)
-    formant = sound.to_formant_burg(time_step=FRAME_SECONDS, max_number_of_formants=5, maximum_formant=formant_ceiling,
-                                    window_length=0.025, pre_emphasis_from=50)
-    centers = (np.arange(frame_count) + 0.5) * FRAME_SECONDS
-    for number in range(1, 4):
-        frequencies = np.array([formant.get_value_at_time(number, center) for center in centers])
-        bandwidths = np.array([formant.get_bandwidth_at_time(number, center) for center in centers])
-        defined = np.isfinite(frequencies) & np.isfinite(bandwidths)
-        tracks[:, CHANNELS.index(f'f{number}')] = np.where(defined, frequencies, 0.0)
     return tracks
 
 

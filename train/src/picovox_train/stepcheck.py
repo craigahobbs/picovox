@@ -58,7 +58,7 @@ def main(argv=None):
             model.train(mode == 'train')
             batch = collate(corpus, indices, device)
             rng = numpy.random.default_rng(1234 + number)
-            losses, _, _, stats = batch_losses(model, synth, batch, settings, rng, 99 + number, 0.1, sonorants)
+            losses, _, _, stats = batch_losses(model, synth, batch, settings, rng, 99 + number, sonorants)
             row[mode] = {key: float(value.detach()).hex() for key, value in {**losses, **stats}.items()}
             if mode == 'train':
                 model.zero_grad()

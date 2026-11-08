@@ -29,7 +29,7 @@ PRIORS = {
             'fhp': 1800}
 }
 
-# Formant guide indexes (aux tracks f1-f3) and the parameter indexes
+# The formant parameters' indexes (F1-F6 - the order loss)
 F_INDEX = [params.INDEX[f'f{number}'] for number in range(1, 7)]
 
 

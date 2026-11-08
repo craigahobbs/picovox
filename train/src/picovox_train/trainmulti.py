@@ -18,8 +18,8 @@ build/nn/data/tts/ (tts.py) - a local TTS model's voices, each speaker's row in 
 compares below each utterance's own band - the rendering and the recording are both low-passed at 0.95 of the
 recording's bandwidth before the losses - and the spectral losses stop at --max-hz (the synthesizer's harmonic taper).
 
-The losses are losses.py's (the multi-resolution STFT and log-mel loss, durations, log F0, the fading formant guide,
-formant order, smoothness, frication band) plus:
+The losses are losses.py's (the multi-resolution STFT and log-mel loss, durations, log F0, formant order, smoothness,
+frication band) plus:
 
 - the perceptual loss (perceptual.py, --perceptual-weight and --perceptual-crops) - the first crops of each step against
   their recordings in the pinned wav2vec2 phoneme recognizer's features
@@ -119,10 +119,7 @@ class Corpus:
                 'frameCount': frame_count, 'sampleOffset': entry['sampleOffset'], 'sampleCount': entry['sampleCount'],
                 'bandwidth': settings['bandwidth'],
                 'f0': f0_track(tracks[:, channels.index('f0')], voiced, frame_count, floor, ceiling),
-                'voiced': numpy.repeat(voiced, 2),
-                'formants': numpy.stack([tracks[:, channels.index(f'f{number}')] for number in (1, 2, 3)], axis=-1),
-                'formantWeight': (voiced & (tracks[:, channels.index('strength')] > 0.5) & (tracks[:, channels.index('f1')] > 0) &
-                                  (tracks[:, channels.index('f3')] > 0)).astype(numpy.float32)
+                'voiced': numpy.repeat(voiced, 2)
             })
 
     def __len__(self):
@@ -184,8 +181,6 @@ def collate_host(corpus, indices, bucket_ratio=0):
     durations = numpy.zeros((batch, token_count), dtype=numpy.int64)
     f0 = numpy.zeros((batch, 2 * frame_count + 1), dtype=numpy.float32)
     voiced = numpy.zeros((batch, 2 * frame_count + 1), dtype=numpy.float32)
-    formants = numpy.ones((batch, frame_count, 3), dtype=numpy.float32)
-    formant_weight = numpy.zeros((batch, frame_count), dtype=numpy.float32)
     for ix, item in enumerate(items):
         count = len(item['tokens'])
         tokens[ix, :count] = item['tokens']
@@ -194,11 +189,9 @@ def collate_host(corpus, indices, bucket_ratio=0):
         f0[ix, :2 * frames + 1] = item['f0']
         f0[ix, 2 * frames + 1:] = item['f0'][-1]
         voiced[ix, :2 * frames] = item['voiced']
-        formants[ix, :frames] = numpy.maximum(item['formants'], 1)
-        formant_weight[ix, :frames] = item['formantWeight']
     host = {
         'tokens': torch.from_numpy(tokens), 'durations': torch.from_numpy(durations), 'f0': torch.from_numpy(f0),
-        'voiced': torch.from_numpy(voiced), 'formants': torch.from_numpy(formants), 'formantWeight': torch.from_numpy(formant_weight),
+        'voiced': torch.from_numpy(voiced),
         'speaker': torch.tensor([item['speaker'] for item in items]),
         'renderCounts': torch.tensor([2 * item['frameCount'] for item in items])
     }
@@ -374,7 +367,7 @@ def perceptual_loss(device):
 
 # The loss terms of a batch - ({name: tensor}, the rendered crops, the recorded crops), both band-limited; prepared is
 # the step's data made ahead (Prefetcher) - the crops, the recordings', and the cycle plan - else they're made here
-def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, prepared=None, with_values=False):
+def batch_losses(model, synth, batch, args, rng, seed, sonorants, prepared=None, with_values=False):
     outputs = model(batch['tokens'], batch['durations'], batch['speaker'], speaker_vector=batch.get('speakerVector'),
                     frame_count=batch.get('frameCount'))
     unit = outputs['unit']
@@ -389,12 +382,6 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
     target_f0 = torch.log(batch['f0'][:, :frames])
     f0_weight = frame_mask * (batch['voiced'][:, :frames] + 0.1)
     losses['f0'] = ((log_f0 - target_f0).abs() * f0_weight).sum() / f0_weight.sum()
-
-    # Formant guide - log F1-F3 at the decoder frames' centers against Praat's
-    centers = values[:, 1::2]
-    formant_weight = batch['formantWeight'][:, :centers.shape[1]]
-    formant_error = (torch.log(centers[..., F_INDEX[:3]]) - torch.log(batch['formants'][:, :centers.shape[1]])).abs().sum(-1)
-    losses['formant'] = (formant_error * formant_weight).sum() / formant_weight.sum().clamp(min=1)
 
     # Formant order, smoothness, frication resonances below the band
     formants = values[..., F_INDEX]
@@ -448,7 +435,7 @@ def batch_losses(model, synth, batch, args, rng, seed, guide_weight, sonorants, 
         crops = args.perceptual_crops or len(audio)
         losses['perceptual'] = perceptual_loss(audio.device)(audio[:crops], target[:crops])
     total = (losses['spectral'] + args.duration_weight * (losses['durPhone'] + losses['durPause'] + losses['durPaused']) +
-             args.f0_weight * losses['f0'] + guide_weight * args.formant_weight * losses['formant'] + losses['order'] +
+             args.f0_weight * losses['f0'] + losses['order'] +
              args.smooth_weight * losses['smooth'] + losses['band'] + args.sonorant_frication * losses['sonorantAf'] +
              losses['eqSmooth'] + (args.perceptual_weight * losses['perceptual'] if args.perceptual_weight else 0))
     losses['total'] = total
@@ -470,7 +457,7 @@ def validate(model, synth, corpus, args, device, sonorants):
     for start in range(0, len(order), args.batch):
         indices = order[start:start + args.batch]
         batch = collate(corpus, indices, device)
-        losses, _, _, stats, values = batch_losses(model, synth, batch, args, rng, 99, 1.0, sonorants, with_values=True)
+        losses, _, _, stats, values = batch_losses(model, synth, batch, args, rng, 99, sonorants, with_values=True)
         stats = {key: value for key, value in ((key, float(value)) for key, value in stats.items()) if not math.isnan(value)}
         for key, value in {**losses, **stats}.items():
             sums[key] = sums.get(key, 0) + float(value) * len(indices)
@@ -513,9 +500,6 @@ def argument_parser():
     parser.add_argument('--warmup', type=int)
     parser.add_argument('--duration-weight', type=float)
     parser.add_argument('--f0-weight', type=float)
-    parser.add_argument('--formant-weight', type=float)
-    parser.add_argument('--guide-floor', type=float)
-    parser.add_argument('--guide-steps', type=float)
     parser.add_argument('--smooth-weight', type=float)
     parser.add_argument('--perceptual-weight', type=float, help='the perceptual loss\'s weight (perceptual.py - 0, off)')
     parser.add_argument('--perceptual-crops', type=int, help='the perceptual loss\'s crops a step (default all)')
@@ -677,9 +661,7 @@ def main(argv=None):
         if args.speaker_noise > 0:
             vectors = model.speaker(batch['speaker'])
             batch['speakerVector'] = vectors + args.speaker_noise * torch.randn_like(vectors)
-        progress = step / args.steps
-        guide = max(args.guide_floor, 1 - (1 - args.guide_floor) * progress / args.guide_steps)
-        losses, audio, target, stats = batch_losses(model, synth, batch, args, None, prepared['seed'], guide, sonorants, prepared)
+        losses, audio, target, stats = batch_losses(model, synth, batch, args, None, prepared['seed'], sonorants, prepared)
         if critic is not None:
             # The critic's step (on the rendering, detached), then the generator's adversarial and feature-matching
             # losses (after --adversarial-start steps of the critic alone). The discriminators' input spectrograms don't
@@ -740,7 +722,7 @@ def main(argv=None):
         if step % args.log_every == 0:
             elapsed = time.time() - last_time
             last_time = time.time()
-            row = {'step': step, 'lr': scheduler.get_last_lr()[0], 'secondsPerStep': elapsed / args.log_every, 'guide': guide,
+            row = {'step': step, 'lr': scheduler.get_last_lr()[0], 'secondsPerStep': elapsed / args.log_every,
                    **{key: value / sum_counts[key] for key, value in sums.items()}}
             print(' '.join(f'{key} {value:.4g}' if isinstance(value, float) else f'{key} {value}' for key, value in row.items()),
                   file=sys.stderr, flush=True)

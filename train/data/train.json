@@ -1,7 +1,7 @@
 {
     "description": "make train's recipe - every stage's settings and seeds: the training speech (picovox_train/tts.py), the G2P network (picovox_train/g2p.py) and its heteronym models (picovox_train/context.py), the voice model (picovox_train/trainmulti.py --recipe), and its evaluation and gate (picovox_train/panel.py)",
     "tts": {
-        "description": "The training speech (picovox_train/tts.py): book sentences spoken by a local TTS model through Ollama's speech endpoint (engine - its model pinned by digest: a new model is a new corpus, downloads/tts/<model>-<digest>/), one engine voice for each of the package's voices (voices - the model's speaker rows in this order; male, the first, the default), the heteronym coverage first (coverage - sentences a word: the context gate's words, the context labels' candidate words, the other measured words - readings.py) from the context labels' books, then the fill's books (fill) at random, to hoursPerVoice hours of speech a voice (wordsPerSecond - the engine's speaking rate, for the estimate); split by a hash of the text (split - test and val percents); a clip excluded by the checks (the recognizer's greedy phone error above maxPhoneError; cut short - truncatedTail final phones missing with under truncatedSilence seconds of trailing silence, or truncatedAlways at any; maxClipped of its samples at full scale); analysed with the formant ceilings by sex, at the engine's bandwidth (Hz)",
+        "description": "The training speech (picovox_train/tts.py): book sentences spoken by a local TTS model through Ollama's speech endpoint (engine - its model pinned by digest: a new model is a new corpus, downloads/tts/<model>-<digest>/), one engine voice for each of the package's voices (voices - the model's speaker rows in this order; male, the first, the default), the heteronym coverage first (coverage - sentences a word: the context gate's words, the context labels' candidate words, the other measured words - readings.py) from the context labels' books, then the fill's books (fill) at random, to hoursPerVoice hours of speech a voice (wordsPerSecond - the engine's speaking rate, for the estimate); split by a hash of the text (split - test and val percents); a clip excluded by the checks (the recognizer's greedy phone error above maxPhoneError; cut short - truncatedTail final phones missing with under truncatedSilence seconds of trailing silence, or truncatedAlways at any; maxClipped of its samples at full scale); analysed at the engine's bandwidth (Hz)",
         "engine": {"url": "http://localhost:11434", "model": "phonon", "digest": "58f58601e4e8",
                    "license": "Phonon (Gradium) - its English checkpoint and voices under the Apache License 2.0 (ollama.com/library/phonon, huggingface.co/gradium/phonon-voices); its training data is undocumented"},
         "voices": {
@@ -19,7 +19,7 @@
         "coverage": {"gate": 200, "context": 24, "other": 12},
         "split": {"test": 5, "val": 5},
         "checks": {"maxPhoneError": 0.35, "truncatedTail": 3, "truncatedAlways": 5, "truncatedSilence": 0.05, "maxClipped": 0.005},
-        "analysis": {"formantCeilings": {"female": 5500, "male": 5000}, "bandwidth": 12000}
+        "analysis": {"bandwidth": 12000}
     },
     "g2p": {
         "description": "The G2P network (picovox_train/g2p.py): the AR encoder-decoder trained on every dictionary word, frequency-weighted, with teacher-labeled unknown words, in four stages (base, two polishes over the most frequent words, then the training speech's pronunciations of the relabeled words - focus), exported at 7 bits",
@@ -79,15 +79,14 @@
         "defaults": {
             "config": "{\"dim\": 80, \"decoderDim\": 64, \"encoderLayers\": 3, \"decoderLayers\": 4}",
             "steps": 30000, "batch": 16, "max-frames": 16000, "crop": 2.0, "bucket-ratio": 1.125, "max-hz": 10500,
-            "lr": 0.001, "warmup": 1000, "duration-weight": 1.0, "f0-weight": 2.0, "formant-weight": 1.0,
-            "guide-floor": 0.1, "guide-steps": 0.3, "smooth-weight": 0.05, "perceptual-weight": 5.0, "perceptual-crops": 4, "frication-max-hz": 11000, "sonorant-frication": 1.0,
+            "lr": 0.001, "warmup": 1000, "duration-weight": 1.0, "f0-weight": 2.0, "smooth-weight": 0.05, "perceptual-weight": 5.0, "perceptual-crops": 4, "frication-max-hz": 11000, "sonorant-frication": 1.0,
             "sonorant-af-db": 40.0, "speaker-noise": 0.03, "dropout": 0.1, "weight-decay": 0.0001, "adversarial": 0.0,
             "feature-matching": 1.0, "adversarial-start": 1000, "critic-lr": 0.0002, "critic-channels": 16, "val-count": 480,
             "seed": 1
         },
         "a": {"stop": 15000, "val-every": 5000},
         "b": {"steps": 10000, "lr": 0.0005, "warmup": 500, "schedule": "wsd", "cooldown": 0.25,
-              "adversarial": 0.1, "guide-steps": 0.001, "val-from": 7500}
+              "adversarial": 0.1, "val-from": 7500}
     },
     "panel": {
         "description": "The listener panel (picovox_train/panel.py eval and gate): a voice model spoken through the browser path (tools/speak.js, at rate Hz) on the panel texts (tools/panel-texts.json) in each of the training speech's voices (tts voices), scored with Whisper's word error rate - and the model's gap to its source (picovox_train/quality.py: each voice's Frechet distance to the training speech's held-out clips in the pinned wav2vec2 recognizer's layer 12, over gap perVoice clips a voice, the package speaking - fdL12, lower closer). make train's baseline is the shipped lib/models/voiceModel.js, evaluated as packaged",

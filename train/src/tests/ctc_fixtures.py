@@ -107,7 +107,7 @@ def tts_settings(**overrides):
         'coverage': {'gate': 2, 'context': 1, 'other': 1},
         'split': {'test': 5, 'val': 5},
         'checks': {'maxPhoneError': 0.35, 'truncatedTail': 3, 'truncatedAlways': 5, 'truncatedSilence': 0.05, 'maxClipped': 0.005},
-        'analysis': {'formantCeilings': {'female': 5500, 'male': 5000}, 'bandwidth': 12000},
+        'analysis': {'bandwidth': 12000},
         **overrides
     }
 

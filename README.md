@@ -361,7 +361,7 @@ The environment is built with `python3` (3.14 here; 3.12 also works - `make buil
 PYTHON_VENV=python3.12`). Its packages are pinned in `train/requirements.txt`: PyTorch 2.14 and numpy (the networks,
 the differentiable synthesizer, the recognizer - `picovox_train/wav2vec2.py`, its 1.3 GB checkpoint downloaded once and
 pinned into `downloads/wav2vec2/` by `picovox_train/corpora.py` - and resampling, `picovox_train/wav.py`; WAV files are
-read with the standard library), Praat (parselmouth) for the training data's pitch and formant tracks, and spaCy for
+read with the standard library), Praat (parselmouth) for the training data's pitch tracks, and spaCy for
 the heteronym labels' part-of-speech tags.
 
 Calibration of Whisper's word error rate (the evaluation set, or 16 recordings of each human speaker - measured in
@@ -518,8 +518,8 @@ The voice network ships at the size the student ladder below chose - d64: an 80-
 decoder of 4 (282,627 parameters, 311 KB gzipped). make train trains it directly on the training speech
 (`picovox_train/trainmulti.py`, the recipe's `voice` - its `defaults.config` the size), in two stages:
 
-1. **Stage A** - the spectral loss through the differentiable synthesizer on the clips (and the duration, F0, and
-   formant-guide losses), the first 15,000 steps of a 30,000-step cosine schedule (10,000 for a week of November 2026 -
+1. **Stage A** - the spectral loss through the differentiable synthesizer on the clips (and the duration and F0
+   losses), the first 15,000 steps of a 30,000-step cosine schedule (10,000 for a week of November 2026 -
    each seed scored within the seeds' spread, but with the distillation's removal the voices averaged 0.03 UTMOS below
    the shipped voice, and the blind A/B leaned to it).
 2. **Stage B** - from A's last checkpoint, with the adversarial critic and feature matching against the over-smoothing,
