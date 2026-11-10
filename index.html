@@ -456,7 +456,7 @@ generates: Project Gutenberg sentences spoken by a local TTS model (Gradium's Ph
 for each of the package's twelve), aligned and checked with our own phoneme recognizer, then the small model that ships
 trained through a differentiable copy of the synthesizer. The G2P network
 learns from the CMU Pronouncing Dictionary (downloaded, pinned; it is not used at runtime), its heteronyms' readings
-measured in the training speech. The whole run takes about 70 minutes on an M3 Max (the training speech generated once,
+measured in the training speech. The whole run takes about 85 minutes on an M3 Max (the training speech generated once,
 then cached - generating and aligning it the first time adds about an hour and a half). See <a href="#make-train">make train</a>
 below, and the paper, <a href="paper/paper.md">PicoVox: Realistic Neural Speech Synthesis in Under 1 MB of
 JavaScript</a>, for the methods and results.</p>
@@ -484,7 +484,7 @@ package of its own: its unit tests (<code>train/src/tests/</code>) run on the CP
 network, in python-build's environment (<code>train/build/venv/</code>), which installs the package with the training's pinned
 PyTorch and numpy (<code>train/pyproject.toml</code>, the same versions as <code>train/requirements.txt</code>). <code>make train</code> runs the package
 from its source (<code>PYTHONPATH=train/src</code>) in its environment, <code>build/venv-train</code> from <code>train/requirements.txt</code> - the
-training (PyTorch, soxr, Praat, and the phoneme recognizer's transformers), the listener models, and spaCy
+training (PyTorch, numpy, and Praat) and spaCy
 (<code>picovox_train/corpora.py</code>'s downloads need only the standard library). A training module runs the same way by hand:</p>
 <pre class="prettyprint source lang-sh"><code>PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.smoke   # every training entry point, a few steps on the CPU
 </code></pre>
@@ -523,118 +523,90 @@ stages not rendered yet listed as waiting), and marks new samples until they're 
 with &quot;Active only&quot;; &quot;Expand&quot; shows a log's last 500 lines, the full width). It refreshes every second, read-only,
 re-fetching only what changed, and reloads itself when its own code changes.</p>
 <h2>The listener panel</h2>
-<p>Neural listener models score the synthesizer the way a panel of listeners would - a repeatable check of naturalness,
-speaker identity, and speaking style alongside Whisper's intelligibility. They run in a Python environment of their own
-(PyTorch), used only by the tools - the package has no dependencies.</p>
+<p>Two measures judge a voice model, repeatably, the way listeners would - one of how close it sounds to its source, one
+of how intelligible it is. They run in a Python environment of their own (PyTorch), used only by the tools - the
+package has no dependencies.</p>
 <table>
 <thead>
 <tr>
-<th>Listener</th>
+<th>Measure</th>
 <th>Model</th>
 <th>Measures</th>
 </tr>
 </thead>
 <tbody>
 <tr>
+<td>The gap to the source</td>
+<td>The pinned wav2vec2 phoneme recognizer (<code>facebook/wav2vec2-lv-60-espeak-cv-ft</code> at a fixed revision, its weights' SHA-256 checked - the training speech's aligner, <code>picovox_train/ctc.py</code>, run by <code>picovox_train/wav2vec2.py</code> in plain PyTorch)</td>
+<td>fdL12 - each voice's Frechet distance between its synthesized clips' frames and its source clips' in the recognizer's layer 12; lower is closer</td>
+</tr>
+<tr>
 <td>Intelligibility</td>
 <td>Whisper <code>base.en</code> (whisper.cpp's <code>whisper-cli</code> - installed separately, e.g. <code>brew install whisper-cpp</code>; the model downloaded, pinned, into <code>downloads/whisper/</code> - <code>picovox_train/corpora.py</code>)</td>
 <td>Word error rate against the text</td>
 </tr>
-<tr>
-<td>Naturalness</td>
-<td><a href="https://github.com/sarulab-speech/UTMOS22">UTMOS22 strong</a> (through torch.hub <a href="https://github.com/tarepan/SpeechMOS">tarepan/SpeechMOS</a>)</td>
-<td>Predicted mean opinion score, 1-5</td>
-</tr>
-<tr>
-<td>Speaker identity</td>
-<td><a href="https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb">ECAPA-TDNN</a> (SpeechBrain, VoxCeleb)</td>
-<td>A 192-dimension speaker embedding</td>
-</tr>
 </tbody>
 </table>
-<p><code>picovox_train/panel.py</code> is the panel's scoring and make train's gate (<code>picovox_train.panel eval</code> and <code>gate</code>): an exported model speaks a fixed evaluation set, <code>tools/panel-texts.json</code> - six Harvard sentences, six narrative
+<p><strong>The gap to the source</strong> (<code>picovox_train.quality gap [--model MODULE]</code>) speaks 40 held-out clips a voice with the
+package (<code>tools/renderLines.js</code> - the voices, gain, and limiter as the package speaks) and gives each voice's Frechet
+distance to its source clips - the training speech's, the same texts - in the recognizer's layer 12 (and layer 6). A
+second take of the engine's own clips measures about 1,500, 2.0.0's voices about 2,500, 2.0.1's about 2,050. It was
+chosen from twenty candidates by checks written first - and it ranks 2.0.0's voice closer than the simpler recipe's
+retrained voice in all twelve voices, as blind listening did (the paper's Section 13.9). It decides between recipes;
+the seeds' spread is about 1.3% of it.</p>
+<p><strong>Intelligibility.</strong> <code>picovox_train/panel.py</code> is the panel's scoring and make train's gate (<code>picovox_train.panel eval</code>
+and <code>gate</code>): an exported model speaks a fixed evaluation set, <code>tools/panel-texts.json</code> - six Harvard sentences, six narrative
 passages from public-domain books with dialogue (Austen, Melville, Dickens, Doyle, Potter, Grahame), two questions, and
 two exclamations - through <code>tools/speak.js</code> (every word pronounced by the G2P network, as the package pronounces), and
-the renderings are scored with UTMOS, Whisper's WER, and the ECAPA speaker similarity.</p>
-<p><code>picovox_train/listeners.py</code> is the scoring tool itself - WAV files (16-bit PCM) of any sample rate in, one JSON line per
-file out:</p>
-<pre class="prettyprint source lang-sh"><code>make build/venv-train.build                                 # build/venv-train from train/requirements.txt
-build/venv-train/bin/python -I train/src/picovox_train/listeners.py [--no-embedding] [--files-from list.txt|-] file.wav ...
-</code></pre>
-<pre class="prettyprint source lang-json"><code>{&quot;file&quot;: &quot;a.wav&quot;, &quot;seconds&quot;: 2.63, &quot;mos&quot;: 3.33, &quot;embedding&quot;: [31.48, ...]}
-</code></pre>
-<p>The models load once per run (4-7 s) and score on the CPU (make train leaves the GPU to training - on an M3 Max's GPU,
-MPS, they scored about 3x as fast, with the same scores). Files longer than 20 s are scored in chunks. The models
-download on first use - about 1.5 GB, into <code>downloads/listeners/</code> (torch.hub, Hugging Face - the
-training speech's phoneme recognizer, <code>picovox_train/ctc.py</code>'s, downloads there too; like the training speech, <code>make clean</code> keeps them - <code>make superclean</code> removes them) - and later runs need no network.</p>
-<p>The environment is built with <code>python3</code> (3.14 here; 3.12 also works - <code>make build/venv-train.build PYTHON_VENV=python3.12</code>). Its packages are pinned in <code>train/requirements.txt</code>: PyTorch 2.14, torchaudio 2.11 (UTMOS's),
-SpeechBrain 1.1, transformers 5.20 (the phoneme recognizer's wav2vec2 - <code>picovox_train/ctc.py</code>), and soxr for resampling
-audio (WAV files are read with the standard library - <code>picovox_train/wav.py</code>). (The emotion2vec+ emotion recognizer,
-FunASR's - about 40 packages more - was the style experiments'; it's in git history.)</p>
-<p>Calibration (the evaluation set, or 16 recordings of each human speaker - measured in October 2026, on the human
-corpora the voice model trained on before 2.0):</p>
+Whisper transcribes the renderings. Whisper is the one judge independent of the recognizer the perceptual loss trains
+against. (The UTMOS naturalness predictor and the ECAPA speaker similarity, the panel's listener models through 2.0.2,
+are in git history: UTMOS rated voices level with their source that listening heard behind, and the similarity to the
+shipped voices stood in the way of a voice moving toward its source.)</p>
+<p>The environment is built with <code>python3</code> (3.14 here; 3.12 also works - <code>make build/venv-train.build PYTHON_VENV=python3.12</code>). Its packages are pinned in <code>train/requirements.txt</code>: PyTorch 2.14 and numpy (the networks,
+the differentiable synthesizer, the recognizer - <code>picovox_train/wav2vec2.py</code>, its 1.3 GB checkpoint downloaded once and
+pinned into <code>downloads/wav2vec2/</code> by <code>picovox_train/corpora.py</code> - and resampling, <code>picovox_train/wav.py</code>; WAV files are
+read with the standard library), Praat (parselmouth) for the training data's pitch tracks, and spaCy for
+the heteronym labels' part-of-speech tags.</p>
+<p>Calibration of Whisper's word error rate (the evaluation set, or 16 recordings of each human speaker - measured in
+October 2026, on the human corpora the voice model trained on before 2.0):</p>
 <table>
 <thead>
 <tr>
 <th>Speech</th>
-<th>MOS mean</th>
-<th>MOS min</th>
 <th>WER</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>Human - CMU ARCTIC bdl, rms, aew (men), slt, clb (women)</td>
-<td>4.28-4.39</td>
-<td>4.01-4.27</td>
 <td>2.7-4.7%</td>
 </tr>
 <tr>
 <td>Human - CMU ARCTIC eey (woman)</td>
-<td>3.84</td>
-<td>3.00</td>
 <td>4.0%</td>
 </tr>
 <tr>
 <td>Human - LibriTTS-R dev-clean audiobook readers 174, 251, 1272 (men), 1462, 1673, 2035 (women)</td>
-<td>3.77-4.40</td>
-<td>3.09-4.17</td>
 <td>2.6-8.2%</td>
 </tr>
 <tr>
 <td>Apple Samantha (unit selection)</td>
-<td>3.94</td>
-<td>3.58</td>
 <td>3.9%</td>
 </tr>
 <tr>
 <td>Apple Daniel (unit selection, British)</td>
-<td>3.41</td>
-<td>3.07</td>
 <td>5.7%</td>
 </tr>
 <tr>
 <td>Apple Fred (1980s formant synthesis)</td>
-<td>2.81</td>
-<td>2.52</td>
 <td>10.6%</td>
 </tr>
 <tr>
 <td>The training speech - the local TTS model's twelve voices (16 held-out book sentences each)</td>
-<td>4.34-4.50</td>
-<td>3.75-4.46</td>
 <td>2.2-6.9%</td>
 </tr>
 </tbody>
 </table>
-<p>Speaker similarity: every human pair 0.0-0.48; halves of one human speaker's recordings about 0.9.</p>
-<p><strong>The gap to the source.</strong> UTMOS can rate a voice level with its source when listeners hear it behind, so a second
-measure scores how far each voice sounds from its Phonon voice: <code>picovox_train.quality gap [--model MODULE]</code> speaks
-40 held-out clips a voice with the package and gives each voice's Frechet distance to its source clips in the pinned
-wav2vec2 recognizer's features (layer 12 - fdL12; and layer 6, and the clips' paired distances). Lower is closer: a
-second take of the engine's own clips measures about 1,500, 2.0.0's voices about 2,500 (2.0.1's about 2,050). It was chosen from twenty
-candidates by checks written first - and it ranks 2.0.0's voice closer than the simpler recipe's retrained voice in
-all twelve voices, as blind listening did (the paper's Section 13.9).</p>
 <h2>make train</h2>
 <p><code>make train</code> recreates the generated models - <code>lib/models/g2pModel.js</code> and <code>lib/models/voiceModel.js</code> - from a clean
 checkout, by one recipe, <code>train/data/train.json</code> (every stage's settings and seeds): <code>make train-g2p</code> and <code>make train-voice</code> at once. Each model's training ends in its gate, with its module in <code>build/train/</code> (<code>g2pModel.js</code>,
@@ -648,7 +620,8 @@ spoken by a local TTS model (<code>train/data/train.json</code>'s <code>tts.engi
 (<code>http://localhost:11434</code> - the app, or <code>ollama serve</code>); the model is pulled if it's missing, and a model of another
 digest fails the stage (a new model is a new corpus). Once the corpus is generated (<code>downloads/tts/</code>), later runs -
 <code>make train-clean</code> too - need no Ollama. The listener panel needs whisper.cpp's <code>whisper-cli</code> (<code>brew install whisper-cpp</code>); everything else is downloaded, pinned - the CMU Pronouncing Dictionary and the panel's Whisper model by
-their own rules (<code>picovox_train/corpora.py</code>), the listener models and the phoneme recognizer on first use.</p>
+their own rules (<code>picovox_train/corpora.py</code> - the CMU Pronouncing Dictionary, the wav2vec2 phoneme recognizer, and
+the panel's Whisper model, each at a fixed revision and checked against its SHA-256).</p>
 <p>The flow:</p>
 <ol>
 <li><code>make -j train</code> - both models, then a report (<code>picovox_train.trained report</code>): each model's size, the voice's
@@ -689,7 +662,7 @@ time (<code>picovox_train/gpulock.py</code> - two at once each run at about half
 <tr>
 <td>tts-corpus - the training speech: the local TTS model's clips (<code>picovox_train.tts generate</code> - Ollama) and their CTC alignment (<code>tts align</code>), in <code>downloads/tts/</code></td>
 <td>GPU - about 40 and 26 minutes the first time, a minute cached</td>
-<td><code>lib/models/g2pModel.js</code>, the dictionary</td>
+<td><code>lib/models/g2pModel.js</code>, the dictionary, the recognizer</td>
 </tr>
 <tr>
 <td>tts-readings - the heteronym tokens' readings measured (<code>picovox_train.measure</code>), and the clips whose tokens they change aligned again</td>
@@ -704,16 +677,16 @@ time (<code>picovox_train/gpulock.py</code> - two at once each run at about half
 <tr>
 <td>voice-a, voice-b - the voice's two training stages (<code>picovox_train.trainmulti --recipe voice.a</code>, <code>voice.b</code>)</td>
 <td>GPU</td>
+<td>data-tts (after baseline-eval)</td>
+</tr>
+<tr>
+<td>baseline-eval - the shipped model through the listener panel: its word error rate, and its gap to the training speech (the recognizer on the GPU) - once per shipped model, its result cached with the training speech; stage A starts after it</td>
+<td>GPU - a few minutes once</td>
 <td>data-tts</td>
 </tr>
 <tr>
-<td>baseline-eval - the shipped model through the listener panel, beside stage A</td>
-<td>CPU</td>
-<td>(after data-tts)</td>
-</tr>
-<tr>
 <td>voice-eval - the voice through the panel, and the gate (<code>picovox_train.panel gate voice --against baseline</code>: no worse than the shipped model)</td>
-<td>CPU</td>
+<td>GPU - a few minutes</td>
 <td>voice-b, baseline-eval</td>
 </tr>
 <tr>
@@ -722,7 +695,7 @@ time (<code>picovox_train/gpulock.py</code> - two at once each run at about half
 <td>voice-eval</td>
 </tr>
 <tr>
-<td>heteronyms - the relabeled words from the measured readings, checked to reproduce <code>train/data/g2p-relabel.json</code> (the G2P network's input)</td>
+<td>heteronyms - the relabeled words from the measured readings, checked to reproduce <code>train/data/g2p-relabel.json</code>'s words - a word the corpus adds is reported, not failed (the G2P network's input)</td>
 <td>CPU, ~1 min</td>
 <td>tts-readings (after data-tts)</td>
 </tr>
@@ -732,9 +705,9 @@ time (<code>picovox_train/gpulock.py</code> - two at once each run at about half
 <td>the labels: tts-readings (after data-tts)</td>
 </tr>
 <tr>
-<td>samples-reference, samples-voice-a, -voice-b - the listening samples</td>
+<td>samples-reference, samples-voice-b - the listening samples</td>
 <td>CPU, under a minute each</td>
-<td>the shipped model (after data-tts); each stage's model</td>
+<td>the shipped model (after data-tts); the voice's evaluation</td>
 </tr>
 </tbody>
 </table>
@@ -745,17 +718,18 @@ stages 63 minutes from the data build to the gate, against the distillation's 71
 model</a>; a GPU step's time varies with the machine's heat - stage A's steps took 0.112-0.120 s
 that day, the teacher A's 0.086 the day before); the voices' data is now cached - built only when its inputs change -
 which takes its 9 minutes off the next run. With the perceptual loss (2.0.1), stage A takes about 46 minutes and B 37
-(2026-11-05). (Before 2.0, on the human
+(2026-11-05). On the reviewed pipeline (2026-11-08 - the paper's Section 13.11), the path from the readings to the
+gate took 84 minutes: the readings 8, the data 2, the shipped model's evaluation 2, stage A 38 and B 33, the gate 2 -
+the voice's stages beside the whole G2P chain (its cross-validation 20 minutes, from 55). (Before 2.0, on the human
 corpora, it took 71 minutes.) The package's manifest records its provenance: the commit, the recipe's and the training
 data's hashes, and the gate's scores. <code>python -m picovox_train.smoke</code> runs every stage's entry point for a few steps on
 the CPU.</p>
-<p>Each training stage's final model - stage A's last checkpoint (which stage B starts from) and stage B's best (the model
-the package stage ships) - is rendered
-for listening as the stage finishes, in its own CPU stage beside the next GPU stage (<code>tools/trainsamples.js</code>): exported
-as the gate exports it (the export the package stage packages), it speaks <code>train/data/train.json</code>'s <code>samples</code> texts (Moby-Dick's opening, a dialogue,
-and heteronyms) in six of the package's voices (three female, three male) exactly as the package speaks a
-sentence (<code>lib/synthesis.js</code>, every word pronounced by the G2P network), and each sample is scored with UTMOS on the
-CPU. The shipped <code>lib/models/voiceModel.js</code> is rendered the same way, as the reference. The WAV files are
+<p>The trained voice - the module the gate scored, stage B's last checkpoint exported and packaged as the package stage
+ships it - is rendered for listening when its evaluation finishes, in its own CPU stage (<code>tools/trainsamples.js</code>): it
+speaks <code>train/data/train.json</code>'s <code>samples</code> texts (Moby-Dick's opening, a dialogue, and heteronyms) in six of the
+package's voices (three female, three male) exactly as the package speaks a sentence (<code>lib/synthesis.js</code>, every word
+pronounced by the G2P network). The shipped <code>lib/models/voiceModel.js</code> is rendered the same way, as the reference. The
+WAV files are
 <code>TRAIN_DIR/samples/STAGE-SPEAKER-TEXT.wav</code>, listed in <code>TRAIN_DIR/samples/index.json</code>; the dashboard's Listen tab plays
 them, each beside the shipped model's.</p>
 <p><code>make train</code> keeps a record for the training dashboard (<code>tools/dashboard/</code>): each stage's start, end, and failure in
@@ -808,13 +782,14 @@ for 28 minutes.</p>
 decoder of 4 (282,627 parameters, 311 KB gzipped). make train trains it directly on the training speech
 (<code>picovox_train/trainmulti.py</code>, the recipe's <code>voice</code> - its <code>defaults.config</code> the size), in two stages:</p>
 <ol>
-<li><strong>Stage A</strong> - the spectral loss through the differentiable synthesizer on the clips (and the duration, F0, and
-formant-guide losses), the first 15,000 steps of a 30,000-step cosine schedule (10,000 for a week of November 2026 -
+<li><strong>Stage A</strong> - the spectral loss through the differentiable synthesizer on the clips (and the duration and F0
+losses), the first 15,000 steps of a 30,000-step cosine schedule (10,000 for a week of November 2026 -
 each seed scored within the seeds' spread, but with the distillation's removal the voices averaged 0.03 UTMOS below
 the shipped voice, and the blind A/B leaned to it).</li>
 <li><strong>Stage B</strong> - from A's last checkpoint, with the adversarial critic and feature matching against the over-smoothing,
 10,000 steps of a warmup-stable-decay schedule (constant, then the last 25% cooled down by 1 - sqrt -
-<code>picovox_train/optim.py</code>); its best validation checkpoint is the voice.</li>
+<code>picovox_train/optim.py</code>); its last checkpoint is the voice (the validation loss doesn't pick the better voice -
+the paper's Sections 7.3 and 11.4 - so no best checkpoint is kept).</li>
 </ol>
 <p>Both stages add the perceptual loss (<code>picovox_train/perceptual.py</code>, weight 5): each step's first 4 rendered crops
 against their recordings in the pinned wav2vec2 phoneme recognizer's layers 3 and 6 (frozen), the mean cosine distance
@@ -823,11 +798,19 @@ trained against, it brought the voices a fifth closer to their source (fd L12 2,
 2,522 and 2,700-2,730 without it), as close in the speaker embedding (0.278 against 0.277), and the panel's UTMOS from
 4.31 to 4.42 - two seeds alike (paper Section 13.10). It makes a step about 1.6 times as long; in blind A/B listening
 against 2.0.0's voice, no audible difference (6 of 6 trials Same).</p>
+<p>The recipe's other parts were put to the same test in November 2026 (the paper's Section 13.11), each retrained against
+seed controls and judged by the gap: the critic earns its time (stage B without it measured 2,104 and 2,135 against the
+controls' 2,067 and 2,093, for a step 31% faster); the perceptual loss's recognizer in bfloat16 gained nothing and ran
+slower; and the formant guide - log F1-F3 against Praat's, faded over stage A - made no difference (both stages without
+it 2,046 and 2,082 against 2,067 and 2,068), so it is gone, and with it Praat's formant analysis of the training speech
+(the data's tracks are F0 and voicing).</p>
 <p>The gate (<code>picovox_train/panel.py</code>): the shipped model (<code>panel eval baseline=lib/models/voiceModel.js</code> - the packaged
-module spoken as the package loads it, <code>tools/unpack.js</code>) and the voice (<code>panel eval voice=CHECKPOINT --reference baseline</code> - exported, packaged, and spoken by <code>tools/speak.js</code> on <code>tools/panel-texts.json</code> in the twelve voices) through
-the listener panel, then <code>panel gate voice --against baseline</code>: the voice's mean UTMOS within 0.05 of the shipped
-model's, its WER at most 1 point worse, and its speaker similarity to the shipped voices at least 0.85 (the recipe's
-<code>panel</code> <code>tolerance</code>) - <code>build/train/eval/summary.json</code>, the exit status 1 if not.</p>
+module spoken as the package loads it, <code>tools/unpack.js</code>; evaluated once per shipped model, its result cached with the
+training speech) and the voice (<code>panel eval voice=CHECKPOINT</code> - exported, packaged, and spoken by <code>tools/speak.js</code> on
+<code>tools/panel-texts.json</code> in the twelve voices, and by the package on 40 held-out clips a voice for the gap) through the
+listener panel, then <code>panel gate voice --against baseline</code>: the voice's WER at most 1 point worse than the shipped
+model's, and its mean gap to the source (fdL12) at most 2% above the shipped model's - about one and a half times the
+seeds' spread (the recipe's <code>panel</code> <code>tolerance</code>) - <code>build/train/eval/summary.json</code>, the exit status 1 if not.</p>
 <p>Until November 2026 make train trained a large teacher (931,619 parameters) and distilled it into the d64 student:
 the teacher's parameter frames for 280,602 sentence-voice pairs, the student trained on them (Muon, 12,000 steps), then
 a short polish on the real audio with the critic - three more GPU stages, about 15 minutes of each run. Trained directly
