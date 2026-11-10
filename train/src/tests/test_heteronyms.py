@@ -252,15 +252,34 @@ class TestHeteronyms(unittest.TestCase):
             self.assertEqual(sorted(committed['relabel']), ['family', 'lead', 'record', 'solo', 'wound'])
             self.assertEqual(committed['evidence']['wound'], {'kept': {'first': 'W UW1 N D'}, 'votes': None})
 
-            # The check - equal
+            # The check - reproduced
             with captured() as (_, stderr):
                 self.assertEqual(heteronyms.main(['--out', self.out, '--keep', keep, '--check', written]), 0)
-            self.assertIn(f'check: the 5 relabeled words equal {written}\'s', stderr.getvalue())
+            self.assertEqual(stderr.getvalue().splitlines()[-1], f'check: the 5 committed relabeled words reproduced ({written})')
+            self.assertNotIn('new relabeled words', stderr.getvalue())
 
-            # The check - different (without the committed words kept)
+            # The check - a word the corpus adds is reported, and passes
+            fewer = os.path.join(self.out, 'fewer.json')
+            with open(fewer, 'w', encoding='utf-8') as file:
+                json.dump({**committed, 'relabel': {word: phones for word, phones in committed['relabel'].items() if word != 'lead'}}, file)
+            with captured() as (_, stderr):
+                self.assertEqual(heteronyms.main(['--out', self.out, '--keep', keep, '--check', fewer]), 0)
+            self.assertIn(f'check: 1 new relabeled words, not in {fewer} (adopt them with --write): lead L EH1 D', stderr.getvalue())
+            self.assertIn(f'check: the 4 committed relabeled words reproduced ({fewer})', stderr.getvalue())
+
+            # The check - a committed word read otherwise fails
+            other = os.path.join(self.out, 'other.json')
+            with open(other, 'w', encoding='utf-8') as file:
+                json.dump({**committed, 'relabel': {**committed['relabel'], 'lead': 'L IY1 D'}}, file)
+            with captured() as (_, stderr):
+                self.assertEqual(heteronyms.main(['--out', self.out, '--keep', keep, '--check', other]), 1)
+            self.assertIn(f'check: the committed words not reproduced from {other} (corpus phonon-0123456789ab, theirs '
+                          'phonon-0123456789ab): lead L EH1 D (was L IY1 D)', stderr.getvalue())
+
+            # The check - committed words dropped fail (without the committed words kept)
             with captured() as (_, stderr):
                 self.assertEqual(heteronyms.main(['--out', self.out, '--check', written]), 1)
-            self.assertIn(f'check: the relabeled words differ from {written}\'s (corpus phonon-0123456789ab, theirs '
+            self.assertIn(f'check: the committed words not reproduced from {written} (corpus phonon-0123456789ab, theirs '
                           'phonon-0123456789ab): family None (was F EY1 M L IY0), record None (was R IH0 K AO1 R D), '
                           'solo None (was S OW1 L AH0), wound None (was W AW1 N D)', stderr.getvalue())
 

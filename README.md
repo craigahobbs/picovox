@@ -437,7 +437,7 @@ time (`picovox_train/gpulock.py` - two at once each run at about half speed) whi
 | baseline-eval - the shipped model through the listener panel: its word error rate, and its gap to the training speech (the recognizer on the GPU) - once per shipped model, its result cached with the training speech; stage A starts after it | GPU - a few minutes once | data-tts |
 | voice-eval - the voice through the panel, and the gate (`picovox_train.panel gate voice --against baseline`: no worse than the shipped model) | GPU - a few minutes | voice-b, baseline-eval |
 | package - the voice's module, `build/train/voiceModel.js`, with its provenance | CPU | voice-eval |
-| heteronyms - the relabeled words from the measured readings, checked to reproduce `train/data/g2p-relabel.json` (the G2P network's input) | CPU, ~1 min | tts-readings (after data-tts) |
+| heteronyms - the relabeled words from the measured readings, checked to reproduce `train/data/g2p-relabel.json`'s words - a word the corpus adds is reported, not failed (the G2P network's input) | CPU, ~1 min | tts-readings (after data-tts) |
 | g2p-network, context-labels, context-network, g2p-reading, g2p - the G2P (the network; the heteronym labels from the pinned books; the context network and its cross-validation; beside it, the reading stage; the export and the gate) | CPU - the network one core, ~30 min | the labels: tts-readings (after data-tts) |
 | samples-reference, samples-voice-b - the listening samples | CPU, under a minute each | the shipped model (after data-tts); the voice's evaluation |
 

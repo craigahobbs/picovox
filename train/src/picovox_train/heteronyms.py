@@ -4,7 +4,7 @@
 """
 The G2P's relabeled words (train/data/g2p-relabel.json, g2p.py's focus stage) - dictionary words whose first
 pronunciation isn't what the training speech's voices say, from the readings measured in the corpus (measure.py -
-the CTC vote or the formants, the classes their controls pass) (python is PYTHONPATH=train/src build/venv-train/bin/python -B):
+the CTC and voicing votes, the classes their controls pass) (python is PYTHONPATH=train/src build/venv-train/bin/python -B):
 
     python -m picovox_train.heteronyms --out DIR [--keep train/data/g2p-relabel.json] [--check train/data/g2p-relabel.json]
     python -m picovox_train.heteronyms --out DIR --keep train/data/g2p-relabel.json --write train/data/g2p-relabel.json
@@ -20,6 +20,11 @@ the CTC vote or the formants, the classes their controls pass) (python is PYTHON
    with --keep, a committed word the corpus can't judge (its readings
    unmeasured, its class's method unused, no significant majority either way, or a context word) is kept with its
    evidence, and one whose first reading is a significant majority is dropped (contradicted)
+
+--check fails (exit 1) when a committed word isn't reproduced - dropped, or relabeled to another reading: the corpus's
+evidence contradicts it. A word the corpus adds is reported, not failed: the TTS engine isn't deterministic (a seed
+doesn't make it so), so a regenerated corpus's thin evidence moves words across the significance line, and a new word
+is adopted deliberately (--write).
 """
 
 import argparse
@@ -174,7 +179,7 @@ def select(items, counts, keep=None, context=(), names=()):
 DESCRIPTION = (
     'The G2P\'s relabeled words (picovox_train/g2p.py relabel, the focus stage) - dictionary words whose first pronunciation '
     'isn\'t what the training speech\'s voices say (picovox_train/heteronyms.py): the significant majority reading of the '
-    'corpus\'s measured tokens (picovox_train/measure.py - the CTC vote or the formants; the Wilson 95% lower bound over the '
+    'corpus\'s measured tokens (picovox_train/measure.py - the CTC or voicing vote; the Wilson 95% lower bound over the '
     'first above one half, from 3+ books), a lexical difference (not vowel reduction or stress alone, not a function word); '
     'or, where the corpus can\'t judge a word (kept), its earlier evidence. evidence: first (the first variant), votes and '
     'books per reading, class, corpus, date - or kept, the earlier evidence')
@@ -213,7 +218,8 @@ def main(argv=None):
                                      description='The G2P\'s relabeled words from the training speech\'s readings')
     parser.add_argument('--out', required=True, help='the output directory')
     parser.add_argument('--keep', help='the committed relabel file - its words the corpus can\'t judge are kept')
-    parser.add_argument('--check', help='a relabel file (train/data/g2p-relabel.json) the result must equal (exit 1 if not)')
+    parser.add_argument('--check', help='a relabel file (train/data/g2p-relabel.json) whose words the result must reproduce '
+                        '(exit 1 if not - new words are reported)')
     parser.add_argument('--write', help='write the result as the committed relabel file')
     args = parser.parse_args(argv)
     os.makedirs(args.out, exist_ok=True)
@@ -242,15 +248,22 @@ def main(argv=None):
     if args.check:
         expected = read_json(args.check)
         relabel = result['relabel']
-        if relabel != expected['relabel']:
-            print(f'check: the relabeled words differ from {args.check}\'s (corpus {os.path.basename(directory)}, theirs '
+
+        # (a word the corpus adds - reported, adopted with --write)
+        added = sorted(set(relabel) - set(expected['relabel']))
+        if added:
+            print(f'check: {len(added)} new relabeled words, not in {args.check} (adopt them with --write): ' +
+                  ', '.join(f'{word} {relabel[word]}' for word in added), file=sys.stderr)
+
+        # (a committed word dropped or read otherwise - the corpus contradicts it)
+        changed = sorted(word for word, phones in expected['relabel'].items() if relabel.get(word) != phones)
+        if changed:
+            print(f'check: the committed words not reproduced from {args.check} (corpus {os.path.basename(directory)}, theirs '
                   f'{expected.get("corpus")}): ' +
-                  ', '.join(f'{word} {relabel.get(word)} (was {expected["relabel"].get(word)})'
-                            for word in sorted(set(relabel) | set(expected['relabel']))
-                            if relabel.get(word) != expected['relabel'].get(word)),
+                  ', '.join(f'{word} {relabel.get(word)} (was {expected["relabel"][word]})' for word in changed),
                   file=sys.stderr)
             return 1
-        print(f'check: the {len(relabel)} relabeled words equal {args.check}\'s', file=sys.stderr)
+        print(f'check: the {len(expected["relabel"])} committed relabeled words reproduced ({args.check})', file=sys.stderr)
     return 0
 
 

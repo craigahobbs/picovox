@@ -256,7 +256,7 @@ $(TRAIN_DIR)/data-tts.done: $(TRAIN_DIR)/tts-readings.done
 # and its held-out accuracy gate (cross-validated over the books) beside the G2P network, the reading stage (two threads)
 # after the network beside the context network, then the export to $(TRAIN_DIR)/g2pModel.js and picovox_train.context
 # check against the committed module; and the heteronym
-# relabeling, which must reproduce train/data/g2p-relabel.json (the G2P network's input).
+# relabeling, which must reproduce train/data/g2p-relabel.json's words (the G2P network's input).
 #
 # In make train, the G2P's memory-bound stages (the context labels, the relabeling) are scheduled after the voices'
 # data build (order-only prerequisites) - into the voice's GPU-bound hours, when the cores are idle - not competing
@@ -317,7 +317,7 @@ $(TRAIN_DIR)/g2p.done: $(TRAIN_DIR)/g2p-reading.done $(TRAIN_DIR)/context-networ
 
 
 # The heteronym relabeling (CPU) - from the training speech's readings, the committed words it can't judge kept; it must
-# reproduce train/data/g2p-relabel.json's words
+# reproduce train/data/g2p-relabel.json's words (a word it adds is reported - adopted with picovox_train.heteronyms --write)
 $(TRAIN_DIR)/heteronyms.done: $(TRAIN_DIR)/tts-readings.done downloads/cmudict/cmudict.dict train/data/g2p-relabel.json \
 		| $(if $(G2P_STANDALONE),,$(TRAIN_DIR)/data-tts.done)
 	@$(STAGE) start
