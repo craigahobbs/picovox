@@ -1303,6 +1303,7 @@ A larger context network (79K parameters) and doubled training steps did not hel
 | 1.6.8 (the human readers' evidence) | 53/54 | 52/52 | 80/86 | 0.093% | 21 | 26/38 |
 | **2.0 (the training speech's)** | **54/54** | 51/52 | 80/86 | 0.061% | 7 | **34/38** |
 | 2.0.x (7 bits, GPTQ - Section 13.8; the regenerated speech) | 53/54 | 51/52 | 80/86 | **0.048%** | **4** | 32/38 |
+| November 10's (the speech regenerated again; the probes' gate, below) | 54/54 | 52/52 | 80/86 | 0.049% | **3** | 29/38 |
 
 The context set's 54 sentences are few, and its thin words flip between training seeds, so we also scored 38 fresh
 sentences - both readings of polish, contract, winds, bass, minute, and invalid, none in the seeds or the set. The
@@ -1635,6 +1636,15 @@ paying in the gap; the G2P's chain, which had run as long, now finishes with hal
 other work - the listener models, the formant analyses, 36 context networks, a second export - is gone. The smoke
 test, which the regenerated training speech had broken (a 48-clip sample that skipped a voice), runs every entry point
 again.
+
+**Installed (November 10).** The speech was generated once more from nothing (make superclean), and that run's models
+are the shipped ones: the voice's gap 2,054 against 2,068 (-0.7%, within a seed's spread of 1.3%), WER 1.06% against
+0.98%, and no audible difference in a blind A/B (6 trials of 6 the same); the G2P as Section 13.3's table has it - its
+probes 29 of 38 by its seed's draw, the check's rule for them changed first. Two checks had failed on the engine's
+nondeterminism, not on the models. The relabeling's, on the generation before (November 8), required the committed words
+reproduced exactly - but a word with thin evidence crosses the significance line between two generations of the speech
+(Phonon accepts a seed, and two takes with one seed differ as much as two without) - and now fails only when a committed
+word is contradicted, a word the speech adds reported. The probes', on this run, is Section 13.3's.
 
 ## 14. Limitations and future work
 

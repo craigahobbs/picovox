@@ -115,9 +115,11 @@ make train's training speech (`train/data/train.json`'s `tts` voices - see [the 
 `test/voices.json` is their design record. The voices are the model's speakers as it speaks them - no blends, and no
 pitch, tract, or rate adjustments of their own - except that every voice's source is 5 dB darker than the network
 predicts it (`lib/synthesis.js` `sourceShelf`): in blind A/B listening (1.6.6) the network's source sounded tinny, and
-darker it was less tinny and never less natural. On the listener panel's texts the voices score a mean UTMOS of
-4.38-4.47 (4.42 over the twelve) and a Whisper word error rate of 0.6-1.2% (0.98%) - 2.0.0's scored 4.31 and 1.13%, and
-the voices before 2.0 4.13 and 1.36% (a blind A/B preferred 2.0's voices in all 15 trials).
+darker it was less tinny and never less natural. On the listener panel's texts the voices have a Whisper word error
+rate of 0.9-1.2% (1.06% over the twelve) and a gap to their TTS source of 2,054 (fdL12 - the listener panel) - the same
+within a training seed's spread as 2.0.1's, which they replaced (0.98% and 2,068; a blind A/B heard no difference in 6
+trials of 6). 2.0.1's scored a mean UTMOS of 4.42, 2.0.0's 4.31 (and 1.13%), and the voices before 2.0 4.13 and 1.36%
+(a blind A/B preferred 2.0's voices in all 15 trials).
 
 ### `styles()`
 
@@ -227,8 +229,8 @@ that runs its own synthesis loop (PicoShelf's worker does):
 | Speed, iPhone without a JIT (Safari over plain http, or in Lockdown Mode) | About 2.6x real time in one worker; about 3.1-3.4x with the network and the renderer in two workers (`sentenceFrames` and `createSentenceRenderer`) |
 | Startup | About 0.1 s to load both networks (Node, M3 Max) |
 
-The voices score a mean UTMOS (a neural predictor of listeners' naturalness ratings, 1-5) of 4.42 on the
-listener panel's texts, with a Whisper word error rate of 0.98% - see [the listener panel](#the-listener-panel).
+The voices have a Whisper word error rate of 1.06% on the listener panel's texts, and a gap to their TTS source of
+2,054 (fdL12) - see [the listener panel](#the-listener-panel).
 
 
 ## How the models are trained
@@ -699,7 +701,7 @@ the shipped module's score when it was added (63/73), so it can only go up.
 The probes (kind `probe` in `train/data/heteronyms-test.json`): both readings of the context network's thin words -
 polish, contract, winds, bass, minute, and invalid - in 38 sentences written apart from the labels' seeds and
 collocations, so the context set's few sentences aren't the only measure of how the network generalizes (the regression
-set's sentences, the probes too, are never training examples). 1.6.8's module scores 26 of 38, 2.0's 34, 2.0.1's 32; the minimum is
+set's sentences, the probes too, are never training examples). 1.6.8's module scores 26 of 38, 2.0's 34, 2.0.1's 32, the one after 29; the minimum is
 0.7, a guard against a collapse below the seeds' spread (the context network's seed alone moves the thin words' readings - four
 seeds on the same labels scored 29 to 34), and make train's check doesn't compare the probes with the committed module's (the
 recipe's `heteronymKindDrop` has no drop for them - two draws of that spread differ by more than the other kinds' 2).
