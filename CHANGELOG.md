@@ -1,31 +1,47 @@
 # Changelog
 
+## 2.0.3 (2026-11-10)
+
+- [1406dd0](https://github.com/craigahobbs/picovox/commit/1406dd0) - pronunciation: the G2P network and its heteronym context network are retrained from regenerated training speech: the regression set's default sentences 52 of 52 (was 51 - "an increase in pay") and its context sentences 54 of 54 (was 53 - "He spoke Polish at home"), "the cut was minute" now right, book words mispronounced 0.049% (was 0.048%), 3 of the 10,000 most frequent words wrong (was 4); known misses: "Polish" and "polish", the verb "contract", the fish "bass", and "invalid" as a noun, in fresh sentences
+
+- [1406dd0](https://github.com/craigahobbs/picovox/commit/1406dd0) - voices: the voice network is retrained by the reviewed training pipeline - the same within a training seed's spread: the gap to its source 2,054 (was 2,068), Whisper word error rate 1.06% (was 0.98%), and blind A/B listening heard no difference; the package is the same size (748 KB)
+
+- [0d8e630](https://github.com/craigahobbs/picovox/commit/0d8e630), [df1d9b7](https://github.com/craigahobbs/picovox/commit/df1d9b7), [a96b92b](https://github.com/craigahobbs/picovox/commit/a96b92b) - the package's internals simplified, its audio bit-identical. Breaking, for imports of lib/ modules (the API, lib/index.js, is unchanged): lib/transforms.js tractScale, effort, and rdScale and lib/params.js TRACT_FREQUENCIES are removed, and lib/package.js packagedWeights reads raw packages only (no deflate-raw)
+
 ## 2.0.2 (2026-11-06)
 
 - [702edfe](https://github.com/craigahobbs/picovox/commit/702edfe) - style "auto" without the paragraph beat - the quotations in the dialogue style (an exclaimed one's in the exclaim style), the narration neutral: each paragraph's arc (its first sentence lifted, its pitch stepping down sentence by sentence) sounded like the voice changing for no reason, and a blind A/B heard no difference without it. Breaking, for imports of lib/ modules (the API, lib/index.js, is unchanged): lib/style.js paragraphBeat and paragraphBeats, and lib/synthesis.js's beat option, are removed
+
 - [e0705e1](https://github.com/craigahobbs/picovox/commit/e0705e1) - a quotation's attribution is the quotation's sentence: a lowercase word after "!" or "?" (or a quotation's closing period) continues the sentence - '"Help!" he screamed.' was two sentences, the attribution read on its own after a sentence's pause; now one, the "!" a phrase break
 
 ## 2.0.1 (2026-11-05)
 
 - [0c46ef3](https://github.com/craigahobbs/picovox/commit/0c46ef3) - voices: the voice network is retrained with a perceptual loss - in both training stages, the rendered speech against its training speech in a pinned wav2vec2 phoneme recognizer's features: on the listener panel's texts the voices' mean UTMOS is 4.42 (was 4.31) and their Whisper word error rate 0.98% (was 1.13%), every voice a fifth closer to its source by the gap measure (picovox_train.quality gap) and as close in speaker similarity; blind A/B listening heard no difference. The voice network's weights are 7 bits, rounded by GPTQ (was 8): the voice module is 311 KB gzipped (was 334 KB), the package 748 KB. lib/model.js no longer reads 8-bit weights
+
 - [088f892](https://github.com/craigahobbs/picovox/commit/088f892) - pronunciation: the G2P network is retrained (the regenerated training speech) and exported at 7 bits per weight, rounded by GPTQ (was 6 bits, nearest): book words mispronounced 0.048% (was 0.061%), 4 of the 10,000 most frequent words wrong (was 7); known misses: "Polish" and "polish", the verb "contract", and the adjective "minute" in fresh sentences. The G2P module is 360 KB gzipped (was 317 KB)
 
 ## 2.0.0 (2026-10-30)
 
 - [6cec8e3](https://github.com/craigahobbs/picovox/commit/6cec8e3) - new voices - every voice is new: the voice network is trained on speech a local TTS model (Gradium's Phonon, through Ollama) speaks at train time, one of its voices for each of the package's twelve, instead of human recordings (CMU ARCTIC, LibriTTS-R, CREMA-D). The voice keys (male - the default - female, sarah, helen, amy, kate, grace, james, robert, michael, david, and thomas), the style keys, and the API are unchanged; each voice is its own row of the model's speaker table, with new descriptions in voices() - no blends of readers, and no per-voice pitch, tract, effort, pulse, or rate adjustments (every voice's -5 dB source shelf kept). On the listener panel's texts the voices' mean UTMOS is 4.31 (was 4.13) and their Whisper word error rate 1.13% (was 1.36%), and a blind A/B preferred the new voices in all 15 trials; the voice network is 282,627 parameters, 334 KB gzipped (was 305,035, 385 KB)
+
 - [6cec8e3](https://github.com/craigahobbs/picovox/commit/6cec8e3) - the happy, sad, fearful, and disgusted styles are transforms only, like angry: the model has no style table - each style's transforms are the measured effects (pitch, pitch range, pulse, frication, level, and pace) the former emotion embeddings, learned from CREMA-D's actors, had on every voice; on the listener panel every style stays intelligible (word error rate 0.6-3.0%, whispering 2.4-3.9%) and every voiced style's UTMOS is within 0.05 of neutral's but fearful's (0.08-0.15 below); style auto's UTMOS is within 0.04 of neutral's in all twelve voices
+
 - [7930848](https://github.com/craigahobbs/picovox/commit/7930848) - pronunciation: the G2P network and its heteronym context network are retrained from the training speech's measured readings (no LibriTTS-R): 98 relabeled words (43 by the phoneme recognizer's vote, 7 by its voicing vote, 48 kept from 1.6), and 86 context words (stress pairs only where their less common reading is common in the books); the regression set's context sentences 54 of 54 (was 53), book words mispronounced 0.061% (was 0.093%), 7 of the 10,000 most frequent words wrong (was 21); known miss: "invalid" before a noun ("her invalid mother")
+
 - [6cec8e3](https://github.com/craigahobbs/picovox/commit/6cec8e3) - breaking, for imports of lib/ modules (the API, lib/index.js, is unchanged): lib/model.js conditions on a speaker only - its speaker blends ({id: weight}) and its style option removed; lib/synthesis.js's voice table is {key, label, sex, description} - a voice is the model's speaker of its key, with no blend, style, or adjustments; a 1.x voice module (lib/models/voiceModel.js) has none of 2.0's voices (its speakers are the human readers), and 2.0's isn't 1.x's; tools/speak.js loses --blend, --style, and --intensity
+
 - [6cec8e3](https://github.com/craigahobbs/picovox/commit/6cec8e3) - training: make train generates its training speech - book sentences, the heteronyms' coverage first, about 4 hours a voice - from the local TTS model (pinned by digest, cached in downloads/tts/), aligns and checks it with a wav2vec2 phoneme recognizer, and measures its heteronym tokens' readings, the G2P's heteronym evidence; the human speech corpora, the speaker pool, and the CREMA-D pipeline are gone
 
 ## 1.6.8 (2026-10-27)
 
 - [bd62a80](https://github.com/craigahobbs/picovox/commit/bd62a80) - pronunciation: the heteronym context network retrained on the context labels 1.6.5's reading fixes changed - "a minute amount of dust" and "he spoke Polish" now right (the context regression set 53 of 54, was 51); 38 of 519,548 words of the pinned books are pronounced differently, all heteronyms. The voice retrained from scratch by the new make train flow - no audible difference in blind A/B listening, its listener-panel scores within noise
+
 - [961cfbf](https://github.com/craigahobbs/picovox/commit/961cfbf) - the package's internals simplified (the packed weights' decode and unused transform options removed), its audio bit-identical
 
 ## 1.6.7 (2026-10-23)
 
 - [ab9f58b](https://github.com/craigahobbs/picovox/commit/ab9f58b) - no clicks in speak's playback: its audio context runs at the synthesis sample rate, so the blocks join exactly - a context at the device's rate resampled each block apart, and every join (each 85 ms) clicked; the README says to play stream's blocks the same way
+
 - [a71531f](https://github.com/craigahobbs/picovox/commit/a71531f), [7285b69](https://github.com/craigahobbs/picovox/commit/7285b69) - the package's internals simplified: the single-speaker model support and the voice network's unused options (a raw speaker embedding, a channel equalizer, a formant bandwidth scale, and the pause threshold) removed, its audio bit-identical
 
 ## 1.6.6 (2026-10-23)
@@ -35,11 +51,13 @@
 ## 1.6.5 (2026-10-23)
 
 - [afa5018](https://github.com/craigahobbs/picovox/commit/afa5018) - reading fixes: a number of 309 or more digits no longer stops synthesis (numbers past 15 digits are read digit by digit); "I said no. Then I left." is two sentences ("No." is an abbreviation only before a number - "No. 5" as "number five"); an uppercase P.M. or A.M. ends a sentence; an en dash between numbers is "to" ("1812–15"); Rev., Capt., Col., Prof., Esq., Jr., Sr., Lt., Mt., Vol., and Fig. spelled out; MI, DI, MV, and DV aren't Roman numerals
+
 - [d91ddc1](https://github.com/craigahobbs/picovox/commit/d91ddc1) - the package's internals simplified (one base64 and inflate, one encoder path, the unused openFraction removed), its audio bit-identical
 
 ## 1.6.4 (2026-10-22)
 
 - [a7ed6d6](https://github.com/craigahobbs/picovox/commit/a7ed6d6) - parentheses pause: an aside's opening and closing parentheses are each a comma's phrase break ("He left the room (quietly, as always) and closed the door."), punctuation after a parenthesis keeping its own break
+
 - [02e7436](https://github.com/craigahobbs/picovox/commit/02e7436) - pronunciation: gravest (the dictionary's "gra-vest" corrected), mindset, and paprika
 
 ## 1.6.3 (2026-10-22)

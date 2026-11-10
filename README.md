@@ -701,7 +701,7 @@ the shipped module's score when it was added (63/73), so it can only go up.
 The probes (kind `probe` in `train/data/heteronyms-test.json`): both readings of the context network's thin words -
 polish, contract, winds, bass, minute, and invalid - in 38 sentences written apart from the labels' seeds and
 collocations, so the context set's few sentences aren't the only measure of how the network generalizes (the regression
-set's sentences, the probes too, are never training examples). 1.6.8's module scores 26 of 38, 2.0's 34, 2.0.1's 32, the one after 29; the minimum is
+set's sentences, the probes too, are never training examples). 1.6.8's module scores 26 of 38, 2.0's 34, 2.0.1's 32, 2.0.3's 29; the minimum is
 0.7, a guard against a collapse below the seeds' spread (the context network's seed alone moves the thin words' readings - four
 seeds on the same labels scored 29 to 34), and make train's check doesn't compare the probes with the committed module's (the
 recipe's `heteronymKindDrop` has no drop for them - two draws of that spread differ by more than the other kinds' 2).
