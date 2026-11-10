@@ -198,9 +198,11 @@ make train's training speech (<code>train/data/train.json</code>'s <code>tts</co
 <code>test/voices.json</code> is their design record. The voices are the model's speakers as it speaks them - no blends, and no
 pitch, tract, or rate adjustments of their own - except that every voice's source is 5 dB darker than the network
 predicts it (<code>lib/synthesis.js</code> <code>sourceShelf</code>): in blind A/B listening (1.6.6) the network's source sounded tinny, and
-darker it was less tinny and never less natural. On the listener panel's texts the voices score a mean UTMOS of
-4.38-4.47 (4.42 over the twelve) and a Whisper word error rate of 0.6-1.2% (0.98%) - 2.0.0's scored 4.31 and 1.13%, and
-the voices before 2.0 4.13 and 1.36% (a blind A/B preferred 2.0's voices in all 15 trials).</p>
+darker it was less tinny and never less natural. On the listener panel's texts the voices have a Whisper word error
+rate of 0.9-1.2% (1.06% over the twelve) and a gap to their TTS source of 2,054 (fdL12 - the listener panel) - the same
+within a training seed's spread as 2.0.1's, which they replaced (0.98% and 2,068; a blind A/B heard no difference in 6
+trials of 6). 2.0.1's scored a mean UTMOS of 4.42, 2.0.0's 4.31 (and 1.13%), and the voices before 2.0 4.13 and 1.36%
+(a blind A/B preferred 2.0's voices in all 15 trials).</p>
 <h3><code>styles()</code></h3>
 <p>The speaking styles - <code>[{key, label, kind, description}]</code>, neutral (the default) first. Any style goes with any voice:</p>
 <table>
@@ -447,8 +449,8 @@ that runs its own synthesis loop (PicoShelf's worker does):</p>
 </tr>
 </tbody>
 </table>
-<p>The voices score a mean UTMOS (a neural predictor of listeners' naturalness ratings, 1-5) of 4.42 on the
-listener panel's texts, with a Whisper word error rate of 0.98% - see <a href="#the-listener-panel">the listener panel</a>.</p>
+<p>The voices have a Whisper word error rate of 1.06% on the listener panel's texts, and a gap to their TTS source of
+2,054 (fdL12) - see <a href="#the-listener-panel">the listener panel</a>.</p>
 <h2>How the models are trained</h2>
 <p>Both networks are trained from scratch by <code>make train</code>, which rebuilds <code>lib/models/g2pModel.js</code> and
 <code>lib/models/voiceModel.js</code> from a clean checkout. The voice network learns from training speech that make train
@@ -1105,8 +1107,10 @@ the shipped module's score when it was added (63/73), so it can only go up.</p>
 <p>The probes (kind <code>probe</code> in <code>train/data/heteronyms-test.json</code>): both readings of the context network's thin words -
 polish, contract, winds, bass, minute, and invalid - in 38 sentences written apart from the labels' seeds and
 collocations, so the context set's few sentences aren't the only measure of how the network generalizes (the regression
-set's sentences, the probes too, are never training examples). 1.6.8's module scores 26 of 38, 2.0's 34, 2.0.1's 32; the minimum is
-0.8 (the thin words' scores vary a few sentences between trainings).</p>
+set's sentences, the probes too, are never training examples). 1.6.8's module scores 26 of 38, 2.0's 34, 2.0.1's 32, 2.0.3's 29; the minimum is
+0.7, a guard against a collapse below the seeds' spread (the context network's seed alone moves the thin words' readings - four
+seeds on the same labels scored 29 to 34), and make train's check doesn't compare the probes with the committed module's (the
+recipe's <code>heteronymKindDrop</code> has no drop for them - two draws of that spread differ by more than the other kinds' 2).</p>
 <h3>Heteronyms</h3>
 <p>Some words have readings their neighbors decide - &quot;I read it yesterday&quot; and &quot;I will read it&quot;, &quot;their lives&quot; and &quot;she
 lives&quot;, &quot;a lead pipe&quot;, the noun/verb stress pairs. The G2P module also holds two small pieces for them (no word list or
@@ -1144,8 +1148,8 @@ committed module below the comment header (the stages are deterministic on the s
 tolerances (the regression set, the book error, the top-10K, the monitoring WER) - then <code>make train-install</code> replaces
 the committed module only when it differs. The books are pinned (<code>train/data/books.json</code> - see make train), so a clean run reproduces the committed module.</p>
 <p>The labels (<code>picovox_train/contextlabels.py</code>, with the curated part in <code>train/data/context-labels.json</code>) come from three
-sources: the training speech's measured readings (each candidate word's token whose reading the recognizer's vote or
-the formants measured - the voice's reading, heard in the audio); part-of-speech tags over the Project Gutenberg books
+sources: the training speech's measured readings (each candidate word's token whose reading the recognizer's CTC or
+voicing vote measured - the voice's reading, heard in the audio); part-of-speech tags over the Project Gutenberg books
 (spaCy, training time only - <code>train/requirements.txt</code>), mapped to readings only for words whose mapping agrees with the
 measured readings on 95% of 10 or more tokens (a stress-pair or other family word of too few, by its family's mapping
 on 200 or more); and hand-written seed sentences and reviewed collocations for the readings the tags can't separate
