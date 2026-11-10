@@ -17,7 +17,7 @@ to ask the context network. The commands (each with PYTHONPATH=train/src):
 The label sources (train/data/context-labels.json is the curated part):
 
 1. Aligned readings - the training speech's measured readings (measure.py - each candidate word's token in a clip whose
-   reading the CTC vote or the formants measured), in its sentence: the voice's reading, heard in the audio - of the
+   reading the CTC or voicing vote measured), in its sentence: the voice's reading, heard in the audio - of the
    inventory's family words and the context gate's words only (the curated words' readings in context are the engine's
    weakest: theirs are the seeds, collocations, and their own hand-written mappings). A token a collocation decides is
    the collocation's example, not an aligned one (the corpus's disagreements with the collocations are reported - the

@@ -1,5 +1,5 @@
 {
- "description": "The heteronym labels' curated part (picovox_train/contextlabels.py - read by readings.py load_spec): words with their own part-of-speech tag mappings (a variant of the reading: the spaCy tags; \"Cap\" before a tag - a capitalized token), readings the dictionary lacks (\"missing\"), family words left out (\"exclude\"), collocations (a regular expression over the 40 characters each side, lowercased, and the reading it fixes - reviewed by hand), and hand-labeled seed sentences per reading.",
+ "description": "The heteronym labels' curated part (picovox_train/contextlabels.py - read by readings.py load_spec): words with their own part-of-speech tag mappings (a variant of the reading: the spaCy tags; \"Cap\" before a tag - a capitalized token), readings the dictionary lacks (\"missing\"), family words left out (\"exclude\"), collocations (a regular expression over the 40 characters each side, lowercased, and the reading it fixes - reviewed by hand), and hand-labeled seed sentences per reading - written apart from the regression set (tools/heteronyms.js), never reusing a probe's word pairs, so the probes measure how the network generalizes.",
  "words": {
   "read": {
    "tags": {
@@ -1567,6 +1567,60 @@
     "She plays bass in the school orchestra.",
     "The bass was too loud for the small room.",
     "He tuned his bass before the show."
+   ]
+  },
+  {
+   "word": "bass",
+   "phones": "B AE1 S",
+   "texts": [
+    "The bass darted under the dock.",
+    "A big bass rose to the fly.",
+    "The bass hid among the reeds.",
+    "Two bass lay in the bottom of the boat.",
+    "The bass struck at the lure.",
+    "The bass fled into deeper water.",
+    "Small bass circled the sunken log.",
+    "The bass nibbled at the worm.",
+    "He cleaned the bass on the bank.",
+    "Bass and bluegill fill the pond.",
+    "The bass spawn in the shallows in spring.",
+    "A frightened bass slipped back into the weeds."
+   ]
+  },
+  {
+   "word": "contract",
+   "phones": "K AH0 N T R AE1 K T",
+   "texts": [
+    "The frost made the boards contract.",
+    "The chill made her skin contract.",
+    "Heat makes the rails expand, and cold makes them contract.",
+    "Fear made his stomach contract.",
+    "The cold air made the glass contract.",
+    "Our lungs expand and contract.",
+    "The rubber bands contract when released.",
+    "As the sponge dried, it began to contract.",
+    "The springs contract under the weight.",
+    "Its walls contract slowly.",
+    "Damp wool will shrink and contract.",
+    "The ice let the joints contract."
+   ]
+  },
+  {
+   "word": "minute",
+   "phones": "M AY0 N UW1 T",
+   "texts": [
+    "The difference was minute.",
+    "The crack in the cup is minute.",
+    "The risk seemed minute.",
+    "The seeds are minute.",
+    "Its effect on the price was minute.",
+    "The scratches were minute.",
+    "The gap between them is minute.",
+    "The traces left behind were minute.",
+    "Each grain is minute.",
+    "The flaws in the gem looked minute.",
+    "She recorded each minute variation.",
+    "The print on the label was minute."
    ]
   }
  ]

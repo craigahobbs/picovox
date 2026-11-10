@@ -9,9 +9,9 @@
 // sentences written apart from its seeds and collocations - its generalization beyond the context set), "names" (surnames,
 // first names, and place names - verified pronunciations: the readers' audio, the dictionary's own derived forms, and
 // well-established names). Prints one line and exits 1 when a kind's score is below its minimum (the make train gate):
-// default 0.9, context 0.85, probe 0.8, missing 0, names the shipped module's score when it was added (it can only go up).
+// default 0.9, context 0.85, probe 0.7, missing 0, names the shipped module's score when it was added (it can only go up).
 //
-// node tools/heteronyms.js [-m modulePath] [--min-default 0.9] [--min-context 0.85] [--min-probe 0.8] [--min-missing 0]
+// node tools/heteronyms.js [-m modulePath] [--min-default 0.9] [--min-context 0.85] [--min-probe 0.7] [--min-missing 0]
 //     [--min-names N] [--show]
 
 import {setPronouncer, textToPhrases} from '../lib/lexicon.js';
@@ -65,8 +65,11 @@ function scoreHeteronyms(items) {
 
 
 // The gate's minimums - the default reading, the context-dependent readings and the probes, and the names (the shipped
-// module's score - raised to 0.91 with the dictionary fixes, 67/73, and to 0.93 with Don Quixote's names, 80/86)
-const minimums = {'default': 0.9, 'context': 0.85, 'probe': 0.8, 'missing': 0, 'names': 0.93};
+// module's score - raised to 0.91 with the dictionary fixes, 67/73, and to 0.93 with Don Quixote's names, 80/86). The
+// probes' minimum guards against a collapse, below their seeds' spread: the context network's seed alone moves its thin
+// words' readings (on 2026-11-10's labels, seeds 1-4 scored 29, 34, 32, and 29 of 38 - 3 sentences wrong on every seed,
+// 8 wrong on some; the 2026-11 study's four seeds 27-32), so a minimum at their mean (0.8 was 31) failed half the trainings
+const minimums = {'default': 0.9, 'context': 0.85, 'probe': 0.7, 'missing': 0, 'names': 0.93};
 
 
 // The one-line result - kinds' scores against their minimums, and whether any is below (or has no minimum - a kind

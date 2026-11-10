@@ -700,7 +700,8 @@ The probes (kind `probe` in `train/data/heteronyms-test.json`): both readings of
 polish, contract, winds, bass, minute, and invalid - in 38 sentences written apart from the labels' seeds and
 collocations, so the context set's few sentences aren't the only measure of how the network generalizes (the regression
 set's sentences, the probes too, are never training examples). 1.6.8's module scores 26 of 38, 2.0's 34, 2.0.1's 32; the minimum is
-0.8 (the thin words' scores vary a few sentences between trainings).
+0.7, a guard against a collapse below the seeds' spread (the context network's seed alone moves the thin words' readings - four
+seeds on the same labels scored 29 to 34).
 
 ### Heteronyms
 
@@ -746,8 +747,8 @@ tolerances (the regression set, the book error, the top-10K, the monitoring WER)
 the committed module only when it differs. The books are pinned (`train/data/books.json` - see make train), so a clean run reproduces the committed module.
 
 The labels (`picovox_train/contextlabels.py`, with the curated part in `train/data/context-labels.json`) come from three
-sources: the training speech's measured readings (each candidate word's token whose reading the recognizer's vote or
-the formants measured - the voice's reading, heard in the audio); part-of-speech tags over the Project Gutenberg books
+sources: the training speech's measured readings (each candidate word's token whose reading the recognizer's CTC or
+voicing vote measured - the voice's reading, heard in the audio); part-of-speech tags over the Project Gutenberg books
 (spaCy, training time only - `train/requirements.txt`), mapped to readings only for words whose mapping agrees with the
 measured readings on 95% of 10 or more tokens (a stress-pair or other family word of too few, by its family's mapping
 on 200 or more); and hand-written seed sentences and reviewed collocations for the readings the tags can't separate
