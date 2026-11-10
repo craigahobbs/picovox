@@ -836,8 +836,8 @@ A retrain never silently replaces what ships:
   teacher's, while the voice was distilled). (It first compared the student with its own teacher, so a better teacher -
   the first from-scratch run's, 4.187 against 4.144 - failed an equal student.)
 - **The G2P check** passes a module identical to the committed one below its comment header; otherwise it requires the
-  regression set's minimums, no kind more than 2 cases below the committed module, and the book measures within the
-  recipe's tolerances - and it keeps the committed module either way.
+  regression set's minimums, no kind more than 2 cases below the committed module (the probes aside - Section 13.3),
+  and the book measures within the recipe's tolerances - and it keeps the committed module either way.
 - **The held-out gate** of Section 9.5, and the relabeling's reproduction.
 - **The install** is its own step, after the gates, the listening, and the package's tests with the trained models
   (`make train-check`): `make train-install`.
@@ -1321,6 +1321,22 @@ wrong (mean 7.0), book error 0.058% (0.064%), the context set 52.75 (51.25), the
 the committed module gets. The probes stay at 29.75 - the thin words (Polish, the adjective minute, the verb
 contract, the fish bass) are the labels', which the new speech's readings moved. (The QAT was replaced by the export's error-aware
 rounding at 7 bits - Section 13.8.)
+
+**The probes' gate (November 10).** With the speech regenerated once more, the retrained G2P failed its gate on the
+probes alone: 29 of 38, against a minimum of 0.8 (31) and the committed module's 32 (no kind could be more than 2 below
+it). The context network's seed alone does that. On the same labels, seeds 1-4 scored 29, 34, 32, and 29 - three
+sentences wrong on every seed, eight on some - and rewording one seed sentence of 679 moved a seed's score by 4. A
+minimum at the seeds' mean fails half the trainings, and a comparison with the committed module is two draws of the same
+spread. So the probes' minimum is 0.7, a guard against a collapse, and the check no longer compares the probes with the
+committed module's (the other kinds keep their drop of 2); on the final labels the four seeds scored 29, 33, 31, and 32,
+and each passed. The three always-wrong sentences were tried with seed sentences written apart from the probes' word
+pairs, twelve a reading, twelve trainings in all. The adjective minute after a linking verb was learned ("the cut was
+minute" wrong on 1 training of 12, from 4 of 4). The verb contract ending a clause gained a little (1.4 of its probes
+missed a training, from 2.25 - "cold makes the metal contract" still wrong on 10 of 12). The fish's bass as a sentence's
+subject was a trade: "the bass swam away" wrong on 4 trainings of 8, but "the bass player arrived late", never wrong
+before, on 3 - three words each side can't tell a swimmer from a player - so its sentences were withdrawn. The probes'
+mean didn't move (31.25 on the final labels, from 31.0): their spread is the network's, and a label fixes its own
+pattern, not the spread.
 
 ### 13.4 One speaker row per voice
 

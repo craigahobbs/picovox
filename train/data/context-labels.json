@@ -1570,30 +1570,12 @@
    ]
   },
   {
-   "word": "bass",
-   "phones": "B AE1 S",
-   "texts": [
-    "The bass darted under the dock.",
-    "A big bass rose to the fly.",
-    "The bass hid among the reeds.",
-    "Two bass lay in the bottom of the boat.",
-    "The bass struck at the lure.",
-    "The bass fled into deeper water.",
-    "Small bass circled the sunken log.",
-    "The bass nibbled at the worm.",
-    "He cleaned the bass on the bank.",
-    "Bass and bluegill fill the pond.",
-    "The bass spawn in the shallows in spring.",
-    "A frightened bass slipped back into the weeds."
-   ]
-  },
-  {
    "word": "contract",
    "phones": "K AH0 N T R AE1 K T",
    "texts": [
     "The frost made the boards contract.",
     "The chill made her skin contract.",
-    "Heat makes the rails expand, and cold makes them contract.",
+    "The rails expand by day, and by night they contract.",
     "Fear made his stomach contract.",
     "The cold air made the glass contract.",
     "Our lungs expand and contract.",

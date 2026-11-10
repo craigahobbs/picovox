@@ -518,7 +518,8 @@ class TestContext(unittest.TestCase):
         measures = {'book': 0.001, 'bookWrongDistinct': 10, 'top10kWrong': 5, 'monitorWer': 0.1}
 
         def run(new_kinds, status, new_measures):
-            scores = {copy: (new_kinds, status), g2pmodel.MODULE_PATH: ({'default': (48, 52), 'context': (44, 50)}, 0)}
+            scores = {copy: (new_kinds, status),
+                      g2pmodel.MODULE_PATH: ({'default': (48, 52), 'context': (44, 50), 'probe': (34, 38)}, 0)}
             evaluated = iter([new_measures, measures])
             with unittest.mock.patch.object(context, 'heteronym_scores', lambda path: scores[path]), \
                     unittest.mock.patch.object(context, 'js_pronouncer', lambda path: path), \
@@ -530,6 +531,16 @@ class TestContext(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertIn('within the tolerances', output)
         self.assertIn('regression set default 47/52 (committed 48), context 44/50 (committed 44)', output)
+
+        # The probes aren't compared with the committed module's (the seeds' spread) - their minimum is their guard
+        status, output = run({'default': (48, 52), 'context': (44, 50), 'probe': (27, 38)}, 0, dict(measures))
+        self.assertEqual(status, 0)
+        self.assertIn('probe 27/38 (committed 34); book 0.001 (committed: book 0.001) - within the tolerances', output)
+        status, output = run({'default': (48, 52), 'context': (44, 50), 'probe': (26, 38)}, 1, dict(measures))
+        self.assertEqual(status, 1)
+        self.assertTrue(output.endswith('FAILED: the regression set is below its minimums\n'))
+
+        # Below the tolerances
         status, output = run({'default': (40, 52), 'missing': (1, 3)}, 1, dict(measures, book=0.01, monitorWer=0.2))
         self.assertEqual(status, 1)
         self.assertIn('FAILED: the regression set is below its minimums; default 40/52 (committed 48); book 0.01', output)

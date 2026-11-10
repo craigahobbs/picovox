@@ -69,6 +69,7 @@ function scoreHeteronyms(items) {
 // probes' minimum guards against a collapse, below their seeds' spread: the context network's seed alone moves its thin
 // words' readings (on 2026-11-10's labels, seeds 1-4 scored 29, 34, 32, and 29 of 38 - 3 sentences wrong on every seed,
 // 8 wrong on some; the 2026-11 study's four seeds 27-32), so a minimum at their mean (0.8 was 31) failed half the trainings
+// (and make train's check doesn't compare the probes with the committed module's - picovox_train.context check)
 const minimums = {'default': 0.9, 'context': 0.85, 'probe': 0.7, 'missing': 0, 'names': 0.93};
 
 

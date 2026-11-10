@@ -795,8 +795,11 @@ def heteronym_scores(module_path):
 
 def command_check(args):
     """make train's G2P gate - the retrained module against the committed one: identical (below the comment
-    header), else the quality gate (the regression set - tools/heteronyms.js's minimums, and no kind more than
-    heteronymKindDrop below the committed module's - and g2p.py's book measures within the recipe's tolerances)"""
+    header), else the quality gate (the regression set - tools/heteronyms.js's minimums, and no kind more than its
+    heteronymKindDrop below the committed module's - and g2p.py's book measures within the recipe's tolerances). A
+    kind without a drop isn't compared, its minimum its guard: the probes, which the context network's seed alone
+    moves 5 of 38 (29 to 34 on the same labels) - a retrained module's score against the committed one's is two draws
+    of that spread, and a drop of 2 failed half the trainings"""
     if module_body(args.model) == module_body(args.committed):
         print(f'check: {args.model} is identical to {args.committed} (below the comment header)')
         return 0
@@ -806,8 +809,9 @@ def command_check(args):
     old_kinds, _ = heteronym_scores(args.committed)
     if status != 0:
         failures.append('the regression set is below its minimums')
+    drops = gate['heteronymKindDrop']
     for kind, (right, total) in new_kinds.items():
-        if right < old_kinds.get(kind, (0, total))[0] - gate['heteronymKindDrop']:
+        if kind in drops and right < old_kinds.get(kind, (0, total))[0] - drops[kind]:
             failures.append(f'{kind} {right}/{total} (committed {old_kinds[kind][0]})')
     _, data = g2p.final_data()
     new_measures = g2p.evaluate(js_pronouncer(args.model), data)

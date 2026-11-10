@@ -71,7 +71,7 @@
         "export": {"bits": 7, "biasBits": 8, "calibration": 8192},
         "gate": {
             "words": ["read", "use", "close", "lives"], "margin": 0.2, "folds": 10,
-            "heteronymKindDrop": 2, "bookError": 0.0001, "bookDistinct": 25, "top10kWrong": 2, "monitorWer": 0.005
+            "heteronymKindDrop": {"default": 2, "context": 2, "missing": 2, "names": 2}, "bookError": 0.0001, "bookDistinct": 25, "top10kWrong": 2, "monitorWer": 0.005
         }
     },
     "voice": {
