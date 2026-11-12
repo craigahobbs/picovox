@@ -226,7 +226,7 @@ that runs its own synthesis loop (PicoShelf's worker does):
 
 | | |
 | --- | --- |
-| The package (`npm pack`) | 990 KB packed, 1.5 MB unpacked - the G2P network 788 KB and the voice network 421 KB of it, as base64 |
+| The package (`npm pack`) | 996 KB packed, 1.5 MB unpacked - the G2P network 788 KB and the voice network 421 KB of it, as base64 |
 | The voice network | 282,627 parameters, 7-bit weights (GPTQ) - 311 KB gzipped |
 | The G2P network | 660,714 parameters (with its spelled head's 24,866; and the heteronym context network's 47,779), 7-bit weights (GPTQ) - 596 KB gzipped |
 | Speed, Apple M3 Max (Node) | The voice network about 127x real time, the renderer about 97x; synthesis end to end (24 kHz) about 55x |

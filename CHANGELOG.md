@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.5 (2026-11-12)
+
+- [81ca51e](https://github.com/craigahobbs/picovox/commit/81ca51e) - speed without a JIT (Safari over plain http, or in Lockdown Mode): playback is 28% faster and a word not yet pronounced takes half the time, the audio and the pronunciations identical, bit for bit - the networks' and the renderer's kernels read their arrays less (an interpreter pays several times more for an array read than for arithmetic on locals). On an M3 Max in JavaScriptCore without its JIT: 2.8 times real time in one thread (was 2.2), a 23-word sentence's new words 0.70 s (was 1.29 s; 2.0.3's 0.74 s); in Node without its JIT, 2.5 times (was 2.2)
+
+- [81ca51e](https://github.com/craigahobbs/picovox/commit/81ca51e) - speed with a JIT: a word not yet pronounced takes 1.7 ms in Node (was 2.9 ms), and Node runs the voice network in 14% less time; Safari's engine takes 15% more (0.20 s for 49 s of audio, was 0.18 s) and the renderer as before - about a hundred times real time in all, as before; the package is 996 KB packed (was 990 KB - the kernels' code)
+
 ## 2.0.4 (2026-11-12)
 
 - [d72966e](https://github.com/craigahobbs/picovox/commit/d72966e) - reading: a word in capitals is spelled when it is an acronym - "AI", "TOC", "FBI", "HTTPS" are their letters' names (2.0.3 read "eye" and "tock"), while "NASA", "UNICEF", a shouted sentence, and a heading are read: the G2P network's new spelled head decides, 42 of 42 acronyms and 42 of 42 read words on the new capitals regression set (2.0.3: 27 and 42); known misses: the short words that are also acronyms ("WHO", "SI", "AM") are read as words
