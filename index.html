@@ -341,8 +341,12 @@ file - a <code>Uint8Array</code> of the file's bytes.</p>
 <p>The text is split into sentences (and paragraphs, at blank lines); each sentence starts with a short pause - 0.24
 seconds, or 0.4 before a paragraph (so the text's first sentence starts with one). Numbers (four-digit numbers as years,
 1972 as &quot;nineteen seventy-two&quot;; ordinals, 1st; decades, 1970s; percentages; money, $1.50 and $5 million; times, 10:30
-a.m.), common abbreviations, dashes, ellipses, and Roman numerals (Chapter IV, World War II) are spoken as words, and
-an aside's parentheses pause as a comma does. An invalid text or option throws a <code>TypeError</code> or a
+a.m.), units after a number (5 km as &quot;five kilometers&quot;, 93,000 sq mi, 90 km/h, 240,000 km2, −5 °C), common symbols (&amp;,
++, =, ×), common abbreviations, dashes, ellipses, and Roman numerals (Chapter IV, World War II) are spoken as words, and
+an aside's parentheses pause as a comma does. An initial (Dr. A. B. Jones) or a dotted abbreviation (the U.S., a Ph.D.,
+a.k.a.) is its letters' names - &quot;i.e.&quot; is &quot;that is&quot;, &quot;e.g.&quot; &quot;for example&quot; - and ends a sentence only before a word
+that starts one (&quot;in the U.S. The law&quot;, not &quot;the U.S. Army&quot;); a word in capitals is spelled when the G2P network finds
+it an acronym (AI, TOC, FBI; with its -s - CEOs, IBM's) and read when it finds it a word (NOT, STOP, NASA). An invalid text or option throws a <code>TypeError</code> or a
 <code>RangeError</code> with a message saying what's wrong (<code>stream</code> and <code>speak</code> throw at once; <code>synthesize</code> rejects).</p>
 <p>The output is bit-for-bit deterministic: the same text and options give the same samples, in the browser and in Node.</p>
 <h3>The modules</h3>
@@ -425,7 +429,7 @@ that runs its own synthesis loop (PicoShelf's worker does):</p>
 <tbody>
 <tr>
 <td>The package (<code>npm pack</code>)</td>
-<td>748 KB packed, 1.1 MB unpacked - the G2P network 477 KB and the voice network 421 KB of it, as base64</td>
+<td>996 KB packed, 1.5 MB unpacked - the G2P network 788 KB and the voice network 421 KB of it, as base64</td>
 </tr>
 <tr>
 <td>The voice network</td>
@@ -433,14 +437,18 @@ that runs its own synthesis loop (PicoShelf's worker does):</p>
 </tr>
 <tr>
 <td>The G2P network</td>
-<td>373,256 parameters (and the heteronym context network's 47,779), 7-bit weights (GPTQ) - 360 KB gzipped</td>
+<td>660,714 parameters (with its spelled head's 24,866; and the heteronym context network's 47,779), 7-bit weights (GPTQ) - 596 KB gzipped</td>
 </tr>
 <tr>
 <td>Speed, Apple M3 Max (Node)</td>
 <td>The voice network about 127x real time, the renderer about 97x; synthesis end to end (24 kHz) about 55x</td>
 </tr>
 <tr>
-<td>Speed, iPhone without a JIT (Safari over plain http, or in Lockdown Mode)</td>
+<td>Speed without a JIT, Apple M3 Max</td>
+<td>About 2.8x real time in one thread in JavaScriptCore (<code>jsc --useJIT=false</code> - Safari's engine; 2.2x in picovox 2.0.4), 2.5x in Node (<code>--jitless</code>; 2.2x); a 23-word sentence's new words 0.7 s (1.3 s)</td>
+</tr>
+<tr>
+<td>Speed, iPhone without a JIT (Safari over plain http, or in Lockdown Mode; picovox 1.2.0)</td>
 <td>About 2.6x real time in one worker; about 3.1-3.4x with the network and the renderer in two workers (<code>sentenceFrames</code> and <code>createSentenceRenderer</code>)</td>
 </tr>
 <tr>
@@ -494,7 +502,7 @@ training (PyTorch, numpy, and Praat) and spaCy
 <pre class="prettyprint source lang-sh"><code>node tools/unpack.js lib/models/voiceModel.js build/voice                 # a packaged model back to its export
 node tools/speak.js -m build/voice &quot;Hello, world.&quot; -o build/hello.wav     # an exported model (&lt;voice>.json and .bin)
 node tools/packagecheck.js build/train/voiceModel.js build/train/eval/voice/multi  # a packaged model against its export (make train's)
-node tools/heteronyms.js                                                # the heteronym and names regression sets
+node tools/heteronyms.js                                                # the heteronym, names, and capitals regression sets
 </code></pre>
 <p>The performance lab, <code>tools/perf/</code>, times the playback pipeline on a phone: <code>node tools/perf/server.js</code> serves the
 repository on the local network (open the printed URL on the phone, which then polls for commands), and <code>node tools/perf/send.js COMMAND '{options}'</code> runs one there and prints its result - <code>timing</code> (the network, the renderer, and
@@ -503,7 +511,10 @@ network and render workers in pairs, at once), <code>bench</code> (fixed workloa
 an iPhone's Safari interprets JavaScript on a page served over plain http, as the lab's is - so the lab measures that
 case; over https it compiles), and <code>reload</code>. A variant of <code>lib/</code> to try a change in is
 <code>tools/perf/variant.sh NAME</code> (<code>build/perf/variants/NAME/lib</code>, which the lab's commands take as <code>lib</code>);
-<code>tools/perf/compare.js NAME</code> compares its output with <code>lib/</code>'s (identical, else the SNR), and <code>tools/perf/speed.js lib NAME</code> times each under Node without a JIT (<code>--jitless</code> - the phone's speed within about 20%). <code>--root DIR</code> serves
+<code>tools/perf/compare.js NAME</code> compares its output with <code>lib/</code>'s (identical, else the SNR), and <code>tools/perf/speed.js lib NAME</code> times each under Node without a JIT (<code>--jitless</code> - the phone's speed within about 20%) - its new words (the G2P),
+the network, and the renderer; <code>--jsc</code> times them in JavaScriptCore without a JIT (macOS's <code>jsc</code> shell - Safari's
+engine), and <code>--jit</code> with one. The two interpreters weigh a change differently, and a JIT differently again (a layer
+computed in blocks is faster interpreted, and slower compiled by JavaScriptCore), so a change is timed in all four. <code>--root DIR</code> serves
 another app (PicoShelf, with its <code>?timing&amp;log=URL</code> timeline posted to <code>build/perf/devlog.jsonl</code>).</p>
 <p><code>tools/speak.js</code> speaks with an exported model (<code>picovox_train.export CHECKPOINT --voice NAME</code> writes
 <code>build/export/NAME.json</code> and <code>.bin</code>, or in <code>--out DIR</code>; <code>tools/unpack.js</code> makes one of the package's multi-speaker model), every word pronounced by the
@@ -1043,17 +1054,23 @@ spread. Both networks share the method - see the paper's Section 13.8.</p>
 <code>picovox_train/g2pmodel.py</code> is its bit-exact Python port, which pronounces the voice model's training data).
 <code>picovox_train/g2p.py</code> trains it, with the recipe in <code>train/data/train.json</code>'s <code>g2p</code> settings, and <code>picovox_train.context export</code> writes the module, with its context network (below):</p>
 <pre class="prettyprint source lang-sh"><code>PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.heteronyms --out build/nn/heteronyms --keep train/data/g2p-relabel.json  # its words (optional)
-PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p train --out build/nn/g2p-train      # four stages, about 30 minutes on one CPU core
+PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p train --out build/nn/g2p-train      # four stages, about 50 minutes on one CPU core
 PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p evaluate                            # the book-token error of lib/models/g2pModel.js
 </code></pre>
-<p>The network is an autoregressive encoder-decoder (embedding 32, a bidirectional GRU of 96 over the letters, a GRU
-decoder of 192 with attention; 369,767 parameters). It trains on every word of the CMU Pronouncing Dictionary (its
+<p>The network is an autoregressive encoder-decoder (embedding 32, a bidirectional GRU of 128 over the letters, a GRU
+decoder of 256 with attention; 631,207 parameters). It trains on every word of the CMU Pronouncing Dictionary (its
 first pronunciation) but a 2,000-word monitoring set, sampled half uniformly and half by the square root of the word's
-count in 128 Project Gutenberg books, plus - 30% of the samples - 100,812 words the dictionary lacks, labeled by a
-large teacher ensemble or by the spelling and <code>-s</code> rules where they apply (<code>train/data/g2p-words.json</code>). A base stage
+count in the texts listeners hear - 128 Project Gutenberg books, the listeners' books, and 784 Wikipedia articles
+(<code>train/data/g2p-books.json</code>: a book's counts join the weights, times its <code>weight</code> - Wikipedia's 2.7, so its 5.9
+million tokens weigh as the books' 16 million do; <code>python -m picovox_train.g2p book</code> counts a text) - plus - 30% of the samples - 100,812 words the dictionary lacks, labeled by
+the spelling and <code>-s</code> rules where they apply, else by Wiktionary where it has the word (9,332), else by a large teacher
+ensemble (<code>train/data/g2p-words.json</code>); Wiktionary also labels 7,499 of the articles' words outside the dictionary, and
+911 of the most frequent of the rest are labeled by hand - names and terms (Quran, Mughal, eukaryotes)
+(<code>train/data/g2p-books.json</code>'s labels - dictionary words in training). A base stage
 (20,000 steps of 512 at learning rate 3e-3) is polished twice with more of the samples on the most frequent words
-(5,000 steps at 1e-3 over the top 20,000 words, then 5,000 at 5e-4 over the top 12,000). The last stage (focus, 3,000
-steps) teaches the spoken pronunciations of 56 words whose dictionary-first pronunciation isn't the usual reading
+(5,000 steps at 1e-3 over the top 20,000 words, then 5,000 at 5e-4 over the top 12,000). The last stage (focus, 13,000
+steps at 5e-4, sampled as the base stage is - at that length a share on the most frequent words only costs the rest)
+also teaches the spoken pronunciations of 56 words whose dictionary-first pronunciation isn't the usual reading
 (lead L IY1 D, live L IH1 V, wind W IH1 N D, ... - <code>train/data/g2p-relabel.json</code>; a stage's <code>relabel</code> replaces those
 words' targets, the rule-labeled words derived from them follow, and <code>focusBoost</code> gives them 2% of the samples). The
 export quantizes to 7 bits per weight, rounding each matrix by GPTQ - error-aware: a row is rounded a weight at a time,
@@ -1061,6 +1078,18 @@ each weight's rounding error compensated in the row's later weights through the 
 training words, a fixed draw) - so the layers' outputs, not the weights, stay close: on four seeds the export reads 23
 more of 2.4 million book words wrong than the float network, and the seeds bracket zero. Training on the CPU with one
 thread is deterministic: the recipe reproduces the shipped model's weights bit for bit.</p>
+<p>The measures (<code>python -m picovox_train.g2p evaluate</code>, and make train's gate): the book-token error - the 22 evaluation
+books' dictionary-word tokens pronounced differently from the label - the top 10,000 book words wrong, the monitoring
+set's word error, the held-out words' error (<code>train/data/g2p-books.json</code>'s <code>heldOut</code> - 507 of Wikipedia's words that
+never train, with Wiktionary's pronunciations; the two dictionaries' conventions aside - not gated), and each
+evaluation text's token error (the file's <code>eval</code> - 215 Wikipedia articles held out of the weights; <code>g2p book --eval</code>
+adds one). The network of 128 units with Wikipedia in its weights and Wiktionary's and the hand labels (2026-11-11)
+against 2.0.3's of 96 with the books alone: the books 0.008% (0.049%), top-10K wrong 0 (3), held-out WER 55.4% (61.5%),
+monitoring WER 42.1% (41.1% - a seed's draw: four seeds of the recipe ended at 41.9% to 43.0%, so the gate's tolerance
+is 1.5 points), and Wikipedia 0.090% (0.286% before the hand labels, whose words the measure counts; before them
+0.078%, against 2.0.3's 1.87%) - at 596 KB gzipped (360 KB), and 1.7 ms for a word it hasn't yet pronounced (1.6 ms; in
+Node without a JIT, a 23-word sentence's words 0.70 s, 0.74 s - once a word; as 2.0.4 shipped, before its kernels read
+their arrays less, 2.9 ms and 1.29 s).</p>
 <p><code>picovox_train/heteronyms.py</code> chooses the relabeled words from the training speech's measured readings
 (<code>picovox_train/measure.py</code> - below): for each word with several dictionary readings, the reading the voices used; a
 word is relabeled when the voices' majority isn't the first (significant - the Wilson 95% lower bound above one half,
@@ -1107,10 +1136,18 @@ the shipped module's score when it was added (63/73), so it can only go up.</p>
 <p>The probes (kind <code>probe</code> in <code>train/data/heteronyms-test.json</code>): both readings of the context network's thin words -
 polish, contract, winds, bass, minute, and invalid - in 38 sentences written apart from the labels' seeds and
 collocations, so the context set's few sentences aren't the only measure of how the network generalizes (the regression
-set's sentences, the probes too, are never training examples). 1.6.8's module scores 26 of 38, 2.0's 34, 2.0.1's 32, 2.0.3's 29; the minimum is
+set's sentences, the probes too, are never training examples). 1.6.8's module scores 26 of 38, 2.0's 34, 2.0.1's 32, 2.0.3's 29, 2.0.4's 33; the minimum is
 0.7, a guard against a collapse below the seeds' spread (the context network's seed alone moves the thin words' readings - four
 seeds on the same labels scored 29 to 34), and make train's check doesn't compare the probes with the committed module's (the
-recipe's <code>heteronymKindDrop</code> has no drop for them - two draws of that spread differ by more than the other kinds' 2).</p>
+recipe's <code>heteronymKindDrop</code> has no drop for them - two draws of that spread differ by more than the other kinds' 2).
+Nor the context set (2026-11-11): its draws on one recipe in two days, the labels a few examples apart, were 52, 51, 54,
+51, and 50 of 54 - against a committed 54, a drop of 2 failed half of them; its minimum (0.85, 46 of 54) is its guard.</p>
+<p>The capitals regression set (<code>train/data/capitals-test.json</code>, kinds <code>acronym</code> and <code>shouted</code>): 42 sentences with a word
+in capitals that is spelled (AI, TOC, FBI, HTTPS - the letters' names) and 42 with one that is read (an emphasized word</p>
+<ul>
+<li>NOT, NEVER; a heading - THE END; an acronym said as a word - NASA, UNESCO). Their minimums are 0.9 and 0.95 (see
+<a href="#words-in-capitals">Words in capitals</a>).</li>
+</ul>
 <h3>Heteronyms</h3>
 <p>Some words have readings their neighbors decide - &quot;I read it yesterday&quot; and &quot;I will read it&quot;, &quot;their lives&quot; and &quot;she
 lives&quot;, &quot;a lead pipe&quot;, the noun/verb stress pairs. The G2P module also holds two small pieces for them (no word list or
@@ -1158,6 +1195,38 @@ collocation's token is its example, not a measured one, and the corpus's disagre
 model's own reading errors) are reported. Two books and the regression set's sentences are held out - every source's
 examples of them, the book the independent unit - and the held-out accuracy gate (<code>picovox_train.context folds</code>)
 is cross-validated by book.</p>
+<h3>Words in capitals</h3>
+<p>A word in capitals is an acronym, spelled - &quot;AI&quot;, &quot;TOC&quot;, &quot;FBI&quot; - or a word, read - &quot;I did NOT&quot;, &quot;THE END&quot;, &quot;NASA&quot; - and
+which it is depends on whether its letters are a word: what the G2P network knows, and no rule does. So the front end
+keeps a word's capitals (<code>lib/lexicon.js</code> - two letters or more, all capitals) and asks the G2P's spelled head: a
+96-unit layer and two logits on the encoder's final states (<code>lib/g2p.js</code> <code>pronounce.spelled</code> - 24,866 parameters).
+The two logits are a word's two places: alone among lowercase words (&quot;the US government&quot;, &quot;500 AD&quot; - spelled), and
+beside words in capitals that are read (&quot;LEAVE US ALONE&quot;, a heading - read: its neighbors in its phrase, both if it
+has two - not &quot;the US NATO allies&quot;). A spelled word is its letters' names, each pronounced by the network (&quot;a&quot; as &quot;ay&quot;); a
+lowercase or capitalized word is never asked, and a word in capitals with an -s (&quot;CEOs&quot;, &quot;IBM's&quot;) is asked of its
+capitals - spelled, its last letter takes the -s (the network's &quot;o's&quot;, &quot;m's&quot;). An initial - a capital letter with its
+period (&quot;Dr. A. B. Jones&quot;) - is its letter's name too, as a dotted abbreviation's letters are (&quot;the U.S.&quot;, &quot;a Ph.D.&quot;),
+and their periods don't end a phrase; the sentence splitter (<code>lib/sentences.js</code>) ends a sentence at one only before a
+word that starts a sentence, or after the pronoun (&quot;said I.&quot;).</p>
+<p>The head's labels (<code>picovox_train/spelled.py</code>, the recipe's <code>context.g2p.spelled</code>) are of letter strings, from the
+G2P's own data: every string of two or three letters (18,252) - read when it is a common word (in the books 20 times
+for two letters, once for three), unless the dictionary's first pronunciation spells it (TV), and otherwise spelled;
+the longer known words (208,562) - spelled when the dictionary's first pronunciation is the letters' names (HTML), or
+another of its pronunciations is and the word isn't in the books (NOAA), and otherwise read; and 6,000 synthetic
+strings of four or five consonants, spelled (the dictionary has only 57 longer spelled words). Those are the labels
+beside a word in capitals; alone, the same - but four common words that, alone in capitals, are acronyms (US, AD, UN,
+CO: <code>train/data/g2p-capitals.json</code> - in capitals with no neighbor in capitals in a twentieth of 999 Wikipedia articles
+or more, at 20 times their rate in the books) are spelled. The file's other evidence is Wiktionary's: its 96 words in
+capitals pronounced as their letters (UCLA) are spelled, but a common word of two or three letters (PIE). The labels'
+word counts are the 128 books' alone: Wikipedia writes its acronyms in capitals, and by its lowercased counts &quot;AI&quot; and
+&quot;GPS&quot; are common words. The head trains in the
+G2P's reading stage on its own batches, and - the encoder frozen there, its gradient clipped alone - changes nothing
+else: a module trained with it is the module trained without it, weight for weight, plus the head.</p>
+<p>The trained head (2026-11-11) finds none of the 23,202 spelled strings read and 182 of the 210,037 words spelled
+(0.1% - &quot;clio&quot;, &quot;aeon&quot;, &quot;angst&quot;: rare four- and five-letter words), and 6 of 1,461 monitoring-set words it never saw
+(0.4%). On the capitals regression set it spells all 42 acronyms (the module without a head 27 - those the G2P spells
+in any case) and reads all 42 shouted words. What it can't know: an acronym that looks like a word and is in no
+dictionary or list, and a common word that is also an acronym beyond its four - &quot;WHO&quot; and &quot;IT&quot; are read.</p>
 <h2>The training speech</h2>
 <p>The voice network's training speech isn't downloaded - make train makes it: <code>picovox_train/tts.py</code> has a local TTS
 model speak sentences of the pinned Project Gutenberg books through Ollama's speech endpoint (<code>POST /v1/audio/speech</code> -
