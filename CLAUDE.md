@@ -26,7 +26,8 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
 - `train/` - the Python training pipeline, the package `picovox_train` (`train/src/picovox_train/`; a python-build
   package - its unit tests in `train/src/tests/`), trained on speech it generates (no human recordings): the front
   end's port (`frontend.py`, `g2pmodel.py`, `vocab.json`), the G2P and heteronym models (`g2p.py`,
-  `heteronyms.py`, `context.py`, `contextlabels.py`, `readings.py`, `measure.py` - the heteronym tokens' readings
+  `heteronyms.py`, `context.py`, `contextlabels.py`, `readings.py`, `spelled.py` - the words in capitals: the G2P's
+  spelled head's labels (`train/data/g2p-capitals.json` - the common words that are acronyms alone), `measure.py` - the heteronym tokens' readings
   measured in the training speech, by the CTC vote, gated by its controls - the G2P's
   heteronym evidence), the data (`tts.py` - the training speech: book sentences, the heteronyms' coverage first,
   spoken by a local TTS model through Ollama - the recipe's `tts`, its model pinned by digest, a voice of it for each of
@@ -55,7 +56,7 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   make train-check's blind A/B (`trainab.js` - the voice lab served locally with its trials, the answers in
   `build/train/listen/`; `trainabreport.js` - the trials, where the voices' frames differ most, and the report with
   its recommendation), `heteronyms.js`
-  (the heteronym and names regression sets), `trainmodels.js` (make train-check's module hook), make train's
+  (the heteronym, names, and capitals regression sets), `trainmodels.js` (make train-check's module hook), make train's
   bookkeeping (`trainstage.sh`, `trainutil.sh` - the stage events and logs, the utilization samples, `trainpower.sh`)
   and listening samples (`trainsamples.js`, `trainsamplesindex.js`), the panel's texts (`panel-texts.json`), and the
   parity checks' outputs (`parity.js` - make parity).

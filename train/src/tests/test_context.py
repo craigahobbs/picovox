@@ -65,6 +65,16 @@ def tiny_labels():
     return {'words': words, 'examples': examples, 'transfer': transfer}
 
 
+# Tiny labels of the spelled head (spelled.py spelled_labels' format)
+def tiny_spelled():
+    return {
+        'labels': {'ai': True, 'toc': True, 'html': True, 'bcdf': True, 'cat': False, 'dog': False, 'read': False, 'lives': False},
+        'alone': ['dog'], 'heldOut': ['book'], 'counts': {'read': 5, 'lives': 2, 'cat': 3}, 'alpha': 0.5,
+        'groups': {'shortSpelled': ['ai', 'toc'], 'shortDictionary': ['ai'], 'longSpelled': ['html'], 'synthetic': ['bcdf'],
+                   'shortWords': ['cat', 'dog'], 'longWords': ['lives', 'read']}
+    }
+
+
 # Whether two models' weights are identical
 def same_weights(model, other):
     return all(torch.equal(parameter, other_parameter) for parameter, other_parameter in
@@ -109,6 +119,8 @@ class TestContext(unittest.TestCase):
         self.assertEqual(context.RECIPE['g2p']['readings'], context.READINGS)
         self.assertNotIn('window', context.CONTEXT_SETTINGS)
         self.assertNotIn('readings', context.G2P_SETTINGS)
+        self.assertNotIn('spelled', context.G2P_SETTINGS)
+        self.assertEqual(set(context.SPELLED_HEAD) - set(context.G2P_SETTINGS['train'].split(',')), set())
         self.assertEqual(context.CONTEXT_CHAR_IDS['\''], 1)
 
     def test_add_reading_heads_and_load(self):
@@ -179,17 +191,37 @@ class TestContext(unittest.TestCase):
     def test_train_g2p(self):
         items, probabilities = self.tiny_items()
         lines = []
-        model = context.train_g2p(tiny_g2p(), items, probabilities, tiny_labels(), G2P_TINY, lines.append)
+        model = context.train_g2p(tiny_g2p(), items, probabilities, tiny_labels(), tiny_spelled(), G2P_TINY, lines.append)
         self.assertTrue(hasattr(model, 'reading'))
+        self.assertTrue(hasattr(model, 'spelled'))
         self.assertFalse(model.training)
         self.assertIn(f'parameters trained ({context.G2P_SETTINGS["train"]})', lines[0])
         self.assertIn('train-g2p: step 3/3', lines[-1])
+        self.assertIn('spelled loss', lines[-1])
 
         # Only the recipe's tensors trained, from a model with the heads
         before = {name: tensor.clone() for name, tensor in model.state_dict().items()}
-        context.train_g2p(model, items, probabilities, tiny_labels(), G2P_TINY, lines.append)
+        context.train_g2p(model, items, probabilities, tiny_labels(), tiny_spelled(), G2P_TINY, lines.append)
         self.assertTrue(torch.equal(before['encoder.weight_ih_l0'], model.state_dict()['encoder.weight_ih_l0']))
         self.assertFalse(torch.equal(before['reading.weight'], model.state_dict()['reading.weight']))
+        self.assertFalse(torch.equal(before['spelled.weight'], model.state_dict()['spelled.weight']))
+
+    def test_train_g2p_spelled_apart(self):
+        # The spelled head trains beside the rest - its labels change nothing but the head
+        items, probabilities = self.tiny_items()
+        other = tiny_spelled()
+        other['labels'] = {word: not spelled for word, spelled in other['labels'].items()}
+        first = context.train_g2p(tiny_g2p(), items, probabilities, tiny_labels(), tiny_spelled(), G2P_TINY, lambda text: None)
+        second = context.train_g2p(tiny_g2p(), items, probabilities, tiny_labels(), other, G2P_TINY, lambda text: None)
+        for (name, tensor), other_tensor in zip(first.state_dict().items(), second.state_dict().values()):
+            self.assertEqual(torch.equal(tensor, other_tensor), name.split('.')[0] not in context.SPELLED_HEAD, name)
+
+    def test_spelled_decisions(self):
+        model = context.add_reading_heads(tiny_g2p())
+        decisions = context.spelled_decisions(model, ['ai', 'toc', 'read'], batch_size=2)
+        self.assertEqual(len(decisions), 3)
+        self.assertTrue(all(len(decision) == 2 and all(isinstance(spelled, bool) for spelled in decision) for decision in decisions))
+        self.assertEqual(context.spelled_decisions(model, ['read']), decisions[2:])
 
     def test_evaluate_g2p(self):
         model = context.add_reading_heads(tiny_g2p())
@@ -201,11 +233,12 @@ class TestContext(unittest.TestCase):
         with unittest.mock.patch.object(context, 'predict', decode), \
                 unittest.mock.patch.object(context, 'ambiguity_logits',
                                            lambda _model, words: [1.0 if word in ('read', 'cat') else -1.0 for word in words]):
-            result = context.evaluate_g2p(model, labels, ['cat', 'dog'])
+            result = context.evaluate_g2p(model, labels, ['cat', 'dog'], tiny_spelled())
         self.assertEqual(result['readingsRight'], 2)
         self.assertEqual(result['readings'], 6)
         self.assertEqual(result['ambiguousMissed'], ['lives', 'use'])
         self.assertEqual(result['falsePositives'], 1)
+        self.assertEqual((result['spelled']['spelled'], result['spelled']['words'], result['spelled']['heldOut']), (4, 4, 1))
 
     def test_context_network(self):
         self.assertEqual(context.item_chars('read'), [context.CONTEXT_CHAR_IDS[char] for char in 'read'])
@@ -396,7 +429,7 @@ class TestContext(unittest.TestCase):
         g2p_model = context.add_reading_heads(tiny_g2p())
         items, probabilities = self.tiny_items()
         with unittest.mock.patch.dict(context.EXPORT, {'calibration': 16}):
-            calibration = context.g2p_calibration(items, probabilities, tiny_labels())
+            calibration = context.g2p_calibration(items, probabilities, tiny_labels(), tiny_spelled())
         torch.save({'config': g2p_model.config, 'state': g2p_model.state_dict(), 'calibration': calibration}, self.path('g2p.pt'))
         torch.manual_seed(1)
         context_model = context.build_context({'embed': 4, 'hidden': 4, 'layer': 4})
@@ -419,11 +452,13 @@ class TestContext(unittest.TestCase):
         self.assertEqual(module['context']['window'], context.WINDOW)
         self.assertEqual(module['context']['slots'], context.READINGS)
         self.assertIn('reading.weight', g2pmodel.unpack_tensors(module))
+        self.assertIn('spelled_layer.weight', g2pmodel.unpack_tensors(module))
         self.assertIn('window_gru.weight_ih_l0', g2pmodel.unpack_tensors(module['context']))
         self.assertTrue(all(len(line) <= g2p.MODULE_LINE_LENGTH for line in text.split('\n')))
 
         # The module as the app runs it (g2pmodel.py) pronounces with it
         self.assertIsInstance(g2pmodel.G2p(module).pronounce('read'), list)
+        self.assertIsInstance(g2pmodel.G2p(module).spelled('read'), bool)
 
         # A module whose weights don't round-trip isn't written
         os.remove(self.path('g2pModel.js'))
@@ -435,11 +470,14 @@ class TestContext(unittest.TestCase):
         self.assertFalse(os.path.exists(self.path('g2pModel.js')))
 
     def test_g2p_calibration(self):
-        # EXPORT's count of words drawn by the training probabilities (reading 0), then every alternate reading target
+        # EXPORT's count of words drawn by the training probabilities (reading 0), then every alternate reading target; and
+        # the spelled head's strings, drawn as its batches
         items, probabilities = self.tiny_items()
         labels = tiny_labels()
         with unittest.mock.patch.dict(context.EXPORT, {'calibration': 5}):
-            calibration = context.g2p_calibration(items, probabilities, labels)
+            calibration = context.g2p_calibration(items, probabilities, labels, tiny_spelled())
+        self.assertEqual(len(calibration['spelled']), 5)
+        self.assertTrue(set(calibration['spelled']) <= set(tiny_spelled()['labels']))
         targets = context.reading_targets(labels)
         self.assertEqual(len(calibration['words']), 5 + len(targets))
         self.assertEqual(calibration['readings'], [0] * 5 + [reading for _, _, reading in targets])
@@ -451,7 +489,7 @@ class TestContext(unittest.TestCase):
         model = context.add_reading_heads(tiny_g2p()).eval()
         items, probabilities = self.tiny_items()
         with unittest.mock.patch.dict(context.EXPORT, {'calibration': 8}):
-            covariances = context.g2p_covariances(model, context.g2p_calibration(items, probabilities, tiny_labels()))
+            covariances = context.g2p_covariances(model, context.g2p_calibration(items, probabilities, tiny_labels(), tiny_spelled()))
         state = model.state_dict()
         matrices = {name for name, tensor in state.items() if tensor.dim() == 2 and 'embed' not in name and name != 'reading.weight'}
         self.assertEqual(set(covariances), matrices)
@@ -515,7 +553,7 @@ class TestContext(unittest.TestCase):
         # A differing module - the regression set and the book measures within the tolerances, or not
         with open(copy, 'w', encoding='utf-8') as file:
             file.write(text.replace("'version': 1", "'version': 1 "))
-        measures = {'book': 0.001, 'bookWrongDistinct': 10, 'top10kWrong': 5, 'monitorWer': 0.1}
+        measures = {'book': 0.001, 'bookWrongDistinct': 10, 'top10kWrong': 5, 'monitorWer': 0.1, 'sets': {'held': {'error': 0.01}}}
 
         def run(new_kinds, status, new_measures):
             scores = {copy: (new_kinds, status),
@@ -547,6 +585,13 @@ class TestContext(unittest.TestCase):
         self.assertIn('monitorWer 0.2', output)
         self.assertIn('missing 1/3 (committed 0)', output)
 
+        # An evaluation text's error past its tolerance
+        status, output = run({'default': (48, 52)}, 0, dict(measures, sets={'held': {'error': 0.0104}}))
+        self.assertEqual(status, 0)
+        status, output = run({'default': (48, 52)}, 0, dict(measures, sets={'held': {'error': 0.011}}))
+        self.assertEqual(status, 1)
+        self.assertIn('FAILED: held 0.011 (committed 0.01, tolerance 0.0005)', output)
+
         # With no relabeled stage
         config = g2p.load_config()
         config['stages'][-1].pop('relabel', None)
@@ -568,23 +613,35 @@ class TestContext(unittest.TestCase):
             relabels.append(relabel)
             return data
         log_path = self.path('train.log')
+        spelled_data = []
+
+        def spelled_labels(labels_data, settings):
+            spelled_data.append((labels_data, settings))
+            return tiny_spelled()
         with unittest.mock.patch.object(g2p, 'load_data', load_data), helpers.json_files(g2p, {RECIPE_PATH: {'g2p': config}}), \
-                captured():
+                unittest.mock.patch.object(context.spelled_module, 'spelled_labels', spelled_labels), captured():
             self.assertEqual(context.main(['train-g2p', '--labels', self.write_labels(), '--init', self.path('init.pt'),
                                            '--out', self.path('g2p.pt'), '--settings', json.dumps(G2P_TINY), '--log', log_path]), 0)
         self.assertEqual(relabels, [os.path.join(ROOT, 'train/data/g2p-relabel.json')])
+        self.assertEqual(spelled_data, [(data, context.SPELLED)])
         checkpoint = torch.load(self.path('g2p.pt'), weights_only=False)
         self.assertEqual(checkpoint['config']['readings'], context.READINGS)
         self.assertEqual(checkpoint['settings']['steps'], 3)
         calibration = checkpoint['calibration']
         self.assertEqual(len(calibration['words']), context.EXPORT['calibration'] + len(context.reading_targets(tiny_labels())))
+        self.assertEqual(len(calibration['spelled']), context.EXPORT['calibration'])
         with open(log_path, encoding='utf-8') as file:
-            self.assertIn('train-g2p: readings ', file.read())
+            log = file.read()
+        self.assertIn('train-g2p: readings ', log)
+        self.assertIn('train-g2p: spelled head - ', log)
+        self.assertIn('/1 held-out words; alone - ', log)
+        self.assertIn('/1 of its words found read', log)
 
         # The recipe's settings (the default config), no relabeled stage
         config['stages'][-1].pop('relabel')
         with unittest.mock.patch.object(g2p, 'load_data', load_data), unittest.mock.patch.object(g2p, 'load_config', lambda: config), \
-                unittest.mock.patch.dict(context.G2P_SETTINGS, G2P_TINY), captured():
+                unittest.mock.patch.dict(context.G2P_SETTINGS, G2P_TINY), \
+                unittest.mock.patch.object(context.spelled_module, 'spelled_labels', spelled_labels), captured():
             self.assertEqual(context.main(['train-g2p', '--labels', self.write_labels(), '--init', self.path('g2p.pt'),
                                            '--out', self.path('g2p2.pt')]), 0)
         self.assertIsNone(relabels[-1])

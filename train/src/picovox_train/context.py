@@ -23,11 +23,15 @@ The G2P additions (g2p.py's model):
   (reading 0, the default, adds nothing - the network's default pronunciations are unchanged by the addition)
 - the ambiguity head - one logit from the encoder's final states: positive for a word with 2+ readings that the
   neighboring words decide (the labels' words, contextlabels.py)
+- the spelled head - two more logits from the encoder's final states: positive for a word that, written in capitals, is
+  spelled - its letters' names: alone among lowercase words, and beside a word in capitals (spelled.py's labels)
 
 Their training continues a trained G2P: its own data (each word's reading 0) plus each ambiguous word's alternate readings
 ("readingShare" of the samples), the other words with an alternate reading index and their default target
 ("invariantShare" - so a reading index on a word the head wrongly fires for changes nothing), and the ambiguity head's
-binary cross entropy ("ambiguityWeight").
+binary cross entropy ("ambiguityWeight"). The spelled head trains beside them on its own batches (the "spelled"
+settings - "batch" strings a step, drawn by its own generator; its loss times "weight", its gradient clipped alone): the
+encoder is frozen, so its loss reaches nothing but the head - the rest trains exactly as without it.
 
 The context network: each item of the window (WINDOW words and phrase-end marks each side of the word - frontend.py
 context_sequence) is read by a character GRU (its last MAX_CHARS characters) to a vector (zero beyond the text); a
@@ -64,6 +68,7 @@ import zlib
 import numpy
 
 from . import RECIPE_PATH, ROOT, g2p, g2pmodel, read_json
+from . import spelled as spelled_module
 from .corpora import file_sha256
 from .trained import module_body
 from .g2p import (EOS, LETTERS, MAX_WORD, MODULE_LINE_LENGTH, PHONES, UPSAMPLE, build_model, learning_rate, log_line, make_batch,
@@ -74,9 +79,11 @@ from .readings import sz_only
 # The recipe's settings - train/data/train.json's "context" (labels, g2p, network, export, gate)
 RECIPE = read_json(RECIPE_PATH)['context']
 
-# The reading slots (the default and two alternates), and the ambiguity head's hidden layer
+# The reading slots (the default and two alternates), the ambiguity head's hidden layer, and the spelled head's settings
+# (its hidden layer, its loss's weight, its batch, and its labels' and their sampling's - spelled.py)
 READINGS = RECIPE['g2p']['readings']
 AMBIGUITY_HIDDEN = RECIPE['g2p']['ambiguityHidden']
+SPELLED = RECIPE['g2p']['spelled']
 
 # The context network's input - its characters (id 0 is padding), the characters of an item it reads, and the window
 CONTEXT_CHARS = '\'abcdefghijklmnopqrstuvwxyz,.?!'
@@ -89,10 +96,11 @@ EXPORT = RECIPE['export']
 
 # The context network's settings, and the G2P reading stage's
 CONTEXT_SETTINGS = {key: value for key, value in RECIPE['network'].items() if key not in ('window', 'maxChars')}
-G2P_SETTINGS = {key: value for key, value in RECIPE['g2p'].items() if key not in ('readings', 'ambiguityHidden')}
+G2P_SETTINGS = {key: value for key, value in RECIPE['g2p'].items() if key not in ('readings', 'ambiguityHidden', 'spelled')}
 
-# The reading stage's new tensors (their learning rate is the stage's times headRate)
-HEADS = ('reading', 'ambiguity_layer', 'ambiguity')
+# The reading stage's new tensors (their learning rate is the stage's times headRate), and the spelled head's
+SPELLED_HEAD = ('spelled_layer', 'spelled')
+HEADS = ('reading', 'ambiguity_layer', 'ambiguity', *SPELLED_HEAD)
 
 
 #
@@ -100,13 +108,15 @@ HEADS = ('reading', 'ambiguity_layer', 'ambiguity')
 #
 
 def add_reading_heads(model, readings=READINGS):
-    """Add the reading embedding and the ambiguity head to a G2P model (g2p.py build_model)"""
+    """Add the reading embedding, the ambiguity head, and the spelled head to a G2P model (g2p.py build_model)"""
     from torch import nn  # pylint: disable=import-outside-toplevel
     model.reading = nn.Embedding(readings - 1, model.config['decoder'])
     nn.init.normal_(model.reading.weight, std=1.0)
     model.ambiguity_layer = nn.Linear(2 * model.config['hidden'], AMBIGUITY_HIDDEN)
     model.ambiguity = nn.Linear(AMBIGUITY_HIDDEN, 1)
     nn.init.constant_(model.ambiguity.bias, -4.0)
+    model.spelled_layer = nn.Linear(2 * model.config['hidden'], int(SPELLED['hidden']))
+    model.spelled = nn.Linear(int(SPELLED['hidden']), 2)
     model.config = {**model.config, 'readings': readings}
     return model
 
@@ -126,6 +136,28 @@ def load_g2p(path):
 def ambiguity_logit(model, ends):
     import torch  # pylint: disable=import-outside-toplevel
     return model.ambiguity(torch.tanh(model.ambiguity_layer(ends))).squeeze(-1)
+
+
+# The spelled head's logits from the encoder's final states - [batch, 2]: alone, and beside a word in capitals
+def spelled_logit(model, ends):
+    import torch  # pylint: disable=import-outside-toplevel
+    return model.spelled(torch.tanh(model.spelled_layer(ends)))
+
+
+# The encoder's final states of words (no gradient - the heads' input)
+def encoder_ends(model, words):
+    import torch  # pylint: disable=import-outside-toplevel
+    with torch.no_grad():
+        return model.encode(make_batch(words, [[] for _ in words])[0])[3]
+
+
+# The spelled head's decisions of words - whether each, in capitals, is spelled: [alone, beside a word in capitals]
+def spelled_decisions(model, words, batch_size=2048):
+    model.eval()
+    decisions = []
+    for start in range(0, len(words), batch_size):
+        decisions.extend((spelled_logit(model, encoder_ends(model, words[start:start + batch_size])) > 0).tolist())
+    return decisions
 
 
 # The loss of a batch - teacher-forced cross entropy of the readings' targets (g2p.py's), plus the ambiguity head's
@@ -163,14 +195,17 @@ def reading_targets(labels, defaults=None):
     return targets
 
 
-def train_g2p(model, items, probabilities, labels, settings, log):
-    """Train the reading input and the ambiguity head (and the rest) from a trained G2P - items [(word, phones)] and their
-    sampling probabilities are the G2P's own data (reading 0); returns the model"""
+def train_g2p(model, items, probabilities, labels, spelled, settings, log):
+    """Train the reading input, the ambiguity head, and the spelled head (and the rest) from a trained G2P - items [(word,
+    phones)] and their sampling probabilities are the G2P's own data (reading 0), spelled the spelled head's labels
+    (spelled.py spelled_labels); returns the model"""
     import torch  # pylint: disable=import-outside-toplevel
     settings = {**G2P_SETTINGS, **settings}
     torch.set_num_threads(int(settings['threads']))
     torch.manual_seed(int(settings['seed']))
     rng = numpy.random.default_rng(int(settings['seed']))
+    spelled_rng = numpy.random.default_rng([int(settings['seed']), 1])
+    spelled_sample = spelled_module.batch_sampler(spelled)
     if not hasattr(model, 'reading'):
         add_reading_heads(model)
     ambiguous = set(labels['words'])
@@ -184,6 +219,8 @@ def train_g2p(model, items, probabilities, labels, settings, log):
         parameter.requires_grad_(any(parameter is other for other in trained))
     head_rate = float(settings['headRate'])
     heads = [parameter for name, parameter in model.named_parameters() if name.split('.')[0] in HEADS]
+    spelled_head = [parameter for name, parameter in model.named_parameters() if name.split('.')[0] in SPELLED_HEAD]
+    others = [parameter for parameter in trained if not any(parameter is head for head in spelled_head)]
     optimizer = torch.optim.AdamW([
         {'params': [parameter for parameter in trained if not any(parameter is head for head in heads)], 'scale': 1.0},
         {'params': [parameter for parameter in trained if any(parameter is head for head in heads)], 'scale': head_rate}
@@ -223,25 +260,34 @@ def train_g2p(model, items, probabilities, labels, settings, log):
             group['lr'] = learning_rate(step, steps, peak, warmup) * group['scale']
         loss, phone_loss, ambiguity_loss = reading_loss(model, letters, phone_targets, readings, labels_tensor,
                                                         float(settings['ambiguityWeight']))
+
+        # The spelled head's batch - its own strings, the encoder's final states of them fixed
+        spelled_words, spelled_targets = spelled_sample(spelled_rng, int(SPELLED['batch']))
+        spelled_loss = torch.nn.functional.binary_cross_entropy_with_logits(
+            spelled_logit(model, encoder_ends(model, spelled_words)), torch.tensor(spelled_targets))
         optimizer.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(trained, 1.0)
+        (loss + float(SPELLED['weight']) * spelled_loss).backward()
+        torch.nn.utils.clip_grad_norm_(others, 1.0)
+        torch.nn.utils.clip_grad_norm_(spelled_head, 1.0)
         optimizer.step()
         window['phone'] += phone_loss.item()
         window['ambiguity'] += ambiguity_loss.item()
+        window['spelled'] += spelled_loss.item()
         if step % 500 == 0 or step == steps:
             count = step % 500 or 500
             log(f'train-g2p: step {step}/{steps} phone loss {window["phone"] / count:.4f}, ambiguity loss '
-                f'{window["ambiguity"] / count:.5f} ({(time.time() - window_start) / count * 1000:.0f} ms/step)')
+                f'{window["ambiguity"] / count:.5f}, spelled loss {window["spelled"] / count:.5f} '
+                f'({(time.time() - window_start) / count * 1000:.0f} ms/step)')
             window.clear()
             window_start = time.time()
     model.eval()
     return model
 
 
-def evaluate_g2p(model, labels, words):
-    """The reading measures of a G2P - the alternate readings right, and the ambiguity head's errors over words (the
-    dictionary and labeled words) - {readingsRight, readings, ambiguousMissed, falsePositives}"""
+def evaluate_g2p(model, labels, words, spelled):
+    """The reading measures of a G2P - the alternate readings right, the ambiguity head's errors over words (the
+    dictionary and labeled words), and the spelled head's errors over its labels (spelled.py spelled_errors) -
+    {readingsRight, readings, ambiguousMissed, falsePositives, spelled}"""
     targets = reading_targets(labels, {})
     predictions = predict(model, [word for word, _, _ in targets], [reading for _, _, reading in targets])
     right = sum(' '.join(predicted) in labels['words'][word]['readings'][reading]
@@ -251,7 +297,8 @@ def evaluate_g2p(model, labels, words):
     logits = ambiguity_logits(model, words)
     missed = [word for word, logit in zip(words, logits) if word in ambiguous and logit <= 0]
     false_positives = sum(1 for word, logit in zip(words, logits) if word not in ambiguous and logit > 0)
-    return {'readingsRight': right, 'readings': len(targets), 'ambiguousMissed': missed, 'falsePositives': false_positives}
+    return {'readingsRight': right, 'readings': len(targets), 'ambiguousMissed': missed, 'falsePositives': false_positives,
+            'spelled': spelled_module.spelled_errors(spelled, lambda spelled_words: spelled_decisions(model, spelled_words))}
 
 
 #
@@ -534,19 +581,23 @@ def evaluate_context(slot_of, labels):
 # The export - the G2P module with the reading heads and the context network
 #
 
-# The G2P's quantization calibration - {words, phones, readings}: EXPORT's "calibration" words drawn by the G2P's own
-# training probabilities (a fixed seed; reading 0) and every alternate reading target (the reading stage's checkpoint
-# keeps it, so the export is the checkpoint's alone)
-def g2p_calibration(items, probabilities, labels):
+# The G2P's quantization calibration - {words, phones, readings, spelled}: EXPORT's "calibration" words drawn by the
+# G2P's own training probabilities (a fixed seed; reading 0) and every alternate reading target, and as many of the
+# spelled head's strings, drawn as its batches (the reading stage's checkpoint keeps it, so the export is the
+# checkpoint's alone)
+def g2p_calibration(items, probabilities, labels, spelled):
     chosen = numpy.random.default_rng(0).choice(len(items), size=int(EXPORT['calibration']), p=probabilities)
     samples = [(*items[index], 0) for index in chosen] + reading_targets(labels)
+    spelled_sample = spelled_module.batch_sampler(spelled)
     return {'words': [word for word, _, _ in samples], 'phones': [list(phones) for _, phones, _ in samples],
-            'readings': [reading for _, _, reading in samples]}
+            'readings': [reading for _, _, reading in samples],
+            'spelled': spelled_sample(numpy.random.default_rng(0), int(EXPORT['calibration']))[0]}
 
 
 # The G2P's matrices' input covariances (for GPTQ - quant.py) - {name: E[x x^T]} over the calibration words, teacher-
 # forced: each GRU's input and its previous state (the encoder's forward and reverse), the bridge's and the ambiguity
-# head's encoder ends, the decoder's attention, combine, and output inputs (the embedding tables - lookups - none)
+# head's encoder ends, the decoder's attention, combine, and output inputs (the embedding tables - lookups - none);
+# and the spelled head's, over its own strings
 def g2p_covariances(model, calibration):
     import torch  # pylint: disable=import-outside-toplevel
     sums = collections.defaultdict(lambda: [0.0, 0])
@@ -585,6 +636,10 @@ def g2p_covariances(model, calibration):
             combined = torch.cat([decoded, torch.einsum('bst,bth->bsh', torch.softmax(scores, -1), encoded)], -1)
             add('combine.weight', combined[steps])
             add('output.weight', torch.tanh(model.combine(combined))[steps])
+        for start in range(0, len(calibration['spelled']), 1024):
+            ends = encoder_ends(model, calibration['spelled'][start:start + 1024])
+            add('spelled_layer.weight', ends)
+            add('spelled.weight', torch.tanh(model.spelled_layer(ends)))
     return {name: total / count for name, (total, count) in sums.items()}
 
 
@@ -695,7 +750,7 @@ def command_export(args):
         f'The neural grapheme-to-phoneme model run by lib/g2p.js (and picovox_train/g2pmodel.py) - {config["design"]} design,',
         f'embedding {config["embed"]}, hidden {config["hidden"]}, {g2p_parameters} parameters with the reading input '
         f'({config["readings"]} readings) and the',
-        f'ambiguity head; and the context network, {context_parameters} parameters; {EXPORT["bits"]}-bit weights; trained by',
+        f'ambiguity and spelled heads; and the context network, {context_parameters} parameters; {EXPORT["bits"]}-bit weights; trained by',
         f'picovox_train.g2p and picovox_train.context (checkpoints sha256 {digests[0]}, {digests[1]}).'
     ]
     text = module_text(config, g2p_quantized, context_checkpoint['config'], context_quantized, comment)
@@ -796,10 +851,15 @@ def heteronym_scores(module_path):
 def command_check(args):
     """make train's G2P gate - the retrained module against the committed one: identical (below the comment
     header), else the quality gate (the regression set - tools/heteronyms.js's minimums, and no kind more than its
-    heteronymKindDrop below the committed module's - and g2p.py's book measures within the recipe's tolerances). A
+    heteronymKindDrop below the committed module's - and g2p.py's book measures, and each evaluation text's error,
+    within the recipe's tolerances). A
     kind without a drop isn't compared, its minimum its guard: the probes, which the context network's seed alone
     moves 5 of 38 (29 to 34 on the same labels) - a retrained module's score against the committed one's is two draws
-    of that spread, and a drop of 2 failed half the trainings"""
+    of that spread, and a drop of 2 failed half the trainings; and the context set, whose draws on one recipe in two
+    days (2026-11-10 and 11 - the labels a few examples apart) were 52, 51, 54, 51, and 50 of 54. The monitoring WER's
+    tolerance is its seeds' spread: four seeds of one recipe (2026-11-11) ended at 41.9%, 42.1%, 42.8%, and 43.0% of
+    its 1,562 words (two trainings pronounce some 600 of them differently) - 1.5 points, two standard deviations of
+    two draws' difference (half a point failed a training for its seed)"""
     if module_body(args.model) == module_body(args.committed):
         print(f'check: {args.model} is identical to {args.committed} (below the comment header)')
         return 0
@@ -820,6 +880,9 @@ def command_check(args):
                             ('top10kWrong', gate['top10kWrong']), ('monitorWer', gate['monitorWer'])):
         if new_measures[name] > old_measures[name] + tolerance:
             failures.append(f'{name} {new_measures[name]} (committed {old_measures[name]}, tolerance {tolerance})')
+    for name, measures in new_measures['sets'].items():
+        if measures['error'] > old_measures['sets'][name]['error'] + gate['evalError']:
+            failures.append(f'{name} {measures["error"]} (committed {old_measures["sets"][name]["error"]}, tolerance {gate["evalError"]})')
     kinds = ', '.join(f'{kind} {right}/{total} (committed {old_kinds.get(kind, (0, 0))[0]})' for kind, (right, total) in new_kinds.items())
     print(f'check: {args.model} differs from {args.committed}; regression set {kinds}; {g2p.describe(new_measures)} '
           f'(committed: {g2p.describe(old_measures)}) - ' +
@@ -832,19 +895,27 @@ def command_check(args):
 #
 
 def command_train_g2p(args):
-    """Train the reading heads from a G2P checkpoint on g2p.py's data and recipe settings - <out> (a checkpoint)"""
+    """Train the reading heads and the spelled head from a G2P checkpoint on g2p.py's data and recipe settings - <out> (a
+    checkpoint)"""
     import torch  # pylint: disable=import-outside-toplevel
     labels = read_json(args.labels)
     settings, data = g2p.final_data()
     items, probabilities = g2p.training_items(data, settings)
+    spelled = spelled_module.spelled_labels(data, SPELLED)
     model = load_g2p(args.init)
     overrides = json.loads(args.settings) if args.settings else {}
-    train_g2p(model, items, probabilities, labels, overrides, lambda text: log_line(args.log, text))
+    train_g2p(model, items, probabilities, labels, spelled, overrides, lambda text: log_line(args.log, text))
     torch.save({'config': model.config, 'state': model.state_dict(), 'settings': {**G2P_SETTINGS, **overrides},
-                'calibration': g2p_calibration(items, probabilities, labels)}, args.out)
-    result = evaluate_g2p(model, labels, list(data['first']))
+                'calibration': g2p_calibration(items, probabilities, labels, spelled)}, args.out)
+    result = evaluate_g2p(model, labels, list(data['first']), spelled)
+    errors = result['spelled']
     log_line(args.log, f'train-g2p: readings {result["readingsRight"]}/{result["readings"]}, ambiguity missed '
                        f'{len(result["ambiguousMissed"])}, false positives {result["falsePositives"]}')
+    log_line(args.log, f'train-g2p: spelled head - {len(errors["spelledMissed"])}/{errors["spelled"]} spelled strings found read, '
+                       f'{len(errors["wordsSpelled"])}/{errors["words"]} words found spelled ({" ".join(errors["wordsSpelled"][:20])}), '
+                       f'{len(errors["heldOutSpelled"])}/{errors["heldOut"]} held-out words; alone - '
+                       f'{len(errors["aloneMissed"])}/{len(spelled["alone"])} of its words found read, '
+                       f'{len(errors["aloneDiffers"])} other strings another way')
     return 0
 
 

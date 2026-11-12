@@ -121,9 +121,14 @@ class TestG2pModel(unittest.TestCase):
     def test_pronounce_javascript(self):
         # The committed module pronounces as lib/g2p.js does (the parity check - tools/parity.js)
         words = ['hello', 'world', 'ishmael', 'read', 'lead', 'zxqv', 'antidisestablishmentarianism', 'a', 'colonel',
-                 'gutenberg', 'wouldn\'t', 'xylophonists', 'q', 'abcdefghijklmnopqrstuvwxyzabcdefghij']
+                 'gutenberg', 'wouldn\'t', 'xylophonists', 'q', 'abcdefghijklmnopqrstuvwxyzabcdefghij', 'ai', 'toc', 'fbi', 'not',
+                 'nasa', 'us', 'http', 'stop']
         parity.inputs(self, 'pronounce', {'words': words})
-        self.assertEqual(g2pmodel.G2p(g2pmodel.read_module()).pronounce_many(words), parity.outputs('pronounce'))
+        g2p_model = g2pmodel.G2p(g2pmodel.read_module())
+        self.assertEqual(g2p_model.pronounce_many(words), parity.outputs('pronounce'))
+
+        # ... and its spelled head decides as lib/g2p.js's does
+        self.assertEqual([[g2p_model.spelled(word), g2p_model.spelled(word, True)] for word in words], parity.outputs('spelled'))
 
     def test_g2p(self):
         g2p_model = self.g2p
@@ -133,6 +138,7 @@ class TestG2pModel(unittest.TestCase):
         # Words without letters are pronounced empty; the cache answers again
         self.assertEqual(g2p_model.pronounce_many(['--', 'cat']), [[], ['K', 'AE1', 'T']])
         self.assertFalse(g2p_model.ambiguous_words['--'])
+        self.assertFalse(g2p_model.spelled('--'))
         self.assertEqual(g2p_model.pronounce('cat'), ['K', 'AE1', 'T'])
 
         # Readings - another reading of a heteronym, and a reading the model lacks (the default)
@@ -142,6 +148,13 @@ class TestG2pModel(unittest.TestCase):
         self.assertGreater(len(readings), 1)
         self.assertEqual(g2p_model.pronounce('cat', 7), ['K', 'AE1', 'T'])
         self.assertFalse(g2p_model.ambiguous('dog'))
+
+        # The spelled head - a word that, in capitals, is spelled
+        self.assertTrue(g2p_model.spelled('toc'))
+        self.assertTrue(g2p_model.spelled('toc'))
+        self.assertFalse(g2p_model.spelled('dog'))
+        self.assertTrue(g2p_model.spelled('us'))
+        self.assertFalse(g2p_model.spelled('us', True))
 
         # The context network's readings
         items = ['he', 'will', 'lead', 'the', 'way', '.']

@@ -1,18 +1,21 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-// Heteronym and names regression check - the sentences of train/data/heteronyms-test.json and train/data/names-test.json through
-// the package's front end (lib/lexicon.js textToPhrases with the G2P network as the pronouncer), each expected reading
+// Heteronym, names, and capitals regression check - the sentences of train/data/heteronyms-test.json,
+// train/data/names-test.json, and train/data/capitals-test.json through the package's front end (lib/lexicon.js
+// textToPhrases with the G2P network as the pronouncer), each expected reading
 // scored: right when the word's phones are one of the reading's variants (or match one without stress and no rejected
 // variant's). Kinds: "default" (the reading a context-free G2P should give), "context" (another reading - needs the
 // neighboring words), "missing" (no dictionary variant), "probe" (both readings of the context network's thin words, in
 // sentences written apart from its seeds and collocations - its generalization beyond the context set), "names" (surnames,
 // first names, and place names - verified pronunciations: the readers' audio, the dictionary's own derived forms, and
-// well-established names). Prints one line and exits 1 when a kind's score is below its minimum (the make train gate):
-// default 0.9, context 0.85, probe 0.7, missing 0, names the shipped module's score when it was added (it can only go up).
+// well-established names), "acronym" (a word in capitals that is spelled - its letters' names: the G2P's spelled head),
+// "shouted" (a word in capitals that is read - an emphasized word, a heading, or an acronym said as a word). Prints one
+// line and exits 1 when a kind's score is below its minimum (the make train gate): default 0.9, context 0.85, probe 0.7,
+// missing 0, names the shipped module's score when it was added (it can only go up), acronym 0.9, shouted 0.95.
 //
 // node tools/heteronyms.js [-m modulePath] [--min-default 0.9] [--min-context 0.85] [--min-probe 0.7] [--min-missing 0]
-//     [--min-names N] [--show]
+//     [--min-names N] [--min-acronym 0.9] [--min-shouted 0.95] [--show]
 
 import {setPronouncer, textToPhrases} from '../lib/lexicon.js';
 import {loadG2p} from '../lib/g2p.js';
@@ -70,7 +73,7 @@ function scoreHeteronyms(items) {
 // words' readings (on 2026-11-10's labels, seeds 1-4 scored 29, 34, 32, and 29 of 38 - 3 sentences wrong on every seed,
 // 8 wrong on some; the 2026-11 study's four seeds 27-32), so a minimum at their mean (0.8 was 31) failed half the trainings
 // (and make train's check doesn't compare the probes with the committed module's - picovox_train.context check)
-const minimums = {'default': 0.9, 'context': 0.85, 'probe': 0.7, 'missing': 0, 'names': 0.93};
+const minimums = {'default': 0.9, 'context': 0.85, 'probe': 0.7, 'missing': 0, 'names': 0.93, 'acronym': 0.9, 'shouted': 0.95};
 
 
 // The one-line result - kinds' scores against their minimums, and whether any is below (or has no minimum - a kind
@@ -98,7 +101,7 @@ async function main() {
     const modulePath = option('-m', null);
     const {g2pModel} = await import(modulePath ? pathToFileURL(resolve(modulePath)).href : '../lib/models/g2pModel.js');
     setPronouncer(await loadG2p(g2pModel));
-    const items = ['heteronyms-test.json', 'names-test.json'].flatMap(
+    const items = ['heteronyms-test.json', 'names-test.json', 'capitals-test.json'].flatMap(
         (name) => JSON.parse(readFileSync(new URL(`../train/data/${name}`, import.meta.url), 'utf8'))
     );
     const {kinds, misses} = scoreHeteronyms(items);
@@ -107,7 +110,9 @@ async function main() {
         'context': Number(option('--min-context', minimums.context)),
         'probe': Number(option('--min-probe', minimums.probe)),
         'missing': Number(option('--min-missing', minimums.missing)),
-        'names': Number(option('--min-names', minimums.names))
+        'names': Number(option('--min-names', minimums.names)),
+        'acronym': Number(option('--min-acronym', minimums.acronym)),
+        'shouted': Number(option('--min-shouted', minimums.shouted))
     };
     const {line, failed} = resultLine(kinds, kindMinimums);
     process.stdout.write(`${line}\n`);

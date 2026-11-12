@@ -1,0 +1,18 @@
+{
+ "description": "The spelled head's evidence beyond the dictionary (picovox_train/spelled.py). alone - the words in capitals that are acronyms alone among lowercase words (the head's second logit): common words - read beside a word in capitals (a heading, a shout: LEAVE US ALONE) - that, alone in capitals, are spelled (the US government, 500 AD). Chosen by Wikipedia's articles against the books: a word of two letters in capitals with no neighbor in capitals in at least a twentieth of Wikipedia's 999 vital articles (level 3, fetched 2026-11-11 - articles, and its tokens of their 7,773,923), at 20 times its rate in the 134 pinned books or more (books - its tokens alone in capitals of their 16,921,835). Not chosen: a word in fewer articles (OH, SI, and SO - a subject's symbols), and the three-letter WHO (67 articles - the books' headings shout it). spelled - Wiktionary's words in capitals that are pronounced as their letters' names (its 96 with an American pronunciation - WikiPron's extract, 2026-11-11): spelled, but a common word of two or three letters (PIE, PAD) - and six of Wikipedia's most frequent words in capitals that the head read as words, by hand (ICRC, IAAF, IFRC, COPD, NADPH, NADH).",
+ "alone": {
+  "ad": {"articles": 248, "tokens": 1004, "books": 5},
+  "co": {"articles": 89, "tokens": 519, "books": 6},
+  "un": {"articles": 120, "tokens": 557, "books": 0},
+  "us": {"articles": 396, "tokens": 1680, "books": 8}
+ },
+ "spelled": [
+  "aav", "ab", "abdl", "ad", "afz", "ai", "api", "ascvd", "asdr", "bc", "bdf", "bdsm", "bff", "bfi", "bj", "blt",
+  "btrz", "btu", "bx", "cccp", "ccitt", "cd", "cia", "clp", "cnn", "copd", "cpn", "cpu", "csx", "dhcp", "dj", "dl",
+  "dna", "dui", "dwp", "eac", "ebm", "elcic", "epf", "fbi", "fyi", "gci", "gdp", "gps", "gpt", "hdd", "hiv", "hp",
+  "iaaf", "ibs", "icq", "icrc", "id", "ifrc", "ipa", "iri", "irs", "jis", "kgb", "kia", "ldp", "lp", "maf", "mcdf",
+  "mmo", "nadh", "nadph", "nsa", "od", "og", "omg", "pad", "pbgv", "pei", "pie", "qed", "rnzaf", "rnzn", "rsfsr", "sa",
+  "scp", "smsa", "sos", "ssr", "suv", "tb", "tbdl", "tv", "ucla", "uk", "un", "us", "ussr", "uuv", "wcg", "wu", "xyz",
+  "yccp", "zdf", "zna", "zra", "zrp"
+ ]
+}

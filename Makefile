@@ -299,8 +299,8 @@ $(TRAIN_DIR)/context-network.done: $(TRAIN_DIR)/context-labels.done
 	@$(STAGE) end
 	touch $@
 
-# (the reading stage - from the G2P network and the labels, beside the context network)
-$(TRAIN_DIR)/g2p-reading.done: $(TRAIN_DIR)/g2p-network.done $(TRAIN_DIR)/context-labels.done
+# (the reading stage - from the G2P network and the labels, beside the context network; the spelled head's labels too)
+$(TRAIN_DIR)/g2p-reading.done: $(TRAIN_DIR)/g2p-network.done $(TRAIN_DIR)/context-labels.done train/data/g2p-capitals.json
 	@$(STAGE) start
 	$(STAGE) -- $(BESIDE) $(TRAIN_PYTHON) -m picovox_train.context train-g2p --labels $(TRAIN_DIR)/context/labels.json --init $(TRAIN_DIR)/g2p/focus.pt \
 		--out $(TRAIN_DIR)/context/g2p.pt

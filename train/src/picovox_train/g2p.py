@@ -7,7 +7,8 @@ every word; g2pmodel.py is its Python port). The recipe is train/data/train.json
 
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p train --out build/train/g2p   # every stage (resumable)
     PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p evaluate [lib/models/g2pModel.js | CHECKPOINT]
-    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p book TEXT --name NAME --title TITLE --url URL
+    PYTHONPATH=train/src build/venv-train/bin/python -B -m picovox_train.g2p book TEXT --name NAME --title TITLE --url URL \
+        [--weight W | --eval]
 
 The data:
 
@@ -16,15 +17,17 @@ The data:
   in none of the 128 books), sampled by frequency - "uniform" of the samples uniform over the words, the rest in
   proportion to count ** "alpha" (train/data/g2p-words.json evalCounts + weightCounts, the words' counts in 128 Project
   Gutenberg books)
-- "unknown" of the samples uniform over 100,812 labeled words the dictionary lacks (train/data/g2p-words.json labels - a
-  teacher ensemble's, or the spelling and -s rules' where they apply to a dictionary word)
+- "unknown" of the samples uniform over 100,812 labeled words the dictionary lacks (train/data/g2p-words.json labels -
+  the spelling and -s rules' where they apply to a dictionary word, else Wiktionary's where it has the word, else a
+  teacher ensemble's)
 - in a stage with "relabel" (a JSON file {"relabel": {word: "PH ON ES"}} - train/data/g2p-relabel.json, heteronyms.py)
   other targets for some dictionary words - the rule-labeled words derived from them follow - and ("focusBoost":
   {"share"}) a share of the samples uniform over them
 - the words of the books listeners hear (train/data/g2p-books.json - "book" counts a book's words): labels for its words
   the dictionary lacks or has wrong (names - Rocinante, Cide Hamete - and archaic words), each a dictionary word in
   training (a corrected dictionary word's rule-labeled forms following), its possessives the dictionary lacks (the
-  stem's target with its -s suffix), and its word counts, which join the frequency weights (the monitoring set is drawn
+  stem's target with its -s suffix), and its word counts, which join the frequency weights - times the book's "weight", if
+  it has one: a corpus of another kind (Wikipedia's articles) balanced with the books (the monitoring set is drawn
   without them, then loses the books' words)
 
 Each stage trains from the previous one's weights (AdamW, linear warmup then cosine decay to 2%, gradient clipping at
@@ -33,8 +36,11 @@ uniform over the most frequent words). The network is exported with the heterony
 export, by the quantization here - "bits" per weight, bfloat16 scales per row, 8-bit biases).
 
 The measures: the book-token error (the share of the 22 evaluation books' dictionary-word tokens whose prediction isn't
-the first pronunciation; "any" - none of the word's pronunciations), the top-10K's wrong words, and the monitoring
-set's word error (any pronunciation).
+the first pronunciation; "any" - none of the word's pronunciations), the top-10K's wrong words, the monitoring
+set's word error (any pronunciation), the held-out words' error (the books file's "heldOut" - words of Wikipedia's that
+never train, with Wiktionary's pronunciations: the share pronounced another way, the two dictionaries' conventions
+aside), and the token error of each evaluation text of the books file (its "eval" - texts that don't train: Wikipedia
+articles held out of its weights).
 """
 
 import argparse
@@ -123,7 +129,8 @@ def split_words(words):
 
 def load_data(relabel=None):
     """The data - {first (word: target phones), all (word: every pronunciation), labels (unknown words' phones), stems,
-    evalCounts, weightCounts, monitor, relabeled (the relabeled words)}: the dictionary with its label errors corrected
+    evalCounts, weightCounts, monitor, relabeled (the relabeled words), evalSets (the books file's evaluation texts -
+    {name: counts}), heldOut (its held-out words' phones)}: the dictionary with its label errors corrected
     (train/data/g2p-fixes.json), and the listeners' books' words (train/data/g2p-books.json)"""
     pronunciations = read_pronunciations()
     words = read_json(WORDS_PATH)
@@ -159,8 +166,15 @@ def load_data(relabel=None):
         first.update((word, phones) for word, phones in targets.items() if word in first)
         relabeled = set(targets) & set(first)
 
+    # The books file's measures - its evaluation texts' counts, and its held-out words (words that never train - one
+    # that has a label, since, isn't held out)
+    books = read_json(BOOKS_PATH)
+    eval_sets = {name: text['counts'] for name, text in sorted(books.get('eval', {}).items())}
+    held_out = {word: phones.split() for word, phones in sorted(books.get('heldOut', {}).items())
+                if word not in first and word not in labels}
     return {'first': first, 'all': pronunciations, 'labels': labels, 'stems': stems, 'evalCounts': eval_counts,
-            'weightCounts': weight_counts, 'monitor': sorted(monitor), 'relabeled': relabeled}
+            'weightCounts': weight_counts, 'monitor': sorted(monitor), 'relabeled': relabeled, 'evalSets': eval_sets,
+            'heldOut': held_out}
 
 
 # The recipe's final stage - (its settings: the recipe's with the stage's over them, its data: with its relabeled targets)
@@ -175,7 +189,7 @@ def final_data():
 # Add the books' words (train/data/g2p-books.json, in place) - each label (a word the dictionary lacks, or a correction of
 # its label - the rule-labeled words derived from it follow) a dictionary word, and each possessive in the books the
 # dictionary lacks the stem's target with its -s suffix (a teacher's label of the word replaced); returns the books' word
-# counts, summed
+# counts, summed - each book's times its weight (1, if it has none)
 def add_books(pronunciations, first, labels, stems):
     books = read_json(BOOKS_PATH)
     targets = {word: phones.split() for word, phones in books['labels'].items()}
@@ -186,7 +200,8 @@ def add_books(pronunciations, first, labels, stems):
         labels.pop(word, None)
     counts = collections.Counter()
     for book in books['books'].values():
-        counts.update(book['counts'])
+        weight = book.get('weight', 1)
+        counts.update({word: count * weight for word, count in book['counts'].items()})
     for word in sorted(counts):
         stem = word[:-2]
         if word.endswith('\'s') and word not in first and stem in first:
@@ -390,7 +405,9 @@ def learning_rate(step, steps, peak, warmup):
 
 def evaluate(pronounce, data):
     """A pronouncer's measures (pronounce: a list of words to their phone lists) - {book, bookAny, bookWrongDistinct,
-    top10kWrong, monitorWer, wrong (the most frequent wrong book words)}"""
+    top10kWrong, monitorWer, heldOutWer (the held-out words' error, the dictionaries' conventions aside - loose; None
+    without them), wrong (the most frequent wrong book words), sets ({name: {error, wrongDistinct, wrong}} - each
+    evaluation text's dictionary-word tokens)}"""
     counts = data['evalCounts']
     words = list(counts)
     predictions = dict(zip(words, pronounce(words)))
@@ -401,20 +418,57 @@ def evaluate(pronounce, data):
     top = set(words[:10000])
     monitor = data['monitor']
     monitor_wrong = sum(1 for word, phones in zip(monitor, pronounce(monitor)) if phones not in allprons[word])
+    sets = {name: evaluate_set(pronounce, first, set_counts) for name, set_counts in data.get('evalSets', {}).items()}
+    held_out = data.get('heldOut', {})
+    held_words = sorted(held_out)
+    held_wrong = sum(1 for word, phones in zip(held_words, pronounce(held_words) if held_words else [])
+                     if loose(phones) != loose(held_out[word]))
     return {
+        'sets': sets,
         'book': sum(counts[word] for word in wrong_first) / tokens,
         'bookAny': sum(counts[word] for word in wrong_any) / tokens,
         'bookWrongDistinct': len(wrong_first),
         'top10kWrong': sum(1 for word in wrong_first if word in top),
         'monitorWer': monitor_wrong / len(monitor),
+        'heldOutWer': held_wrong / len(held_words) if held_words else None,
         'wrong': [[word, counts[word], ' '.join(predictions[word]), ' '.join(first[word])] for word in wrong_first[:30]]
     }
 
 
+# An evaluation text's measures - {error (its dictionary-word tokens whose prediction isn't the first pronunciation),
+# wrongDistinct, wrong (its most frequent wrong words)}
+def evaluate_set(pronounce, first, counts):
+    words = sorted((word for word in counts if word in first), key=lambda word: (-counts[word], word))
+    wrong = [word for word, phones in zip(words, pronounce(words)) if phones != first[word]]
+    return {'error': sum(counts[word] for word in wrong) / sum(counts[word] for word in words), 'wrongDistinct': len(wrong),
+            'wrong': [[word, counts[word]] for word in wrong[:30]]}
+
+
+# A pronunciation without the differences of two dictionaries' conventions (the held-out words' labels are
+# Wiktionary's) - AO as AA, a vowel without the primary stress unstressed, IH, EH, and UH reduced (AH) there, and ER0 as
+# AH0 R
+def loose(phones):
+    reduced = {'AO': 'AA'}
+    unstressed = {'IH': 'AH', 'EH': 'AH', 'UH': 'AH'}
+    result = []
+    for phone in phones:
+        vowel = phone.rstrip('012')
+        if vowel == phone:
+            result.append(phone)
+        elif phone.endswith('1'):
+            result.append(reduced.get(vowel, vowel) + '1')
+        else:
+            result.append(unstressed.get(vowel, reduced.get(vowel, vowel)) + '0')
+    return ' '.join(result).replace('AH0 R', 'ER0')
+
+
 # A one-line summary of the measures
 def describe(result):
+    sets = ''.join(f', {name} err {100 * measures["error"]:.3f}% ({measures["wrongDistinct"]} distinct)'
+                   for name, measures in result['sets'].items())
+    held_out = '' if result.get('heldOutWer') is None else f', held-out WER {100 * result["heldOutWer"]:.2f}%'
     return (f'book err {100 * result["book"]:.3f}% (any {100 * result["bookAny"]:.3f}%, {result["bookWrongDistinct"]} distinct), '
-            f'top-10K wrong {result["top10kWrong"]}, monitor WER {100 * result["monitorWer"]:.2f}%')
+            f'top-10K wrong {result["top10kWrong"]}, monitor WER {100 * result["monitorWer"]:.2f}%{held_out}{sets}')
 
 
 #
@@ -612,28 +666,34 @@ def command_evaluate(args):
 
 def command_book(args):
     """A book's word counts (the front end's words - frontend.text_items) into the books file - the words the network
-    trains on (the dictionary's, the labels', and their possessives)"""
+    trains on (the dictionary's, the labels', and their possessives): a book that trains (its counts weights, times
+    --weight), or with --eval an evaluation text (its counts a measure's)"""
     with open(args.text, encoding='utf-8') as file:
         items = frontend.text_items(file.read())
     books = read_json(args.books)
     known = set(read_pronunciations()) | set(books['labels'])
     counts = collections.Counter(item for item, _ in items if isinstance(item, str))
     kept = {word: count for word, count in sorted(counts.items()) if word in known or (word.endswith('\'s') and word[:-2] in known)}
-    books['books'][args.name] = {'title': args.title, 'url': args.url, 'tokens': sum(counts.values()), 'counts': kept}
+    book = {'title': args.title, 'url': args.url, 'tokens': sum(counts.values()), 'counts': kept}
+    if args.eval:
+        books.setdefault('eval', {})[args.name] = book
+    else:
+        books['books'][args.name] = {**book, **({'weight': args.weight} if args.weight != 1 else {})}
     write_books(args.books, books)
     log_line(None, f'book {args.name}: {sum(counts.values())} tokens, {len(kept)} of its {len(counts)} words kept')
     return 0
 
 
-# Write the books file - its labels one word a line, and each book's counts on one line
+# Write the books file - its labels (and its held-out words) one word a line, and each book's (and each evaluation
+# text's) counts on one line
 def write_books(path, books):
-    lines = ['{', f' "description": {json.dumps(books["description"])},', ' "labels": {']
-    lines += [f'  {json.dumps(word)}: {json.dumps(phones)},' for word, phones in sorted(books['labels'].items())]
-    lines[-1] = lines[-1].rstrip(',')
-    lines += [' },', ' "books": {']
-    entries = [f'  {json.dumps(name)}: {json.dumps(book)}' for name, book in sorted(books['books'].items())]
-    lines += [entry + ',' for entry in entries[:-1]] + entries[-1:]
-    lines += [' }', '}']
+    lines = ['{', f' "description": {json.dumps(books["description"])}']
+    for section in ('labels', 'heldOut', 'books', 'eval'):
+        if section in books:
+            entries = [f'  {json.dumps(name)}: {json.dumps(value)}' for name, value in sorted(books[section].items())]
+            lines[-1] += ','
+            lines += [f' "{section}": {{'] + [entry + ',' for entry in entries[:-1]] + entries[-1:] + [' }']
+    lines.append('}')
     with open(path, 'w', encoding='utf-8') as file:
         file.write('\n'.join(lines) + '\n')
 
@@ -656,6 +716,8 @@ def main(argv=None):
     book_parser.add_argument('--name', required=True, help='the book\'s name (its key)')
     book_parser.add_argument('--title', required=True)
     book_parser.add_argument('--url', required=True, help='the text\'s source')
+    book_parser.add_argument('--weight', type=float, default=1, help='the counts\' weight in the frequency weights (default: 1)')
+    book_parser.add_argument('--eval', action='store_true', help='an evaluation text - its counts a measure\'s, not weights')
     book_parser.add_argument('--books', default=BOOKS_PATH)
     book_parser.set_defaults(func=command_book)
     args = parser.parse_args(argv)

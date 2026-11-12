@@ -18,6 +18,8 @@ The front end and the G2P:
   (picovox_train.context export writes lib/models/g2pModel.js); contextlabels.py - their labels (train/data/context-labels.json);
   readings.py - the dictionary's variants clustered into readings, how two readings are told apart in the audio, the
   measured words and the corpus's coverage of them, and the shared phone helpers
+- spelled.py - the words in capitals: the labels of the G2P's spelled head (context.py trains it in the reading stage) -
+  whether a word in capitals is spelled, its letters' names ("AI", "TOC"), or read ("NOT", "NASA")
 - lib/tokens.js - the same tokens in JavaScript, from lib/lexicon.js, for browser-side inference
 
 The data:

@@ -348,8 +348,9 @@ class Context:
 
 class G2p:
     """A loaded G2P model - pronounce(word, reading=0) gives the word's ARPAbet phones with stress in a reading, cached per
-    word and reading; ambiguous(word) (the ambiguity head) and choose_reading(items, index) (the context network's
-    reading) - lib/g2p.js loadG2p"""
+    word and reading; ambiguous(word) (the ambiguity head), choose_reading(items, index) (the context network's
+    reading), and spelled(word, beside=False) (the spelled head - whether the word, in capitals, is spelled: alone among
+    lowercase words, or beside a word in capitals) - lib/g2p.js loadG2p"""
 
     def __init__(self, model):
         self.model = model
@@ -378,17 +379,23 @@ class G2p:
         self.ambiguity_bias = tensors['ambiguity.bias']
         self.ambiguity_layer_columns = np.ascontiguousarray(tensors['ambiguity_layer.weight'].T)
         self.ambiguity_layer_bias = tensors['ambiguity_layer.bias']
+        self.spelled_columns = np.ascontiguousarray(tensors['spelled.weight'].T)
+        self.spelled_bias = tensors['spelled.bias']
+        self.spelled_layer_columns = np.ascontiguousarray(tensors['spelled_layer.weight'].T)
+        self.spelled_layer_bias = tensors['spelled_layer.bias']
         self.caches = [{} for _ in range(self.readings)]
         self.ambiguous_words = {}
         self.last_ambiguous = []
+        self.spelled_words = {}
+        self.last_spelled = []
         self.context = Context(model['context'])
 
     # The letter ids of a word - its known letters, at most maxLetters
     def word_ids(self, word):
         return [self.letter_ids[letter] for letter in word if letter in self.letter_ids][:self.model['maxLetters']]
 
-    # Pronounce letter-id lists (each non-empty) in a reading - phone-id lists (and the ambiguity head's decisions into
-    # last_ambiguous)
+    # Pronounce letter-id lists (each non-empty) in a reading - phone-id lists (and the ambiguity and spelled heads'
+    # decisions into last_ambiguous and last_spelled)
     def pronounce_ids(self, id_lists, reading=0):
         hidden, decoder = self.hidden, self.decoder
         count = len(id_lists)
@@ -416,6 +423,8 @@ class G2p:
         state = js_tanh(_matrix_vectors(self.bridge_columns, ends, self.bridge_bias))
         ambiguity_hidden = js_tanh(_matrix_vectors(self.ambiguity_layer_columns, ends, self.ambiguity_layer_bias))
         self.last_ambiguous = (_matrix_vectors(self.ambiguity_columns, ambiguity_hidden, self.ambiguity_bias)[:, 0] > 0).tolist()
+        spelled_hidden = js_tanh(_matrix_vectors(self.spelled_layer_columns, ends, self.spelled_layer_bias))
+        self.last_spelled = (_matrix_vectors(self.spelled_columns, spelled_hidden, self.spelled_bias) > 0).tolist()
         if reading > 0:
             state = state + self.reading_weights[reading - 1]
 
@@ -457,7 +466,7 @@ class G2p:
         return phones
 
     # Pronounce words in a reading (a reading the model lacks is the default), filling the caches - the words' phones (the
-    # new words in batches of similar length; in the default reading, also the ambiguity head's decisions)
+    # new words in batches of similar length; in the default reading, also the ambiguity and spelled heads' decisions)
     def pronounce_many(self, words, reading=0):
         reading = reading if reading < self.readings else 0
         cache = self.caches[reading]
@@ -470,12 +479,14 @@ class G2p:
             else:
                 cache[word] = []
                 self.ambiguous_words[word] = False
+                self.spelled_words[word] = [False, False]
         for start in range(0, len(nonempty), BATCH_SIZE):
             batch = nonempty[start:start + BATCH_SIZE]
             for word, phone_ids in zip(batch, self.pronounce_ids([self.word_ids(word) for word in batch], reading)):
                 cache[word] = [self.model['phones'][index] for index in phone_ids]
             if reading == 0:
                 self.ambiguous_words.update(zip(batch, self.last_ambiguous))
+                self.spelled_words.update(zip(batch, self.last_spelled))
         return [cache[word] for word in words]
 
     # The ARPAbet phones (with stress) of a word in a reading
@@ -490,6 +501,13 @@ class G2p:
         if word not in self.ambiguous_words:
             self.pronounce_many([word])
         return self.ambiguous_words[word]
+
+    # Whether a word, written in capitals, is spelled - its letters' names (the spelled head): alone among lowercase
+    # words, or beside a word in capitals
+    def spelled(self, word, beside=False):
+        if word not in self.spelled_words:
+            self.pronounce_many([word])
+        return self.spelled_words[word][1 if beside else 0]
 
     # The reading of the word at index in a text's items (the context network)
     def choose_reading(self, items, index):

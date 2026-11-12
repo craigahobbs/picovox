@@ -57,6 +57,7 @@ const seed = streamSeed(rng.seed, rng.stream);
 const outputs = {
     'tokenize': inputs.tokenize.texts.map((text) => tokenize(text, vocabulary)),
     'pronounce': inputs.pronounce.words.map((word) => pronounce(word)),
+    'spelled': inputs.pronounce.words.map((word) => [pronounce.spelled(word), pronounce.spelled(word, true)]),
     'expTanh': {
         'exp': inputs.expTanh.values.map((hex) => mathBits(Math.exp, hex)),
         'tanh': inputs.expTanh.values.map((hex) => mathBits(Math.tanh, hex))

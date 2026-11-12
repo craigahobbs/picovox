@@ -201,6 +201,23 @@ class TestG2p(unittest.TestCase):
         self.assertEqual(data['weightCounts']['mat'], 2)
         self.assertEqual(data['weightCounts']['mat\'s'], 1)
         self.assertNotIn(monitored, data['monitor'])
+        self.assertEqual(data['evalSets'], {})
+        self.assertEqual(data['heldOut'], {})
+
+        # A book's weight scales its counts; an evaluation text's counts are a measure's - they don't train
+        self.files[g2p.BOOKS_PATH] = {'labels': {}, 'books': {'one': {'counts': {'cat': 3, 'mat': 1}, 'weight': 2.5}}}
+        monitored = g2p.load_data()['monitor'][0]
+        self.files[g2p.BOOKS_PATH]['eval'] = {'held': {'counts': {'dog': 4, monitored: 1}}}
+        data = g2p.load_data()
+        self.assertEqual(data['weightCounts']['cat'], 7.5)
+        self.assertEqual(data['weightCounts']['mat'], 4.5)
+        self.assertNotIn('dog', data['weightCounts'])
+        self.assertIn(monitored, data['monitor'])
+        self.assertEqual(data['evalSets'], {'held': {'dog': 4, monitored: 1}})
+
+        # The held-out words - the words that never train (not a dictionary word's, nor a labeled word's)
+        self.files[g2p.BOOKS_PATH]['heldOut'] = {'zork': 'Z AO1 R K', 'blorp': 'B L AO1 R P', 'cat': 'K AE1 T', 'catz': 'K AE1 T S'}
+        self.assertEqual(g2p.load_data()['heldOut'], {'blorp': ['B', 'L', 'AO1', 'R', 'P'], 'zork': ['Z', 'AO1', 'R', 'K']})
 
     def test_load_data_books_relabeled(self):
         # A possessive the books added (add_books - no longer a label) follows its stem's relabel
@@ -214,6 +231,7 @@ class TestG2p(unittest.TestCase):
         books_path = os.path.join(self.directory.name, 'g2p-books.json')
         with open(books_path, 'w', encoding='utf-8') as file:
             json.dump({'description': 'The books', 'labels': {'zork': 'Z AO1 R K', 'cattish': 'K AE1 T IH0 SH'},
+                       'heldOut': {'yon': 'Y AA1 N', 'blorp': 'B L AO1 R P'},
                        'books': {'other': {'title': 'Other', 'url': 'u', 'tokens': 1, 'counts': {'a': 1}}}}, file)
         text_path = os.path.join(self.directory.name, 'book.txt')
         with open(text_path, 'w', encoding='utf-8') as file:
@@ -224,12 +242,26 @@ class TestG2p(unittest.TestCase):
         self.assertIn('book tale: 9 tokens, 6 of its 8 words kept', stderr.getvalue())
         with open(books_path, encoding='utf-8') as file:
             text = file.read()
-        self.assertEqual(text.splitlines()[:5], ['{', ' "description": "The books",', ' "labels": {',
-                                                 '  "cattish": "K AE1 T IH0 SH",', '  "zork": "Z AO1 R K"'])
+        self.assertEqual(text.splitlines()[:10], ['{', ' "description": "The books",', ' "labels": {',
+                                                  '  "cattish": "K AE1 T IH0 SH",', '  "zork": "Z AO1 R K"', ' },',
+                                                  ' "heldOut": {', '  "blorp": "B L AO1 R P",', '  "yon": "Y AA1 N"', ' },'])
         books = json.loads(text)
         self.assertEqual(books['books']['tale'], {'title': 'A Tale', 'url': 'https://x', 'tokens': 9, 'counts': {
             'cat\'s': 1, 'dog': 1, 'sat': 1, 'the': 2, 'zork': 1, 'zork\'s': 1}})
         self.assertEqual(list(books['books']), ['other', 'tale'])
+        self.assertNotIn('eval', books)
+
+        # A book with a weight, and an evaluation text
+        with captured():
+            self.assertEqual(g2p.main(argv[:3] + ['heavy'] + argv[4:] + ['--weight', '2.5']), 0)
+            self.assertEqual(g2p.main(argv[:3] + ['held'] + argv[4:] + ['--eval']), 0)
+        with open(books_path, encoding='utf-8') as file:
+            text = file.read()
+        books = json.loads(text)
+        self.assertEqual(books['books']['heavy'], {**books['books']['tale'], 'weight': 2.5})
+        self.assertEqual(list(books['books']), ['heavy', 'other', 'tale'])
+        self.assertEqual(books['eval'], {'held': books['books']['tale']})
+        self.assertEqual(text.splitlines()[-5:], [' },', ' "eval": {', '  "held": ' + json.dumps(books['eval']['held']), ' }', '}'])
 
     def test_s_suffix(self):
         self.assertEqual(g2p.s_suffix(['K', 'AE1', 'T']), ['S'])
@@ -297,6 +329,24 @@ class TestG2p(unittest.TestCase):
         self.assertEqual(result['top10kWrong'], 2)
         self.assertEqual(g2p.describe(result), f'book err {100 * 15 / 138:.3f}% (any {100 * 5 / 138:.3f}%, 2 distinct), '
                                                f'top-10K wrong 2, monitor WER {100 * result["monitorWer"]:.2f}%')
+        self.assertEqual(result['sets'], {})
+        self.assertIsNone(result['heldOutWer'])
+
+        # The held-out words' error - the dictionaries' conventions aside
+        self.assertEqual(g2p.loose('AO1 R AH0 R EH2 K ER0 D IH0 K UH1 T S AA2'.split()), 'AA1 R ER0 AH0 K ER0 D AH0 K UH1 T S AA0')
+        data['heldOut'] = {'blorp': ['B', 'L', 'AA1', 'R', 'P'], 'zork': ['Z', 'AO1', 'R', 'K'], 'yon': ['Y', 'AA1', 'N']}
+        said = {'blorp': ['B', 'L', 'AO1', 'R', 'P'], 'zork': ['Z', 'ER1', 'K'], 'yon': ['Y', 'AO1', 'N']}
+        result = g2p.evaluate(lambda words: [said.get(word, data['all'].get(word, [[]])[-1]) for word in words], data)
+        self.assertAlmostEqual(result['heldOutWer'], 1 / 3)
+        self.assertIn(f', monitor WER {100 * result["monitorWer"]:.2f}%, held-out WER 33.33%', g2p.describe(result))
+        del data['heldOut']
+
+        # The evaluation texts' errors - their dictionary words' tokens
+        data['evalSets'] = {'held': {'dog': 6, 'cat': 3, 'the': 1, 'zork': 5}, 'other': {'cat': 2}}
+        result = g2p.evaluate(lambda words: [data['all'][word][-1] if word != 'dog' else ['D'] for word in words], data)
+        self.assertEqual(result['sets'], {'held': {'error': 0.6, 'wrongDistinct': 1, 'wrong': [['dog', 6]]},
+                                          'other': {'error': 0.0, 'wrongDistinct': 0, 'wrong': []}})
+        self.assertTrue(g2p.describe(result).endswith('%, held err 60.000% (1 distinct), other err 0.000% (0 distinct)'))
 
     def test_quantize(self):
         codes, values = g2p.bfloat16([1.0, 1.00390625, 1.01171875, -2.5, 0.0])
@@ -320,7 +370,8 @@ class TestG2p(unittest.TestCase):
             done = json.load(file)
         self.assertEqual(done['checkpoint'], os.path.join(out, 'focus.pt'))
         self.assertEqual(sorted(done['results']), ['base', 'focus'])
-        self.assertEqual(set(done['results']['base']), {'book', 'bookAny', 'bookWrongDistinct', 'top10kWrong', 'monitorWer', 'wrong'})
+        self.assertEqual(set(done['results']['base']),
+                         {'book', 'bookAny', 'bookWrongDistinct', 'top10kWrong', 'monitorWer', 'heldOutWer', 'wrong', 'sets'})
         with open(os.path.join(out, 'train.log'), encoding='utf-8') as file:
             log = file.read()
         self.assertIn('base: step 3/3 loss', log)

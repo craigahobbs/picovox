@@ -28,7 +28,11 @@ TEXTS = [
     'At 10:30 a.m., 9:00 p.m., or 6pm, I am paying 50% - $1,234.56, $0.50, $5 million, £1.50, and €20 - in the a.m.',
     'He left the room (quietly, as always) and closed the door (1818); (Aside.) The end (truly)',
     'Pi is 3.14159265358979323846; 12345678901234567890 and 9,007,199,254,740,993 are long, $12345678901234567.89 too.',
-    'Rev. Smith, Esq., Capt. Hook, and Ms. Ames saw No. 5, Vol. 2, and Fig. 3 on Mt. Ida; I said no. No. Gen. Lee, Ch. 4.'
+    'Rev. Smith, Esq., Capt. Hook, and Ms. Ames saw No. 5, Vol. 2, and Fig. 3 on Mt. Ida; I said no. No. Gen. Lee, Ch. 4.',
+    'Dr. A. B. Jones met I. M. Pei in the U.S. capital. It was Dr. X, said I. So was I.',
+    'He has a Ph.D., i.e. a doctorate, e.g. from the U.S.A. or the U.K, a.k.a. Britain. The CEOs met IBM\'s board and NASA\'s.',
+    'It is 40,075 km around (24,901 mi), 240,000 km2 or 93,000 sq mi, at 90 km/h and −5 °C (23 °F): 2 + 2 = 4, 3 × 5 & ~10% of 1 kg.',
+    'The AI read the TOC, the FBI\'s HTML, and NASA. I did NOT say STOP, US! IT IS A TEST OF THE BBC.'
 ]
 
 
@@ -192,6 +196,71 @@ class TestFrontend(unittest.TestCase):
             ('ay', 19), ('em', 19), ('am', 24), ({'end': 'period'}, 26)
         ])
 
+    def test_text_items_initials(self):
+        # An initial - a capital letter with its period - is its letter's name ("a" as "ay", "i" as "eye"), and doesn't end
+        # the phrase; a lowercase letter's period does
+        self.assertEqual(frontend.text_items('Dr. A. B. Lee, I. Pei. Plan a. Go'), [
+            ('doctor', 0), ('ay', 4), ('b', 7), ('lee', 10), ({'end': 'comma'}, 13), ('eye', 15), ('pei', 18),
+            ({'end': 'period'}, 18), ('plan', 23), ('a', 28), ({'end': 'period'}, 28), ('go', 31), ({'end': 'period'}, 33)
+        ])
+
+        # "I." after a lowercase word, and not before an initial, is the pronoun
+        self.assertEqual([item for item, _ in frontend.text_items('I. Lee met I. M. Pei, said I. Lee, said I.')],
+                         ['eye', 'lee', 'met', 'eye', 'm', 'pei', {'end': 'comma'}, 'said', 'i', {'end': 'period'}, 'lee',
+                          {'end': 'comma'}, 'said', 'i', {'end': 'period'}])
+
+    def test_text_items_units(self):
+        # A unit after a number is its words - the plural, but after 1; "sq" and "cu" before one are square and cubic;
+        # units with a slash or a power, and degrees (as lib/lexicon.js)
+        def words(text):
+            return ' '.join(item if isinstance(item, str) else f'<{item["end"]}>' for item, _ in frontend.text_items(text))
+        self.assertEqual(words('It is 40,075 km around, 5 mi or 1 km wide, 660 ft. It weighs 1.5 kg'),
+                         'it is forty thousand seventy five kilometers around <comma> five miles or one kilometer wide <comma> '
+                         'six hundred sixty feet <period> it weighs one point five kilograms <period>')
+        self.assertEqual(words('93,000 sq mi, 530 cu mi, 27 GW, 55 mph, 5 mL and 5 sq of it'),
+                         'ninety three thousand square miles <comma> five hundred thirty cubic miles <comma> twenty seven gigawatts '
+                         '<comma> fifty five miles per hour <comma> five milliliters and five sq of it <period>')
+        self.assertEqual(words('A km away, 4G and 5 Ma ago'), 'a km away <comma> four g and five ma ago <period>')
+        self.assertEqual(words('km away at 10 ft/s over 5 sq'), 'km away at ten feet per second over five sq <period>')
+        self.assertEqual(words('At 90 km/h, 1 m/s, 240,000 km2, 3 m³ and 1 ft2 at 0 °C (32 °F), a 350° view, 1° off'),
+                         'at ninety kilometers per hour <comma> one meter per second <comma> two hundred forty thousand square '
+                         'kilometers <comma> three cubic meters and one square foot at zero degrees celsius <comma> thirty two degrees '
+                         'fahrenheit <comma> a three hundred fifty degrees view <comma> one degree off <period>')
+        self.assertEqual(words('On the M2, the M² and KM/H'), 'on the m two <comma> the m and km h <period>')
+        self.assertEqual(frontend.text_items('5 km')[1], ('kilometers', 2))
+
+    def test_text_items_symbols(self):
+        # The symbols read as words - a minus sign before a number (a hyphen only after a space or an opening parenthesis)
+        def words(text):
+            return ' '.join(item if isinstance(item, str) else f'<{item["end"]}>' for item, _ in frontend.text_items(text))
+        self.assertEqual(words('Tom & Jerry: 2 + 2 = 4, 3 × 5, ±2 ≈ 2, ~500, <10 and >5, a < b'),
+                         'tom and jerry <comma> two plus two equals four <comma> three times five <comma> plus or minus two '
+                         'approximately two <comma> about five hundred <comma> less than ten and greater than five <comma> a b <period>')
+        self.assertEqual(words('−5 °C, -3 (-2) and 1939-45 − x'),
+                         'minus five degrees celsius <comma> minus three <comma> minus two <comma> and nineteen thirty nine forty five '
+                         'x <period>')
+
+    def test_text_items_dotted(self):
+        # A dotted abbreviation is its letters' names - "i.e." and "e.g." their words - and doesn't end the phrase
+        self.assertEqual(frontend.text_items('A Ph.D., i.e. e.g. the U.S.A. or U.K, a.k.a. it. At 5 p.m.'), [
+            ('a', 0), ('p', 2), ('h', 2), ('d', 2), ({'end': 'comma'}, 7), ('that', 9), ('is', 9), ('for', 14), ('example', 14),
+            ('the', 19), ('u', 23), ('s', 23), ('ay', 23), ('or', 30), ('u', 33), ('k', 33), ({'end': 'comma'}, 36), ('ay', 38),
+            ('k', 38), ('ay', 38), ('it', 45), ({'end': 'period'}, 45), ('at', 49), ('five', 52), ('pee', 52), ('em', 52),
+            ({'end': 'period'}, 58)
+        ])
+
+    def test_capital_items(self):
+        # The words in capitals - two letters or more, with a period or not
+        items, capitals = frontend.capital_items('The AI, I say, is NOT Ai or A.I. or OK\'d: US.')
+        self.assertEqual([item for item, _ in items if isinstance(item, str)],
+                         ['the', 'ai', 'i', 'say', 'is', 'not', 'ai', 'or', 'ay', 'eye', 'or', 'ok\'d', 'us'])
+        self.assertEqual(capitals, {1: 'ai', 3: '', 7: 'not', 15: 'us'})
+
+        # ... with their -s
+        items, capitals = frontend.capital_items('CEOs, IBM\'s US\'s As and KING\'S.')
+        self.assertEqual([item for item, _ in items if isinstance(item, str)], ['ceos', 'ibm\'s', 'us\'s', 'as', 'and', 'king\'s'])
+        self.assertEqual(capitals, {0: 'ceo', 2: 'ibm', 3: 'us'})
+
     def test_text_items_parentheses(self):
         # An aside's parentheses are comma breaks, unless a punctuation mark right after one ends the phrase
         self.assertEqual(frontend.text_items('Go (now, ok) home (1818); (Aside.) the end (truly)'), [
@@ -231,6 +300,35 @@ class TestFrontend(unittest.TestCase):
         # The aligned readings replace words' phones
         phrases = frontend.text_to_phrases('Go go.', phones.get, readings={1: ['G', 'UW1']})
         self.assertEqual([word['phones'][1]['ph'] for word in phrases[0]['words']], ['OW', 'UW'])
+
+    def test_text_to_phrases_spelled(self):
+        # A word in capitals the G2P's spelled head finds spelled is its letters' names - not a function word, nor an
+        # ambiguous one
+        letters = {'ay': ['EY1'], 'eye': ['AY1'], 'u': ['Y', 'UW1'], 's': ['EH1', 'S'], 'eye\'s': ['AY1', 'Z']}
+        g2p = unittest.mock.Mock()
+        g2p.pronounce.side_effect = lambda word, reading=0: letters.get(word, ['R', 'IY1', 'D'] if reading else ['W', 'ER1', 'D'])
+        g2p.ambiguous.side_effect = lambda word: word in ('us', 'read')
+        g2p.choose_reading.return_value = 1
+        g2p.spelled.side_effect = lambda word, beside=False: word == 'ai' or (word == 'us' and not beside)
+        with unittest.mock.patch.object(frontend, 'get_g2p', return_value=g2p):
+            phrases = frontend.text_to_phrases('The AI, US. Not us; I read. NOT US, the US AI. US, NOT them; NOT US AI, tell US A '
+                                               'lie, NOT US A')
+        phones = [[' '.join(frontend.phone_token(phone) for phone in word['phones']) for word in phrase['words']] for phrase in phrases]
+
+        # ("us" is spelled alone among lowercase words or beside a spelled word, read beside words in capitals that are
+        # read - its neighbors in its phrase, both if it has two; a capital letter alone is neither)
+        self.assertEqual(phones, [['W ER0 D', 'EY1 AY1'], ['Y UW1 EH1 S'], ['W ER1 D', 'R IY0 D'], ['W ER0 D', 'R IY1 D'],
+                                  ['W ER1 D', 'R IY0 D'], ['W ER0 D', 'Y UW1 EH1 S', 'EY1 AY1'], ['Y UW1 EH1 S'], ['W ER1 D', 'W ER0 D'],
+                                  ['W ER1 D', 'Y UW1 EH1 S', 'EY1 AY1'], ['W ER1 D', 'Y UW1 EH1 S', 'W ER0 D', 'W ER1 D'],
+                                  ['W ER1 D', 'R IY0 D', 'W ER0 D']])
+        self.assertEqual(sorted({(call.args[0], call.args[1] if len(call.args) > 1 else False) for call in g2p.spelled.call_args_list}),
+                         [('ai', False), ('ai', True), ('not', False), ('not', True), ('us', False), ('us', True)])
+
+        # A spelled word's -s is its last letter's
+        with unittest.mock.patch.object(frontend, 'get_g2p', return_value=g2p):
+            phrases = frontend.text_to_phrases('AIs, NOTs')
+        self.assertEqual([[frontend.phone_token(phone) for phone in word['phones']] for phrase in phrases for word in phrase['words']],
+                         [['EY1', 'AY1', 'Z'], ['W', 'ER1', 'D']])
 
     def test_tokenize(self):
         result = frontend.tokenize('Go, go.', {'go': ['G', 'OW1']}.get)

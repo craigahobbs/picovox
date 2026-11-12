@@ -270,8 +270,10 @@ test('sentenceBlocks, defaults', () => {
 
 test('sentenceBlocks, streaming', () => {
     // The blocks are made as they're taken - the network's first chunks come before the rest of the sentence is spoken
+    // (its words pronounced before - a word is pronounced once, so the times are the network's and the renderer's)
     const text = 'It is a truth universally acknowledged, that a single man in possession of a good fortune, must be in want of a wife.';
     const options = {'speaker': voiceSpeaker(model, 'male'), 'pause': sentencePause};
+    speakFrames(model, text, {'speaker': options.speaker});
     const iterator = sentenceBlocks(model, text, options);
     const startFirst = performance.now();
     const first = iterator.next();

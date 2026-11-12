@@ -144,7 +144,8 @@ pronunciation, as corrected in Sections 9.4, 9.6, and 9.7):
 - **Regression sets** (`train/data/heteronyms-test.json`, `train/data/names-test.json`, run through the package's front end
   by `tools/heteronyms.js`): sentences with the word in context and its accepted and rejected pronunciations, by kind -
   *default* (52 sentences: a heteronym's usual reading), *context* (54: the readings only the context decides),
-  *missing* (3: readings the dictionary lacks), and *names* (73: names with verified pronunciations). Each kind has a
+  *missing* (3: readings the dictionary lacks), and *names* (73: names with verified pronunciations); the capitals
+  set (`train/data/capitals-test.json`, Section 9.12) adds *acronym* and *shouted* (42 each). Each kind has a
   minimum, and the G2P check of Section 10.2 fails below it.
 
 
@@ -785,6 +786,233 @@ year's) - and paprika exactly (P AE0 P R IY1 K AH0), but costs the books: their 
 to 0.056% and 0.066%, past the gate's tolerance (0.01 points). Taking that trade - and measuring the gate on Wikipedia's
 text too - is left open.
 
+### 9.12 Initials and words in capitals
+
+A listener heard "Dr. X. Smith" stop after the X, and "AI" and "TOC" read as words ("aye", "tock"). The first was the
+front end's: the sentence splitter keeps an initial's period inside its sentence, but the phrasing gave it a period's
+phrase end (and read "A." as the article). An initial - a capital letter with its period - is now its letter's name
+without a phrase end ("Dr. A. B. Jones"), as a dotted abbreviation's letters are ("the U.S.", "a Ph.D."; "i.e." and
+"e.g." are "that is" and "for example"), and the splitter ends a sentence at one only before a word that starts a
+sentence ("in the U.S. The law", not "the U.S. Army") or after the pronoun ("said I."); 221 of three books' 23,568
+sentences read differently.
+
+A Wikipedia article through the front end showed what else it dropped or mangled: a unit after a number ("5 km" was
+"five K-E-K-M" - now "five kilometers"; "93,000 sq mi", "90 km/h", "240,000 km2", "−5 °C" as their words, the plural
+but after 1) and the symbols &, +, =, ×, ±, ≈, and a minus sign before a number.
+
+The second is the G2P's question. The front end lowercased every word, and the network spells the acronyms the
+dictionary spells (FBI, HTML) but reads the ones that look like words. A rule - spell a short word in capitals - can't
+tell TOC from NOT, and books shout: whether a letter string is a word is what the network knows. A case input alone
+teaches nothing, though: the dictionary has no case, so every word's target is the same with the input as without it.
+The labels that depend on case are of the strings, not their phones - spelled, or read - so the addition is a head,
+as the ambiguity head (Section 9.5): a 96-unit layer and a logit on the encoder's final states, asked only of a word
+in capitals, a spelled word then read as its letters' names (each the network's own pronunciation; a word with an -s -
+"CEOs", "IBM's" - is asked of its capitals, and its last letter takes the -s).
+
+Its labels (`picovox_train/spelled.py`) come from the G2P's data. Every string of two or three letters is labeled
+(18,252 - the head learns the table): read when it is a common word in the 128 books (20 occurrences for two letters,
+one for three) unless the dictionary's first pronunciation is its letters' names, and otherwise spelled - a rare
+dictionary word of three letters in capitals is far more often an acronym. A longer known word (208,562) is spelled
+when the dictionary's first pronunciation spells it, or another does and the books never use it (57 words), and
+otherwise read; 6,000 synthetic strings of four or five consonants are spelled. The dictionary's variants are the
+labels that turn on case: "ai" is AY1, then EY1 AY1.
+
+Before the training code, the labels were tried on the shipped module's encoder states (234,600 strings, a head
+alone): 48 units learned the short table but one string and read 99.8% of held-out longer words. In the reading stage
+itself (3,000 steps, the encoder frozen), 48 units at the stage's batch found 682 of 209,633 words spelled - "chef",
+"null", "info" among them - 96 units 362, three times the batch 502, and both 222 (0.1%: "issy", "baas", "aeon"),
+with none of the 23,181 spelled strings read and 6 of 1,869 monitoring-set words spelled (0.3%). That head is 18,625
+parameters, 16 KB of the module gzipped (4%).
+
+The head trains beside the stage - its own batches from its own generator, its gradient clipped alone - and with the
+encoder frozen its loss reaches nothing else: retrained with and without it from the same training speech, the two
+modules' 26 shared tensors are identical, so every pronunciation measure is (book-token error 0.049%, top-10K wrong
+3, monitoring WER 40.69%). The capitals regression set (`train/data/capitals-test.json`: 42 acronyms in sentences, 42
+shouted words, headings, and acronyms said as words) scores 39 of 42 and 42 of 42, the module without the head 27 and
+42. The misses are NCAA, UCLA, and HDMI: acronyms that look like words and are in no dictionary.
+
+A common word that is also an acronym ("US", "AD") was read. Where it stands decides it: in 999 Wikipedia articles
+(Section 9.13), 36,847 words in capitals stand alone among lowercase words and 1,839 beside another word in capitals -
+the acronyms; in the books 39,499 and 60,626 - headings, speakers' names, shouts. So the head has two logits, and the front end asks
+by the word's place: alone, or beside a word in capitals that is read ("LEAVE US ALONE"; beside a spelled one - "the
+US FDA" - it is alone). The labels differ for four words (`train/data/g2p-capitals.json`): US, AD, UN, and CO, each a
+common word in capitals alone in a twentieth of the articles or more (US in 40%) at 20 times its rate in the books or
+more, are spelled alone. WHO (67 articles; the books' headings shout it), SO, OH, and SI (a subject's symbols, in few
+articles) are left read. Wiktionary adds what no dictionary of ours has: its 96 words in capitals pronounced as their
+letters (UCLA among them) are labeled spelled, but a common word of two or three letters (PIE, PAD).
+
+### 9.13 Contemporary text: Wikipedia
+
+The player reads Wikipedia, and the measures were the books'. Wikipedia's 999 vital articles (level 3 - its own list of
+the subjects an encyclopedia must have; 7.8 million words, fetched once as the player reads an article) were split by
+their titles: 784 for the frequency weights and 215 held out (1.7 million words). On the held-out articles' dictionary
+words the shipped network's token error is 1.47% - thirty times the books' 0.049% - and "percent" alone, the front
+end's word for "%" that the books write "per cent", is a sixth of it (P ER1 S IH0 N T). The error follows the word's
+count in the 128 books almost exactly (on a first sample): a dictionary word in none of them is wrong 19.1% of the
+time, one counted 1 to 5 times 13.4%, 6 to 20 times 4.5%, 21 to 100 times 0.67%, and over 100 times never - words of
+20 or fewer are 1.27 of 1.37 points. Out-of-dictionary words are 3.2% of the tokens; words in capitals 0.7%; units and
+symbols the front end dropped or spelled, 0.4% (Section 9.12).
+
+So the weights, not the pronunciations, were the books': the articles' counts join them as a listeners' book
+(`train/data/g2p-books.json`, Section 9.10) with a weight - 2.7, the books' 16 million tokens over the articles' 5.9
+million, so the two kinds of text weigh the same - and the held-out articles' counts are an evaluation text, a measure
+of the G2P beside the books' (the gate holds it within 0.05 points of the committed module's). Section 9.11 found that
+Wikipedia's counts cost the books at this size; they do, a little, and a larger network pays for both (float networks,
+the weights from a first 434 articles; the error on the 215 held out):
+
+| Network (hidden units, parameters) | Weights | Book-token error | Wikipedia token error |
+| --- | --- | --- | --- |
+| 96, 370K - the shipped recipe | the books | 0.046% | 1.456% |
+| 128, 631K | the books | 0.017% | 0.768% |
+| 96, 370K | with Wikipedia | 0.076% | 0.331% |
+| **128, 631K** | **with Wikipedia** | **0.025%** | **0.144%** |
+| 160, 962K | with Wikipedia | 0.008% | 0.077% |
+| 192, 1.36M | with Wikipedia | 0.006% | 0.051% |
+
+At 128 units the network is better than the shipped one on both texts - a tenth of its Wikipedia error, half its book
+error - and 160 buys 0.07 points more for half again the parameters (192, 0.03 more for twice 128's - and the
+monitoring set's held-out words no better: 41.2%, 40.5%, 40.1%, and 41.6% from 96 to 192 units; the larger networks
+learn more of the dictionary, not more of English); the recipe takes 128.
+
+Retrained by `make train-g2p` with all 784 articles' counts (and the listeners' reported words of Section 9.11 weighed
+as frequent words - "paprika" had drifted to a third pronunciation), the module against picovox 2.0.3's:
+
+| Measure | picovox 2.0.3 | Retrained (128 units, Wikipedia's weights) |
+| --- | --- | --- |
+| Wikipedia token error (215 held-out articles) | 1.47% | 0.124% |
+| Book-token error, distinct words, top-10K wrong | 0.049%, 531, 3 | 0.024%, 225, 4 |
+| Monitoring WER (held out) | 41.1% | 40.8% |
+| Default, context readings; probes; names | 52/52, 54/54; 29/38; 80/86 | 52/52, 50/54; 33/38; 81/86 |
+| Acronyms spelled, shouted words read (Section 9.12) | 27/42, 42/42 | 42/42, 42/42 |
+| Module | 476,798 bytes (360 KB gzipped) | 786,615 bytes (595 KB gzipped) |
+
+"Percent" is right (P ER0 S EH1 N T), and UNICEF and Karachi. The costs are the size and the time: a word not yet
+pronounced takes 3.3 ms in Node (1.9 ms), and without a JIT a 23-word sentence's words 1.3 s (0.74 s) - once a word,
+but the first sentences of a text are all new words. The context set's 50 of 54 is its spread, not this network's:
+on one recipe in two days, its labels a few examples apart, it drew 52, 51, 54, 51, and 50 - a committed 54 less the
+check's drop of 2 failed half of them - so the check now holds the context set to its minimum alone, as the probes
+(Section 13.3).
+
+Wiktionary's pronunciations were measured as labels for the words no dictionary has, in place of the teacher ensemble's.
+On the 29,520 words both have, the dictionary and Wiktionary agree, stress aside, on 84%; the G2P on 81% of them, but
+on 49% of 35,479 words outside the dictionary - and the teacher on 58% of those it labels, as the G2P does there: the
+network has learned its teacher. But Wiktionary has only a fifth of the articles' out-of-dictionary tokens (the rest
+are names, plurals, and British spellings), and a translator of its transcriptions to the dictionary's conventions (the
+G2P's network reading a word's letters and its Wiktionary phones) agrees with the dictionary on 74% of unseen words,
+reduced vowels and secondary stress aside, against the G2P's 64% - a modest gain.
+
+Two other teachers for those words were tried, and failed. The training speech's engine as an adjudicator - it says
+"Say WORD again." in three voices, and the recognizer's CTC likelihood (Section 13.3) chooses among the G2P's beam of
+six candidates: on 300 of the monitoring set's words, which the G2P has never seen, the G2P's first guess is the
+dictionary's (the recognizer's mergers aside) for 63%, and the speech's choice for 48%, though the dictionary's is in
+the beam for 87% - the engine reads rare names worse than the G2P does ("Salvatore" as "sal-vuh-tor"). And a local
+language model (27 billion parameters) asked for ARPAbet: of twenty of the articles' hard names it had about half
+right (Proust and Karachi; not Heathcliff, Flaubert, or Humayun) - no better than the G2P.
+
+So Wiktionary's labels train, where it has them: 7,499 of the articles' words outside the dictionary
+(`train/data/g2p-books.json` - dictionary words in training, their counts in the weights and in the held-out articles'
+measure, which counts them now: by it the module above reads 0.538% of Wikipedia's tokens wrong, and 2.0.3's 1.87%),
+799 more held out - the 507 of them that aren't the words file's a measure of unseen words of Wikipedia's kind (the
+file's `heldOut`: the held-out WER, beside the monitoring set's) - and 9,332 of the words file's labels, 4,928 of them
+another pronunciation than the teacher's. The recipe as it was failed its gate on them - the book error 0.036% against
+0.024%, nine of the top 10,000 words wrong against four: 7,499 more words to learn in the same steps. It was short of
+training, not of size - 10,000 more steps from the installed network brought the books to 0.017% and three of the top
+10,000 - so the last stage is longer, 13,000 steps from 3,000. And at that length its share of samples on the most
+frequent words only costs - the errors left are the tail's (float networks, from one third stage):
+
+| Last stage | Book-token error | Top-10K wrong | Wikipedia token error |
+| --- | --- | --- | --- |
+| 3,000 steps, 40% of its samples on the top 12,000 words | 0.036% | 9 | 0.243% |
+| 8,000 steps, 40% | 0.022% | 2 | 0.168% |
+| 13,000 steps, 40% | 0.013% | 2 | 0.121% |
+| 13,000 steps, 20% | 0.006% | 1 | 0.082% |
+| **13,000 steps, none** | **0.004%** | **0** | **0.066%** |
+
+The gate then failed on the monitoring WER alone - 42.1% against the committed 40.8%, its tolerance half a point - and
+the tolerance was at fault. Two trainings pronounce some 600 of the monitoring set's 1,562 words differently (this
+network against the installed one: 156 right words lost, 140 won), and four seeds of the recipe ended at 41.9%, 42.1%,
+42.8%, and 43.0% - their base stages at 39.6% to 42.3%: the installed module's 40.8% was a good draw. The other
+measures hold still across the seeds (the books 0.002% to 0.005%, Wikipedia 0.059% to 0.083%, none or one of the top
+10,000 wrong), so the monitoring WER's tolerance is now its spread - 1.5 points, two standard deviations of two draws'
+difference - and the module was checked again, not retrained. Whether the labels cost the dictionary's held-out words -
+rare surnames, most of them - a point, four seeds can't say (the same seed ended at 40.4% and 41.1% on the earlier
+data); on held-out words of Wikipedia's kind they cost nothing: of Wiktionary's 507 the network reads 57.8% another way
+(57.6% to 58.8% on the other seeds; reduced vowels and secondary stress aside), the installed one 59.2%.
+
+| Measure | picovox 2.0.3 | 128 units, Wikipedia's weights | With Wiktionary's labels, the longer last stage |
+| --- | --- | --- | --- |
+| Wikipedia token error (Wiktionary's words counted) | 1.87% | 0.538% | 0.078% |
+| Book-token error, distinct words, top-10K wrong | 0.049%, 531, 3 | 0.024%, 225, 4 | 0.008%, 63, 1 |
+| Monitoring WER (held out) | 41.1% | 40.8% | 42.1% |
+| Held-out WER (Wiktionary's 507 words) | 61.5% | 59.8% | 57.4% |
+| Default, context readings; probes; names | 52/52, 54/54; 29/38; 80/86 | 52/52, 50/54; 33/38; 81/86 | 52/52, 51/54; 33/38; 81/86 |
+| Acronyms spelled, shouted words read | 27/42, 42/42 | 42/42, 42/42 | 42/42, 42/42 |
+| Module | 476,798 bytes (360 KB gzipped) | 786,615 bytes (595 KB gzipped) | 787,503 bytes (596 KB gzipped) |
+
+Of the 30,000 most frequent words the retrained network pronounces 636 differently from the installed one - 613 of them
+now their labels, 10 no longer. And the longer stage steadies a retraining: two seeds of the recipe differ on 50 to 62
+of those words (the shorter recipe's retraining on the new labels moved 747 - 166 of them off their labels).
+
+What is left is the words without a label. Of Wikipedia's 7.8 million tokens, 97.3% are the dictionary's and the books
+file's words, 0.5% the words file's, and 2.2% have no label: 0.17% in capitals (the spelled head's, Section 9.12), 0.31%
+regular forms and British spellings of known words ("genomes", "urbanisation"), and 1.76% names and terms - 58,082
+words, the 1,000 most frequent 0.37% of the tokens (the 5,000, 0.76%).
+
+The regular forms could take their stems' pronunciations by rule. Rules for the plural, the possessive, the past, the
+-ing form, the adverb, and the British spellings agree with the dictionary on its own regular forms 89% to 97% of the
+time (reduced vowels and secondary stress aside), and the network with the rules on 72% of Wikipedia's 6,269. Trained
+on nine tenths of them it agrees on 96% of those, the other measures unmoved - and on 73% of the tenth held out, from
+71%: it learns the words, not the rule. And where the network and the rule disagree the rule is wrong about one time
+in eight (names that end as verbs do - Yared, Lingling - and stems that are a noun and a verb: "reattributed" from the
+noun), so the gain would be near 0.04% of the tokens: not taken.
+
+Wiktionary has little more (recordings without a transcription for 0.18% of the tokens, British transcriptions for
+0.11%), so the most frequent names and terms were labeled by hand, as Don Quixote's were (Section 9.10): 903 of the
+1,000 most frequent words without a label - Quran, Mughal, Tagore, Suleiman; eukaryotes, trigonometric,
+cyanobacteria - the rest fragments (units, symbols) and held-out words. The network read 58% of them another way
+("KYOO-ran", "MYOO-gal", "TAH-gore"; 522 words, 0.19% of Wikipedia's tokens). The same pass over the 330 most frequent
+words in capitals found the spelled head right on nearly all: six it read as words are spelled now (ICRC, IAAF, IFRC,
+COPD, NADPH, NADH - `train/data/g2p-capitals.json`), seven that are read have labels (FIFA, UEFA, LIGO, IUPAC, OLED,
+NSTEMI, NREM), and "HTTPS" - which the words file's rule had labeled the plural of HTTP - is its letters. The short
+words that are also acronyms (WHO, SI, OH, AM) are still read (Section 9.12). Retrained, and installed:
+
+| Measure | Before the hand labels | With them |
+| --- | --- | --- |
+| Wikipedia token error (the hand-labeled words counted) | 0.286% | 0.090% |
+| Book-token error, distinct words, top-10K wrong | 0.008%, 63, 1 | 0.008%, 88, 0 |
+| Monitoring WER (held out) | 42.1% | 42.1% |
+| Held-out WER (Wiktionary's 507 words) | 57.4% | 55.4% |
+| Default, context readings; probes; names | 52/52, 51/54; 33/38; 81/86 | 52/52, 51/54; 33/38; 81/86 |
+| Acronyms spelled, shouted words read | 42/42, 42/42 | 42/42, 42/42 |
+| Module | 787,503 bytes (596 KB gzipped) | 787,591 bytes (596 KB gzipped) |
+
+(A first retraining, with the 903 labels alone, spelled 40 of the 42 acronyms: "HTTPS", by its wrong label, and
+"YMCA" - a string the head had not seen, read by one training and spelled by the next.)
+
+Is 128 units more than the labels need? The recipe was trained again at smaller widths (two seeds each; the weights
+unrounded), and the installed network's weights rounded to fewer bits:
+
+| Units, parameters | Wikipedia error | Book-token error | Top-10K wrong | Monitoring WER | Held-out WER |
+| --- | --- | --- | --- | --- | --- |
+| 64, 180K (one seed) | 1.49% | 0.365% | 182 | 43.3% | 56.4% |
+| 80, 267K | 0.72%, 0.66% | 0.120%, 0.112% | 39, 42 | 44.1%, 43.2% | 57.4%, 59.4% |
+| 96, 372K | 0.33%, 0.35% | 0.048%, 0.046% | 14, 9 | 43.6%, 43.7% | 57.2%, 59.8% |
+| 112, 494K | 0.14%, 0.14% | 0.010%, 0.013% | 1, 0 | 42.3%, 43.0% | 57.4%, 55.8% |
+| **128, 633K** | **0.08%, 0.07%** | **0.007%, 0.003%** | **0, 0** | **41.9%, 42.1%** | **56.2%, 58.6%** |
+
+| The 128 units' module | Bytes (gzipped) | Wikipedia error | Book-token error, distinct | Top-10K wrong | Gate |
+| --- | --- | --- | --- | --- | --- |
+| **7 bits (installed)** | **787,591 (596 KB)** | **0.090%** | **0.008%, 88** | **0** | **-** |
+| 6 bits | 692,063 (523 KB) | 0.113% | 0.011%, 121 | 2 | passes |
+| 5 bits | 608,614 (460 KB) | 0.322% | 0.046%, 343 | 20 | fails |
+
+Each 16 units halve the labeled words' error, with no plateau by 128 (this section's first sweep had 160 and 192
+halving it again), and the words the network never saw are read no better or worse at any width: the units hold the
+dictionary. So no smaller width is 128's equal - 112 units, about a fifth smaller, doubles Wikipedia's error (one
+more word in 1,500), and 96 units, 2.0.3's size, quadruples it. Six bits are the
+cheapest cut - 12% of the module for a quarter more of Wikipedia's error (one more word in 4,300) - and five are too
+few. The recipe stays at 128 units and 7 bits.
+
 ## 10. Reproducible training: `make train`
 
 ### 10.1 One recipe, one command
@@ -836,7 +1064,8 @@ A retrain never silently replaces what ships:
   teacher's, while the voice was distilled). (It first compared the student with its own teacher, so a better teacher -
   the first from-scratch run's, 4.187 against 4.144 - failed an equal student.)
 - **The G2P check** passes a module identical to the committed one below its comment header; otherwise it requires the
-  regression set's minimums, no kind more than 2 cases below the committed module (the probes aside - Section 13.3),
+  regression set's minimums, no kind more than 2 cases below the committed module (the probes aside - Section 13.3 -
+  and, since Section 9.13, the context set),
   and the book measures within the recipe's tolerances - and it keeps the committed module either way.
 - **The held-out gate** of Section 9.5, and the relabeling's reproduction.
 - **The install** is its own step, after the gates, the listening, and the package's tests with the trained models

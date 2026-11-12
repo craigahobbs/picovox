@@ -109,6 +109,13 @@ FUNCTION_WORDS = set([
 # Question words - a question starting with one ends with a fall
 WH_WORDS = set(['who', 'what', 'where', 'when', 'why', 'how', 'which', 'whose', 'whom'])
 
+# The letters whose names aren't the words the pronouncer says for them alone - an initial's, and a spelled word's
+# letters (lib/lexicon.js's letterWords)
+LETTER_WORDS = {'a': 'ay', 'i': 'eye'}
+
+# The dotted abbreviations read as words - any other is its letters' names (lib/lexicon.js's dottedWords)
+DOTTED_WORDS = {'ie': ['that', 'is'], 'eg': ['for', 'example']}
+
 # Abbreviations
 ABBREVIATIONS = {'mr': 'mister', 'mrs': 'missus', 'dr': 'doctor', 'st': 'saint', 'vs': 'versus', 'etc': 'etcetera'}
 
@@ -122,24 +129,64 @@ PERIOD_ABBREVIATIONS = {
     'esq': 'esquire', 'jr': 'junior', 'sr': 'senior', 'mt': 'mount', 'vol': 'volume', 'fig': 'figure'
 }
 
+# The units after a number, by their symbols as written - the unit's words, and its plural's; "sq" and "cu" before one
+# are "square" and "cubic" (lib/lexicon.js's units and unitPrefixes)
+UNITS = {
+    'km': ['kilometer', 'kilometers'], 'm': ['meter', 'meters'], 'cm': ['centimeter', 'centimeters'], 'mm': ['millimeter', 'millimeters'],
+    'nm': ['nanometer', 'nanometers'], 'mi': ['mile', 'miles'], 'ft': ['foot', 'feet'], 'yd': ['yard', 'yards'],
+    'kg': ['kilogram', 'kilograms'], 'g': ['gram', 'grams'], 'mg': ['milligram', 'milligrams'], 'lb': ['pound', 'pounds'],
+    'lbs': ['pounds', 'pounds'], 'oz': ['ounce', 'ounces'], 'ml': ['milliliter', 'milliliters'], 'mL': ['milliliter', 'milliliters'],
+    'ha': ['hectare', 'hectares'], 'mph': ['mile per hour', 'miles per hour'], 'kW': ['kilowatt', 'kilowatts'],
+    'MW': ['megawatt', 'megawatts'], 'GW': ['gigawatt', 'gigawatts'], 'Hz': ['hertz', 'hertz'], 'kHz': ['kilohertz', 'kilohertz'],
+    'MHz': ['megahertz', 'megahertz'], 'GHz': ['gigahertz', 'gigahertz'], 'kPa': ['kilopascal', 'kilopascals'],
+    'ppm': ['part per million', 'parts per million'], 'psi': ['pound per square inch', 'pounds per square inch'],
+    'AU': ['astronomical unit', 'astronomical units']
+}
+UNIT_PREFIXES = {'sq': 'square', 'cu': 'cubic'}
+
+# The units written with a slash or a power, anywhere (km/h, m2) - the lengths, the times, and the powers
+UNIT_LENGTHS = {'km': 'kilometer', 'm': 'meter', 'cm': 'centimeter', 'mm': 'millimeter', 'mi': 'mile', 'ft': 'foot'}
+UNIT_TIMES = {'h': 'hour', 'hr': 'hour', 's': 'second', 'min': 'minute'}
+UNIT_POWERS = {'2': 'square', '²': 'square', '3': 'cubic', '³': 'cubic'}
+
+# The symbols read as words - a minus sign before a number too (lib/lexicon.js's symbolWords)
+SYMBOL_WORDS = {
+    '&': ['and'], '+': ['plus'], '=': ['equals'], '×': ['times'], '±': ['plus', 'or', 'minus'], '≈': ['approximately'],
+    '<': ['less', 'than'], '>': ['greater', 'than'], '~': ['about'], '−': ['minus'], '-': ['minus']
+}
+
 # Number words
 ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve',
         'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen']
 TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety']
 
-# The text's tokens - a.m. or p.m., a word, a time (10:30, 10:30 a.m., 10pm), an amount of money (with its scale - $5
-# million), a number (its thousands grouped by commas or not; with a decimal fraction, a percent sign, or an ordinal or
-# plural suffix), or a punctuation mark (a parenthesis too - lib/lexicon.js's tokenPattern)
+# The text's tokens - a.m. or p.m., a dotted abbreviation (letters with their periods, and "Ph.D."), a unit with a slash or
+# a power (km/h, m2), degrees (°, °C, °F), a word, a time (10:30, 10:30 a.m., 10pm), an amount of money (with its scale -
+# $5 million), a number (its thousands grouped by commas or not; with a decimal fraction, a percent sign, or an ordinal or
+# plural suffix), a symbol read as a word (a minus sign before a number too), or a punctuation mark (a parenthesis too -
+# lib/lexicon.js's tokenPattern), matched without case
 DIGITS_PATTERN = r'(?:\d{1,3}(?:,\d{3})+(?!\d)|\d+)'
 MERIDIEM_PATTERN = r'[ap]\.?m\.?(?![a-z])'
 TOKEN_REGEX = re.compile('|'.join([
     r'[ap]\.m\.?(?![a-z])',
+    r'(?:(?:[a-z]\.)+[a-z]|ph\.d)\.?(?![a-z])',
+    r'(?:km|mi|cm|mm|ft|m)(?:/(?:hr|h|s|min)|[23²³])(?![a-z0-9])',
+    r'°(?:[ \t]?[cf](?![a-z]))?',
     r"[a-z][a-z']*\.?",
     rf'\d{{1,2}}(?::\d{{2}}(?!\d)(?:[ \t]*{MERIDIEM_PATTERN})?|[ \t]*{MERIDIEM_PATTERN})',
     rf'[$£€]{DIGITS_PATTERN}(?:\.\d+)?(?:[ \t\r\n]+(?:thousand|million|billion|trillion)(?![a-z]))?',
     rf"{DIGITS_PATTERN}(?:\.\d+%?|%|(?:st|nd|rd|th|'?s)(?![a-z]))?",
+    r'[&+=×±≈]|[<>~](?=[ \t]?\d)|−(?=\d)|(?<![^ \t\r\n(])-(?=\d)',
     '[.,;:!?()]'
-]), re.ASCII)
+]), re.ASCII | re.IGNORECASE)
+COMPOUND_UNIT_REGEX = re.compile(r'^([a-z]+)(?:/([a-z]+)|(.))$')
+COMPOUND_TOKEN_REGEX = re.compile(r'^[a-z]+[/23²³]')
+PLAIN_NUMBER_REGEX = re.compile(r'^[\d,]+(?:\.\d+)?$', re.ASCII)
+INITIAL_START_REGEX = re.compile(r'^[A-Z]\.')
+DOTTED_REGEX = re.compile(r'^(?:(?:[a-z]\.)+[a-z]|ph\.d)\.?$')
+INITIAL_REGEX = re.compile(r'^[A-Z]\.$')
+CAPITALS_REGEX = re.compile(r"^([A-Z]{2,})(?:'?s)?\.?$")
+CAPITAL_LETTER_REGEX = re.compile(r'^[A-Z]\.?$')
 NUMBER_REGEX = re.compile(r'^([\d,]+)(?:\.(\d+))?(\D*)$', re.ASCII)
 MONEY_REGEX = re.compile(r'^(\D)([\d,]+)(?:\.(\d+))?(?:\s+([a-z]+))?$', re.ASCII)
 YEAR_REGEX = re.compile(r'^[1-9]\d{3}$', re.ASCII)
@@ -279,12 +326,38 @@ def plain_letters(text):
     return ACCENTED_REGEX.sub(plain, text)
 
 
+# Whether the token "I." at index is the pronoun, not an initial - after a lowercase word and not before an initial
+# ("said I.", not "met I. M. Pei" - lib/lexicon.js's isPronoun)
+def is_pronoun(matches, index):
+    return index > 0 and 'a' <= matches[index - 1].group(0)[0] <= 'z' and \
+        not (index + 1 < len(matches) and INITIAL_START_REGEX.match(matches[index + 1].group(0)))
+
+
+# The words of a unit with a slash or a power, as written - "km/h" as kilometers per hour, "m2" as square meters (the
+# plural, but after the number 1); None if it isn't written as a unit is (lib/lexicon.js's compoundUnitWords)
+def compound_unit_words(cased, singular):
+    match = COMPOUND_UNIT_REGEX.match(cased)
+    if not match:
+        return None
+    length, time, power = match.groups()
+    length_word = UNIT_LENGTHS[length] if singular else ('feet' if length == 'ft' else UNIT_LENGTHS[length] + 's')
+    return [UNIT_POWERS[power], length_word] if time is None else [length_word, 'per', UNIT_TIMES[time]]
+
+
 # The front end's items of a text, in order (textToPhrases' first pass) - [(item, offset)]: a word (its text after
 # numbers and abbreviations are spelled out) or a phrase end ({'end': name}, only after a word - a parenthesis's comma
 # gives way to a punctuation mark right after it), and the offset of its source token in the text. The context sequence
-# is the items with the phrase ends as PHRASE_MARKS.
+# is the items with the phrase ends as PHRASE_MARKS. An initial - a capital letter with its period (not the pronoun -
+# is_pronoun) - is its letter's name, and doesn't end a phrase; nor does a dotted abbreviation.
 def text_items(text):
+    return capital_items(text)[0]
+
+
+# A text's items (text_items) and its items that are words in capitals - (items, capitals: {index: the word's capitals -
+# the word without its -s; '' for a capital letter alone})
+def capital_items(text):
     items = []
+    capitals = {}
     parenthesis_end = False
 
     def end_phrase(end, offset, parenthesis=False):
@@ -296,9 +369,20 @@ def text_items(text):
             items[-1] = ({'end': end}, offset)
             parenthesis_end = False
 
-    matches = list(TOKEN_REGEX.finditer(plain_letters(text).lower().replace('‘', '\'').replace('’', '\'')))
+    matches = list(TOKEN_REGEX.finditer(plain_letters(text).replace('‘', '\'').replace('’', '\'')))
+
+    # A token as written, without a last period ('' beyond the text); whether the token at index is a number - a
+    # unit's ("5 km"; with "sq" or "cu" between, "5 sq mi")
+    def bare_token(index):
+        return matches[index].group(0).rstrip('.') if 0 <= index < len(matches) else ''
+
+    def is_number(index):
+        return bool(PLAIN_NUMBER_REGEX.match(matches[index].group(0))) if 0 <= index < len(matches) else False
+
     for index, match in enumerate(matches):
-        token, offset = match.group(0), match.start()
+        cased, offset = match.group(0), match.start()
+        token = cased.lower()
+        is_one = index > 0 and matches[index - 1].group(0) == '1'
         if TIME_REGEX.match(token):
             items.extend((word, offset) for word in time_words(token))
         elif '0' <= token[0] <= '9':
@@ -307,15 +391,45 @@ def text_items(text):
             items.extend((word, offset) for word in money_words(token))
         elif MERIDIEM_REGEX.match(token):
             items.extend((word, offset) for word in MERIDIEM_WORDS[token[0]])
+        elif DOTTED_REGEX.match(token):
+            letters = token.replace('.', '')
+            items.extend((word, offset) for word in DOTTED_WORDS.get(letters) or [LETTER_WORDS.get(letter, letter) for letter in letters])
+        elif token[0] == '°':
+            items.append(('degree' if is_one else 'degrees', offset))
+            if len(token) > 1:
+                items.append(('celsius' if token.endswith('c') else 'fahrenheit', offset))
+        elif token in SYMBOL_WORDS:
+            items.extend((word, offset) for word in SYMBOL_WORDS[token])
+        elif COMPOUND_TOKEN_REGEX.match(token):
+            words = compound_unit_words(cased, is_one)
+            if words is None:
+                # (not a unit - "M2": its letters as a word, and its number)
+                letters, digit = re.match(r'^([a-z]+)/?(.*)$', token).groups()
+                words = [letters] + (number_words(int(digit)) if '0' <= digit <= '9' else [digit] if 'a' <= digit[:1] <= 'z' else [])
+            items.extend((word, offset) for word in words)
         elif 'a' <= token[0] <= 'z':
             bare = token[:-1] if token.endswith('.') else token
-            if bare in ABBREVIATIONS:
+            cased_bare = bare_token(index)
+            if cased_bare in UNITS and (is_number(index - 1) or (bare_token(index - 1) in UNIT_PREFIXES and is_number(index - 2))):
+                items.extend((word, offset) for word in UNITS[cased_bare][0 if is_one else 1].split(' '))
+                if token.endswith('.'):
+                    end_phrase('period', offset)
+            elif cased_bare in UNIT_PREFIXES and is_number(index - 1) and bare_token(index + 1) in UNITS:
+                items.append((UNIT_PREFIXES[cased_bare], offset))
+            elif bare in ABBREVIATIONS:
                 items.append((ABBREVIATIONS[bare], offset))
             elif token.endswith('.') and bare in PERIOD_ABBREVIATIONS:
                 items.append((PERIOD_ABBREVIATIONS[bare], offset))
             elif token == 'no.' and index + 1 < len(matches) and '0' <= matches[index + 1].group(0)[0] <= '9':
                 items.append(('number', offset))
+            elif INITIAL_REGEX.match(cased) and not (bare == 'i' and is_pronoun(matches, index)):
+                items.append((LETTER_WORDS.get(bare, bare), offset))
             else:
+                capital = CAPITALS_REGEX.match(cased)
+                if capital:
+                    capitals[len(items)] = capital.group(1).lower()
+                elif CAPITAL_LETTER_REGEX.match(cased):
+                    capitals[len(items)] = ''
                 items.append((bare.strip('\''), offset))
                 if token.endswith('.'):
                     end_phrase('period', offset)
@@ -330,7 +444,7 @@ def text_items(text):
         else:
             end_phrase('comma', offset)
     end_phrase('period', len(text))
-    return items
+    return items, capitals
 
 
 # The context sequence of a text's items - the words, and the phrase ends as their marks
@@ -341,16 +455,35 @@ def context_sequence(items):
 # Tokenize text into phrases (textToPhrases) - [{words: [{text, phones: [{ph, stress}]}], end}];
 # pronounce_word(word) gives a word's ARPAbet phones (default: the G2P network's - lib/lexicon.js setPronouncer with
 # lib/g2p.js loadG2p, as the app does: a word the network finds ambiguous takes the reading its context network chooses
-# from the neighboring words); readings ({position: phones}, a word's index in the text's words) replaces words' phones
-# (the voice training data's aligned readings - readings.py)
+# from the neighboring words, and a word in capitals the network finds spelled - its spelled head, asked of the word alone
+# or beside words in capitals that are read - is its letters' names - with its -s, the word's); readings ({position:
+# phones}, a word's index in the text's words) replaces words' phones (the voice training data's aligned readings -
+# readings.py)
 def text_to_phrases(text, pronounce_word=None, readings=None):
-    items = text_items(text)
+    items, capitals = capital_items(text)
+    spelled = set()
     if pronounce_word is None:
         g2p = get_g2p()
         sequence = context_sequence(items)
+        # The words in capitals that are spelled - each asked as a word alone among lowercase words, or as one beside
+        # words in capitals that are read (its neighbors in its phrase - one, or both; a capital letter alone is neither)
+        read_capitals = {index for index, stem in capitals.items() if stem and not g2p.spelled(stem, True)}
+        beside = set()
+        for index, stem in capitals.items():
+            neighbors = [neighbor for neighbor in (index - 1, index + 1)
+                         if 0 <= neighbor < len(items) and isinstance(items[neighbor][0], str) and capitals.get(neighbor) != '']
+            if stem and neighbors and all(neighbor in read_capitals for neighbor in neighbors):
+                beside.add(index)
+        spelled = {index for index, stem in capitals.items() if stem and g2p.spelled(stem, index in beside)}
 
-        # A word's phones - the reading the context network chooses for an ambiguous word, else the default reading
+        # A word's phones - a spelled word's letters' names (the last with the word's -s), the reading the context
+        # network chooses for an ambiguous word, else the default reading
         def pronounce_item(word, index):
+            if index in spelled:
+                names = [LETTER_WORDS.get(letter, letter) for letter in capitals[index]]
+                if word != capitals[index]:
+                    names[-1] += '\'s'
+                return [phone for name in names for phone in g2p.pronounce(name)]
             return g2p.pronounce(word, g2p.choose_reading(sequence, index) if g2p.ambiguous(word) else 0)
     else:
         def pronounce_item(word, _index):
@@ -369,7 +502,7 @@ def text_to_phrases(text, pronounce_word=None, readings=None):
         for phone in word_phones:
             match = PHONE_REGEX.match(phone)
             phones.append({'ph': match.group(1), 'stress': None if match.group(2) is None else int(match.group(2))})
-        if item in FUNCTION_WORDS:
+        if item in FUNCTION_WORDS and index not in spelled:
             for phone in phones:
                 if phone['stress'] is not None:
                     phone['stress'] = 0

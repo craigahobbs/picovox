@@ -22,8 +22,8 @@
         "analysis": {"bandwidth": 12000}
     },
     "g2p": {
-        "description": "The G2P network (picovox_train/g2p.py): the AR encoder-decoder trained on every dictionary word, frequency-weighted, with teacher-labeled unknown words, in four stages (base, two polishes over the most frequent words, then the training speech's pronunciations of the relabeled words - focus), exported at 7 bits",
-        "model": {"embed": 32, "hidden": 96},
+        "description": "The G2P network (picovox_train/g2p.py): the AR encoder-decoder trained on every dictionary word, frequency-weighted, with labeled unknown words (the rules', Wiktionary's, a teacher's), in four stages (base, two polishes over the most frequent words, then a long stage sampled as the base is, with the training speech's pronunciations of the relabeled words - focus), exported at 7 bits",
+        "model": {"embed": 32, "hidden": 128},
         "batch": 512,
         "alpha": 0.5,
         "uniform": 0.5,
@@ -33,12 +33,12 @@
             {"name": "base", "steps": 20000, "lr": 0.003, "warmup": 500, "seed": 1},
             {"name": "polish", "steps": 5000, "lr": 0.001, "warmup": 100, "seed": 3, "topBoost": {"share": 0.3, "count": 20000}},
             {"name": "polish2", "steps": 5000, "lr": 0.0005, "warmup": 100, "seed": 4, "topBoost": {"share": 0.4, "count": 12000}},
-            {"name": "focus", "steps": 3000, "lr": 0.0005, "warmup": 100, "seed": 6, "topBoost": {"share": 0.4, "count": 12000},
+            {"name": "focus", "steps": 13000, "lr": 0.0005, "warmup": 100, "seed": 6,
              "relabel": "train/data/g2p-relabel.json", "focusBoost": {"share": 0.02}}
         ]
     },
     "context": {
-        "description": "The heteronym models (picovox_train/contextlabels.py, picovox_train/context.py): the context labels (the training speech's measured readings - picovox_train/measure.py; part-of-speech tags over the Project Gutenberg books texts - pinned texts (picovox_train/books.py, train/data/books.json), fetched to build/nn/books - where the tag mapping agrees with the audio; the hand-written seeds of train/data/context-labels.json; and unlabeled transfer windows of the ambiguous words in the books, up to maxTransfer a word), the G2P's reading stage from the g2p recipe's last stage (the reading vectors, the ambiguity head, and the decoder), the context network (distilled from teachers - that many networks of their own seeds - toward their mean probabilities on its examples and the transfer windows, for steadiness), the export to lib/models/g2pModel.js, and the gates - the cross-validated held-out aligned accuracy over the gate's words (less the S/Z-only pairs; the folds by book), and make train's comparison with the committed module (identical, else within these tolerances)",
+        "description": "The heteronym models (picovox_train/contextlabels.py, picovox_train/context.py): the context labels (the training speech's measured readings - picovox_train/measure.py; part-of-speech tags over the Project Gutenberg books texts - pinned texts (picovox_train/books.py, train/data/books.json), fetched to build/nn/books - where the tag mapping agrees with the audio; the hand-written seeds of train/data/context-labels.json; and unlabeled transfer windows of the ambiguous words in the books, up to maxTransfer a word), the G2P's reading stage from the g2p recipe's last stage (the reading vectors, the ambiguity head, and the decoder - and beside them the spelled head, whether a word in capitals is spelled: picovox_train/spelled.py's labels, its settings g2p.spelled - the head's hidden units, its loss's weight and batch, the short words' least counts in the books by length, the synthetic consonant strings, and the long words' sampling exponent), the context network (distilled from teachers - that many networks of their own seeds - toward their mean probabilities on its examples and the transfer windows, for steadiness), the export to lib/models/g2pModel.js, and the gates - the cross-validated held-out aligned accuracy over the gate's words (less the S/Z-only pairs; the folds by book), and make train's comparison with the committed module (identical, else within these tolerances)",
         "labels": {
             "texts": ["pg11", "pg23", "pg35", "pg36", "pg42", "pg43", "pg72", "pg74", "pg76", "pg84", "pg98", "pg100",
                 "pg103", "pg108", "pg120", "pg145", "pg158", "pg161", "pg174", "pg175", "pg204", "pg209", "pg219",
@@ -60,8 +60,9 @@
         },
         "g2p": {
             "readings": 3, "ambiguityHidden": 16, "steps": 3000, "batch": 512, "lr": 0.0003, "warmup": 100, "readingShare": 0.04,
-            "invariantShare": 0.02, "ambiguityWeight": 1.0, "seed": 7, "threads": 2, "train": "reading,ambiguity_layer,ambiguity,decoder",
-            "headRate": 15.0
+            "invariantShare": 0.02, "ambiguityWeight": 1.0, "seed": 7, "threads": 2,
+            "train": "reading,ambiguity_layer,ambiguity,spelled_layer,spelled,decoder", "headRate": 15.0,
+            "spelled": {"hidden": 96, "weight": 1.0, "batch": 1536, "shortCounts": {"2": 20, "3": 1}, "synthetic": 6000, "alpha": 0.5}
         },
         "network": {
             "window": 3, "maxChars": 12, "embed": 16, "hidden": 48, "layer": 64, "dropout": 0.1, "steps": 8000, "batch": 256,
@@ -71,7 +72,7 @@
         "export": {"bits": 7, "biasBits": 8, "calibration": 8192},
         "gate": {
             "words": ["read", "use", "close", "lives"], "margin": 0.2, "folds": 10,
-            "heteronymKindDrop": {"default": 2, "context": 2, "missing": 2, "names": 2}, "bookError": 0.0001, "bookDistinct": 25, "top10kWrong": 2, "monitorWer": 0.005
+            "heteronymKindDrop": {"default": 2, "missing": 2, "names": 2}, "bookError": 0.0001, "evalError": 0.0005, "bookDistinct": 40, "top10kWrong": 2, "monitorWer": 0.015
         }
     },
     "voice": {

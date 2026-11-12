@@ -79,6 +79,31 @@ test('splitSentences, not sentence ends', () => {
     assert.deepEqual(sentenceTexts('At 6 P.M. Then we left at 7 A.M. on the dot.'), [
         ['At 6 P.M.', true], ['Then we left at 7 A.M. on the dot.', false]
     ]);
+
+    // A dotted abbreviation in lowercase too - but "i.e.", "e.g.", and "a.k.a." never end a sentence
+    assert.deepEqual(
+        sentenceTexts('He has a Ph.D. from MIT, i.e. a doctorate, e.g. Physics, a.k.a. Bob. At 60 r.p.m. it hums. ' +
+            'It ran at 60 r.p.m. Then it stopped.'),
+        [
+            ['He has a Ph.D. from MIT, i.e. a doctorate, e.g. Physics, a.k.a. Bob.', true], ['At 60 r.p.m. it hums.', false],
+            ['It ran at 60 r.p.m.', false], ['Then it stopped.', false]
+        ]
+    );
+});
+
+
+test('splitSentences, initials', () => {
+    // An initial's period ends a sentence before a word that starts one - not before a name
+    const text = 'He lives in the U.S. The law changed. The U.S. Army met John F. Kennedy. Plan B. "We left." Henry V. In 1415';
+    assert.deepEqual(sentenceTexts(text), [
+        ['He lives in the U.S.', true], ['The law changed.', false], ['The U.S. Army met John F. Kennedy.', false], ['Plan B.', false],
+        ['"We left."', false], ['Henry V.', false], ['In 1415', false]
+    ]);
+
+    // "I." after a lowercase word is the pronoun, and ends its sentence - unless an initial is next
+    assert.deepEqual(sentenceTexts('"So do I," said I. Asimov left. Then I met I. M. Pei. Mr. I. Asimov came.'), [
+        ['"So do I," said I.', true], ['Asimov left.', false], ['Then I met I. M. Pei.', false], ['Mr. I. Asimov came.', false]
+    ]);
 });
 
 

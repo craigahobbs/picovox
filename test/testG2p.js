@@ -157,7 +157,7 @@ test('g2p.loadG2p, a listener\'s reports', async () => {
         'graver': 'G R EY1 V ER0',
         'mindset': 'M AY1 N D S EH2 T',
         'mindsets': 'M AY1 N D S EH2 T S',
-        'paprika': 'P AH0 P R IY1 K AH0'
+        'paprika': 'P AE0 P R IY1 K AH0'
     };
     for (const [word, phones] of Object.entries(expected)) {
         assert.equal(pronounce(word).join(' '), phones, word);
@@ -191,6 +191,28 @@ test('g2p.loadG2p, heteronym readings', async () => {
     // At the text's edges, and with characters outside the context network's alphabet
     assert(pronounce.chooseReading(['read'], 0) < g2pModel.context.slots);
     assert(pronounce.chooseReading(['éé', 'read', '.'], 1) < g2pModel.context.slots);
+});
+
+
+// Words in capitals - the spelled head picks out the words that are spelled (their letters' names) from the words read
+test('g2p.loadG2p, spelled words', async () => {
+    const pronounce = await loadG2p(g2pModel);
+    assert.equal(pronounce.spelled('ai'), true);
+    assert.equal(pronounce.spelled('toc'), true);
+    assert.equal(pronounce.spelled('fbi'), true);
+    assert.equal(pronounce.spelled('not'), false);
+    assert.equal(pronounce.spelled('nasa'), false);
+    assert.equal(pronounce.spelled('éé'), false);
+
+    // A common word that, alone in capitals, is an acronym - not beside a word in capitals
+    assert.equal(pronounce.spelled('us'), true);
+    assert.equal(pronounce.spelled('us', true), false);
+    assert.equal(pronounce.spelled('ai', true), true);
+    assert.equal(pronounce.spelled('not', true), false);
+
+    // The decision is made when the word is first pronounced
+    pronounce('stop');
+    assert.equal(pronounce.spelled('stop'), false);
 });
 
 

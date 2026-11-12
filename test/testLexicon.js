@@ -97,6 +97,146 @@ test('lexicon.setPronouncer, readings from context', async () => {
 });
 
 
+test('lexicon.setPronouncer, words in capitals', async () => {
+    const lexicon = await freshLexicon('set-pronouncer-capitals');
+
+    // A word in capitals the pronouncer finds spelled is its letters' names ("a" as "ay", "i" as "eye") - asked only of
+    // words in capitals (two letters or more), and a spelled word isn't a function word or an ambiguous one. The
+    // pronouncer: "ai" is spelled, "us" alone among lowercase words
+    const asked = new Set();
+    const letters = {'ay': ['EY1'], 'eye': ['AY1'], 't': ['T', 'IY1'], 'u': ['Y', 'UW1'], 's': ['EH1', 'S']};
+    const pronounce = (word, reading = 0) => letters[word] ?? (reading === 1 ? ['R', 'IY1', 'D'] : ['W', 'ER1', 'D']);
+    pronounce.ambiguous = (word) => word === 'us' || word === 'read';
+    pronounce.chooseReading = () => 1;
+    pronounce.spelled = (word, beside) => {
+        asked.add(`${word} ${beside}`);
+        return word === 'ai' || (word === 'us' && !beside);
+    };
+    lexicon.setPronouncer(pronounce);
+    const phrases = lexicon.textToPhrases('The AI, US. It is NOT ait; I read. A US');
+    assert.deepEqual(phrases.map(wordTexts), [['the', 'ai'], ['us'], ['it', 'is', 'not', 'ait'], ['i', 'read'], ['a', 'us']]);
+    assert.deepEqual(phrases.map(wordPhones), [
+        ['W ER0 D', 'EY1 AY1'], ['Y UW1 EH1 S'], ['W ER0 D', 'W ER0 D', 'W ER1 D', 'W ER1 D'], ['W ER0 D', 'R IY1 D'],
+        ['W ER0 D', 'Y UW1 EH1 S']
+    ]);
+    assert.deepEqual([...asked].toSorted(), ['ai false', 'not false', 'us false']);
+
+    // Beside words in capitals that are read - its neighbors in its phrase, both if it has two - a word is asked as one
+    // beside them ("us" is read); beside a lowercase word or a spelled one, as one alone. A capital letter alone is read
+    assert.deepEqual(lexicon.textToPhrases('NOT US, the US AI. US, NOT them; NOT US AI, tell US A lie, NOT US A').map(wordPhones), [
+        ['W ER1 D', 'R IY0 D'], ['W ER0 D', 'Y UW1 EH1 S', 'EY1 AY1'], ['Y UW1 EH1 S'], ['W ER1 D', 'W ER0 D'],
+        ['W ER1 D', 'Y UW1 EH1 S', 'EY1 AY1'], ['W ER1 D', 'Y UW1 EH1 S', 'W ER0 D', 'W ER1 D'], ['W ER1 D', 'R IY0 D', 'W ER0 D']
+    ]);
+    assert.deepEqual([...asked].toSorted(), ['ai false', 'ai true', 'not false', 'not true', 'us false', 'us true']);
+
+    // A spelled word's -s is its last letter's ("AIs", "US's" - the pronouncer is asked of the capitals)
+    Object.assign(letters, {'eye\'s': ['AY1', 'Z'], 's\'s': ['EH1', 'S', 'IH0', 'Z']});
+    asked.clear();
+    assert.deepEqual(lexicon.textToPhrases('AIs, the US\'s nots').map(wordPhones),
+        [['EY1 AY1 Z'], ['W ER0 D', 'Y UW1 EH1 S IH0 Z', 'W ER1 D']]);
+    assert.deepEqual([...asked].toSorted(), ['ai false', 'us false']);
+
+    // A pronouncer without a spelled head reads every word
+    lexicon.setPronouncer(miniPronouncer);
+    assert.deepEqual(wordPhones(lexicon.textToPhrases('THE BOX')[0]), ['DH AH0', 'B AA1 K S']);
+});
+
+
+test('lexicon.textToPhrases, words in capitals', () => {
+    // The G2P network's spelled head - an acronym is spelled, a word in capitals read
+    assert.deepEqual(wordPhones(textToPhrases('The AI and the TOC.')[0]), ['DH AH0', 'EY1 AY1', 'AH0 N D', 'DH AH0', 'T IY1 OW1 S IY1']);
+    assert.deepEqual(wordPhones(textToPhrases('I did NOT say STOP!')[0]), ['AY0', 'D IH0 D', 'N AA1 T', 'S EY1', 'S T AA1 P']);
+    assert.deepEqual(wordPhones(textToPhrases('the ai')[0]), ['DH AH0', 'AY1']);
+
+    // A common word that, alone in capitals, is an acronym - read beside a word in capitals
+    assert.deepEqual(wordPhones(textToPhrases('The US and AD.')[0]), ['DH AH0', 'Y UW1 EH1 S', 'AH0 N D', 'EY1 D IY1']);
+    assert.deepEqual(wordPhones(textToPhrases('LEAVE US ALONE!')[0]), ['L IY1 V', 'AH0 S', 'AH0 L OW1 N']);
+    assert.deepEqual(wordPhones(textToPhrases('The CEOs met IBM\'s board.')[0]),
+        ['DH AH0', 'S IY1 IY1 OW1 Z', 'M EH1 T', 'AY1 B IY1 EH1 M Z', 'B AO1 R D']);
+});
+
+
+test('lexicon.textToPhrases, initials', () => {
+    // An initial - a capital letter with its period - is its letter's name, and doesn't end the phrase
+    const phrases = textToPhrases('Dr. A. B. Jones met I. M. Pei in the U.S. capital. Plan a. Then b');
+    assert.deepEqual(phrases.map(wordTexts), [
+        ['doctor', 'ay', 'b', 'jones', 'met', 'eye', 'm', 'pei', 'in', 'the', 'u', 's', 'capital'], ['plan', 'a'], ['then', 'b']
+    ]);
+    assert.deepEqual(phrases.map((phrase) => phrase.end), ['period', 'period', 'period']);
+    assert.deepEqual(wordPhones(phrases[0]).slice(1, 3), ['EY1', 'B IY1']);
+
+    // A sentence's last initial ends it
+    assert.deepEqual(textToPhrases('It was Dr. X.').map(wordTexts), [['it', 'was', 'doctor', 'x']]);
+
+    // "I." after a lowercase word, and not before an initial, is the pronoun
+    assert.deepEqual(textToPhrases('So was I. M. Pei, said I. Asimov').map(wordTexts),
+        [['so', 'was', 'eye', 'm', 'pei'], ['said', 'i'], ['asimov']]);
+    assert.deepEqual(textToPhrases('So was I. then, said I, he').map(wordTexts), [['so', 'was', 'i'], ['then'], ['said', 'i'], ['he']]);
+    assert.deepEqual(textToPhrases('I. Asimov, said I.').map(wordTexts), [['eye', 'asimov'], ['said', 'i']]);
+});
+
+
+test('lexicon.textToPhrases, units', () => {
+    // A unit after a number is its words - the plural, but after 1; "sq" and "cu" before one are square and cubic
+    assert.deepEqual(textToPhrases('It is 40,075 km around, 5 mi or 1 km wide, 660 ft. It weighs 1.5 kg').map(wordTexts), [
+        ['it', 'is', 'forty', 'thousand', 'seventy', 'five', 'kilometers', 'around'], ['five', 'miles', 'or', 'one', 'kilometer', 'wide'],
+        ['six', 'hundred', 'sixty', 'feet'], ['it', 'weighs', 'one', 'point', 'five', 'kilograms']
+    ]);
+    assert.deepEqual(textToPhrases('93,000 sq mi, 530 cu mi, 27 GW, 55 mph, 5 mL and 5 sq of it').map(wordTexts), [
+        ['ninety', 'three', 'thousand', 'square', 'miles'], ['five', 'hundred', 'thirty', 'cubic', 'miles'],
+        ['twenty', 'seven', 'gigawatts'],
+        ['fifty', 'five', 'miles', 'per', 'hour'], ['five', 'milliliters', 'and', 'five', 'sq', 'of', 'it']
+    ]);
+
+    // Not after a number, or not as the unit is written, it's a word
+    assert.deepEqual(textToPhrases('A km away, 4G and 5 Ma ago').map(wordTexts),
+        [['a', 'km', 'away'], ['four', 'g', 'and', 'five', 'ma', 'ago']]);
+    assert.deepEqual(textToPhrases('km away at 10 ft/s over 5 sq').map(wordTexts),
+        [['km', 'away', 'at', 'ten', 'feet', 'per', 'second', 'over', 'five', 'sq']]);
+
+    // Units with a slash or a power, and degrees
+    const text = 'At 90 km/h, 1 m/s, 240,000 km2, 3 m³ and 1 ft2 at 0 °C (32 °F), a 350° view, 1° off';
+    assert.deepEqual(textToPhrases(text).map(wordTexts), [
+        ['at', 'ninety', 'kilometers', 'per', 'hour'], ['one', 'meter', 'per', 'second'],
+        ['two', 'hundred', 'forty', 'thousand', 'square', 'kilometers'], ['three', 'cubic', 'meters', 'and', 'one', 'square', 'foot', 'at',
+            'zero', 'degrees', 'celsius'], ['thirty', 'two', 'degrees', 'fahrenheit'],
+        ['a', 'three', 'hundred', 'fifty', 'degrees', 'view'], ['one', 'degree', 'off']
+    ]);
+
+    // In capitals they aren't units - the letters and the number
+    assert.deepEqual(textToPhrases('On the M2, the M² and KM/H').map(wordTexts),
+        [['on', 'the', 'm', 'two'], ['the', 'm', 'and', 'km', 'h']]);
+});
+
+
+test('lexicon.textToPhrases, symbols', () => {
+    // The symbols read as words - a minus sign before a number (a hyphen only after a space or an opening parenthesis)
+    assert.deepEqual(textToPhrases('Tom & Jerry: 2 + 2 = 4, 3 × 5, ±2 ≈ 2, ~500, <10 and >5, a < b').map(wordTexts), [
+        ['tom', 'and', 'jerry'], ['two', 'plus', 'two', 'equals', 'four'], ['three', 'times', 'five'],
+        ['plus', 'or', 'minus', 'two', 'approximately', 'two'], ['about', 'five', 'hundred'],
+        ['less', 'than', 'ten', 'and', 'greater', 'than', 'five'], ['a', 'b']
+    ]);
+    assert.deepEqual(textToPhrases('−5 °C, -3 (-2) and 1939-45 − x').map(wordTexts), [
+        ['minus', 'five', 'degrees', 'celsius'], ['minus', 'three'], ['minus', 'two'],
+        ['and', 'nineteen', 'thirty', 'nine', 'forty', 'five', 'x']
+    ]);
+});
+
+
+test('lexicon.textToPhrases, dotted abbreviations', () => {
+    // A dotted abbreviation is its letters' names - "i.e." and "e.g." their words - and doesn't end the phrase
+    const phrases = textToPhrases('He has a Ph.D., i.e. a doctorate, e.g. from the U.S.A. or the U.K, a.k.a. Britain. The end');
+    assert.deepEqual(phrases.map(wordTexts), [
+        ['he', 'has', 'a', 'p', 'h', 'd'], ['that', 'is', 'a', 'doctorate'],
+        ['for', 'example', 'from', 'the', 'u', 's', 'ay', 'or', 'the', 'u', 'k'],
+        ['ay', 'k', 'ay', 'britain'], ['the', 'end']
+    ]);
+
+    // a.m. and p.m. are their own
+    assert.deepEqual(textToPhrases('At 5 p.m. or a.m.').map(wordTexts), [['at', 'five', 'pee', 'em', 'or', 'ay', 'em']]);
+});
+
+
 test('lexicon.textToPhrases, the G2P network', () => {
     const [phrase] = textToPhrases('Hello world');
     assert.deepEqual(wordTexts(phrase), ['hello', 'world']);
