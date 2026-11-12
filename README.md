@@ -230,7 +230,8 @@ that runs its own synthesis loop (PicoShelf's worker does):
 | The voice network | 282,627 parameters, 7-bit weights (GPTQ) - 311 KB gzipped |
 | The G2P network | 660,714 parameters (with its spelled head's 24,866; and the heteronym context network's 47,779), 7-bit weights (GPTQ) - 596 KB gzipped |
 | Speed, Apple M3 Max (Node) | The voice network about 127x real time, the renderer about 97x; synthesis end to end (24 kHz) about 55x |
-| Speed, iPhone without a JIT (Safari over plain http, or in Lockdown Mode) | About 2.6x real time in one worker; about 3.1-3.4x with the network and the renderer in two workers (`sentenceFrames` and `createSentenceRenderer`) |
+| Speed without a JIT, Apple M3 Max | About 2.8x real time in one thread in JavaScriptCore (`jsc --useJIT=false` - Safari's engine; 2.2x in picovox 2.0.4), 2.5x in Node (`--jitless`; 2.2x); a 23-word sentence's new words 0.7 s (1.3 s) |
+| Speed, iPhone without a JIT (Safari over plain http, or in Lockdown Mode; picovox 1.2.0) | About 2.6x real time in one worker; about 3.1-3.4x with the network and the renderer in two workers (`sentenceFrames` and `createSentenceRenderer`) |
 | Startup | About 0.1 s to load both networks (Node, M3 Max) |
 
 The voices have a Whisper word error rate of 1.06% on the listener panel's texts, and a gap to their TTS source of
@@ -308,7 +309,10 @@ an iPhone's Safari interprets JavaScript on a page served over plain http, as th
 case; over https it compiles), and `reload`. A variant of `lib/` to try a change in is
 `tools/perf/variant.sh NAME` (`build/perf/variants/NAME/lib`, which the lab's commands take as `lib`);
 `tools/perf/compare.js NAME` compares its output with `lib/`'s (identical, else the SNR), and `tools/perf/speed.js lib
-NAME` times each under Node without a JIT (`--jitless` - the phone's speed within about 20%). `--root DIR` serves
+NAME` times each under Node without a JIT (`--jitless` - the phone's speed within about 20%) - its new words (the G2P),
+the network, and the renderer; `--jsc` times them in JavaScriptCore without a JIT (macOS's `jsc` shell - Safari's
+engine), and `--jit` with one. The two interpreters weigh a change differently, and a JIT differently again (a layer
+computed in blocks is faster interpreted, and slower compiled by JavaScriptCore), so a change is timed in all four. `--root DIR` serves
 another app (PicoShelf, with its `?timing&log=URL` timeline posted to `build/perf/devlog.jsonl`).
 
 `tools/speak.js` speaks with an exported model (`picovox_train.export CHECKPOINT --voice NAME` writes
@@ -668,8 +672,9 @@ adds one). The network of 128 units with Wikipedia in its weights and Wiktionary
 against 2.0.3's of 96 with the books alone: the books 0.008% (0.049%), top-10K wrong 0 (3), held-out WER 55.4% (61.5%),
 monitoring WER 42.1% (41.1% - a seed's draw: four seeds of the recipe ended at 41.9% to 43.0%, so the gate's tolerance
 is 1.5 points), and Wikipedia 0.090% (0.286% before the hand labels, whose words the measure counts; before them
-0.078%, against 2.0.3's 1.87%) - at 596 KB gzipped (360 KB), and 3.3 ms for a word it hasn't yet pronounced (1.9 ms; in
-Node without a JIT, a 23-word sentence's words 1.3 s, from 0.74 s - once a word).
+0.078%, against 2.0.3's 1.87%) - at 596 KB gzipped (360 KB), and 1.7 ms for a word it hasn't yet pronounced (1.6 ms; in
+Node without a JIT, a 23-word sentence's words 0.70 s, 0.74 s - once a word; as 2.0.4 shipped, before its kernels read
+their arrays less, 2.9 ms and 1.29 s).
 
 `picovox_train/heteronyms.py` chooses the relabeled words from the training speech's measured readings
 (`picovox_train/measure.py` - below): for each word with several dictionary readings, the reading the voices used; a

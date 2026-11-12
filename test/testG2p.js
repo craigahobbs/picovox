@@ -1,7 +1,7 @@
 // Licensed under the MIT License
 // https://github.com/craigahobbs/picovox/blob/main/LICENSE
 
-import {loadG2p, unpackTensors} from '../lib/g2p.js';
+import {loadG2p, matrixVector, unpackTensors} from '../lib/g2p.js';
 import {Buffer} from 'node:buffer';
 import {strict as assert} from 'node:assert';
 import {decodeBase64} from '../lib/package.js';
@@ -102,6 +102,29 @@ test('g2p.unpackTensors, bytes', () => {
     const model = {'layout': 'bytes', 'tensors': [{'name': 'matrix', 'shape': [1, 3], 'bits': 5}]};
     const bytes = new Uint8Array([0x80, 0x3e, 16, 13, 30]);
     assert.deepEqual([...unpackTensors(model, bytes).get('matrix')], [0.25, -0.5, 3.75]);
+});
+
+
+test('g2p.matrixVector, each row summed in its columns\' order', () => {
+    // 21 columns - sixteen at a time, then five one at a time - with a bias and without, the vector from an offset
+    const rows = 3;
+    const columns = 21;
+    const matrix = Float64Array.from({'length': rows * columns}, (_unused, ix) => Math.sin(ix * 0.7) / 3);
+    const vector = Float64Array.from({'length': columns + 2}, (_unused, ix) => Math.cos(ix * 1.3) / 7);
+    const bias = Float64Array.from({'length': rows}, (_unused, ix) => 0.1 * (ix + 1));
+    for (const rowBias of [bias, null]) {
+        const expected = new Float64Array(rows);
+        for (let row = 0; row < rows; row++) {
+            let sum = rowBias === null ? 0 : rowBias[row];
+            for (let column = 0; column < columns; column++) {
+                sum += matrix[row * columns + column] * vector[2 + column];
+            }
+            expected[row] = sum;
+        }
+        const result = new Float64Array(rows).fill(9);
+        matrixVector(result, matrix, rows, columns, vector, 2, rowBias);
+        assertArraysEqual(result, expected, rowBias === null ? 'no bias' : 'bias');
+    }
 });
 
 

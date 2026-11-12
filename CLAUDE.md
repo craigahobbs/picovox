@@ -50,7 +50,7 @@ PicoShelf (a separate repository). (The first, rule-based formant synthesizer an
   exported or packaged model - the listener panel's renderer), `loadVoice.js` (a model's loader, for `speak.js` and
   `trainsamples.js`), `unpack.js`, `packagecheck.js`, `pronounceLines.js` (for the Python checks), and `renderLines.js`
   (`picovox_train.quality`'s renderer), `serve.js` (the local servers' static files); the training dashboard (`dashboard/`), the performance lab (`perf/` - the playback pipeline timed on a
-  phone, and under Node without a JIT), the voice lab (`voicelab/` - the package synthesizing in a page with adjustable
+  phone, and without a JIT under Node and JavaScriptCore - `speed.js`, `--jsc`), the voice lab (`voicelab/` - the package synthesizing in a page with adjustable
   frame edits, for Claude's blind A/B questions in an artifact; `make voicelab` stages it with `lib/` in
   `build/voicelab/`, and `make train-check` with the trained voice too - a version's `model`, shipped or trained),
   make train-check's blind A/B (`trainab.js` - the voice lab served locally with its trials, the answers in
@@ -143,3 +143,7 @@ the python-build skill before running its tests, lint, or coverage, or changing 
   after - and the trainer exact (`picovox_train/stepcheck.py` before and after). The generated models must still
   reproduce byte for byte from their checkpoints (`picovox_train.export` + `picovox_train.package`;
   `picovox_train.context export` for the G2P).
+- Speed changes are judged without a JIT, where the package's speed matters - `tools/perf/speed.js` under Node
+  (`--jitless`) and JavaScriptCore (`--jsc`: Safari's engine), whose interpreters pay for array reads and calls several
+  times what they pay for arithmetic on locals - and checked with both JITs (`--jit`), which can disagree (the paper's
+  Section 12.4).

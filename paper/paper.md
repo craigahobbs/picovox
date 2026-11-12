@@ -887,7 +887,8 @@ as frequent words - "paprika" had drifted to a third pronunciation), the module 
 | Module | 476,798 bytes (360 KB gzipped) | 786,615 bytes (595 KB gzipped) |
 
 "Percent" is right (P ER0 S EH1 N T), and UNICEF and Karachi. The costs are the size and the time: a word not yet
-pronounced takes 3.3 ms in Node (1.9 ms), and without a JIT a 23-word sentence's words 1.3 s (0.74 s) - once a word,
+pronounced takes 3.3 ms in Node (1.9 ms), and without a JIT a 23-word sentence's words 1.3 s (0.74 s; Section 12.4's
+kernels since halve both) - once a word,
 but the first sentences of a text are all new words. The context set's 50 of 54 is its spread, not this network's:
 on one recipe in two days, its labels a few examples apart, it drew 52, 51, 54, 51, and 50 - a committed 54 less the
 check's drop of 2 failed half of them - so the check now holds the context set to its minimum alone, as the probes
@@ -1332,6 +1333,63 @@ current filtering - and the network is the bottleneck once the two run apart), a
 a pipeline (1.6 times one worker in all, each sentence slower). Unlike Section 12.3's earlier measurement, an iPhone in
 Safari 27 ran two workers at nearly twice one's speed and four at about 2.4 times, so the player's one worker on iPhones
 is now one pipeline of two.
+
+**The larger G2P, and a second interpreter (November 2026).** Picovox 2.0.4's G2P network (128 units, Section 9.13) is
+1.8 times 2.0.3's arithmetic, and without a JIT a word not yet pronounced took as much longer: a 23-word sentence's words
+1.29 s, from 0.74 s - a second before a text's first speech. So the playback pipeline was profiled again without a JIT,
+in two interpreters: Node's (`node --jitless`), and JavaScriptCore's - Safari's own engine, which macOS ships as a shell
+(`jsc --useJIT=false`: the phone's interpreter itself - the lab's fixed loop takes 111 ms in it, the iPhone's 93 to 103;
+`tools/perf/speed.js --jsc`). Timed operation by operation, the two agree on what costs: an array read or write about 10
+ns, arithmetic on locals 2 to 3 ns an operation, a built-in's call about 12 ns (in JavaScriptCore a typed array's
+`length`, 26 ns). So the kernels were rewritten to read less - each product's operands from locals, an array's element
+once - with every sum in its old order, so the outputs are identical, bit for bit (the G2P's pronunciations of 40,666
+words in every reading with its heads' decisions, the front end's phones, the voice network's 53,338 frames of the
+panel's texts, and 6.6 million samples of audio at two rates, by their hashes):
+
+- **The G2P's matrix-vector product**, a row at a time (a matrix read and a vector read per product), is sixteen columns
+  at a time down the rows, the vector's sixteen values in locals: 24 ns a product to 12 in JavaScriptCore, 27 to 15 in
+  Node. The attention's keys, the combine layer, and the scores go through the same kernel (the attention's weights
+  transposed at load, the combine layer's split in its two halves). The G2P is now 95% that kernel.
+- **The voice network's linear layer**, one output over four rows at a time (a read and a quarter per product), is
+  three outputs over four rows, four columns a pass - 28 reads for 48 products.
+- **The FFT** does two radix-4 passes at once - sixteen points in locals, the first pass's four butterflies and the
+  second's - with half the reads and writes: a 256-point transform 82 microseconds to 62 in JavaScriptCore, 85 to 74
+  in Node (its butterflies share their temporaries: an interpreter's locals past its first hundred or so are slower).
+- **The noise filter** takes the tract's 13 poles eight at a time in locals (padded to 16 with poles whose factor is
+  one) in place of three reads a pole and bin; reads each bin's values once; and divides by its size - a power of two -
+  as a product. The per-sample loop keeps its state in locals (a closure's variables are slower), the voicing tables'
+  prefilter is kept by size, and loops no longer read a typed array's length each pass.
+
+| Without a JIT, an M3 Max (25 s of audio) | JavaScriptCore, 2.0.4 | Now | Node, 2.0.4 | Now |
+| --- | --- | --- | --- | --- |
+| The texts' 65 words, each new (the G2P) | 4.03 s | **1.99 s** | 4.66 s | **2.46 s** |
+| Voice network | 4.9x real time | **6.2x** | 4.5x | **5.5x** |
+| Renderer | 4.0x | **5.1x** | 4.2x | **4.5x** |
+| Both, one thread | 2.20x | **2.82x** | 2.17x | **2.49x** |
+
+The 23-word sentence's words take 0.70 s (2.0.3's 0.74 s), and with a JIT a new word 1.7 ms (2.0.4's 2.9 ms, 2.0.3's
+1.6 ms). With their JITs, over 49 s of audio: Node runs the network in 0.31 s (0.36 s) and the renderer as before (0.40
+s); JavaScriptCore the G2P's words in 86 ms (131 ms), the renderer as before (0.35 s), and the network in 0.20 s, from
+0.18 s - the one cost. Compiled, JavaScriptCore runs the blocked layer slower whatever its block, so the block was
+chosen by measurement (eleven shapes, each with identical frames):
+
+| The linear layer's block (rows by outputs; its running sums) | JavaScriptCore, no JIT | With its JIT (49 s) | Node, no JIT |
+| --- | --- | --- | --- |
+| One output over four rows, eight columns a pass (2.0.4's; 16) | 4.8x real time | 176 ms | 4.5x |
+| Two by two (16) | 4.8x | 190 ms | 4.6x |
+| Three by two, two by three (24) | 5.3x | 199 ms | 4.9x, 5.0x |
+| Three by three (36) | 5.8x | 189 ms | 5.3x |
+| **Four by three (48)** | **6.3x** | **201 ms** | **5.6x** |
+| Four by four (64) | 6.2x | 215 ms | 5.2x |
+
+Four by four - the first tried, and the fewest reads - is no faster interpreted than four by three and the slowest
+compiled; and the compiled cost is not the sums outnumbering the processor's 32 floating-point registers, as first
+supposed (16 sums cost 8%, 36 cost 7%, 24 cost 13%). Four by three stays: without a JIT the pipeline is three times real
+time, with one a hundred. Three more things measured did not make it: plain arrays in place of
+typed arrays (JavaScriptCore's interpreter reads them 5% to 14% faster, but its JIT runs the kernels up to twice as
+slowly), the tract's poles for four harmonics at a time (under 1.5% of the renderer, for 70 lines), and a mirror index
+computed from the FFT size - a double, `2 ** n` - which JavaScriptCore's JIT indexes arrays with eight times as
+slowly (the renderer a third slower with its JIT, though faster without: every change is timed both ways).
 
 ### 12.5 picovox 1.0.1's voice
 
