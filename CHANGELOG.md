@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.4 (2026-11-12)
+
+- [d72966e](https://github.com/craigahobbs/picovox/commit/d72966e) - reading: a word in capitals is spelled when it is an acronym - "AI", "TOC", "FBI", "HTTPS" are their letters' names (2.0.3 read "eye" and "tock"), while "NASA", "UNICEF", a shouted sentence, and a heading are read: the G2P network's new spelled head decides, 42 of 42 acronyms and 42 of 42 read words on the new capitals regression set (2.0.3: 27 and 42); known misses: the short words that are also acronyms ("WHO", "SI", "AM") are read as words
+
+- [d72966e](https://github.com/craigahobbs/picovox/commit/d72966e) - reading: a capital letter's period ends its sentence before a word that starts one ("in the U.S. The law changed", "Plan B. We left" - not "the U.S. Army" or "John F. Kennedy"), and "i.e.", "e.g.", and "a.k.a." don't end one; an initial is its letter's name ("A. Lincoln"), a dotted abbreviation its letters' ("U.S.A.", "Ph.D." - "i.e." is "that is", "e.g." "for example"), a unit after a number its words ("5 km", "90 km/h", "20 °C", "30 m2"), and a symbol its word (&, +, =, ×, ±, ≈; <, >, ~, and a minus sign before a number)
+
+- [d72966e](https://github.com/craigahobbs/picovox/commit/d72966e) - pronunciation: the G2P network is larger (128 units, from 96) and retrained on contemporary text - its words weighed by Wikipedia articles' counts beside the books', and the names and terms no dictionary has labeled by Wiktionary's pronunciations and by hand ("Quran", "Mughal", "Tagore", "eukaryotes"): Wikipedia words mispronounced 0.078% (was 1.87%), book words 0.008% (was 0.049%), none of the 10,000 most frequent words wrong (was 3), names 81 of 86 (was 80); known misses: the regression set's context sentences 51 of 54 (was 54 - "Wind the clock before bed", "Record the meeting", "He spoke Polish at home"; its trainings draw 50 to 54)
+
+- [d72966e](https://github.com/craigahobbs/picovox/commit/d72966e) - the package is 990 KB packed (was 748 KB) - the G2P network's module 596 KB gzipped (was 360 KB) - and a word not yet pronounced takes 3.3 ms in Node (was 1.9 ms). For imports of lib/ modules (the API, lib/index.js, is unchanged): lib/g2p.js loads this version's lib/models/g2pModel.js only, and its pronouncer has spelled(word, beside)
+
 ## 2.0.3 (2026-11-10)
 
 - [1406dd0](https://github.com/craigahobbs/picovox/commit/1406dd0) - pronunciation: the G2P network and its heteronym context network are retrained from regenerated training speech: the regression set's default sentences 52 of 52 (was 51 - "an increase in pay") and its context sentences 54 of 54 (was 53 - "He spoke Polish at home"), "the cut was minute" now right, book words mispronounced 0.049% (was 0.048%), 3 of the 10,000 most frequent words wrong (was 4); known misses: "Polish" and "polish", the verb "contract", the fish "bass", and "invalid" as a noun, in fresh sentences
